@@ -9,9 +9,14 @@
 ## 仓库与工具链
 
 - `lib/`：Flutter UI、交互、编辑状态、配方和任务编排。
+- `lib/app/`：应用组装、主题和路由，不放修图业务规则。
+- `lib/features/<feature>/presentation/`：页面和用户交互。
+- `lib/features/<feature>/application/`：用例、任务编排与会话状态。
+- `lib/features/<feature>/domain/`：不依赖 UI、插件或供应商的配方和值对象。
 - `ios/`、`android/`：平台工程以及未来的原生图像处理桥接。
 - `test/`：单元和 Widget 行为测试。
 - `docs/`：产品、架构、质量和发布契约。
+- `docs/architecture/flutter-foundation.md`：Flutter 分层、依赖方向和 Module seam 的基准说明。
 - `release/release-policy.yaml`：非密钥的发布规则，必须保持 schema 2。
 - `scripts/check_release_contract.rb`：发布规则、环境、候选和源码身份校验器。
 - Flutter stable 基线：Flutter 3.44.8、Dart 3.12.2；变更基线前先验证依赖兼容性。
