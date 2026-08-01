@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:yingjian/features/editor/application/editor_session.dart';
+import 'package:yingjian/l10n/l10n.dart';
 
 class EditorPage extends StatefulWidget {
   const EditorPage({super.key});
@@ -25,16 +26,16 @@ class _EditorPageState extends State<EditorPage> {
         final recipe = _session.recipe;
         return Scaffold(
           appBar: AppBar(
-            title: const Text('精修工作台'),
+            title: Text(context.l10n.editorTitle),
             actions: [
               IconButton(
-                tooltip: '撤销',
+                tooltip: context.l10n.undo,
                 onPressed: _session.canUndo ? _session.undo : null,
                 icon: const Icon(Icons.undo),
               ),
               TextButton(
                 onPressed: _session.isEdited ? _session.reset : null,
-                child: const Text('重置'),
+                child: Text(context.l10n.reset),
               ),
             ],
           ),
@@ -48,12 +49,12 @@ class _EditorPageState extends State<EditorPage> {
                     color: Theme.of(context).colorScheme.surfaceContainerHigh,
                     borderRadius: BorderRadius.circular(24),
                   ),
-                  child: const Center(child: Text('照片预览区域')),
+                  child: Center(child: Text(context.l10n.photoPreviewArea)),
                 ),
               ),
               const SizedBox(height: 32),
               _AdjustmentSlider(
-                label: '曝光',
+                label: context.l10n.exposure,
                 value: recipe.exposure,
                 onChangeStart: _session.beginAdjustment,
                 onChanged: (value) {
@@ -62,7 +63,7 @@ class _EditorPageState extends State<EditorPage> {
                 onChangeEnd: _session.commitAdjustment,
               ),
               _AdjustmentSlider(
-                label: '对比度',
+                label: context.l10n.contrast,
                 value: recipe.contrast,
                 onChangeStart: _session.beginAdjustment,
                 onChanged: (value) {
@@ -71,7 +72,7 @@ class _EditorPageState extends State<EditorPage> {
                 onChangeEnd: _session.commitAdjustment,
               ),
               _AdjustmentSlider(
-                label: '色温',
+                label: context.l10n.warmth,
                 value: recipe.warmth,
                 onChangeStart: _session.beginAdjustment,
                 onChanged: (value) {

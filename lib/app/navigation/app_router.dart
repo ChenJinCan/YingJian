@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:yingjian/features/editor/presentation/editor_page.dart';
 import 'package:yingjian/features/home/presentation/home_page.dart';
+import 'package:yingjian/l10n/l10n.dart';
 
 abstract final class AppRoutes {
   static const home = '/';
@@ -8,6 +9,8 @@ abstract final class AppRoutes {
 }
 
 abstract final class AppRouter {
+  static final navigatorKey = GlobalKey<NavigatorState>();
+
   static Route<void> onGenerateRoute(RouteSettings settings) {
     return switch (settings.name) {
       AppRoutes.home => _page(const HomePage(), settings),
@@ -27,8 +30,8 @@ class UnknownRoutePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('页面不存在')),
-      body: const Center(child: Text('暂时无法打开这个页面')),
+      appBar: AppBar(title: Text(context.l10n.unknownPageTitle)),
+      body: Center(child: Text(context.l10n.unknownPageMessage)),
     );
   }
 }

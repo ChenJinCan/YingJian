@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:yingjian/app/navigation/app_router.dart';
+import 'package:yingjian/l10n/l10n.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -14,10 +15,13 @@ class HomePage extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('映见', style: Theme.of(context).textTheme.displaySmall),
+                Text(
+                  context.l10n.appTitle,
+                  style: Theme.of(context).textTheme.displaySmall,
+                ),
                 const SizedBox(height: 12),
                 Text(
-                  '一张精修，整组好看',
+                  context.l10n.homeTagline,
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 32),
@@ -25,7 +29,7 @@ class HomePage extends StatelessWidget {
                   onPressed: () {
                     Navigator.of(context).pushNamed(AppRoutes.editor);
                   },
-                  child: const Text('开始修图'),
+                  child: Text(context.l10n.startEditing),
                 ),
               ],
             ),

@@ -4,6 +4,9 @@
 
 基础骨架服务于 MVP 的三个稳定需求：快速迭代 UI、可预测的非破坏编辑状态，以及未来替换本地算法、商业 SDK 或云端模型时不污染页面代码。
 
+共同基线来源和采用/拒绝决定见
+[`cross-app-foundation-audit.md`](cross-app-foundation-audit.md)。
+
 ## 依赖方向
 
 ```text
@@ -14,6 +17,8 @@ app（组装、主题、路由）
 
 未来原生/云端 adapter ──> application 中真实存在的 seam
 ```
+
+启动阶段由 `StartupCoordinator` 区分首屏必需准备与可延迟任务；主题和语言由根部 Provider 注入的 `AppSettings` 管理，并通过 SharedPreferences 恢复。
 
 - `domain` 不依赖 Flutter UI、插件或供应商 SDK。
 - `application` 可以使用 Flutter 的基础状态原语，但不导入 Widget。

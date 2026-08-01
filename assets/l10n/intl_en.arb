@@ -1,0 +1,15 @@
+{
+  "@@locale": "en",
+  "appTitle": "Yingjian",
+  "homeTagline": "Refine one. Unify the whole set.",
+  "startEditing": "Start editing",
+  "editorTitle": "Fine-tuning workspace",
+  "undo": "Undo",
+  "reset": "Reset",
+  "photoPreviewArea": "Photo preview",
+  "exposure": "Exposure",
+  "contrast": "Contrast",
+  "warmth": "Warmth",
+  "unknownPageTitle": "Page not found",
+  "unknownPageMessage": "This page cannot be opened right now"
+}

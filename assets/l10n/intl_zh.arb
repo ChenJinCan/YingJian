@@ -1,0 +1,17 @@
+{
+  "@@locale": "zh",
+  "appTitle": "映见",
+  "@appTitle": {"description": "应用名称"},
+  "homeTagline": "一张精修，整组好看",
+  "@homeTagline": {"description": "首页核心价值主张"},
+  "startEditing": "开始修图",
+  "editorTitle": "精修工作台",
+  "undo": "撤销",
+  "reset": "重置",
+  "photoPreviewArea": "照片预览区域",
+  "exposure": "曝光",
+  "contrast": "对比度",
+  "warmth": "色温",
+  "unknownPageTitle": "页面不存在",
+  "unknownPageMessage": "暂时无法打开这个页面"
+}

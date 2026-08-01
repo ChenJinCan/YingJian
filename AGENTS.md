@@ -10,6 +10,9 @@
 
 - `lib/`：Flutter UI、交互、编辑状态、配方和任务编排。
 - `lib/app/`：应用组装、主题和路由，不放修图业务规则。
+- `lib/app/settings/`：由 Provider 注入并持久化的主题、语言等轻量应用设置。
+- `lib/startup/`：首屏关键初始化和首屏后延迟任务协调。
+- `assets/l10n/`、`lib/l10n/`：官方 gen-l10n 的源资源与生成代码。
 - `lib/features/<feature>/presentation/`：页面和用户交互。
 - `lib/features/<feature>/application/`：用例、任务编排与会话状态。
 - `lib/features/<feature>/domain/`：不依赖 UI、插件或供应商的配方和值对象。
@@ -17,6 +20,7 @@
 - `test/`：单元和 Widget 行为测试。
 - `docs/`：产品、架构、质量和发布契约。
 - `docs/architecture/flutter-foundation.md`：Flutter 分层、依赖方向和 Module seam 的基准说明。
+- `docs/architecture/cross-app-foundation-audit.md`：与三款现有应用逐项对照后的采用/拒绝决定。
 - `release/release-policy.yaml`：非密钥的发布规则，必须保持 schema 2。
 - `scripts/check_release_contract.rb`：发布规则、环境、候选和源码身份校验器。
 - Flutter stable 基线：Flutter 3.44.8、Dart 3.12.2；变更基线前先验证依赖兼容性。
@@ -25,6 +29,7 @@
 
 ```sh
 flutter pub get
+flutter gen-l10n
 dart format -o none --set-exit-if-changed lib test
 flutter analyze
 flutter test
