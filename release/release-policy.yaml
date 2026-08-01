@@ -1,0 +1,66 @@
+schema_version: 2
+
+app:
+  id: yingjian
+
+packaging:
+  mode: local_only
+
+identity:
+  version_rule: reuse_testing_else_patch_public
+  build_rule: global_latest_plus_one
+
+baseline:
+  source: authenticated_store_console
+  max_age_minutes: 30
+
+source:
+  require_clean_worktree: true
+  require_upstream_sync: true
+
+platforms:
+  ios:
+    identifier: com.babycompany.yingjian
+    release_ready: false
+    blocker: App Store record, production signing, and local archive verification are not configured.
+    env_file: .env.testflight
+    env_example: .env.testflight.example
+    required_tools:
+      - flutter
+      - ruby
+      - bundle
+      - xcodebuild
+    required_env:
+      - ASC_KEY_ID
+      - ASC_ISSUER_ID
+      - ASC_KEY_PATH
+      - MATCH_GIT_URL
+      - MATCH_PASSWORD
+    forbidden_env:
+      - VERSION
+      - BUILD_NUMBER
+      - RELEASE_PUBLIC_VERSION
+      - RELEASE_REMOTE_LATEST_VERSION
+      - RELEASE_REMOTE_LATEST_BUILD
+      - RELEASE_BASELINE_VERIFIED_AT
+      - RELEASE_SOURCE_COMMIT
+  android:
+    identifier: com.babycompany.yingjian
+    release_ready: false
+    blocker: Google Play record, release signing, and final AAB verification are not configured.
+    env_file: .env.android
+    env_example: .env.android.example
+    required_tools:
+      - flutter
+      - ruby
+      - keytool
+    required_env:
+      - ANDROID_SIGNING_PROPERTIES_FILE
+    forbidden_env:
+      - VERSION_NAME
+      - VERSION_CODE
+      - RELEASE_PUBLIC_VERSION
+      - RELEASE_REMOTE_LATEST_VERSION
+      - RELEASE_REMOTE_LATEST_BUILD
+      - RELEASE_BASELINE_VERIFIED_AT
+      - RELEASE_SOURCE_COMMIT

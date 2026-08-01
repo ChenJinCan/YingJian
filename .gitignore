@@ -33,6 +33,22 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# Local environments, credentials, and signing material
+.env
+.env.*
+!.env.testflight.example
+!.env.android.example
+AuthKey_*.p8
+*.keystore
+*.jks
+signing.properties
+
+# Packaged release artifacts stay outside Git
+*.apk
+*.aab
+*.ipa
+*.xcarchive
+
 # Symbolication related
 app.*.symbols
 
