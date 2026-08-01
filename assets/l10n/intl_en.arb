@@ -11,5 +11,20 @@
   "contrast": "Contrast",
   "warmth": "Warmth",
   "unknownPageTitle": "Page not found",
-  "unknownPageMessage": "This page cannot be opened right now"
+  "unknownPageMessage": "This page cannot be opened right now",
+  "settings": "Settings",
+  "privacyAndDiagnostics": "Privacy and diagnostics",
+  "anonymousDiagnostics": "Anonymous diagnostics",
+  "diagnosticsOffDescription": "Off by default; no analytics, crash, or performance data is sent",
+  "diagnosticsOnDescription": "Sends minimized anonymous diagnostics",
+  "diagnosticsUnavailableDescription": "The independent Yingjian Firebase project is not configured",
+  "diagnosticsEnableFailed": "Diagnostics are unavailable and remain disabled",
+  "privacyPolicy": "Privacy Policy",
+  "privacyPolicyDescription": "How photos, diagnostics, and third parties handle data",
+  "termsOfUse": "Terms of Use",
+  "rateApp": "Rate this app",
+  "rateAppDescription": "Open the app store review page",
+  "storeListingUnavailable": "The app store listing is not configured",
+  "openSourceLicenses": "Open-source licenses",
+  "legalDocumentLoadFailed": "This document cannot be loaded right now"
 }

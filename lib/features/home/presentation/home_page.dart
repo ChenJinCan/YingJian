@@ -8,6 +8,16 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        actions: [
+          IconButton(
+            tooltip: context.l10n.settings,
+            onPressed: () =>
+                Navigator.of(context).pushNamed(AppRoutes.settings),
+            icon: const Icon(Icons.settings_outlined),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Center(
           child: Padding(

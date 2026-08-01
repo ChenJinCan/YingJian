@@ -13,5 +13,20 @@
   "contrast": "对比度",
   "warmth": "色温",
   "unknownPageTitle": "页面不存在",
-  "unknownPageMessage": "暂时无法打开这个页面"
+  "unknownPageMessage": "暂时无法打开这个页面",
+  "settings": "设置",
+  "privacyAndDiagnostics": "隐私与诊断",
+  "anonymousDiagnostics": "匿名诊断",
+  "diagnosticsOffDescription": "默认关闭，不发送分析、崩溃或性能数据",
+  "diagnosticsOnDescription": "发送经过最小化处理的匿名诊断数据",
+  "diagnosticsUnavailableDescription": "尚未配置映见独立 Firebase 项目",
+  "diagnosticsEnableFailed": "诊断服务暂不可用，设置已保持关闭",
+  "privacyPolicy": "隐私政策",
+  "privacyPolicyDescription": "查看照片、诊断与第三方数据处理说明",
+  "termsOfUse": "使用条款",
+  "rateApp": "去评分",
+  "rateAppDescription": "打开应用商店评分页面",
+  "storeListingUnavailable": "应用商店页面尚未配置",
+  "openSourceLicenses": "开源许可",
+  "legalDocumentLoadFailed": "暂时无法加载此文档"
 }

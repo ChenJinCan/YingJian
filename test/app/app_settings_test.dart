@@ -13,6 +13,16 @@ void main() {
 
     expect(settings.themeMode, ThemeMode.system);
     expect(settings.locale, isNull);
+    expect(settings.diagnosticsEnabled, isFalse);
+  });
+
+  test('persists an explicit diagnostics choice', () async {
+    final settings = await AppSettings.load();
+
+    await settings.setDiagnosticsEnabled(true);
+    final restored = await AppSettings.load();
+
+    expect(restored.diagnosticsEnabled, isTrue);
   });
 
   test('persists theme and locale across instances', () async {

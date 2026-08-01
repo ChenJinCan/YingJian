@@ -12,6 +12,8 @@
 - `lib/app/`：应用组装、主题和路由，不放修图业务规则。
 - `lib/app/settings/`：由 Provider 注入并持久化的主题、语言等轻量应用设置。
 - `lib/startup/`：首屏关键初始化和首屏后延迟任务协调。
+- `lib/observability/`：事件白名单、崩溃与性能供应商隔离；不得被业务流程反向依赖。
+- `lib/review/`：系统评分资格策略与永久商店入口。
 - `assets/l10n/`、`lib/l10n/`：官方 gen-l10n 的源资源与生成代码。
 - `lib/features/<feature>/presentation/`：页面和用户交互。
 - `lib/features/<feature>/application/`：用例、任务编排与会话状态。
@@ -24,6 +26,7 @@
 - `release/release-policy.yaml`：非密钥的发布规则，必须保持 schema 2。
 - `scripts/check_release_contract.rb`：发布规则、环境、候选和源码身份校验器。
 - Flutter stable 基线：Flutter 3.44.8、Dart 3.12.2；变更基线前先验证依赖兼容性。
+- iOS deployment target 基线为 15.0；降低前必须验证 Firebase 与所有原生插件兼容性。
 
 常用验证命令：
 
@@ -62,6 +65,8 @@ ruby scripts/check_release_contract.rb validate-config
 - 默认本地处理，未经用户明确选择不上传原图。
 - 云端语义编辑只上传用户确认的照片和必要区域，并明确展示会消耗云端权益。
 - 不把图片、人脸特征、签名 URL、密钥、完整个人提示或其他个人数据写入普通日志。
+- Analytics、Crashlytics 和 Performance 默认关闭；仅在用户明确开启匿名诊断后启用，关闭后必须立即停止。
+- 新增遥测前先更新 `docs/operations/telemetry-event-catalog.md` 和事件白名单测试；禁止自由文本事件与任意参数 Map。
 - 推荐方案、预览和参数微调默认走确定性的本地配方；不得因用户浏览三套方案而自动产生三次云端出图费用。
 - 云端任务必须可取消、可重试、可去重并具备超时和成本上限；失败、取消或质量门拒绝不得错误扣权益。
 - AI 服务端密钥不得进入 Flutter 客户端、提交历史、文档、日志、截图或命令参数。
@@ -93,6 +98,7 @@ ruby scripts/check_release_contract.rb validate-config
 - 构建前冻结平台、track、公开基线、源码完整 SHA、版本、build 和获准终止阶段。
 - 构建后单独验证包名/Bundle ID、版本、build、配置、必要资源、数据 schema/记录数量、源码提交和 SHA-256；源码身份不能代替产物身份。
 - 当前任一平台 `release_ready: false` 时，表示签名、商店记录或产物验证链尚未完成，禁止绕过校验器发布。
+- Firebase 原生配置、公开隐私/支持 URL、Apple App Privacy 与 Google Play Data Safety 均为独立发布门禁；缺失时预检必须失败。
 
 发布前入口：
 

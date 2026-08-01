@@ -169,6 +169,96 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'暂时无法打开这个页面'**
   String get unknownPageMessage;
+
+  /// No description provided for @settings.
+  ///
+  /// In zh, this message translates to:
+  /// **'设置'**
+  String get settings;
+
+  /// No description provided for @privacyAndDiagnostics.
+  ///
+  /// In zh, this message translates to:
+  /// **'隐私与诊断'**
+  String get privacyAndDiagnostics;
+
+  /// No description provided for @anonymousDiagnostics.
+  ///
+  /// In zh, this message translates to:
+  /// **'匿名诊断'**
+  String get anonymousDiagnostics;
+
+  /// No description provided for @diagnosticsOffDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'默认关闭，不发送分析、崩溃或性能数据'**
+  String get diagnosticsOffDescription;
+
+  /// No description provided for @diagnosticsOnDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'发送经过最小化处理的匿名诊断数据'**
+  String get diagnosticsOnDescription;
+
+  /// No description provided for @diagnosticsUnavailableDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'尚未配置映见独立 Firebase 项目'**
+  String get diagnosticsUnavailableDescription;
+
+  /// No description provided for @diagnosticsEnableFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'诊断服务暂不可用，设置已保持关闭'**
+  String get diagnosticsEnableFailed;
+
+  /// No description provided for @privacyPolicy.
+  ///
+  /// In zh, this message translates to:
+  /// **'隐私政策'**
+  String get privacyPolicy;
+
+  /// No description provided for @privacyPolicyDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'查看照片、诊断与第三方数据处理说明'**
+  String get privacyPolicyDescription;
+
+  /// No description provided for @termsOfUse.
+  ///
+  /// In zh, this message translates to:
+  /// **'使用条款'**
+  String get termsOfUse;
+
+  /// No description provided for @rateApp.
+  ///
+  /// In zh, this message translates to:
+  /// **'去评分'**
+  String get rateApp;
+
+  /// No description provided for @rateAppDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开应用商店评分页面'**
+  String get rateAppDescription;
+
+  /// No description provided for @storeListingUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'应用商店页面尚未配置'**
+  String get storeListingUnavailable;
+
+  /// No description provided for @openSourceLicenses.
+  ///
+  /// In zh, this message translates to:
+  /// **'开源许可'**
+  String get openSourceLicenses;
+
+  /// No description provided for @legalDocumentLoadFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂时无法加载此文档'**
+  String get legalDocumentLoadFailed;
 }
 
 class _AppLocalizationsDelegate

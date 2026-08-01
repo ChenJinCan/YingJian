@@ -12,6 +12,9 @@ BUILD_VALUE="${3:?build is required}"
 : "${RELEASE_BASELINE_VERIFIED_AT:?record the store lookup as an ISO-8601 timestamp}"
 : "${RELEASE_SOURCE_COMMIT:?freeze the exact pushed source commit}"
 
+"$ROOT_DIR/scripts/check_firebase_setup.sh" --require-configured
+ruby "$ROOT_DIR/scripts/check_legal_setup.rb"
+
 ruby "$ROOT_DIR/scripts/check_release_contract.rb" validate-config \
   --root "$ROOT_DIR"
 ruby "$ROOT_DIR/scripts/check_release_contract.rb" validate-env \

@@ -6,6 +6,10 @@ CHECKER="$ROOT_DIR/scripts/check_release_contract.rb"
 FIXTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/release-contract.XXXXXX")"
 trap 'rm -rf "$FIXTURE_DIR" "$FIXTURE_DIR-remote.git"' EXIT
 
+rg -Fq 'check_firebase_setup.sh" --require-configured' \
+  "$ROOT_DIR/scripts/release_contract_preflight.sh"
+rg -Fq 'check_legal_setup.rb' "$ROOT_DIR/scripts/release_contract_preflight.sh"
+
 mkdir -p "$FIXTURE_DIR/release"
 
 cat >"$FIXTURE_DIR/release/release-policy.yaml" <<'YAML'

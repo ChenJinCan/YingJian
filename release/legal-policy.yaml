@@ -1,0 +1,13 @@
+schema_version: 1
+
+privacy_policy:
+  public_url:
+  support_url:
+  support_contact:
+
+store_verification:
+  app_store_privacy_verified: false
+  google_play_data_safety_verified: false
+
+apple:
+  eula_mode: standard

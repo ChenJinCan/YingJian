@@ -5,9 +5,29 @@ import 'package:yingjian/app/navigation/app_router.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
 import 'package:yingjian/app/theme/app_theme.dart';
 import 'package:yingjian/l10n/app_localizations.dart';
+import 'package:yingjian/observability/app_navigator_observer.dart';
+import 'package:yingjian/observability/app_observability.dart';
 
-class YingjianApp extends StatelessWidget {
+class YingjianApp extends StatefulWidget {
   const YingjianApp({super.key});
+
+  @override
+  State<YingjianApp> createState() => _YingjianAppState();
+}
+
+class _YingjianAppState extends State<YingjianApp> {
+  AppObservability? _observability;
+  AppNavigatorObserver? _navigatorObserver;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final observability = context.read<AppObservability>();
+    if (!identical(_observability, observability)) {
+      _observability = observability;
+      _navigatorObserver = AppNavigatorObserver(observability);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -28,6 +48,7 @@ class YingjianApp extends StatelessWidget {
       ],
       supportedLocales: AppLocalizations.supportedLocales,
       initialRoute: AppRoutes.home,
+      navigatorObservers: [_navigatorObserver!],
       onGenerateRoute: AppRouter.onGenerateRoute,
     );
   }

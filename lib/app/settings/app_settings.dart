@@ -5,14 +5,17 @@ class AppSettings extends ChangeNotifier {
   AppSettings._(this._preferences) {
     _themeMode = _readThemeMode();
     _locale = _readLocale();
+    _diagnosticsEnabled = _preferences.getBool(_diagnosticsEnabledKey) ?? false;
   }
 
   static const _themeModeKey = 'app.theme_mode';
   static const _localeKey = 'app.locale';
+  static const _diagnosticsEnabledKey = 'privacy.diagnostics_enabled';
 
   final SharedPreferences _preferences;
   late ThemeMode _themeMode;
   late Locale? _locale;
+  late bool _diagnosticsEnabled;
 
   static Future<AppSettings> load() async {
     final preferences = await SharedPreferences.getInstance();
@@ -21,6 +24,7 @@ class AppSettings extends ChangeNotifier {
 
   ThemeMode get themeMode => _themeMode;
   Locale? get locale => _locale;
+  bool get diagnosticsEnabled => _diagnosticsEnabled;
 
   Future<void> setThemeMode(ThemeMode value) async {
     if (_themeMode == value) {
@@ -53,6 +57,18 @@ class AppSettings extends ChangeNotifier {
       }
     }
     _locale = value;
+    notifyListeners();
+  }
+
+  Future<void> setDiagnosticsEnabled(bool value) async {
+    if (_diagnosticsEnabled == value) {
+      return;
+    }
+    final saved = await _preferences.setBool(_diagnosticsEnabledKey, value);
+    if (!saved) {
+      throw StateError('Unable to persist diagnostics preference');
+    }
+    _diagnosticsEnabled = value;
     notifyListeners();
   }
 
