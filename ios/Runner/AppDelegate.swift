@@ -1282,6 +1282,37 @@ private enum PortraitMaskSpike {
       extent: extent,
       to: directory.appendingPathComponent("effective-region-overlay.png")
     )
+    let offPath = try writePNG(
+      proxy,
+      extent: extent,
+      to: directory.appendingPathComponent("candidate-off.png")
+    )
+    let defaultCandidate = observations.isEmpty
+      ? proxy
+      : retouch(
+          source: proxy,
+          mask: effectiveImage,
+          strength: 0.35,
+          extent: extent
+        )
+    let highSafeCandidate = observations.isEmpty
+      ? proxy
+      : retouch(
+          source: proxy,
+          mask: effectiveImage,
+          strength: 0.55,
+          extent: extent
+        )
+    let defaultPath = try writePNG(
+      defaultCandidate,
+      extent: extent,
+      to: directory.appendingPathComponent("candidate-default.png")
+    )
+    let highSafePath = try writePNG(
+      highSafeCandidate,
+      extent: extent,
+      to: directory.appendingPathComponent("candidate-high-safe.png")
+    )
 
     return [
       "faceCount": observations.count,
@@ -1292,8 +1323,15 @@ private enum PortraitMaskSpike {
       "protectionMaskPath": protectionPath,
       "effectiveMaskPath": effectivePath,
       "overlayPath": overlayPath,
+      "offPath": offPath,
+      "defaultPath": defaultPath,
+      "highSafePath": highSafePath,
       "candidateKind": "vision-landmarks-geometry-roi",
       "geometryOnly": true,
+      "effectVersion": "ios-geometry-retouch-spike-v1",
+      "defaultStrength": 0.35,
+      "highSafeStrength": 0.55,
+      "productionEligible": false,
       "executionEnvironment": executionEnvironment,
       "landmarkSummary": landmarkSummary(observations.first?.landmarks),
       "landmarkBoundsSummary": landmarkBoundsSummary(observations.first?.landmarks),
@@ -1495,6 +1533,56 @@ private enum PortraitMaskSpike {
         kCIInputMaskImageKey: mask,
       ]
     ).cropped(to: extent)
+  }
+
+  /// Debug candidate only. The geometry ROI is intentionally conservative and
+  /// must pass the frozen portrait corpus before any production integration.
+  private static func retouch(
+    source: CIImage,
+    mask: CIImage,
+    strength: Double,
+    extent: CGRect
+  ) -> CIImage {
+    let bounded = max(0, min(1, strength))
+    guard bounded > 0 else { return source.cropped(to: extent) }
+    let white = CIImage(color: CIColor(red: 1, green: 1, blue: 1, alpha: 1))
+      .cropped(to: extent)
+    let opaqueSource = source.composited(over: white).cropped(to: extent)
+
+    let denoised = opaqueSource.applyingFilter(
+      "CINoiseReduction",
+      parameters: [
+        "inputNoiseLevel": 0.008 + bounded * 0.018,
+        "inputSharpness": 0.55,
+      ]
+    ).cropped(to: extent)
+    let relit = denoised.applyingFilter(
+      "CIHighlightShadowAdjust",
+      parameters: [
+        "inputHighlightAmount": 1 - bounded * 0.08,
+        "inputShadowAmount": bounded * 0.22,
+      ]
+    ).cropped(to: extent)
+    let balanced = relit.applyingFilter(
+      "CIColorControls",
+      parameters: [
+        kCIInputBrightnessKey: bounded * 0.018,
+        kCIInputContrastKey: 1 - bounded * 0.025,
+        kCIInputSaturationKey: 1 - bounded * 0.025,
+      ]
+    ).cropped(to: extent)
+    let detailed = balanced.applyingFilter(
+      "CISharpenLuminance",
+      parameters: [kCIInputSharpnessKey: 0.12 + bounded * 0.08]
+    ).cropped(to: extent)
+    let blended = detailed.applyingFilter(
+      "CIBlendWithMask",
+      parameters: [
+        kCIInputBackgroundImageKey: opaqueSource,
+        kCIInputMaskImageKey: mask,
+      ]
+    ).cropped(to: extent)
+    return blended.composited(over: opaqueSource).cropped(to: extent)
   }
 
   private static func writePNG(_ image: CIImage, extent: CGRect, to url: URL) throws -> String {

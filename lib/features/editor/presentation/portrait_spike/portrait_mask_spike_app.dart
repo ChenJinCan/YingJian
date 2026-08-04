@@ -155,8 +155,8 @@ class _PrototypeNotice extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             const Text(
-              '这里只验证 Vision 人脸几何、五官保护区和图片方向是否对齐。'
-              '绿色区域不是真实皮肤分割，也不代表已经实现自然磨皮。',
+              '这里只验证 Vision 人脸几何、五官保护区、图片方向和一条受区域约束的像素候选。'
+              '绿色区域不是真实皮肤分割，三档结果也不具备生产资格，必须先通过授权样片盲评。',
             ),
           ],
         ),
@@ -185,6 +185,9 @@ class _AnalysisState extends StatelessWidget {
               'proxy: ${result.width} × ${result.height}\n'
               'candidateKind: ${result.candidateKind}\n'
               'geometryOnly: ${result.geometryOnly}\n'
+              'effectVersion: ${result.effectVersion}\n'
+              'strengths: ${result.defaultStrength} / ${result.highSafeStrength}\n'
+              'productionEligible: ${result.productionEligible}\n'
               'environment: ${result.executionEnvironment}\n'
               'landmarks: ${result.landmarkSummary}\n'
               'bounds: ${result.landmarkBoundsSummary}',
@@ -252,6 +255,27 @@ class _DebugImageWrap extends StatelessWidget {
             path: result.overlayPath,
           ),
         ),
+        SizedBox(
+          width: cardWidth,
+          child: _DebugImageCard(
+            title: '6. 人像候选关闭（像素基线）',
+            path: result.offPath,
+          ),
+        ),
+        SizedBox(
+          width: cardWidth,
+          child: _DebugImageCard(
+            title: '7. 人像候选默认强度',
+            path: result.defaultPath,
+          ),
+        ),
+        SizedBox(
+          width: cardWidth,
+          child: _DebugImageCard(
+            title: '8. 人像候选高安全强度',
+            path: result.highSafePath,
+          ),
+        ),
       ],
     );
   }
@@ -309,8 +333,15 @@ class PortraitMaskSpikeResult {
     required this.protectionMaskPath,
     required this.effectiveMaskPath,
     required this.overlayPath,
+    required this.offPath,
+    required this.defaultPath,
+    required this.highSafePath,
     required this.candidateKind,
     required this.geometryOnly,
+    required this.effectVersion,
+    required this.defaultStrength,
+    required this.highSafeStrength,
+    required this.productionEligible,
     required this.executionEnvironment,
     required this.landmarkSummary,
     required this.landmarkBoundsSummary,
@@ -334,8 +365,15 @@ class PortraitMaskSpikeResult {
       protectionMaskPath: read<String>('protectionMaskPath'),
       effectiveMaskPath: read<String>('effectiveMaskPath'),
       overlayPath: read<String>('overlayPath'),
+      offPath: read<String>('offPath'),
+      defaultPath: read<String>('defaultPath'),
+      highSafePath: read<String>('highSafePath'),
       candidateKind: read<String>('candidateKind'),
       geometryOnly: read<bool>('geometryOnly'),
+      effectVersion: read<String>('effectVersion'),
+      defaultStrength: read<double>('defaultStrength'),
+      highSafeStrength: read<double>('highSafeStrength'),
+      productionEligible: read<bool>('productionEligible'),
       executionEnvironment: read<String>('executionEnvironment'),
       landmarkSummary: read<String>('landmarkSummary'),
       landmarkBoundsSummary: read<String>('landmarkBoundsSummary'),
@@ -350,8 +388,15 @@ class PortraitMaskSpikeResult {
   final String protectionMaskPath;
   final String effectiveMaskPath;
   final String overlayPath;
+  final String offPath;
+  final String defaultPath;
+  final String highSafePath;
   final String candidateKind;
   final bool geometryOnly;
+  final String effectVersion;
+  final double defaultStrength;
+  final double highSafeStrength;
+  final bool productionEligible;
   final String executionEnvironment;
   final String landmarkSummary;
   final String landmarkBoundsSummary;
