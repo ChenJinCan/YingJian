@@ -230,14 +230,14 @@ void main() {
     );
     expect(find.text('重做'), findsOneWidget);
 
-    await tester.ensureVisible(find.text('原画质导出'));
+    await tester.ensureVisible(find.text('批量导出 1 张'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('原画质导出'));
+    await tester.tap(find.text('批量导出 1 张'));
     await tester.pumpAndSettle();
 
     expect(exporter.exportedPhoto, photo);
     expect(exporter.exportedRecipe?.exposure, greaterThan(0));
-    expect(find.text('已保存到系统相册（4032 × 3024）'), findsOneWidget);
+    expect(find.text('已保存 1 张 · 失败 0 张 · 取消 0 张'), findsWidgets);
     debugDefaultTargetPlatformOverride = null;
   });
 
@@ -336,6 +336,67 @@ void main() {
     expect(find.text('重试'), findsOneWidget);
   });
 
+  testWidgets('batch export keeps successes and retries only failed photos', (
+    tester,
+  ) async {
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final photos = [
+      ProjectPhoto(
+        id: 'photo-1',
+        localPath: photoFile.path,
+        originalName: 'first.png',
+      ),
+      ProjectPhoto(
+        id: 'photo-2',
+        localPath: photoFile.path,
+        originalName: 'second.png',
+      ),
+    ];
+    final store = MemoryPhotoProjectStore(
+      PhotoProject(
+        id: 'project-1',
+        createdAt: DateTime.utc(2026, 8, 4),
+        updatedAt: DateTime.utc(2026, 8, 4),
+        photos: photos,
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'mvp-catalog-v1:clean-balanced',
+      ),
+    );
+    final exporter = _FailOncePhotoExporter('photo-2');
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(settings, photoProjectStore: store, photoExporter: exporter),
+    );
+
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+    await tester.dragUntilVisible(
+      find.text('批量导出 2 张'),
+      find.byType(ListView).first,
+      const Offset(0, -320),
+    );
+    await tester.drag(find.byType(ListView).first, const Offset(0, -80));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('批量导出 2 张'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('已保存 1 张 · 失败 1 张 · 取消 0 张'), findsWidgets);
+    expect(store.project?.exportStates['photo-1'], PhotoExportState.saved);
+    expect(store.project?.exportStates['photo-2'], PhotoExportState.failed);
+    await tester.tap(find.text('只重试失败与取消项'));
+    await tester.pumpAndSettle();
+
+    expect(
+      store.project?.exportStates.values,
+      everyElement(PhotoExportState.saved),
+    );
+    expect(exporter.calls, ['photo-1', 'photo-2', 'photo-2']);
+  });
+
   testWidgets('input-destructive actions stay disabled during export', (
     tester,
   ) async {
@@ -374,13 +435,13 @@ void main() {
     await tester.tap(find.text('开始修图'));
     await tester.pumpAndSettle();
     await tester.dragUntilVisible(
-      find.text('原画质导出'),
+      find.text('批量导出 2 张'),
       find.byType(ListView).first,
       const Offset(0, -300),
     );
     await tester.drag(find.byType(ListView).first, const Offset(0, -80));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('原画质导出'));
+    await tester.tap(find.text('批量导出 2 张'));
     await tester.pump();
 
     expect(
@@ -486,6 +547,27 @@ final class _FailingProjectStore implements PhotoProjectStore {
 
   @override
   Future<void> save(PhotoProject project) async {}
+}
+
+final class _FailOncePhotoExporter implements PhotoExporter {
+  _FailOncePhotoExporter(this.failPhotoId);
+
+  final String failPhotoId;
+  final List<String> calls = [];
+  bool _failed = false;
+
+  @override
+  Future<ExportedPhoto> export({
+    required ProjectPhoto photo,
+    required EditRecipe recipe,
+  }) async {
+    calls.add(photo.id);
+    if (photo.id == failPhotoId && !_failed) {
+      _failed = true;
+      throw StateError('fixture failure');
+    }
+    return ExportedPhoto(assetId: photo.id, width: 4032, height: 3024);
+  }
 }
 
 final class _DeferredPhotoExporter implements PhotoExporter {

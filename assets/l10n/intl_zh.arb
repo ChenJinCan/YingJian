@@ -100,5 +100,13 @@
   "photoStatusAutoCompensated": "自动补偿",
   "photoStatusOverridden": "单张精修",
   "photoStatusFailed": "处理失败",
-  "photoStatusQueued": "待导出"
+  "photoStatusQueued": "待导出",
+  "batchExportPhotos": "批量导出 {count} 张",
+  "@batchExportPhotos": {"placeholders": {"count": {"type": "int"}}},
+  "exportingPhotos": "正在逐张导出…",
+  "cancelExport": "取消未开始项",
+  "exportSummary": "已保存 {saved} 张 · 失败 {failed} 张 · 取消 {cancelled} 张",
+  "@exportSummary": {"placeholders": {"saved": {"type": "int"}, "failed": {"type": "int"}, "cancelled": {"type": "int"}}},
+  "retryFailedPhotos": "只重试失败与取消项",
+  "continueEditing": "继续编辑"
 }

@@ -295,4 +295,26 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get photoStatusQueued => '待导出';
+
+  @override
+  String batchExportPhotos(int count) {
+    return '批量导出 $count 张';
+  }
+
+  @override
+  String get exportingPhotos => '正在逐张导出…';
+
+  @override
+  String get cancelExport => '取消未开始项';
+
+  @override
+  String exportSummary(int saved, int failed, int cancelled) {
+    return '已保存 $saved 张 · 失败 $failed 张 · 取消 $cancelled 张';
+  }
+
+  @override
+  String get retryFailedPhotos => '只重试失败与取消项';
+
+  @override
+  String get continueEditing => '继续编辑';
 }

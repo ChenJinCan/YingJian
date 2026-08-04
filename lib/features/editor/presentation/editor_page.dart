@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:yingjian/features/editor/application/batch_photo_exporter.dart';
 import 'package:yingjian/features/editor/application/editor_session.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
@@ -29,6 +30,8 @@ class _EditorPageState extends State<EditorPage> {
   int _selectedIndex = 0;
   bool _busy = false;
   bool _exporting = false;
+  BoundedBatchPhotoExporter? _batchExporter;
+  BatchExportSummary? _exportSummary;
   bool _preparingRecommendations = false;
   RecommendationPreparation? _recommendationPreparation;
   int _previewRecommendationIndex = -1;
@@ -49,7 +52,13 @@ class _EditorPageState extends State<EditorPage> {
 
   Future<void> _restoreProject(PhotoProjectSession session) async {
     await session.restore();
+    final recoveredSummary = await BoundedBatchPhotoExporter.recoverInterrupted(
+      session,
+    );
     final project = session.project;
+    if (mounted && recoveredSummary != null) {
+      setState(() => _exportSummary = recoveredSummary);
+    }
     _editorSession.load(session.editableRecipe);
     final focusPhotoId = project?.focusPhotoId;
     if (focusPhotoId != null) {
@@ -298,23 +307,30 @@ class _EditorPageState extends State<EditorPage> {
     super.dispose();
   }
 
-  Future<void> _exportPhoto(ProjectPhoto photo) async {
+  Future<void> _exportBatch({bool retryFailuresOnly = false}) async {
     if (_exporting) {
       return;
     }
     setState(() => _exporting = true);
     try {
-      final exported = await context.read<PhotoExporter>().export(
-        photo: photo,
-        recipe: _session!.effectiveRecipeFor(photo.id),
+      final batch = BoundedBatchPhotoExporter(
+        session: _session!,
+        exporter: context.read<PhotoExporter>(),
       );
+      _batchExporter = batch;
+      final summary = await batch.export(retryFailuresOnly: retryFailuresOnly);
       if (!mounted) {
         return;
       }
+      setState(() => _exportSummary = summary);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            context.l10n.photoExported(exported.width, exported.height),
+            context.l10n.exportSummary(
+              summary.savedCount,
+              summary.failedCount,
+              summary.cancelledCount,
+            ),
           ),
         ),
       );
@@ -326,9 +342,22 @@ class _EditorPageState extends State<EditorPage> {
       }
     } finally {
       if (mounted) {
-        setState(() => _exporting = false);
+        setState(() {
+          _exporting = false;
+          _batchExporter = null;
+        });
       }
     }
+  }
+
+  void _cancelBatchExport() => _batchExporter?.cancel();
+
+  Future<void> _continueEditing() async {
+    final session = _session!;
+    if (session.project?.flowState == PhotoProjectFlowState.exported) {
+      await session.transitionTo(PhotoProjectFlowState.editing);
+    }
+    if (mounted) setState(() => _exportSummary = null);
   }
 
   Future<void> _importPhotos() async {
@@ -441,7 +470,12 @@ class _EditorPageState extends State<EditorPage> {
                         unawaited(_movePhoto(photo, destination)),
                     onRemove: (photo) => unawaited(_removePhoto(photo)),
                     onImport: _importPhotos,
-                    onExport: _exportPhoto,
+                    exportSummary: _exportSummary,
+                    onExport: () => unawaited(_exportBatch()),
+                    onCancelExport: _cancelBatchExport,
+                    onRetryExport: () =>
+                        unawaited(_exportBatch(retryFailuresOnly: true)),
+                    onContinueEditing: () => unawaited(_continueEditing()),
                     onRecipeCommitted: () => unawaited(_persistRecipe()),
                     onUndo: () => unawaited(_undoEdit()),
                     onRedo: () => unawaited(_redoEdit()),
@@ -558,6 +592,7 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.selectedIndex,
     required this.busy,
     required this.exporting,
+    required this.exportSummary,
     required this.editingEnabled,
     required this.previewRecipe,
     required this.flowState,
@@ -572,6 +607,9 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.onRemove,
     required this.onImport,
     required this.onExport,
+    required this.onCancelExport,
+    required this.onRetryExport,
+    required this.onContinueEditing,
     required this.onRecipeCommitted,
     required this.onUndo,
     required this.onRedo,
@@ -587,6 +625,7 @@ class _PhotoWorkspace extends StatelessWidget {
   final int selectedIndex;
   final bool busy;
   final bool exporting;
+  final BatchExportSummary? exportSummary;
   final bool editingEnabled;
   final EditRecipe previewRecipe;
   final PhotoProjectFlowState flowState;
@@ -600,7 +639,10 @@ class _PhotoWorkspace extends StatelessWidget {
   final void Function(ProjectPhoto photo, int destination) onMove;
   final ValueChanged<ProjectPhoto> onRemove;
   final VoidCallback onImport;
-  final ValueChanged<ProjectPhoto> onExport;
+  final VoidCallback onExport;
+  final VoidCallback onCancelExport;
+  final VoidCallback onRetryExport;
+  final VoidCallback onContinueEditing;
   final VoidCallback onRecipeCommitted;
   final VoidCallback onUndo;
   final VoidCallback onRedo;
@@ -614,6 +656,9 @@ class _PhotoWorkspace extends StatelessWidget {
     final selected = photos[selectedIndex];
     final recipe = editorSession.recipe;
     final previewRenderer = context.read<PhotoPreviewRenderer>();
+    final hasPhotosReadyToExport = project.exportStates.values.any(
+      (state) => state == PhotoExportState.notQueued,
+    );
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -826,18 +871,39 @@ class _PhotoWorkspace extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 8),
+        if (exportSummary != null) ...[
+          _ExportSummaryCard(
+            summary: exportSummary!,
+            exporting: exporting,
+            onRetry: onRetryExport,
+            onContinueEditing: onContinueEditing,
+          ),
+          const SizedBox(height: 12),
+        ],
         FilledButton.icon(
-          onPressed: exporting || !editingEnabled
+          onPressed: exporting || !editingEnabled || !hasPhotosReadyToExport
               ? null
-              : () => onExport(selected),
+              : onExport,
           icon: exporting
               ? const SizedBox.square(
                   dimension: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : const Icon(Icons.file_download_outlined),
-          label: Text(context.l10n.exportOriginalQuality),
+          label: Text(
+            exporting
+                ? context.l10n.exportingPhotos
+                : context.l10n.batchExportPhotos(photos.length),
+          ),
         ),
+        if (exporting) ...[
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: onCancelExport,
+            icon: const Icon(Icons.cancel_outlined),
+            label: Text(context.l10n.cancelExport),
+          ),
+        ],
         const SizedBox(height: 12),
         OutlinedButton.icon(
           onPressed:
@@ -848,6 +914,52 @@ class _PhotoWorkspace extends StatelessWidget {
           label: Text(context.l10n.addPhotos),
         ),
       ],
+    );
+  }
+}
+
+class _ExportSummaryCard extends StatelessWidget {
+  const _ExportSummaryCard({
+    required this.summary,
+    required this.exporting,
+    required this.onRetry,
+    required this.onContinueEditing,
+  });
+
+  final BatchExportSummary summary;
+  final bool exporting;
+  final VoidCallback onRetry;
+  final VoidCallback onContinueEditing;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              context.l10n.exportSummary(
+                summary.savedCount,
+                summary.failedCount,
+                summary.cancelledCount,
+              ),
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 12),
+            if (summary.hasRetryableItems)
+              FilledButton.tonal(
+                onPressed: exporting ? null : onRetry,
+                child: Text(context.l10n.retryFailedPhotos),
+              ),
+            TextButton(
+              onPressed: exporting ? null : onContinueEditing,
+              child: Text(context.l10n.continueEditing),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

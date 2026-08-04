@@ -98,5 +98,13 @@
   "photoStatusAutoCompensated": "Auto adjusted",
   "photoStatusOverridden": "Photo refined",
   "photoStatusFailed": "Processing failed",
-  "photoStatusQueued": "Ready to export"
+  "photoStatusQueued": "Ready to export",
+  "batchExportPhotos": "Export {count} photos",
+  "@batchExportPhotos": {"placeholders": {"count": {"type": "int"}}},
+  "exportingPhotos": "Exporting one photo at a time…",
+  "cancelExport": "Cancel items not started",
+  "exportSummary": "Saved {saved} · Failed {failed} · Cancelled {cancelled}",
+  "@exportSummary": {"placeholders": {"saved": {"type": "int"}, "failed": {"type": "int"}, "cancelled": {"type": "int"}}},
+  "retryFailedPhotos": "Retry failed and cancelled",
+  "continueEditing": "Continue editing"
 }

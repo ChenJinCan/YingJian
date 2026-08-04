@@ -310,4 +310,26 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get photoStatusQueued => 'Ready to export';
+
+  @override
+  String batchExportPhotos(int count) {
+    return 'Export $count photos';
+  }
+
+  @override
+  String get exportingPhotos => 'Exporting one photo at a time…';
+
+  @override
+  String get cancelExport => 'Cancel items not started';
+
+  @override
+  String exportSummary(int saved, int failed, int cancelled) {
+    return 'Saved $saved · Failed $failed · Cancelled $cancelled';
+  }
+
+  @override
+  String get retryFailedPhotos => 'Retry failed and cancelled';
+
+  @override
+  String get continueEditing => 'Continue editing';
 }

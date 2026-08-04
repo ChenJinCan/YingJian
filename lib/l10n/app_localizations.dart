@@ -637,6 +637,42 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'待导出'**
   String get photoStatusQueued;
+
+  /// No description provided for @batchExportPhotos.
+  ///
+  /// In zh, this message translates to:
+  /// **'批量导出 {count} 张'**
+  String batchExportPhotos(int count);
+
+  /// No description provided for @exportingPhotos.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在逐张导出…'**
+  String get exportingPhotos;
+
+  /// No description provided for @cancelExport.
+  ///
+  /// In zh, this message translates to:
+  /// **'取消未开始项'**
+  String get cancelExport;
+
+  /// No description provided for @exportSummary.
+  ///
+  /// In zh, this message translates to:
+  /// **'已保存 {saved} 张 · 失败 {failed} 张 · 取消 {cancelled} 张'**
+  String exportSummary(int saved, int failed, int cancelled);
+
+  /// No description provided for @retryFailedPhotos.
+  ///
+  /// In zh, this message translates to:
+  /// **'只重试失败与取消项'**
+  String get retryFailedPhotos;
+
+  /// No description provided for @continueEditing.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续编辑'**
+  String get continueEditing;
 }
 
 class _AppLocalizationsDelegate
