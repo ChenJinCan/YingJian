@@ -678,7 +678,7 @@ enum ImageExportMetadata {
   }
 }
 
-private struct IOSImagePipeline {
+struct IOSImagePipeline {
   let exposureEV: Double
   let highlights: Double
   let shadows: Double
@@ -776,7 +776,7 @@ private struct IOSImagePipeline {
     return result
   }
 
-  var colorTransform: ColorTransform {
+  private var colorTransform: ColorTransform {
     let exposureScale = pow(2, exposureEV)
     let contrastScale = 1 + contrast * 0.75
     let redWarmthScale = 1 + warmth * 0.15
@@ -866,11 +866,21 @@ private struct IOSImagePipeline {
       output = output.clampedToExtent().transformed(by: transform).cropped(to: cropRect)
     }
     if quarterTurns != 0 {
+      let expectedSize = quarterTurns.isMultiple(of: 2)
+        ? output.extent.size
+        : CGSize(width: output.extent.height, height: output.extent.width)
       let center = CGPoint(x: output.extent.midX, y: output.extent.midY)
       let transform = CGAffineTransform(translationX: center.x, y: center.y)
         .rotated(by: CGFloat(-quarterTurns) * .pi / 2)
         .translatedBy(x: -center.x, y: -center.y)
       output = output.transformed(by: transform)
+      let transformedExtent = output.extent
+      return output.transformed(
+        by: CGAffineTransform(
+          translationX: -transformedExtent.minX,
+          y: -transformedExtent.minY
+        )
+      ).cropped(to: CGRect(origin: .zero, size: expectedSize))
     }
     let transformedExtent = output.extent.integral
     return output.transformed(
