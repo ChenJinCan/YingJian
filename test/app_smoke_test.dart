@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
+import 'package:yingjian/features/editor/application/photo_exporter.dart';
+import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 
@@ -123,19 +126,23 @@ void main() {
       originalName: '周末人像.png',
     );
     final exporter = FakePhotoExporter();
+    final store = MemoryPhotoProjectStore(
+      PhotoProject(
+        id: 'project-1',
+        createdAt: DateTime.utc(2026, 8, 4),
+        updatedAt: DateTime.utc(2026, 8, 4),
+        photos: [photo],
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'clean-natural-01',
+      ),
+    );
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
     final settings = await AppSettings.load();
     await tester.pumpWidget(
-      buildTestApp(
-        settings,
-        photoImporter: FakePhotoImporter([photo]),
-        photoExporter: exporter,
-      ),
+      buildTestApp(settings, photoProjectStore: store, photoExporter: exporter),
     );
 
     await tester.tap(find.text('开始修图'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('选择照片'));
     await tester.pumpAndSettle();
 
     expect(find.text('周末人像.png'), findsOneWidget);
@@ -146,8 +153,9 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.drag(find.byType(Slider).first, const Offset(120, 0));
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(exporter.exportedRecipe, isNull);
+    expect(store.project?.undoHistory, hasLength(1));
 
     await tester.dragUntilVisible(
       find.text('重做'),
@@ -180,6 +188,86 @@ void main() {
 
     expect(find.text('无法恢复上次项目'), findsOneWidget);
     expect(find.text('重试'), findsOneWidget);
+  });
+
+  testWidgets('input-destructive actions stay disabled during export', (
+    tester,
+  ) async {
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final photos = [
+      ProjectPhoto(
+        id: 'photo-1',
+        localPath: photoFile.path,
+        originalName: 'first.png',
+      ),
+      ProjectPhoto(
+        id: 'photo-2',
+        localPath: photoFile.path,
+        originalName: 'second.png',
+      ),
+    ];
+    final store = MemoryPhotoProjectStore(
+      PhotoProject(
+        id: 'project-1',
+        createdAt: DateTime.utc(2026, 8, 4),
+        updatedAt: DateTime.utc(2026, 8, 4),
+        photos: photos,
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'clean-natural-01',
+      ),
+    );
+    final exporter = _DeferredPhotoExporter();
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(settings, photoProjectStore: store, photoExporter: exporter),
+    );
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+    await tester.dragUntilVisible(
+      find.text('原画质导出'),
+      find.byType(ListView).first,
+      const Offset(0, -300),
+    );
+    await tester.tap(find.text('原画质导出'));
+    await tester.pump();
+
+    expect(
+      tester
+          .widget<IconButton>(
+            find.widgetWithIcon(IconButton, Icons.delete_outline),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(
+      tester
+          .widget<IconButton>(
+            find.widgetWithIcon(IconButton, Icons.arrow_forward),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(
+      tester
+          .widget<IconButton>(
+            find.widgetWithIcon(IconButton, Icons.remove_circle_outline),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(
+      tester
+          .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '继续添加照片'))
+          .onPressed,
+      isNull,
+    );
+
+    exporter.complete();
+    await tester.pumpAndSettle();
   });
 
   testWidgets('user confirms project deletion without touching originals', (
@@ -250,4 +338,20 @@ final class _FailingProjectStore implements PhotoProjectStore {
 
   @override
   Future<void> save(PhotoProject project) async {}
+}
+
+final class _DeferredPhotoExporter implements PhotoExporter {
+  final Completer<ExportedPhoto> _completion = Completer<ExportedPhoto>();
+
+  @override
+  Future<ExportedPhoto> export({
+    required ProjectPhoto photo,
+    required EditRecipe recipe,
+  }) => _completion.future;
+
+  void complete() {
+    _completion.complete(
+      const ExportedPhoto(assetId: 'asset-42', width: 4032, height: 3024),
+    );
+  }
 }

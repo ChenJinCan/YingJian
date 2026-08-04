@@ -89,7 +89,34 @@ class PhotoProjectSession extends ChangeNotifier {
   Object? get restoreError => _restoreError;
   bool get isRestoring => _isRestoring;
   bool get isImporting => _isImporting;
+  PhotoProjectFlowState get flowState => _isImporting
+      ? PhotoProjectFlowState.importing
+      : _project?.flowState ?? PhotoProjectFlowState.empty;
   List<PhotoImportFailure> get importFailures => _importFailures;
+  bool get canUndo => _project?.undoHistory.isNotEmpty ?? false;
+  bool get canRedo => _project?.redoHistory.isNotEmpty ?? false;
+  bool get canEdit => _project?.flowState == PhotoProjectFlowState.editing;
+
+  EditRecipe get editableRecipe {
+    final current = _project;
+    if (current == null) return EditRecipe.neutral;
+    if (current.editingScope == ProjectEditingScope.group) {
+      return current.sharedStyle.recipe;
+    }
+    final photoId = current.focusPhotoId ?? current.photos.first.id;
+    return current.photoOverrides[photoId]?.recipe ?? EditRecipe.neutral;
+  }
+
+  EditRecipe effectiveRecipeFor(String photoId) {
+    return _requirePhoto(photoId).effectiveRecipeFor(photoId);
+  }
+
+  EditRecipe previewRecipeFor(String photoId, EditRecipe editableRecipe) {
+    final current = _requirePhoto(photoId);
+    return current.editingScope == ProjectEditingScope.group
+        ? current.effectiveRecipeFor(photoId, sharedRecipe: editableRecipe)
+        : current.effectiveRecipeFor(photoId, photoOverride: editableRecipe);
+  }
 
   Future<void> restore() async {
     _isRestoring = true;
@@ -106,6 +133,12 @@ class PhotoProjectSession extends ChangeNotifier {
   }
 
   Future<PhotoImportResult> importPhotos() async {
+    if (_isImporting) {
+      throw StateError('A photo import is already active');
+    }
+    if (_project?.canMutateInputs == false) {
+      throw StateError('Project inputs cannot change while exporting');
+    }
     final remaining = PhotoProject.maxPhotoCount - photos.length;
     if (remaining == 0) {
       return PhotoImportResult.limitReached;
@@ -113,13 +146,16 @@ class PhotoProjectSession extends ChangeNotifier {
 
     _isImporting = true;
     notifyListeners();
-    late final PhotoImportBatch batch;
     try {
-      batch = await _importer.importPhotos(limit: remaining);
+      return await _performImport(remaining);
     } finally {
       _isImporting = false;
       notifyListeners();
     }
+  }
+
+  Future<PhotoImportResult> _performImport(int remaining) async {
+    final batch = await _importer.importPhotos(limit: remaining);
     _importFailures = List.unmodifiable(batch.failures);
     final imported = batch.photos;
     if (imported.isEmpty) {
@@ -143,11 +179,10 @@ class PhotoProjectSession extends ChangeNotifier {
             photos: imported,
             flowState: PhotoProjectFlowState.analyzing,
           )
-        : existing.copyWith(
-            updatedAt: timestamp,
+        : existing.replacePhotosAndInvalidateDerivedState(
             photos: [...existing.photos, ...imported],
-            flowState: PhotoProjectFlowState.analyzing,
-            selectedRecommendationId: null,
+            updatedAt: timestamp,
+            focusPhotoId: existing.focusPhotoId,
           );
     try {
       await _store.save(next);
@@ -174,7 +209,7 @@ class PhotoProjectSession extends ChangeNotifier {
     if (current == null) {
       throw StateError('A project is required before changing its flow state');
     }
-    if (!current.flowState.canTransitionTo(nextState)) {
+    if (!current.canTransitionTo(nextState)) {
       throw StateError(
         'Project cannot transition from ${current.flowState.name} '
         'to ${nextState.name}',
@@ -182,20 +217,195 @@ class PhotoProjectSession extends ChangeNotifier {
     }
     if (current.flowState == nextState) return;
     final next = current.copyWith(updatedAt: _now(), flowState: nextState);
-    await _store.save(next);
-    _project = next;
-    notifyListeners();
+    await _saveAndPublish(next);
   }
 
-  Future<void> updateRecipe(EditRecipe recipe) async {
+  Future<void> selectRecommendation({
+    required String recommendationId,
+    required SharedStyle sharedStyle,
+    Map<String, AdaptiveCompensation> adaptiveCompensations = const {},
+  }) async {
     final current = _project;
-    if (current == null || current.recipe == recipe) {
+    if (current == null) {
+      throw StateError(
+        'A project is required before selecting a recommendation',
+      );
+    }
+    if (current.flowState != PhotoProjectFlowState.choosingRecommendation) {
+      throw StateError('Recommendations can only be selected while choosing');
+    }
+    if (recommendationId.trim().isEmpty) {
+      throw ArgumentError.value(
+        recommendationId,
+        'recommendationId',
+        'Recommendation id must not be empty',
+      );
+    }
+    final next = current.copyWith(
+      updatedAt: _now(),
+      flowState: PhotoProjectFlowState.editing,
+      selectedRecommendationId: recommendationId,
+      sharedStyle: sharedStyle,
+      adaptiveCompensations: adaptiveCompensations,
+      photoOverrides: const {},
+      exportStates: {
+        for (final photo in current.photos)
+          photo.id: PhotoExportState.notQueued,
+      },
+      editingScope: current.photos.length == 1
+          ? ProjectEditingScope.currentPhoto
+          : ProjectEditingScope.group,
+      undoHistory: const [],
+      redoHistory: const [],
+    );
+    await _saveAndPublish(next);
+  }
+
+  Future<void> setEditingScope(
+    ProjectEditingScope scope, {
+    String? photoId,
+  }) async {
+    final current = _project;
+    if (current == null) {
+      throw StateError('A project is required before changing editing scope');
+    }
+    if (current.flowState != PhotoProjectFlowState.editing) {
+      throw StateError('Editing scope can only change while editing');
+    }
+    if (scope == ProjectEditingScope.group && current.photos.length == 1) {
+      throw StateError('A single-photo project has no group editing scope');
+    }
+    if (scope == ProjectEditingScope.currentPhoto) {
+      if (photoId == null ||
+          !current.photos.any((photo) => photo.id == photoId)) {
+        throw ArgumentError.value(
+          photoId,
+          'photoId',
+          'Current-photo scope requires a project photo',
+        );
+      }
+    }
+    final focusPhotoId = scope == ProjectEditingScope.currentPhoto
+        ? photoId
+        : current.focusPhotoId;
+    if (current.editingScope == scope && current.focusPhotoId == focusPhotoId) {
       return;
     }
-    final next = current.copyWith(updatedAt: _now(), recipe: recipe);
-    await _store.save(next);
-    _project = next;
-    notifyListeners();
+    final next = current.copyWith(
+      updatedAt: _now(),
+      editingScope: scope,
+      focusPhotoId: focusPhotoId,
+    );
+    await _saveAndPublish(next);
+  }
+
+  Future<void> commitEdit(EditRecipe recipe) async {
+    final current = _project;
+    if (current == null) {
+      throw StateError('A project is required before committing an edit');
+    }
+    if (current.flowState != PhotoProjectFlowState.editing) {
+      throw StateError('Edits can only be committed while editing');
+    }
+    final photoId = current.editingScope == ProjectEditingScope.currentPhoto
+        ? current.focusPhotoId ?? current.photos.first.id
+        : null;
+    final beforeRecipe = photoId == null
+        ? current.sharedStyle.recipe
+        : current.photoOverrides[photoId]?.recipe ?? EditRecipe.neutral;
+    if (beforeRecipe == recipe) return;
+    final operation = ProjectEditOperation(
+      scope: current.editingScope,
+      photoId: photoId,
+      beforeRecipe: beforeRecipe,
+      afterRecipe: recipe,
+      beforeSharedIntensity: current.sharedStyle.intensity,
+      afterSharedIntensity: current.sharedStyle.intensity,
+    );
+    final next = _applyOperation(
+      current,
+      operation,
+      recipe,
+      sharedIntensity: current.sharedStyle.intensity,
+      undoHistory: [...current.undoHistory, operation],
+      redoHistory: const [],
+    );
+    await _saveAndPublish(next);
+  }
+
+  Future<void> commitSharedIntensity(double intensity) async {
+    final current = _project;
+    if (current == null) {
+      throw StateError('A project is required before committing an edit');
+    }
+    if (current.flowState != PhotoProjectFlowState.editing ||
+        current.editingScope != ProjectEditingScope.group) {
+      throw StateError('Shared intensity can only change in group editing');
+    }
+    final nextStyle = SharedStyle(
+      recipe: current.sharedStyle.recipe,
+      family: current.sharedStyle.family,
+      intensity: intensity,
+    );
+    if (nextStyle == current.sharedStyle) return;
+    final operation = ProjectEditOperation(
+      scope: ProjectEditingScope.group,
+      beforeRecipe: current.sharedStyle.recipe,
+      afterRecipe: current.sharedStyle.recipe,
+      beforeSharedIntensity: current.sharedStyle.intensity,
+      afterSharedIntensity: intensity,
+    );
+    final next = _applyOperation(
+      current,
+      operation,
+      operation.afterRecipe,
+      sharedIntensity: operation.afterSharedIntensity,
+      undoHistory: [...current.undoHistory, operation],
+      redoHistory: const [],
+    );
+    await _saveAndPublish(next);
+  }
+
+  Future<void> undoEdit() async {
+    final current = _project;
+    if (current == null || current.undoHistory.isEmpty) return;
+    if (current.flowState != PhotoProjectFlowState.editing) {
+      throw StateError('Edit history can only change while editing');
+    }
+    final operation = current.undoHistory.last;
+    final next = _applyOperation(
+      current,
+      operation,
+      operation.beforeRecipe,
+      sharedIntensity: operation.beforeSharedIntensity,
+      undoHistory: current.undoHistory.sublist(
+        0,
+        current.undoHistory.length - 1,
+      ),
+      redoHistory: [...current.redoHistory, operation],
+    );
+    await _saveAndPublish(next);
+  }
+
+  Future<void> redoEdit() async {
+    final current = _project;
+    if (current == null || current.redoHistory.isEmpty) return;
+    if (current.flowState != PhotoProjectFlowState.editing) {
+      throw StateError('Edit history can only change while editing');
+    }
+    final operation = current.redoHistory.last;
+    final next = _applyOperation(
+      current,
+      operation,
+      operation.afterRecipe,
+      sharedIntensity: operation.afterSharedIntensity,
+      undoHistory: [...current.undoHistory, operation],
+      redoHistory: current.redoHistory.sublist(
+        0,
+        current.redoHistory.length - 1,
+      ),
+    );
+    await _saveAndPublish(next);
   }
 
   Future<void> movePhoto({
@@ -205,6 +415,9 @@ class PhotoProjectSession extends ChangeNotifier {
     final current = _project;
     if (current == null) {
       throw StateError('A project is required before moving a photo');
+    }
+    if (!current.canMutateInputs) {
+      throw StateError('Project inputs cannot change while exporting');
     }
     if (toIndex < 0 || toIndex >= current.photos.length) {
       throw RangeError.index(toIndex, current.photos, 'toIndex');
@@ -220,9 +433,7 @@ class PhotoProjectSession extends ChangeNotifier {
     final photo = reordered.removeAt(fromIndex);
     reordered.insert(toIndex, photo);
     final next = current.copyWith(updatedAt: _now(), photos: reordered);
-    await _store.save(next);
-    _project = next;
-    notifyListeners();
+    await _saveAndPublish(next);
   }
 
   Future<void> setFocusPhoto(String photoId) async {
@@ -237,9 +448,7 @@ class PhotoProjectSession extends ChangeNotifier {
       return;
     }
     final next = current.copyWith(updatedAt: _now(), focusPhotoId: photoId);
-    await _store.save(next);
-    _project = next;
-    notifyListeners();
+    await _saveAndPublish(next);
   }
 
   Future<void> setPhotoAnalysisState(
@@ -247,12 +456,16 @@ class PhotoProjectSession extends ChangeNotifier {
     PhotoAnalysisState state,
   ) async {
     final current = _requirePhoto(photoId);
-    if (current.analysisStates[photoId] == state) return;
+    final previous = current.analysisStates[photoId]!;
+    if (previous == state) return;
+    if (!current.canTransitionPhotoAnalysis(photoId, state)) {
+      throw StateError(
+        'Photo analysis cannot transition from ${previous.name} to ${state.name}',
+      );
+    }
     final states = Map.of(current.analysisStates)..[photoId] = state;
     final next = current.copyWith(updatedAt: _now(), analysisStates: states);
-    await _store.save(next);
-    _project = next;
-    notifyListeners();
+    await _saveAndPublish(next);
   }
 
   Future<void> setPhotoExportState(
@@ -260,18 +473,25 @@ class PhotoProjectSession extends ChangeNotifier {
     PhotoExportState state,
   ) async {
     final current = _requirePhoto(photoId);
-    if (current.exportStates[photoId] == state) return;
+    final previous = current.exportStates[photoId]!;
+    if (previous == state) return;
+    if (!current.canTransitionPhotoExport(photoId, state)) {
+      throw StateError(
+        'Photo export cannot transition from ${previous.name} to ${state.name}',
+      );
+    }
     final states = Map.of(current.exportStates)..[photoId] = state;
     final next = current.copyWith(updatedAt: _now(), exportStates: states);
-    await _store.save(next);
-    _project = next;
-    notifyListeners();
+    await _saveAndPublish(next);
   }
 
   Future<void> removePhoto(String photoId) async {
     final current = _project;
     if (current == null) {
       throw StateError('A project is required before removing a photo');
+    }
+    if (!current.canMutateInputs) {
+      throw StateError('Project inputs cannot change while exporting');
     }
     final photoIndex = current.photos.indexWhere(
       (photo) => photo.id == photoId,
@@ -292,26 +512,15 @@ class PhotoProjectSession extends ChangeNotifier {
     }
 
     final remainingPhotos = current.photos.toList()..removeAt(photoIndex);
-    final adaptiveCompensations = Map.of(current.adaptiveCompensations)
-      ..remove(photoId);
-    final photoOverrides = Map.of(current.photoOverrides)..remove(photoId);
-    final analysisStates = Map.of(current.analysisStates)..remove(photoId);
-    final exportStates = Map.of(current.exportStates)..remove(photoId);
     final focusPhotoId = current.focusPhotoId == photoId
         ? remainingPhotos[photoIndex.clamp(0, remainingPhotos.length - 1)].id
         : current.focusPhotoId;
-    final next = current.copyWith(
+    final next = current.replacePhotosAndInvalidateDerivedState(
       updatedAt: _now(),
       photos: remainingPhotos,
-      adaptiveCompensations: adaptiveCompensations,
-      photoOverrides: photoOverrides,
-      analysisStates: analysisStates,
-      exportStates: exportStates,
       focusPhotoId: focusPhotoId,
     );
-    await lifecycleStore.save(next);
-    _project = next;
-    notifyListeners();
+    await _saveAndPublish(next);
     await lifecycleStore.deletePhotoCopy(removedPhoto);
   }
 
@@ -320,12 +529,67 @@ class PhotoProjectSession extends ChangeNotifier {
     if (current == null) {
       return;
     }
+    if (!current.canMutateInputs) {
+      throw StateError('Project cannot be deleted while exporting');
+    }
     final lifecycleStore = _store;
     if (lifecycleStore is! PhotoProjectLifecycleStore) {
       throw StateError('The project store does not support project deletion');
     }
     await lifecycleStore.deleteProject(current);
     _project = null;
+    notifyListeners();
+  }
+
+  PhotoProject _applyOperation(
+    PhotoProject current,
+    ProjectEditOperation operation,
+    EditRecipe recipe, {
+    required double sharedIntensity,
+    required List<ProjectEditOperation> undoHistory,
+    required List<ProjectEditOperation> redoHistory,
+  }) {
+    final exportStates = Map.of(current.exportStates);
+    if (operation.scope == ProjectEditingScope.group) {
+      for (final photo in current.photos) {
+        exportStates[photo.id] = PhotoExportState.notQueued;
+      }
+      return current.copyWith(
+        updatedAt: _now(),
+        editingScope: ProjectEditingScope.group,
+        sharedStyle: SharedStyle(
+          recipe: recipe,
+          family: current.sharedStyle.family,
+          intensity: sharedIntensity,
+        ),
+        exportStates: exportStates,
+        undoHistory: undoHistory,
+        redoHistory: redoHistory,
+      );
+    }
+
+    final photoId = operation.photoId!;
+    final overrides = Map.of(current.photoOverrides);
+    if (recipe == EditRecipe.neutral) {
+      overrides.remove(photoId);
+    } else {
+      overrides[photoId] = PhotoOverride(recipe: recipe);
+    }
+    exportStates[photoId] = PhotoExportState.notQueued;
+    return current.copyWith(
+      updatedAt: _now(),
+      editingScope: ProjectEditingScope.currentPhoto,
+      focusPhotoId: photoId,
+      photoOverrides: overrides,
+      exportStates: exportStates,
+      undoHistory: undoHistory,
+      redoHistory: redoHistory,
+    );
+  }
+
+  Future<void> _saveAndPublish(PhotoProject next) async {
+    await _store.save(next);
+    _project = next;
     notifyListeners();
   }
 

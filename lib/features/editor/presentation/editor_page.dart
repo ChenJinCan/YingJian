@@ -43,7 +43,7 @@ class _EditorPageState extends State<EditorPage> {
   Future<void> _restoreProject(PhotoProjectSession session) async {
     await session.restore();
     final project = session.project;
-    _editorSession.load(project?.recipe ?? EditRecipe.neutral);
+    _editorSession.load(session.editableRecipe);
     final focusPhotoId = project?.focusPhotoId;
     if (focusPhotoId != null) {
       final focusIndex = project!.photos.indexWhere(
@@ -57,21 +57,57 @@ class _EditorPageState extends State<EditorPage> {
 
   Future<void> _persistRecipe() async {
     try {
-      await _session?.updateRecipe(_editorSession.recipe);
+      await _session?.commitEdit(_editorSession.recipe);
     } on Object {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
       }
+    } finally {
+      _editorSession.load(_session?.editableRecipe ?? EditRecipe.neutral);
     }
+  }
+
+  Future<void> _undoEdit() async {
+    try {
+      await _session?.undoEdit();
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
+      }
+    } finally {
+      _editorSession.load(_session?.editableRecipe ?? EditRecipe.neutral);
+    }
+  }
+
+  Future<void> _redoEdit() async {
+    try {
+      await _session?.redoEdit();
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
+      }
+    } finally {
+      _editorSession.load(_session?.editableRecipe ?? EditRecipe.neutral);
+    }
+  }
+
+  Future<void> _resetEdit() async {
+    _editorSession.load(EditRecipe.neutral);
+    await _persistRecipe();
   }
 
   Future<void> _selectPhoto(int index) async {
     final photo = _session!.photos[index];
-    setState(() => _selectedIndex = index);
     try {
       await _session!.setFocusPhoto(photo.id);
+      if (mounted) setState(() => _selectedIndex = index);
+      _editorSession.load(_session!.editableRecipe);
     } on Object {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -106,6 +142,7 @@ class _EditorPageState extends State<EditorPage> {
   }
 
   Future<void> _removePhoto(ProjectPhoto photo) async {
+    if (_exporting) return;
     final confirmed = await _confirm(
       title: context.l10n.removePhoto,
       message: context.l10n.removePhotoConfirmation,
@@ -123,6 +160,7 @@ class _EditorPageState extends State<EditorPage> {
       } else {
         _selectedIndex = 0;
       }
+      _editorSession.load(_session!.editableRecipe);
     } on Object {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -133,6 +171,7 @@ class _EditorPageState extends State<EditorPage> {
   }
 
   Future<void> _deleteProject() async {
+    if (_exporting) return;
     final confirmed = await _confirm(
       title: context.l10n.deleteProject,
       message: context.l10n.deleteProjectConfirmation,
@@ -154,6 +193,7 @@ class _EditorPageState extends State<EditorPage> {
   }
 
   Future<void> _movePhoto(ProjectPhoto photo, int destination) async {
+    if (_exporting) return;
     try {
       await _session!.movePhoto(photoId: photo.id, toIndex: destination);
       _selectedIndex = destination;
@@ -181,7 +221,7 @@ class _EditorPageState extends State<EditorPage> {
     try {
       final exported = await context.read<PhotoExporter>().export(
         photo: photo,
-        recipe: _editorSession.recipe,
+        recipe: _session!.effectiveRecipeFor(photo.id),
       );
       if (!mounted) {
         return;
@@ -207,7 +247,7 @@ class _EditorPageState extends State<EditorPage> {
   }
 
   Future<void> _importPhotos() async {
-    if (_busy) {
+    if (_busy || _exporting) {
       return;
     }
     setState(() => _busy = true);
@@ -220,6 +260,9 @@ class _EditorPageState extends State<EditorPage> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(context.l10n.photoLimitReached)));
+      }
+      if (result == PhotoImportResult.imported) {
+        _editorSession.load(_session!.editableRecipe);
       }
     } on Object {
       if (mounted) {
@@ -252,7 +295,9 @@ class _EditorPageState extends State<EditorPage> {
                 : [
                     IconButton(
                       tooltip: context.l10n.deleteProject,
-                      onPressed: () => unawaited(_deleteProject()),
+                      onPressed: _exporting
+                          ? null
+                          : () => unawaited(_deleteProject()),
                       icon: const Icon(Icons.delete_outline),
                     ),
                   ],
@@ -274,7 +319,14 @@ class _EditorPageState extends State<EditorPage> {
                     selectedIndex: _selectedIndex,
                     busy: _busy,
                     exporting: _exporting,
+                    editingEnabled: session.canEdit,
+                    previewRecipe: session.previewRecipeFor(
+                      photos[_selectedIndex].id,
+                      _editorSession.recipe,
+                    ),
                     editorSession: _editorSession,
+                    canUndo: session.canUndo,
+                    canRedo: session.canRedo,
                     onSelected: (index) => unawaited(_selectPhoto(index)),
                     onMove: (photo, destination) =>
                         unawaited(_movePhoto(photo, destination)),
@@ -282,6 +334,9 @@ class _EditorPageState extends State<EditorPage> {
                     onImport: _importPhotos,
                     onExport: _exportPhoto,
                     onRecipeCommitted: () => unawaited(_persistRecipe()),
+                    onUndo: () => unawaited(_undoEdit()),
+                    onRedo: () => unawaited(_redoEdit()),
+                    onReset: () => unawaited(_resetEdit()),
                   ),
           ),
         );
@@ -387,13 +442,20 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.selectedIndex,
     required this.busy,
     required this.exporting,
+    required this.editingEnabled,
+    required this.previewRecipe,
     required this.editorSession,
+    required this.canUndo,
+    required this.canRedo,
     required this.onSelected,
     required this.onMove,
     required this.onRemove,
     required this.onImport,
     required this.onExport,
     required this.onRecipeCommitted,
+    required this.onUndo,
+    required this.onRedo,
+    required this.onReset,
   });
 
   final List<ProjectPhoto> photos;
@@ -401,13 +463,20 @@ class _PhotoWorkspace extends StatelessWidget {
   final int selectedIndex;
   final bool busy;
   final bool exporting;
+  final bool editingEnabled;
+  final EditRecipe previewRecipe;
   final EditorSession editorSession;
+  final bool canUndo;
+  final bool canRedo;
   final ValueChanged<int> onSelected;
   final void Function(ProjectPhoto photo, int destination) onMove;
   final ValueChanged<ProjectPhoto> onRemove;
   final VoidCallback onImport;
   final ValueChanged<ProjectPhoto> onExport;
   final VoidCallback onRecipeCommitted;
+  final VoidCallback onUndo;
+  final VoidCallback onRedo;
+  final VoidCallback onReset;
 
   @override
   Widget build(BuildContext context) {
@@ -433,7 +502,7 @@ class _PhotoWorkspace extends StatelessWidget {
                   child: NativePhotoPreview(
                     key: ValueKey('photo-preview-${selected.id}'),
                     sourcePath: selected.localPath,
-                    recipe: recipe,
+                    recipe: previewRecipe,
                     renderer: previewRenderer,
                     errorBuilder: (context) =>
                         Center(child: Text(context.l10n.photoLoadFailed)),
@@ -456,21 +525,21 @@ class _PhotoWorkspace extends StatelessWidget {
             Text(context.l10n.photoCount(photos.length)),
             IconButton(
               tooltip: context.l10n.movePhotoEarlier,
-              onPressed: selectedIndex == 0
+              onPressed: selectedIndex == 0 || exporting
                   ? null
                   : () => onMove(selected, selectedIndex - 1),
               icon: const Icon(Icons.arrow_back),
             ),
             IconButton(
               tooltip: context.l10n.movePhotoLater,
-              onPressed: selectedIndex == photos.length - 1
+              onPressed: selectedIndex == photos.length - 1 || exporting
                   ? null
                   : () => onMove(selected, selectedIndex + 1),
               icon: const Icon(Icons.arrow_forward),
             ),
             IconButton(
               tooltip: context.l10n.removePhoto,
-              onPressed: () => onRemove(selected),
+              onPressed: exporting ? null : () => onRemove(selected),
               icon: const Icon(Icons.remove_circle_outline),
             ),
           ],
@@ -517,6 +586,7 @@ class _PhotoWorkspace extends StatelessWidget {
         ),
         const SizedBox(height: 20),
         _AdjustmentSlider(
+          enabled: editingEnabled,
           label: context.l10n.exposure,
           value: recipe.exposure,
           onStart: editorSession.beginAdjustment,
@@ -529,6 +599,7 @@ class _PhotoWorkspace extends StatelessWidget {
           },
         ),
         _AdjustmentSlider(
+          enabled: editingEnabled,
           label: context.l10n.contrast,
           value: recipe.contrast,
           onStart: editorSession.beginAdjustment,
@@ -541,6 +612,7 @@ class _PhotoWorkspace extends StatelessWidget {
           },
         ),
         _AdjustmentSlider(
+          enabled: editingEnabled,
           label: context.l10n.warmth,
           value: recipe.warmth,
           onStart: editorSession.beginAdjustment,
@@ -556,35 +628,22 @@ class _PhotoWorkspace extends StatelessWidget {
           children: [
             Expanded(
               child: TextButton.icon(
-                onPressed: editorSession.canUndo
-                    ? () {
-                        editorSession.undo();
-                        onRecipeCommitted();
-                      }
-                    : null,
+                onPressed: editingEnabled && canUndo ? onUndo : null,
                 icon: const Icon(Icons.undo),
                 label: Text(context.l10n.undo),
               ),
             ),
             Expanded(
               child: TextButton.icon(
-                onPressed: editorSession.canRedo
-                    ? () {
-                        editorSession.redo();
-                        onRecipeCommitted();
-                      }
-                    : null,
+                onPressed: editingEnabled && canRedo ? onRedo : null,
                 icon: const Icon(Icons.redo),
                 label: Text(context.l10n.redo),
               ),
             ),
             Expanded(
               child: TextButton(
-                onPressed: editorSession.isEdited
-                    ? () {
-                        editorSession.reset();
-                        onRecipeCommitted();
-                      }
+                onPressed: editingEnabled && editorSession.isEdited
+                    ? onReset
                     : null,
                 child: Text(context.l10n.reset),
               ),
@@ -593,7 +652,9 @@ class _PhotoWorkspace extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         FilledButton.icon(
-          onPressed: exporting ? null : () => onExport(selected),
+          onPressed: exporting || !editingEnabled
+              ? null
+              : () => onExport(selected),
           icon: exporting
               ? const SizedBox.square(
                   dimension: 18,
@@ -604,7 +665,8 @@ class _PhotoWorkspace extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         OutlinedButton.icon(
-          onPressed: busy || photos.length >= PhotoProject.maxPhotoCount
+          onPressed:
+              busy || exporting || photos.length >= PhotoProject.maxPhotoCount
               ? null
               : onImport,
           icon: const Icon(Icons.add_photo_alternate_outlined),
@@ -687,6 +749,7 @@ String _photoImportFailureMessage(
 
 class _AdjustmentSlider extends StatelessWidget {
   const _AdjustmentSlider({
+    required this.enabled,
     required this.label,
     required this.value,
     required this.onStart,
@@ -694,6 +757,7 @@ class _AdjustmentSlider extends StatelessWidget {
     required this.onEnd,
   });
 
+  final bool enabled;
   final String label;
   final double value;
   final VoidCallback onStart;
@@ -712,9 +776,9 @@ class _AdjustmentSlider extends StatelessWidget {
             max: 1,
             divisions: 100,
             label: '${(value * 100).round()}',
-            onChangeStart: (_) => onStart(),
-            onChanged: onChanged,
-            onChangeEnd: (_) => onEnd(),
+            onChangeStart: enabled ? (_) => onStart() : null,
+            onChanged: enabled ? onChanged : null,
+            onChangeEnd: enabled ? (_) => onEnd() : null,
           ),
         ),
         SizedBox(

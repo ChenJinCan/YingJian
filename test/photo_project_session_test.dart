@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +8,35 @@ import 'package:yingjian/features/project/domain/photo_project.dart';
 
 void main() {
   group('PhotoProjectSession', () {
+    test('publishes empty, importing, then saved analyzing flow', () async {
+      final store = _DeferredSavePhotoProjectStore();
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const [
+          ProjectPhoto(
+            id: 'photo-1',
+            localPath: '/app/media/photo-1.jpg',
+            originalName: 'first.jpg',
+          ),
+        ]),
+        store: store,
+      );
+
+      expect(session.flowState, PhotoProjectFlowState.empty);
+      final importing = session.importPhotos();
+      while (store.pendingProject == null) {
+        await Future<void>.delayed(Duration.zero);
+      }
+
+      expect(session.flowState, PhotoProjectFlowState.importing);
+      expect(session.project, isNull);
+
+      store.allowSave.complete();
+      await importing;
+
+      expect(session.flowState, PhotoProjectFlowState.analyzing);
+      expect(session.project, store.savedProject);
+    });
+
     test('imports up to six app-owned photos and saves the project', () async {
       final importer = _FakePhotoImporter([
         const ProjectPhoto(
@@ -54,6 +84,7 @@ void main() {
             ),
           ],
           flowState: PhotoProjectFlowState.analyzing,
+          analysisStates: const {'photo-1': PhotoAnalysisState.ready},
         );
         final store = _MemoryPhotoProjectStore()..savedProject = saved;
         final session = PhotoProjectSession(
@@ -71,6 +102,100 @@ void main() {
       },
     );
 
+    test('does not finish analysis while any photo is still pending', () async {
+      final saved = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.analyzing,
+        analysisStates: const {
+          'photo-1': PhotoAnalysisState.ready,
+          'photo-2': PhotoAnalysisState.pending,
+        },
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+
+      await expectLater(
+        session.transitionTo(PhotoProjectFlowState.choosingRecommendation),
+        throwsStateError,
+      );
+
+      expect(session.project, saved);
+    });
+
+    test('does not start export until every photo is queued', () async {
+      final saved = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'clean-natural-01',
+        exportStates: const {
+          'photo-1': PhotoExportState.queued,
+          'photo-2': PhotoExportState.notQueued,
+        },
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+
+      await expectLater(
+        session.transitionTo(PhotoProjectFlowState.exporting),
+        throwsStateError,
+      );
+
+      expect(session.project, saved);
+    });
+
+    test('retries queued failures without re-queuing saved photos', () async {
+      final saved = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'clean-natural-01',
+        exportStates: const {
+          'photo-1': PhotoExportState.saved,
+          'photo-2': PhotoExportState.queued,
+        },
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+
+      await session.transitionTo(PhotoProjectFlowState.exporting);
+
+      expect(session.project?.flowState, PhotoProjectFlowState.exporting);
+      expect(session.project?.exportStates['photo-1'], PhotoExportState.saved);
+      expect(store.savedProject, session.project);
+    });
+
+    test('does not finish export while a photo is still running', () async {
+      final saved = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.exporting,
+        selectedRecommendationId: 'clean-natural-01',
+        exportStates: const {
+          'photo-1': PhotoExportState.saved,
+          'photo-2': PhotoExportState.running,
+        },
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+
+      await expectLater(
+        session.transitionTo(PhotoProjectFlowState.exported),
+        throwsStateError,
+      );
+
+      expect(session.project, saved);
+    });
+
     test(
       'keeps the last safe state when a flow transition cannot be saved',
       () async {
@@ -86,6 +211,7 @@ void main() {
             ),
           ],
           flowState: PhotoProjectFlowState.analyzing,
+          analysisStates: const {'photo-1': PhotoAnalysisState.ready},
         );
         final store = _MemoryPhotoProjectStore()..savedProject = saved;
         final session = PhotoProjectSession(
@@ -104,6 +230,315 @@ void main() {
         expect(store.savedProject, saved);
       },
     );
+
+    test(
+      'selects a recommendation and enters editing in one saved snapshot',
+      () async {
+        final saved = PhotoProject(
+          id: 'project-1',
+          createdAt: DateTime.utc(2026, 8, 4),
+          updatedAt: DateTime.utc(2026, 8, 4),
+          photos: const [
+            ProjectPhoto(
+              id: 'photo-1',
+              localPath: '/app/media/photo-1.jpg',
+              originalName: 'first.jpg',
+            ),
+            ProjectPhoto(
+              id: 'photo-2',
+              localPath: '/app/media/photo-2.jpg',
+              originalName: 'second.jpg',
+            ),
+          ],
+          flowState: PhotoProjectFlowState.choosingRecommendation,
+          analysisStates: const {
+            'photo-1': PhotoAnalysisState.ready,
+            'photo-2': PhotoAnalysisState.fallback,
+          },
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+          now: () => DateTime.utc(2026, 8, 4, 1),
+        );
+        await session.restore();
+
+        await session.selectRecommendation(
+          recommendationId: 'clean-natural-01',
+          sharedStyle: SharedStyle(
+            recipe: EditRecipe(exposure: 0.2, warmth: 0.1),
+          ),
+          adaptiveCompensations: {
+            'photo-2': AdaptiveCompensation(
+              source: AdaptiveCompensationSource.safeFallbackV1,
+              recipe: EditRecipe(exposure: -0.1),
+            ),
+          },
+        );
+
+        expect(session.project?.selectedRecommendationId, 'clean-natural-01');
+        expect(session.project?.flowState, PhotoProjectFlowState.editing);
+        expect(
+          session.project?.sharedStyle.recipe,
+          EditRecipe(exposure: 0.2, warmth: 0.1),
+        );
+        expect(
+          session.project?.adaptiveCompensations['photo-2']?.recipe,
+          EditRecipe(exposure: -0.1),
+        );
+        expect(store.savedProject, session.project);
+      },
+    );
+
+    test('does not enter editing without a selected recommendation', () async {
+      final saved = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.choosingRecommendation,
+        selectedRecommendationId: null,
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+
+      await expectLater(
+        session.transitionTo(PhotoProjectFlowState.editing),
+        throwsStateError,
+      );
+
+      expect(session.project, saved);
+    });
+
+    test('a new recommendation replaces stale edit and export state', () async {
+      final saved = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.choosingRecommendation,
+        photoOverrides: {
+          'photo-2': PhotoOverride(recipe: EditRecipe(contrast: 0.3)),
+        },
+        exportStates: const {
+          'photo-1': PhotoExportState.saved,
+          'photo-2': PhotoExportState.saved,
+        },
+        undoHistory: [
+          ProjectEditOperation(
+            scope: ProjectEditingScope.currentPhoto,
+            photoId: 'photo-2',
+            beforeRecipe: EditRecipe.neutral,
+            afterRecipe: EditRecipe(contrast: 0.3),
+          ),
+        ],
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+
+      await session.selectRecommendation(
+        recommendationId: 'texture-01',
+        sharedStyle: SharedStyle(recipe: EditRecipe(warmth: -0.2)),
+      );
+
+      expect(session.project?.photoOverrides, isEmpty);
+      expect(session.project?.undoHistory, isEmpty);
+      expect(session.project?.redoHistory, isEmpty);
+      expect(session.project?.exportStates, {
+        'photo-1': PhotoExportState.notQueued,
+        'photo-2': PhotoExportState.notQueued,
+      });
+    });
+
+    test('persists an explicit current-photo editing scope', () async {
+      final saved = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'clean-natural-01',
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+
+      await session.setEditingScope(
+        ProjectEditingScope.currentPhoto,
+        photoId: 'photo-2',
+      );
+
+      expect(session.project?.editingScope, ProjectEditingScope.currentPhoto);
+      expect(session.project?.focusPhotoId, 'photo-2');
+      final restored = PhotoProject.fromJson(store.savedProject!.toJson());
+      expect(restored.editingScope, ProjectEditingScope.currentPhoto);
+      expect(restored.focusPhotoId, 'photo-2');
+    });
+
+    test(
+      'restores semantic current-photo history and can undo and redo it',
+      () async {
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'clean-natural-01',
+          editingScope: ProjectEditingScope.currentPhoto,
+          focusPhotoId: 'photo-2',
+          sharedStyle: SharedStyle(recipe: EditRecipe(exposure: 0.2)),
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+
+        await session.commitEdit(EditRecipe(contrast: 0.3));
+
+        expect(
+          session.project?.effectiveRecipeFor('photo-1'),
+          EditRecipe(exposure: 0.2),
+        );
+        expect(
+          session.project?.effectiveRecipeFor('photo-2'),
+          EditRecipe(exposure: 0.2, contrast: 0.3),
+        );
+        expect(session.canUndo, isTrue);
+        expect(session.canRedo, isFalse);
+
+        final restoredSession = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await restoredSession.restore();
+        expect(restoredSession.canUndo, isTrue);
+
+        await restoredSession.undoEdit();
+        expect(restoredSession.project?.photoOverrides, isEmpty);
+        expect(restoredSession.canRedo, isTrue);
+
+        await restoredSession.redoEdit();
+        expect(
+          restoredSession.project?.photoOverrides['photo-2']?.recipe,
+          EditRecipe(contrast: 0.3),
+        );
+        expect(restoredSession.canRedo, isFalse);
+      },
+    );
+
+    test(
+      'persists shared intensity in semantic undo and redo history',
+      () async {
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'clean-natural-01',
+          sharedStyle: SharedStyle(
+            family: SharedStyleFamily.naturalClean,
+            intensity: 0.8,
+            recipe: EditRecipe(exposure: 0.2),
+          ),
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+
+        await session.commitSharedIntensity(0.4);
+
+        expect(session.project?.sharedStyle.intensity, closeTo(0.4, 1e-12));
+        expect(
+          session.effectiveRecipeFor('photo-1').exposure,
+          closeTo(0.08, 1e-12),
+        );
+        await session.undoEdit();
+        expect(session.project?.sharedStyle.intensity, closeTo(0.8, 1e-12));
+        await session.redoEdit();
+        expect(session.project?.sharedStyle.intensity, closeTo(0.4, 1e-12));
+        final restored = PhotoProject.fromJson(session.project!.toJson());
+        expect(restored.sharedStyle, session.project!.sharedStyle);
+        expect(restored.undoHistory, session.project!.undoHistory);
+        expect(restored.redoHistory, session.project!.redoHistory);
+      },
+    );
+
+    test('does not mutate edit history while export is active', () async {
+      final operation = ProjectEditOperation(
+        scope: ProjectEditingScope.group,
+        beforeRecipe: EditRecipe.neutral,
+        afterRecipe: EditRecipe(exposure: 0.2),
+      );
+      final saved = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.exporting,
+        sharedStyle: SharedStyle(recipe: operation.afterRecipe),
+        undoHistory: [operation],
+        exportStates: const {
+          'photo-1': PhotoExportState.running,
+          'photo-2': PhotoExportState.queued,
+        },
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+
+      await expectLater(session.undoEdit(), throwsStateError);
+
+      expect(session.project, saved);
+      expect(store.savedProject, saved);
+    });
+
+    test(
+      'keeps the last edit snapshot when a semantic edit cannot be saved',
+      () async {
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'clean-natural-01',
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        store.failOnSave = true;
+
+        await expectLater(
+          session.commitEdit(EditRecipe(exposure: 0.3)),
+          throwsA(isA<FileSystemException>()),
+        );
+
+        expect(session.project, saved);
+        expect(store.savedProject, saved);
+        expect(session.canUndo, isFalse);
+      },
+    );
+
+    test('keeps recommendation choice unpublished when saving fails', () async {
+      final saved = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.choosingRecommendation,
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+      store.failOnSave = true;
+
+      await expectLater(
+        session.selectRecommendation(
+          recommendationId: 'clean-natural-01',
+          sharedStyle: SharedStyle(recipe: EditRecipe(exposure: 0.2)),
+        ),
+        throwsA(isA<FileSystemException>()),
+      );
+
+      expect(session.project, saved);
+      expect(store.savedProject, saved);
+    });
 
     test(
       'removes newly copied photos when the project cannot be saved',
@@ -154,34 +589,39 @@ void main() {
       expect(session.photos.single.originalName, 'restored.jpg');
     });
 
-    test('persists the reversible edit recipe with the project', () async {
-      final store = _MemoryPhotoProjectStore()
-        ..savedProject = PhotoProject(
-          id: 'project-1',
-          createdAt: DateTime.utc(2026, 8, 4, 5),
-          updatedAt: DateTime.utc(2026, 8, 4, 5),
-          photos: const [
-            ProjectPhoto(
-              id: 'photo-1',
-              localPath: '/app/media/photo-1.jpg',
-              originalName: 'first.jpg',
-            ),
-          ],
+    test(
+      'persists a single-photo edit as reversible project history',
+      () async {
+        final store = _MemoryPhotoProjectStore()
+          ..savedProject = PhotoProject(
+            id: 'project-1',
+            createdAt: DateTime.utc(2026, 8, 4, 5),
+            updatedAt: DateTime.utc(2026, 8, 4, 5),
+            photos: const [
+              ProjectPhoto(
+                id: 'photo-1',
+                localPath: '/app/media/photo-1.jpg',
+                originalName: 'first.jpg',
+              ),
+            ],
+            flowState: PhotoProjectFlowState.editing,
+            selectedRecommendationId: 'clean-natural-01',
+          );
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+          now: () => DateTime.utc(2026, 8, 4, 6),
         );
-      final session = PhotoProjectSession(
-        importer: _FakePhotoImporter(const []),
-        store: store,
-        now: () => DateTime.utc(2026, 8, 4, 6),
-      );
-      await session.restore();
-      final recipe = EditRecipe(exposure: 0.3, contrast: 0.2, warmth: -0.1);
+        await session.restore();
+        final recipe = EditRecipe(exposure: 0.3, contrast: 0.2, warmth: -0.1);
 
-      await session.updateRecipe(recipe);
+        await session.commitEdit(recipe);
 
-      expect(session.project?.recipe, recipe);
-      expect(store.savedProject?.recipe, recipe);
-      expect(store.savedProject?.updatedAt, DateTime.utc(2026, 8, 4, 6));
-    });
+        expect(session.project?.photoOverrides['photo-1']?.recipe, recipe);
+        expect(store.savedProject?.undoHistory, hasLength(1));
+        expect(store.savedProject?.updatedAt, DateTime.utc(2026, 8, 4, 6));
+      },
+    );
 
     test(
       'keeps startup available when the saved project is unreadable',
@@ -273,6 +713,116 @@ void main() {
       },
     );
 
+    test('changing project inputs invalidates derived editing state', () async {
+      final operation = ProjectEditOperation(
+        scope: ProjectEditingScope.group,
+        beforeRecipe: EditRecipe.neutral,
+        afterRecipe: EditRecipe(exposure: 0.2),
+      );
+      final existing = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'clean-natural-01',
+        sharedStyle: SharedStyle(recipe: operation.afterRecipe),
+        adaptiveCompensations: {
+          'photo-1': AdaptiveCompensation(
+            source: AdaptiveCompensationSource.localAnalysisV1,
+            recipe: EditRecipe(exposure: -0.1),
+          ),
+        },
+        photoOverrides: {
+          'photo-2': PhotoOverride(recipe: EditRecipe(contrast: 0.3)),
+        },
+        analysisStates: const {
+          'photo-1': PhotoAnalysisState.ready,
+          'photo-2': PhotoAnalysisState.ready,
+        },
+        exportStates: const {
+          'photo-1': PhotoExportState.saved,
+          'photo-2': PhotoExportState.saved,
+        },
+        undoHistory: [operation],
+      );
+      const added = ProjectPhoto(
+        id: 'photo-3',
+        localPath: '/app/media/photo-3.jpg',
+        originalName: 'third.jpg',
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = existing;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const [added]),
+        store: store,
+      );
+      await session.restore();
+
+      await session.importPhotos();
+
+      expect(session.project?.flowState, PhotoProjectFlowState.analyzing);
+      expect(session.project?.selectedRecommendationId, isNull);
+      expect(session.project?.sharedStyle.recipe, EditRecipe.neutral);
+      expect(session.project?.adaptiveCompensations, isEmpty);
+      expect(session.project?.photoOverrides, isEmpty);
+      expect(
+        session.project?.analysisStates.values,
+        everyElement(PhotoAnalysisState.pending),
+      );
+      expect(
+        session.project?.exportStates.values,
+        everyElement(PhotoExportState.notQueued),
+      );
+      expect(session.project?.undoHistory, isEmpty);
+      expect(session.project?.redoHistory, isEmpty);
+    });
+
+    test('does not change project inputs while export is active', () async {
+      final saved = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.exporting,
+        exportStates: const {
+          'photo-1': PhotoExportState.running,
+          'photo-2': PhotoExportState.queued,
+        },
+      );
+      final importer = _FakePhotoImporter(const [
+        ProjectPhoto(
+          id: 'photo-3',
+          localPath: '/app/media/photo-3.jpg',
+          originalName: 'third.jpg',
+        ),
+      ]);
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(importer: importer, store: store);
+      await session.restore();
+
+      await expectLater(session.importPhotos(), throwsStateError);
+
+      expect(importer.requestedLimits, isEmpty);
+      expect(session.project, saved);
+    });
+
+    test('does not reorder or remove inputs while export is active', () async {
+      final saved = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.exporting,
+        exportStates: const {
+          'photo-1': PhotoExportState.running,
+          'photo-2': PhotoExportState.queued,
+        },
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+
+      await expectLater(
+        session.movePhoto(photoId: 'photo-2', toIndex: 0),
+        throwsStateError,
+      );
+      await expectLater(session.removePhoto('photo-2'), throwsStateError);
+
+      expect(session.project, saved);
+      expect(store.deletedPhotoIds, isEmpty);
+    });
+
     test(
       'moves a photo and saves the new project order before publishing',
       () async {
@@ -342,7 +892,9 @@ void main() {
     });
 
     test('persists a stable analysis state for one project photo', () async {
-      final saved = _twoPhotoProject();
+      final saved = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.analyzing,
+      );
       final store = _MemoryPhotoProjectStore()..savedProject = saved;
       final session = PhotoProjectSession(
         importer: _FakePhotoImporter(const []),
@@ -350,6 +902,10 @@ void main() {
       );
       await session.restore();
 
+      await session.setPhotoAnalysisState(
+        'photo-2',
+        PhotoAnalysisState.running,
+      );
       await session.setPhotoAnalysisState('photo-2', PhotoAnalysisState.ready);
 
       expect(session.project?.analysisStates, {
@@ -357,6 +913,69 @@ void main() {
         'photo-2': PhotoAnalysisState.ready,
       });
       expect(store.savedProject, session.project);
+    });
+
+    test('rejects an analysis state that skips execution', () async {
+      final saved = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.analyzing,
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+
+      await expectLater(
+        session.setPhotoAnalysisState('photo-1', PhotoAnalysisState.ready),
+        throwsStateError,
+      );
+
+      expect(session.project, saved);
+      expect(store.savedProject, saved);
+    });
+
+    test('rejects per-photo task updates outside their owning phase', () async {
+      final editing = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'clean-natural-01',
+      );
+      final editingStore = _MemoryPhotoProjectStore()..savedProject = editing;
+      final editingSession = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: editingStore,
+      );
+      await editingSession.restore();
+
+      await expectLater(
+        editingSession.setPhotoAnalysisState(
+          'photo-1',
+          PhotoAnalysisState.running,
+        ),
+        throwsStateError,
+      );
+
+      final analyzing = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.analyzing,
+      );
+      final analyzingStore = _MemoryPhotoProjectStore()
+        ..savedProject = analyzing;
+      final analyzingSession = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: analyzingStore,
+      );
+      await analyzingSession.restore();
+
+      await expectLater(
+        analyzingSession.setPhotoExportState(
+          'photo-1',
+          PhotoExportState.queued,
+        ),
+        throwsStateError,
+      );
+
+      expect(editingSession.project, editing);
+      expect(analyzingSession.project, analyzing);
     });
 
     test('persists a stable export state for one project photo', () async {
@@ -396,12 +1015,38 @@ void main() {
               originalName: 'second.jpg',
             ),
           ],
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'clean-natural-01',
+          sharedStyle: SharedStyle(recipe: EditRecipe(exposure: 0.2)),
           focusPhotoId: 'photo-2',
           adaptiveCompensations: {
-            'photo-2': AdaptiveCompensation(recipe: EditRecipe(exposure: 0.1)),
+            'photo-1': AdaptiveCompensation(
+              recipe: EditRecipe(exposure: -0.1),
+              source: AdaptiveCompensationSource.safeFallbackV1,
+            ),
+            'photo-2': AdaptiveCompensation(
+              source: AdaptiveCompensationSource.safeFallbackV1,
+              recipe: EditRecipe(exposure: 0.1),
+            ),
           },
           photoOverrides: {
             'photo-2': PhotoOverride(recipe: EditRecipe(warmth: 0.2)),
+          },
+          undoHistory: [
+            ProjectEditOperation(
+              scope: ProjectEditingScope.currentPhoto,
+              photoId: 'photo-2',
+              beforeRecipe: EditRecipe.neutral,
+              afterRecipe: EditRecipe(warmth: 0.2),
+            ),
+          ],
+          analysisStates: const {
+            'photo-1': PhotoAnalysisState.ready,
+            'photo-2': PhotoAnalysisState.ready,
+          },
+          exportStates: const {
+            'photo-1': PhotoExportState.saved,
+            'photo-2': PhotoExportState.saved,
           },
         );
         final store = _MemoryPhotoProjectStore()..savedProject = saved;
@@ -416,10 +1061,19 @@ void main() {
 
         expect(session.photos.map((photo) => photo.id), ['photo-1']);
         expect(session.project?.focusPhotoId, 'photo-1');
+        expect(session.project?.flowState, PhotoProjectFlowState.analyzing);
+        expect(session.project?.selectedRecommendationId, isNull);
+        expect(session.project?.sharedStyle.recipe, EditRecipe.neutral);
         expect(session.project?.adaptiveCompensations, isEmpty);
         expect(session.project?.photoOverrides, isEmpty);
-        expect(session.project?.analysisStates.keys, ['photo-1']);
-        expect(session.project?.exportStates.keys, ['photo-1']);
+        expect(session.project?.analysisStates, {
+          'photo-1': PhotoAnalysisState.pending,
+        });
+        expect(session.project?.exportStates, {
+          'photo-1': PhotoExportState.notQueued,
+        });
+        expect(session.project?.undoHistory, isEmpty);
+        expect(session.project?.redoHistory, isEmpty);
         expect(store.deletedPhotoIds, ['photo-2']);
       },
     );
@@ -481,6 +1135,27 @@ void main() {
       expect(session.project, isNull);
       expect(store.savedProject, isNull);
       expect(store.deletedProjectIds, ['project-1']);
+    });
+
+    test('does not delete the project while export is active', () async {
+      final saved = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.exporting,
+        exportStates: const {
+          'photo-1': PhotoExportState.running,
+          'photo-2': PhotoExportState.queued,
+        },
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+
+      await expectLater(session.deleteProject(), throwsStateError);
+
+      expect(session.project, saved);
+      expect(store.deletedProjectIds, isEmpty);
     });
   });
 }
@@ -556,4 +1231,20 @@ final class _FailingPhotoProjectStore implements PhotoProjectStore {
 
   @override
   Future<void> save(PhotoProject project) async {}
+}
+
+final class _DeferredSavePhotoProjectStore implements PhotoProjectStore {
+  final Completer<void> allowSave = Completer<void>();
+  PhotoProject? pendingProject;
+  PhotoProject? savedProject;
+
+  @override
+  Future<PhotoProject?> loadLatest() async => savedProject;
+
+  @override
+  Future<void> save(PhotoProject project) async {
+    pendingProject = project;
+    await allowSave.future;
+    savedProject = project;
+  }
 }

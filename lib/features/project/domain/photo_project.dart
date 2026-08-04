@@ -115,6 +115,7 @@ class ProjectPhoto {
 }
 
 enum PhotoProjectFlowState {
+  empty,
   importing,
   analyzing,
   choosingRecommendation,
@@ -127,10 +128,120 @@ enum PhotoAnalysisState { pending, running, ready, fallback, failed }
 
 enum PhotoExportState { notQueued, queued, running, saved, failed, cancelled }
 
+extension PhotoAnalysisStateTransitions on PhotoAnalysisState {
+  bool canTransitionTo(PhotoAnalysisState next) {
+    if (next == this) return true;
+    return switch (this) {
+      PhotoAnalysisState.pending => next == PhotoAnalysisState.running,
+      PhotoAnalysisState.running =>
+        next == PhotoAnalysisState.ready ||
+            next == PhotoAnalysisState.fallback ||
+            next == PhotoAnalysisState.failed,
+      PhotoAnalysisState.ready ||
+      PhotoAnalysisState.fallback ||
+      PhotoAnalysisState.failed => next == PhotoAnalysisState.running,
+    };
+  }
+}
+
+extension PhotoExportStateTransitions on PhotoExportState {
+  bool canTransitionTo(PhotoExportState next) {
+    if (next == this) return true;
+    return switch (this) {
+      PhotoExportState.notQueued => next == PhotoExportState.queued,
+      PhotoExportState.queued =>
+        next == PhotoExportState.running || next == PhotoExportState.cancelled,
+      PhotoExportState.running =>
+        next == PhotoExportState.saved ||
+            next == PhotoExportState.failed ||
+            next == PhotoExportState.cancelled,
+      PhotoExportState.failed ||
+      PhotoExportState.cancelled => next == PhotoExportState.queued,
+      PhotoExportState.saved => false,
+    };
+  }
+}
+
+enum ProjectEditingScope { group, currentPhoto }
+
+@immutable
+class ProjectEditOperation {
+  const ProjectEditOperation({
+    required this.scope,
+    required this.beforeRecipe,
+    required this.afterRecipe,
+    this.beforeSharedIntensity = 1,
+    this.afterSharedIntensity = 1,
+    this.photoId,
+  });
+
+  final ProjectEditingScope scope;
+  final String? photoId;
+  final EditRecipe beforeRecipe;
+  final EditRecipe afterRecipe;
+  final double beforeSharedIntensity;
+  final double afterSharedIntensity;
+
+  Map<String, Object> toJson() {
+    final value = <String, Object>{
+      'scope': scope.name,
+      'beforeRecipe': beforeRecipe.toJson(),
+      'afterRecipe': afterRecipe.toJson(),
+      'beforeSharedIntensity': beforeSharedIntensity,
+      'afterSharedIntensity': afterSharedIntensity,
+    };
+    if (photoId != null) value['photoId'] = photoId!;
+    return value;
+  }
+
+  factory ProjectEditOperation.fromJson(Map<String, Object?> json) {
+    final scope = PhotoProject._enumValue(
+      json['scope'],
+      ProjectEditingScope.values,
+      'edit operation scope',
+    );
+    return ProjectEditOperation(
+      scope: scope,
+      photoId: json['photoId'] as String?,
+      beforeRecipe: EditRecipe.fromJson(
+        json['beforeRecipe']! as Map<String, Object?>,
+      ),
+      afterRecipe: EditRecipe.fromJson(
+        json['afterRecipe']! as Map<String, Object?>,
+      ),
+      beforeSharedIntensity:
+          (json['beforeSharedIntensity'] as num?)?.toDouble() ?? 1,
+      afterSharedIntensity:
+          (json['afterSharedIntensity'] as num?)?.toDouble() ?? 1,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is ProjectEditOperation &&
+      other.scope == scope &&
+      other.photoId == photoId &&
+      other.beforeRecipe == beforeRecipe &&
+      other.afterRecipe == afterRecipe &&
+      other.beforeSharedIntensity == beforeSharedIntensity &&
+      other.afterSharedIntensity == afterSharedIntensity;
+
+  @override
+  int get hashCode => Object.hash(
+    scope,
+    photoId,
+    beforeRecipe,
+    afterRecipe,
+    beforeSharedIntensity,
+    afterSharedIntensity,
+  );
+}
+
 extension PhotoProjectFlowStateTransitions on PhotoProjectFlowState {
   bool canTransitionTo(PhotoProjectFlowState next) {
     if (next == this) return true;
     return switch (this) {
+      PhotoProjectFlowState.empty => next == PhotoProjectFlowState.importing,
       PhotoProjectFlowState.importing =>
         next == PhotoProjectFlowState.analyzing,
       PhotoProjectFlowState.analyzing =>
@@ -146,48 +257,136 @@ extension PhotoProjectFlowStateTransitions on PhotoProjectFlowState {
   }
 }
 
+enum SharedStyleFamily { naturalClean, atmosphericColor, texturedStyle, manual }
+
 @immutable
 class SharedStyle {
-  const SharedStyle({required this.recipe});
+  factory SharedStyle({
+    required EditRecipe recipe,
+    SharedStyleFamily family = SharedStyleFamily.manual,
+    double intensity = 1,
+  }) {
+    _validateUnitValue(intensity, 'intensity');
+    return SharedStyle._(recipe: recipe, family: family, intensity: intensity);
+  }
+
+  const SharedStyle._({
+    required this.recipe,
+    required this.family,
+    required this.intensity,
+  });
 
   final EditRecipe recipe;
+  final SharedStyleFamily family;
+  final double intensity;
 
-  Map<String, Object> toJson() => {'recipe': recipe.toJson()};
+  Map<String, Object> toJson() => {
+    'recipe': recipe.toJson(),
+    'family': family.name,
+    'intensity': intensity,
+  };
 
   factory SharedStyle.fromJson(Map<String, Object?> json) {
     return SharedStyle(
       recipe: EditRecipe.fromJson(json['recipe']! as Map<String, Object?>),
+      family: json['family'] == null
+          ? SharedStyleFamily.manual
+          : PhotoProject._enumValue(
+              json['family'],
+              SharedStyleFamily.values,
+              'shared style family',
+            ),
+      intensity: (json['intensity'] as num?)?.toDouble() ?? 1,
     );
   }
 
   @override
   bool operator ==(Object other) =>
-      other is SharedStyle && other.recipe == recipe;
+      other is SharedStyle &&
+      other.recipe == recipe &&
+      other.family == family &&
+      other.intensity == intensity;
 
   @override
-  int get hashCode => recipe.hashCode;
+  int get hashCode => Object.hash(recipe, family, intensity);
+}
+
+enum AdaptiveCompensationSource {
+  localAnalysisV1,
+  safeFallbackV1,
+  legacyMigration,
 }
 
 @immutable
 class AdaptiveCompensation {
-  const AdaptiveCompensation({required this.recipe});
+  factory AdaptiveCompensation({
+    required EditRecipe recipe,
+    required AdaptiveCompensationSource source,
+    double safeSharedIntensity = 1,
+    double skinProtection = 0,
+  }) {
+    _validateUnitValue(safeSharedIntensity, 'safeSharedIntensity');
+    _validateUnitValue(skinProtection, 'skinProtection');
+    return AdaptiveCompensation._(
+      recipe: recipe,
+      source: source,
+      safeSharedIntensity: safeSharedIntensity,
+      skinProtection: skinProtection,
+    );
+  }
+
+  const AdaptiveCompensation._({
+    required this.recipe,
+    required this.source,
+    required this.safeSharedIntensity,
+    required this.skinProtection,
+  });
 
   final EditRecipe recipe;
+  final AdaptiveCompensationSource source;
+  final double safeSharedIntensity;
+  final double skinProtection;
 
-  Map<String, Object> toJson() => {'recipe': recipe.toJson()};
+  Map<String, Object> toJson() => {
+    'recipe': recipe.toJson(),
+    'source': source.name,
+    'safeSharedIntensity': safeSharedIntensity,
+    'skinProtection': skinProtection,
+  };
 
   factory AdaptiveCompensation.fromJson(Map<String, Object?> json) {
     return AdaptiveCompensation(
       recipe: EditRecipe.fromJson(json['recipe']! as Map<String, Object?>),
+      source: json['source'] == null
+          ? AdaptiveCompensationSource.legacyMigration
+          : PhotoProject._enumValue(
+              json['source'],
+              AdaptiveCompensationSource.values,
+              'adaptive compensation source',
+            ),
+      safeSharedIntensity:
+          (json['safeSharedIntensity'] as num?)?.toDouble() ?? 1,
+      skinProtection: (json['skinProtection'] as num?)?.toDouble() ?? 0,
     );
   }
 
   @override
   bool operator ==(Object other) =>
-      other is AdaptiveCompensation && other.recipe == recipe;
+      other is AdaptiveCompensation &&
+      other.recipe == recipe &&
+      other.source == source &&
+      other.safeSharedIntensity == safeSharedIntensity &&
+      other.skinProtection == skinProtection;
 
   @override
-  int get hashCode => recipe.hashCode;
+  int get hashCode =>
+      Object.hash(recipe, source, safeSharedIntensity, skinProtection);
+}
+
+void _validateUnitValue(double value, String name) {
+  if (!value.isFinite || value < 0 || value > 1) {
+    throw RangeError.range(value, 0, 1, name);
+  }
 }
 
 @immutable
@@ -225,6 +424,9 @@ class PhotoProject {
     Map<String, PhotoOverride> photoOverrides = const {},
     Map<String, PhotoAnalysisState> analysisStates = const {},
     Map<String, PhotoExportState> exportStates = const {},
+    ProjectEditingScope? editingScope,
+    List<ProjectEditOperation> undoHistory = const [],
+    List<ProjectEditOperation> redoHistory = const [],
     this.flowState = PhotoProjectFlowState.editing,
     this.focusPhotoId,
     this.selectedRecommendationId,
@@ -240,9 +442,23 @@ class PhotoProject {
        exportStates = Map.unmodifiable({
          for (final photo in photos)
            photo.id: exportStates[photo.id] ?? PhotoExportState.notQueued,
-       }) {
+       }),
+       undoHistory = List.unmodifiable(undoHistory),
+       redoHistory = List.unmodifiable(redoHistory),
+       editingScope =
+           editingScope ??
+           (photos.length == 1
+               ? ProjectEditingScope.currentPhoto
+               : ProjectEditingScope.group) {
     if (photos.isEmpty || photos.length > maxPhotoCount) {
       throw RangeError.range(photos.length, 1, maxPhotoCount, 'photos.length');
+    }
+    if (flowState == PhotoProjectFlowState.empty) {
+      throw ArgumentError.value(
+        flowState,
+        'flowState',
+        'Empty is a session state and cannot contain project photos',
+      );
     }
     final photoIds = photos.map((photo) => photo.id).toSet();
     if (photoIds.length != photos.length) {
@@ -275,6 +491,14 @@ class PhotoProject {
         'Focus photo must belong to the project',
       );
     }
+    if (photos.length == 1 &&
+        this.editingScope != ProjectEditingScope.currentPhoto) {
+      throw ArgumentError.value(
+        this.editingScope,
+        'editingScope',
+        'A single-photo project always edits the current photo',
+      );
+    }
     final foreignLayerIds = {
       ...adaptiveCompensations.keys,
       ...photoOverrides.keys,
@@ -288,10 +512,31 @@ class PhotoProject {
         'Every layer must reference a project photo',
       );
     }
+    for (final operation in [...undoHistory, ...redoHistory]) {
+      final photoId = operation.photoId;
+      if ((operation.beforeRecipe == operation.afterRecipe &&
+              operation.beforeSharedIntensity ==
+                  operation.afterSharedIntensity) ||
+          !operation.beforeSharedIntensity.isFinite ||
+          operation.beforeSharedIntensity < 0 ||
+          operation.beforeSharedIntensity > 1 ||
+          !operation.afterSharedIntensity.isFinite ||
+          operation.afterSharedIntensity < 0 ||
+          operation.afterSharedIntensity > 1 ||
+          (operation.scope == ProjectEditingScope.group && photoId != null) ||
+          (operation.scope == ProjectEditingScope.currentPhoto &&
+              (photoId == null || !photoIds.contains(photoId)))) {
+        throw ArgumentError.value(
+          operation,
+          'editHistory',
+          'Edit operations must describe a changed valid project scope',
+        );
+      }
+    }
   }
 
   static const maxPhotoCount = 6;
-  static const schemaVersion = 3;
+  static const schemaVersion = 4;
 
   final String id;
   final DateTime createdAt;
@@ -302,6 +547,9 @@ class PhotoProject {
   final Map<String, PhotoOverride> photoOverrides;
   final Map<String, PhotoAnalysisState> analysisStates;
   final Map<String, PhotoExportState> exportStates;
+  final ProjectEditingScope editingScope;
+  final List<ProjectEditOperation> undoHistory;
+  final List<ProjectEditOperation> redoHistory;
   final PhotoProjectFlowState flowState;
   final String? focusPhotoId;
   final String? selectedRecommendationId;
@@ -310,25 +558,110 @@ class PhotoProject {
   /// global recipe to explicit group/current-photo scopes.
   EditRecipe get recipe => sharedStyle.recipe;
 
-  EditRecipe effectiveRecipeFor(String photoId) {
+  bool canTransitionTo(PhotoProjectFlowState nextState) {
+    if (!flowState.canTransitionTo(nextState)) return false;
+    if (flowState == nextState) return true;
+    if (flowState == PhotoProjectFlowState.analyzing &&
+        nextState == PhotoProjectFlowState.choosingRecommendation) {
+      return analysisStates.values.every(
+        (state) =>
+            state != PhotoAnalysisState.pending &&
+            state != PhotoAnalysisState.running,
+      );
+    }
+    if (flowState == PhotoProjectFlowState.choosingRecommendation &&
+        nextState == PhotoProjectFlowState.editing) {
+      return selectedRecommendationId != null;
+    }
+    if (flowState == PhotoProjectFlowState.editing &&
+        nextState == PhotoProjectFlowState.exporting) {
+      return exportStates.values.any(
+            (state) => state == PhotoExportState.queued,
+          ) &&
+          exportStates.values.every(
+            (state) =>
+                state == PhotoExportState.queued ||
+                state == PhotoExportState.saved,
+          );
+    }
+    if (flowState == PhotoProjectFlowState.exporting &&
+        nextState == PhotoProjectFlowState.exported) {
+      return exportStates.values.every(
+        (state) =>
+            state == PhotoExportState.saved ||
+            state == PhotoExportState.failed ||
+            state == PhotoExportState.cancelled,
+      );
+    }
+    return true;
+  }
+
+  bool canTransitionPhotoAnalysis(
+    String photoId,
+    PhotoAnalysisState nextState,
+  ) {
+    return flowState == PhotoProjectFlowState.analyzing &&
+        analysisStates[photoId]?.canTransitionTo(nextState) == true;
+  }
+
+  bool canTransitionPhotoExport(String photoId, PhotoExportState nextState) {
+    final previous = exportStates[photoId];
+    if (previous == null || !previous.canTransitionTo(nextState)) return false;
+    if (flowState == PhotoProjectFlowState.editing) {
+      return nextState == PhotoExportState.queued;
+    }
+    return flowState == PhotoProjectFlowState.exporting;
+  }
+
+  bool get canMutateInputs => flowState != PhotoProjectFlowState.exporting;
+
+  PhotoProject replacePhotosAndInvalidateDerivedState({
+    required List<ProjectPhoto> photos,
+    required DateTime updatedAt,
+    String? focusPhotoId,
+  }) {
+    if (!canMutateInputs) {
+      throw StateError('Project inputs cannot change while exporting');
+    }
+    return PhotoProject(
+      id: id,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      photos: photos,
+      flowState: PhotoProjectFlowState.analyzing,
+      focusPhotoId: focusPhotoId,
+      sharedStyle: SharedStyle(recipe: EditRecipe.neutral),
+    );
+  }
+
+  EditRecipe effectiveRecipeFor(
+    String photoId, {
+    EditRecipe? sharedRecipe,
+    EditRecipe? photoOverride,
+  }) {
     if (!photos.any((photo) => photo.id == photoId)) {
       throw ArgumentError.value(photoId, 'photoId', 'Photo is not in project');
     }
-    final adaptive = adaptiveCompensations[photoId]?.recipe;
-    final override = photoOverrides[photoId]?.recipe;
+    final adaptiveLayer = adaptiveCompensations[photoId];
+    final adaptive = adaptiveLayer?.recipe;
+    final shared = sharedRecipe ?? sharedStyle.recipe;
+    final sharedIntensity = sharedStyle.intensity
+        .clamp(0.0, adaptiveLayer?.safeSharedIntensity ?? 1.0)
+        .toDouble();
+    final override = photoOverride ?? photoOverrides[photoId]?.recipe;
     return EditRecipe(
       exposure: _sumAndClamp(
-        sharedStyle.recipe.exposure,
+        shared.exposure * sharedIntensity,
         adaptive?.exposure,
         override?.exposure,
       ),
       contrast: _sumAndClamp(
-        sharedStyle.recipe.contrast,
+        shared.contrast * sharedIntensity,
         adaptive?.contrast,
         override?.contrast,
       ),
       warmth: _sumAndClamp(
-        sharedStyle.recipe.warmth,
+        shared.warmth * sharedIntensity,
         adaptive?.warmth,
         override?.warmth,
       ),
@@ -344,6 +677,9 @@ class PhotoProject {
     Map<String, PhotoOverride>? photoOverrides,
     Map<String, PhotoAnalysisState>? analysisStates,
     Map<String, PhotoExportState>? exportStates,
+    ProjectEditingScope? editingScope,
+    List<ProjectEditOperation>? undoHistory,
+    List<ProjectEditOperation>? redoHistory,
     PhotoProjectFlowState? flowState,
     Object? focusPhotoId = _notProvided,
     Object? selectedRecommendationId = _notProvided,
@@ -355,12 +691,21 @@ class PhotoProject {
       photos: photos ?? this.photos,
       sharedStyle:
           sharedStyle ??
-          (recipe == null ? this.sharedStyle : SharedStyle(recipe: recipe)),
+          (recipe == null
+              ? this.sharedStyle
+              : SharedStyle(
+                  recipe: recipe,
+                  family: this.sharedStyle.family,
+                  intensity: this.sharedStyle.intensity,
+                )),
       adaptiveCompensations:
           adaptiveCompensations ?? this.adaptiveCompensations,
       photoOverrides: photoOverrides ?? this.photoOverrides,
       analysisStates: analysisStates ?? this.analysisStates,
       exportStates: exportStates ?? this.exportStates,
+      editingScope: editingScope ?? this.editingScope,
+      undoHistory: undoHistory ?? this.undoHistory,
+      redoHistory: redoHistory ?? this.redoHistory,
       flowState: flowState ?? this.flowState,
       focusPhotoId: focusPhotoId == _notProvided
           ? this.focusPhotoId
@@ -392,6 +737,13 @@ class PhotoProject {
       'exportStates': exportStates.map(
         (photoId, state) => MapEntry(photoId, state.name),
       ),
+      'editingScope': editingScope.name,
+      'undoHistory': undoHistory
+          .map((operation) => operation.toJson())
+          .toList(),
+      'redoHistory': redoHistory
+          .map((operation) => operation.toJson())
+          .toList(),
     };
     if (focusPhotoId != null) {
       value['focusPhotoId'] = focusPhotoId!;
@@ -454,6 +806,19 @@ class PhotoProject {
       exportStates: storedVersion < 3
           ? const {}
           : _enumMap(json['exportStates'], PhotoExportState.values),
+      editingScope: storedVersion < 4
+          ? null
+          : _enumValue(
+              json['editingScope'],
+              ProjectEditingScope.values,
+              'project editing scope',
+            ),
+      undoHistory: storedVersion < 4
+          ? const []
+          : _operationList(json['undoHistory']),
+      redoHistory: storedVersion < 4
+          ? const []
+          : _operationList(json['redoHistory']),
     );
   }
 
@@ -468,6 +833,9 @@ class PhotoProject {
         mapEquals(other.photoOverrides, photoOverrides) &&
         mapEquals(other.analysisStates, analysisStates) &&
         mapEquals(other.exportStates, exportStates) &&
+        other.editingScope == editingScope &&
+        listEquals(other.undoHistory, undoHistory) &&
+        listEquals(other.redoHistory, redoHistory) &&
         other.flowState == flowState &&
         other.focusPhotoId == focusPhotoId &&
         other.selectedRecommendationId == selectedRecommendationId &&
@@ -484,6 +852,9 @@ class PhotoProject {
     Object.hashAllUnordered(photoOverrides.entries),
     Object.hashAllUnordered(analysisStates.entries),
     Object.hashAllUnordered(exportStates.entries),
+    editingScope,
+    Object.hashAll(undoHistory),
+    Object.hashAll(redoHistory),
     flowState,
     focusPhotoId,
     selectedRecommendationId,
@@ -520,5 +891,27 @@ class PhotoProject {
       }
       return MapEntry(photoId, state);
     });
+  }
+
+  static T _enumValue<T extends Enum>(
+    Object? raw,
+    List<T> values,
+    String description,
+  ) {
+    final state = values.where((value) => value.name == raw).firstOrNull;
+    if (state == null) {
+      throw FormatException('Unsupported $description $raw');
+    }
+    return state;
+  }
+
+  static List<ProjectEditOperation> _operationList(Object? raw) {
+    if (raw == null) return const [];
+    return (raw as List<Object?>)
+        .map(
+          (value) =>
+              ProjectEditOperation.fromJson(value! as Map<String, Object?>),
+        )
+        .toList();
   }
 }

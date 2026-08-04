@@ -23,6 +23,7 @@ void main() {
       sharedStyle: SharedStyle(recipe: EditRecipe(exposure: 0.2)),
       adaptiveCompensations: {
         first.id: AdaptiveCompensation(
+          source: AdaptiveCompensationSource.localAnalysisV1,
           recipe: EditRecipe(exposure: 0.1, warmth: -0.1),
         ),
       },
@@ -38,7 +39,48 @@ void main() {
     expect(project.effectiveRecipeFor(second.id), EditRecipe(exposure: 0.2));
   });
 
-  test('version three project keeps per-photo analysis and export state', () {
+  test('per-photo safety caps shared intensity with declared provenance', () {
+    final project = PhotoProject(
+      id: 'project-1',
+      createdAt: DateTime.utc(2026, 8, 4),
+      updatedAt: DateTime.utc(2026, 8, 4),
+      photos: const [first, second],
+      sharedStyle: SharedStyle(
+        family: SharedStyleFamily.atmosphericColor,
+        intensity: 0.8,
+        recipe: EditRecipe(exposure: 0.5, warmth: 0.5),
+      ),
+      adaptiveCompensations: {
+        first.id: AdaptiveCompensation(
+          source: AdaptiveCompensationSource.localAnalysisV1,
+          safeSharedIntensity: 0.4,
+          skinProtection: 0.75,
+          recipe: EditRecipe(exposure: -0.1),
+        ),
+      },
+    );
+
+    expect(
+      project.effectiveRecipeFor(first.id),
+      EditRecipe(exposure: 0.1, warmth: 0.2),
+    );
+    expect(
+      project.effectiveRecipeFor(second.id),
+      EditRecipe(exposure: 0.4, warmth: 0.4),
+    );
+    final restored = PhotoProject.fromJson(project.toJson());
+    expect(restored.sharedStyle.family, SharedStyleFamily.atmosphericColor);
+    expect(
+      restored.adaptiveCompensations[first.id]?.source,
+      AdaptiveCompensationSource.localAnalysisV1,
+    );
+    expect(
+      restored.adaptiveCompensations[first.id]?.skinProtection,
+      closeTo(0.75, 1e-12),
+    );
+  });
+
+  test('current project keeps per-photo state and explicit editing scope', () {
     final project = PhotoProject(
       id: 'project-1',
       createdAt: DateTime.utc(2026, 8, 4),
@@ -49,13 +91,25 @@ void main() {
       selectedRecommendationId: 'clean-natural-01',
       sharedStyle: SharedStyle(recipe: EditRecipe(warmth: 0.2)),
       adaptiveCompensations: {
-        first.id: AdaptiveCompensation(recipe: EditRecipe(exposure: 0.1)),
+        first.id: AdaptiveCompensation(
+          source: AdaptiveCompensationSource.safeFallbackV1,
+          recipe: EditRecipe(exposure: 0.1),
+        ),
       },
       photoOverrides: {
         first.id: PhotoOverride(recipe: EditRecipe(contrast: 0.2)),
       },
       analysisStates: {first.id: PhotoAnalysisState.ready},
       exportStates: {first.id: PhotoExportState.queued},
+      editingScope: ProjectEditingScope.currentPhoto,
+      undoHistory: [
+        ProjectEditOperation(
+          scope: ProjectEditingScope.currentPhoto,
+          photoId: first.id,
+          beforeRecipe: EditRecipe.neutral,
+          afterRecipe: EditRecipe(contrast: 0.2),
+        ),
+      ],
     );
 
     final restored = PhotoProject.fromJson(project.toJson());
@@ -63,7 +117,37 @@ void main() {
     expect(restored, project);
     expect(restored.analysisStates[first.id], PhotoAnalysisState.ready);
     expect(restored.exportStates[first.id], PhotoExportState.queued);
-    expect(project.toJson()['schemaVersion'], 3);
+    expect(restored.editingScope, ProjectEditingScope.currentPhoto);
+    expect(restored.undoHistory, project.undoHistory);
+    expect(project.toJson()['schemaVersion'], 4);
+  });
+
+  test('version three project migrates to a safe scope with empty history', () {
+    final restored = PhotoProject.fromJson({
+      'schemaVersion': 3,
+      'id': 'version-three',
+      'createdAt': '2026-08-04T00:00:00.000Z',
+      'updatedAt': '2026-08-04T01:00:00.000Z',
+      'photos': [
+        {
+          'id': first.id,
+          'localPath': first.localPath,
+          'originalName': first.originalName,
+        },
+      ],
+      'flowState': 'editing',
+      'sharedStyle': {
+        'recipe': {'exposure': 0.1, 'contrast': 0.0, 'warmth': 0.0},
+      },
+      'adaptiveCompensations': <String, Object>{},
+      'photoOverrides': <String, Object>{},
+      'analysisStates': {first.id: 'ready'},
+      'exportStates': {first.id: 'notQueued'},
+    });
+
+    expect(restored.editingScope, ProjectEditingScope.currentPhoto);
+    expect(restored.undoHistory, isEmpty);
+    expect(restored.redoHistory, isEmpty);
   });
 
   test(
