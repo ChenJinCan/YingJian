@@ -25,17 +25,53 @@ class NativePhotoPreview extends StatefulWidget {
   State<NativePhotoPreview> createState() => _NativePhotoPreviewState();
 }
 
-class _NativePhotoPreviewState extends State<NativePhotoPreview> {
+class _NativePhotoPreviewState extends State<NativePhotoPreview>
+    with WidgetsBindingObserver {
   PhotoPreviewHandle? _handle;
   EditRecipe? _pendingRecipe;
   bool _updateInFlight = false;
   bool _useFallback = false;
+  bool _suspended = false;
   int _generation = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(_create());
+  }
+
+  @override
+  void didHaveMemoryPressure() {
+    if (!_suspended) unawaited(_replacePreview());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        if (!_suspended) return;
+        _suspended = false;
+        if (_handle == null) unawaited(_create());
+        return;
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        unawaited(_suspendPreview());
+    }
+  }
+
+  Future<void> _suspendPreview() async {
+    if (_suspended) return;
+    _suspended = true;
+    _generation += 1;
+    final previous = _handle;
+    _handle = null;
+    _pendingRecipe = null;
+    _useFallback = false;
+    if (mounted) setState(() {});
+    if (previous != null) await _safeDispose(previous);
   }
 
   @override
@@ -72,6 +108,7 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview> {
   }
 
   Future<void> _create() async {
+    if (_suspended) return;
     final generation = ++_generation;
     final initialRecipe = widget.recipe;
     try {
@@ -141,6 +178,7 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _generation += 1;
     final handle = _handle;
     if (handle != null) {
