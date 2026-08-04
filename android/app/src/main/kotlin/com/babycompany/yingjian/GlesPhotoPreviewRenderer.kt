@@ -3,7 +3,6 @@ package com.babycompany.yingjian
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
-import android.media.ExifInterface
 import android.opengl.EGL14
 import android.opengl.EGLConfig
 import android.opengl.EGLContext
@@ -14,6 +13,7 @@ import android.opengl.GLUtils
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import androidx.exifinterface.media.ExifInterface
 import io.flutter.embedding.engine.renderer.FlutterRenderer
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall

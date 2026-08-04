@@ -35,7 +35,7 @@
 - `flutter_localizations` + `intl`：官方本地化生成和运行时代理。
 - `provider`：从应用根部注入可观察状态。
 - `shared_preferences`：主题和语言等非敏感轻量设置。
-- `image_picker`：用户主动选择 1–9 张照片；不请求完整元数据。
+- `image_picker`：用户主动选择 1–6 张照片；不请求完整元数据。
 - `path_provider`：把照片副本和项目快照保存在应用支持目录。
 - Firebase Analytics、Crashlytics、Performance：匿名诊断的供应商实现，默认关闭并由用户显式开启。
 - `flutter_test` + `integration_test`：Module、Widget 和未来真机链路验证。

@@ -25,18 +25,18 @@ Flutter 业务层只认识版本化 `ImagePipelineV1` 和两个 Adapter Interfac
 - 在独立线程创建 EGL context，使用 GLES3、纹理、FBO/窗口 surface 和 shader 绘制最长边不超过 2048 px 的代理图。
 - 滑杆更新在 Dart 侧合并，同一时刻最多一个通道更新在途。
 - 预览不可用时退回既有 Flutter 矩阵，只作为兼容路径，不作为正式图像引擎。
-- 高清导出继续使用既有 Bitmap Adapter，但改为解析同一 `ImagePipelineV1`；分块/GPU 导出仍是后续门禁。
+- 高清导出解析同一 `ImagePipelineV1`。API 28+ 使用单个可变 sRGB Bitmap 原位分块变换；API 24–27 使用 `BitmapRegionDecoder` 分块规范化 EXIF 方向到单个输出 Bitmap，避免源图与输出图同时完整驻留。最终仍须以 48 MP Profile/Release 物理设备数据关闭内存门。
 
 ### iOS Adapter
 
-- 高清导出改为解析同一 `ImagePipelineV1` 并继续使用 Core Image。
-- 本轮没有实现 iOS 原生 Texture 预览，MethodChannel 不可用时走兼容预览；Metal/Core Image Texture Adapter 是下一阶段工作。
+- 高清导出解析同一 `ImagePipelineV1` 并使用 Core Image。
+- 原生预览通过 Core Image 与 `FlutterTexture` 提供，和导出共享参数语义；MethodChannel 或能力不可用时走兼容预览。
 
 ## 取舍
 
 - 首个纵切只迁移当前三项调节，优先验证 seam、纹理生命周期和跨端参数一致性，不假装已经具备竞品画质。
 - Android 选择 GLES3 作为基线，同时把后端藏在 Adapter 后；只有 Profile/Release 真机证据表明 GLES3 不满足目标时才引入 Vulkan。
-- 现有 Android 高清导出仍会整图解码，不满足 48 MP 内存合同；它被明确保留为开发演示，不能因原生预览完成而宣称导出基座完成。
+- Android 高清导出仍需持有一个完整输出 Bitmap；分块方向解码消除了旧系统的双整图峰值，但没有物理设备 Profile/Release 证据前仍不能宣称 48 MP 导出基座完成。
 
 ## 验证要求
 

@@ -38,9 +38,9 @@ app（组装、主题、路由）
 
 它内部隐藏历史栈和手势合并规则。一次滑块拖动无论产生多少预览值，都只形成一个撤销步骤。测试与页面通过同一个 Interface 验证行为。
 
-`PhotoProjectSession` 是照片项目 Module。它只接收已经复制到应用目录的 `ProjectPhoto`，执行 1–9 张数量约束，并在向 UI 发布新状态前保存照片与编辑配方快照。系统相册临时路径由 `AppOwnedPhotoImporter` 转为应用自有副本；`JsonPhotoProjectStore` 使用相对媒体路径保存最新项目，避免 iOS 数据容器 UUID 变化后绝对路径失效，并兼容迁移旧快照。页面不依赖 `image_picker`、文件复制或 JSON 格式。
+`PhotoProjectSession` 是照片项目 Module。它只接收已经复制到应用目录的 `ProjectPhoto`，执行 1–6 张数量约束，并在向 UI 发布新状态前保存照片与编辑配方快照。系统相册临时路径由 `AppOwnedPhotoImporter` 转为应用自有副本；`JsonPhotoProjectStore` 使用相对媒体路径保存最新项目，避免 iOS 数据容器 UUID 变化后绝对路径失效，并兼容迁移旧快照。页面不依赖 `image_picker`、文件复制或 JSON 格式。
 
-`ImagePipelineV1` 冻结预览和双平台导出共用的版本化参数语义。`PhotoPreviewRenderer` 是原生预览 seam：Android Adapter 通过独立 GL 线程、GLES3 和 Flutter Texture 提供路径驱动的代理图预览；iOS 原生 Texture 尚未实现时，以及原生预览不可用时，使用 `PhotoColorTransform` Flutter 矩阵作为兼容降级。`PhotoExporter` 从原图重新渲染，iOS 使用 Core Image 写入 Photos，Android 当前仍使用 Bitmap 色彩矩阵写入 MediaStore。后者尚不满足 48 MP 受控内存合同。原始项目文件始终只读。详细决定见 [`ADR 0002`](../adr/0002-native-preview-pipeline.md)。
+`ImagePipelineV1` 冻结预览和双平台导出共用的版本化参数语义。`PhotoPreviewRenderer` 是原生预览 seam：Android Adapter 通过独立 GL 线程、GLES3 和 Flutter Texture 提供路径驱动的代理图预览；iOS Adapter 使用 Core Image 和 Flutter Texture，原生预览不可用时才使用 `PhotoColorTransform` Flutter 矩阵作为兼容降级。`PhotoExporter` 从原图重新渲染：iOS 使用 Core Image 写入 Photos；Android API 28+ 使用单个可变 sRGB Bitmap 原位分块变换，API 24–27 使用 `BitmapRegionDecoder` 分块应用 EXIF 方向后写入单个输出 Bitmap，再以 JPEG 95 写入 MediaStore。该路径移除了双整图峰值，但完整 48 MP、格式、色彩和物理设备预算仍以 Ticket 02 的样片与 Profile/Release 证据为关闭门。原始项目文件始终只读。详细决定见 [`ADR 0002`](../adr/0002-native-preview-pipeline.md)。
 
 ## 暂不引入
 
