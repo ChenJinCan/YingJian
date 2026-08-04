@@ -14,6 +14,7 @@ private enum PhotoInputInspectionError: Error {
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var photoExportChannel: FlutterMethodChannel?
   private var photoInputChannel: FlutterMethodChannel?
+  private var photoAnalysisChannel: FlutterMethodChannel?
   private var photoPreviewRenderer: IOSPhotoPreviewRenderer?
   private let photoExportContext = CIContext(options: [.cacheIntermediates: false])
 #if DEBUG
@@ -47,6 +48,7 @@ private enum PhotoInputInspectionError: Error {
     }
     photoExportChannel = channel
     configurePhotoInput(messenger: registrar.messenger())
+    configurePhotoAnalysis(messenger: registrar.messenger())
     photoPreviewRenderer = IOSPhotoPreviewRenderer(
       messenger: registrar.messenger(),
       textureRegistry: registrar.textures()
@@ -157,6 +159,141 @@ private enum PhotoInputInspectionError: Error {
       "orientation": normalizedOrientation,
       "colorSpace": colorSpace,
       "inputFormat": inputFormat,
+    ]
+  }
+
+  private func configurePhotoAnalysis(messenger: FlutterBinaryMessenger) {
+    let channel = FlutterMethodChannel(
+      name: "yingjian/photo_analysis",
+      binaryMessenger: messenger
+    )
+    channel.setMethodCallHandler { call, result in
+      guard
+        call.method == "analyzePhoto",
+        let values = call.arguments as? [String: Any],
+        let sourcePath = values["sourcePath"] as? String
+      else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      DispatchQueue.global(qos: .userInitiated).async {
+        do {
+          let analysis = try Self.analyzePhoto(path: sourcePath)
+          DispatchQueue.main.async { result(analysis) }
+        } catch {
+          DispatchQueue.main.async {
+            result(FlutterError(
+              code: "analysisUnavailable",
+              message: "Local photo analysis is unavailable",
+              details: nil
+            ))
+          }
+        }
+      }
+    }
+    photoAnalysisChannel = channel
+  }
+
+  static func analyzePhoto(path: String) throws -> [String: Any] {
+    let url = URL(fileURLWithPath: path)
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+      throw PhotoInputInspectionError.unreadable
+    }
+    let options: [CFString: Any] = [
+      kCGImageSourceCreateThumbnailFromImageAlways: true,
+      kCGImageSourceCreateThumbnailWithTransform: true,
+      kCGImageSourceThumbnailMaxPixelSize: 128,
+      kCGImageSourceShouldCacheImmediately: true,
+    ]
+    guard let image = CGImageSourceCreateThumbnailAtIndex(
+      source,
+      0,
+      options as CFDictionary
+    ) else {
+      throw PhotoInputInspectionError.unreadable
+    }
+
+    let width = image.width
+    let height = image.height
+    var pixels = [UInt8](repeating: 0, count: width * height * 4)
+    let context = CIContext(options: [.cacheIntermediates: false])
+    guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
+      throw PhotoInputInspectionError.unreadable
+    }
+    context.render(
+      CIImage(cgImage: image),
+      toBitmap: &pixels,
+      rowBytes: width * 4,
+      bounds: CGRect(x: 0, y: 0, width: width, height: height),
+      format: .RGBA8,
+      colorSpace: colorSpace
+    )
+
+    var luminanceTotal = 0.0
+    var redTotal = 0.0
+    var blueTotal = 0.0
+    var edgeTotal = 0.0
+    var previousRow = [Double](repeating: 0, count: width)
+    for y in 0..<height {
+      var previous = 0.0
+      for x in 0..<width {
+        let offset = (y * width + x) * 4
+        let red = Double(pixels[offset]) / 255.0
+        let green = Double(pixels[offset + 1]) / 255.0
+        let blue = Double(pixels[offset + 2]) / 255.0
+        let luminance = (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
+        luminanceTotal += luminance
+        redTotal += red
+        blueTotal += blue
+        if x > 0 { edgeTotal += abs(luminance - previous) }
+        if y > 0 { edgeTotal += abs(luminance - previousRow[x]) }
+        previous = luminance
+        previousRow[x] = luminance
+      }
+    }
+    let count = Double(width * height)
+    let meanLuminance = luminanceTotal / count
+    let redBlueDelta = (redTotal - blueTotal) / count
+    let edgeMean = edgeTotal / max(1.0, (count * 2.0) - Double(width + height))
+
+    let exposure: String
+    if meanLuminance < 0.34 {
+      exposure = "underexposed"
+    } else if meanLuminance > 0.72 {
+      exposure = "overexposed"
+    } else {
+      exposure = "balanced"
+    }
+    let whiteBalance: String
+    if redBlueDelta > 0.10 {
+      whiteBalance = "warmCast"
+    } else if redBlueDelta < -0.10 {
+      whiteBalance = "coolCast"
+    } else {
+      whiteBalance = "balanced"
+    }
+    let clarity: String
+    if edgeMean < 0.018 {
+      clarity = "blurred"
+    } else if edgeMean < 0.040 {
+      clarity = "soft"
+    } else {
+      clarity = "clear"
+    }
+
+    let faceRequest = VNDetectFaceRectanglesRequest()
+    let handler = VNImageRequestHandler(cgImage: image, orientation: .up)
+    try? handler.perform([faceRequest])
+    let hasFace = !(faceRequest.results ?? []).isEmpty
+    return [
+      "analysisVersion": "local-pixels-v1",
+      "capabilityVersion": "ios-core-image-vision-v1",
+      "confidence": "medium",
+      "exposure": exposure,
+      "whiteBalance": whiteBalance,
+      "clarity": clarity,
+      "portrait": "unavailable",
+      "scene": hasFace ? "people" : "unknown",
     ]
   }
 

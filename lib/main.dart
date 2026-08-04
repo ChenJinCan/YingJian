@@ -16,6 +16,7 @@ import 'package:yingjian/features/project/infrastructure/app_owned_photo_importe
 import 'package:yingjian/features/project/infrastructure/image_picker_photo_source.dart';
 import 'package:yingjian/features/project/infrastructure/json_photo_project_store.dart';
 import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
+import 'package:yingjian/features/recommendations/infrastructure/method_channel_photo_analyzer.dart';
 import 'package:yingjian/observability/app_observability.dart';
 import 'package:yingjian/observability/firebase_observability_backend.dart';
 import 'package:yingjian/review/review_manager.dart';
@@ -62,7 +63,7 @@ Future<void> _startApplication() async {
       );
       photoExporter = MethodChannelPhotoExporter();
       photoPreviewRenderer = MethodChannelPhotoPreviewRenderer();
-      photoAnalyzer = const MetadataSafePhotoAnalyzer();
+      photoAnalyzer = const MethodChannelPhotoAnalyzer();
     },
     showApp: () {
       runApp(
