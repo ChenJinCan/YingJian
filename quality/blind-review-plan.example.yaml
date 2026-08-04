@@ -1,0 +1,86 @@
+schema: 1
+review_id: portrait-round-1
+task: portrait
+minimum_reviewers: 5
+items:
+  - asset_id: portrait-001
+    tags: [portrait_single, improvable, glasses]
+    candidates:
+      - id: original
+        role: baseline_original
+        file: ../.quality/review-inputs/portrait-001/original.jpg
+        sha256: replace_with_64_character_lowercase_sha256
+        provenance:
+          producer: original
+          version: source-v1
+          device: source-device-record
+          os: source-os-record
+          variant: original
+          render_kind: source
+          parameters: {}
+      - id: yingjian-off-export
+        role: subject
+        file: ../.quality/review-inputs/portrait-001/yingjian-off-export.jpg
+        sha256: replace_with_64_character_lowercase_sha256
+        provenance:
+          producer: yingjian
+          version: replace_with_capability_version
+          device: replace_with_device
+          os: replace_with_os
+          variant: off
+          render_kind: export
+          source_sha256: replace_with_original_sha256
+          parameters: {strength: 0}
+      - id: yingjian-default-export
+        role: subject
+        file: ../.quality/review-inputs/portrait-001/yingjian-default-export.jpg
+        sha256: replace_with_64_character_lowercase_sha256
+        provenance:
+          producer: yingjian
+          version: replace_with_capability_version
+          device: replace_with_device
+          os: replace_with_os
+          variant: default
+          render_kind: export
+          source_sha256: replace_with_original_sha256
+          parameters: {strength: replace_with_frozen_default}
+      - id: yingjian-high-safe-export
+        role: subject
+        file: ../.quality/review-inputs/portrait-001/yingjian-high-safe-export.jpg
+        sha256: replace_with_64_character_lowercase_sha256
+        provenance:
+          producer: yingjian
+          version: replace_with_capability_version
+          device: replace_with_device
+          os: replace_with_os
+          variant: high_safe
+          render_kind: export
+          source_sha256: replace_with_original_sha256
+          parameters: {strength: replace_with_frozen_high_safe}
+      - id: yingjian-default-preview
+        role: subject
+        file: ../.quality/review-inputs/portrait-001/yingjian-default-preview.jpg
+        sha256: replace_with_64_character_lowercase_sha256
+        provenance:
+          producer: yingjian
+          version: replace_with_capability_version
+          device: replace_with_device
+          os: replace_with_os
+          variant: default
+          render_kind: preview
+          source_sha256: replace_with_original_sha256
+          parameters: {strength: replace_with_frozen_default}
+      - id: competitor-fixed-path-export
+        role: reference
+        file: ../.quality/review-inputs/portrait-001/competitor-fixed-path-export.jpg
+        sha256: replace_with_64_character_lowercase_sha256
+        provenance:
+          producer: competitor
+          version: replace_with_competitor_app_version
+          device: replace_with_device
+          os: replace_with_os
+          variant: fixed_path
+          render_kind: export
+          source_sha256: replace_with_original_sha256
+          parameters: {preset: replace_with_preset_and_strength}
+          operation_path: replace_with_recorded_fixed_steps

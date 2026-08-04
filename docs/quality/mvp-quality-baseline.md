@@ -221,6 +221,8 @@
 ```sh
 ruby scripts/check_image_quality_corpus.rb --allow-incomplete
 ruby scripts/check_image_quality_corpus.rb
+ruby scripts/test_blind_review_tools.rb
 ```
 
 第一条只检查当前清单结构，第二条是完整门禁；在样片缺失时第二条必须失败。
+匿名包构建、评分表字段和人像冻结门见[本地匿名图片评审工作流](blind-review-workflow.md)。
