@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
@@ -34,7 +36,98 @@ void main() {
       expect(session.photos, hasLength(2));
       expect(session.photos.first.localPath, '/app/media/photo-1.jpg');
       expect(store.savedProject, session.project);
+      expect(session.project?.flowState, PhotoProjectFlowState.analyzing);
     });
+
+    test(
+      'rejects a project flow transition that skips required stages',
+      () async {
+        final saved = PhotoProject(
+          id: 'project-1',
+          createdAt: DateTime.utc(2026, 8, 4),
+          updatedAt: DateTime.utc(2026, 8, 4),
+          photos: const [
+            ProjectPhoto(
+              id: 'photo-1',
+              localPath: '/app/media/photo-1.jpg',
+              originalName: 'first.jpg',
+            ),
+          ],
+          flowState: PhotoProjectFlowState.analyzing,
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+
+        expect(
+          () => session.transitionTo(PhotoProjectFlowState.exporting),
+          throwsStateError,
+        );
+        expect(session.project, saved);
+        expect(store.savedProject, saved);
+      },
+    );
+
+    test(
+      'keeps the last safe state when a flow transition cannot be saved',
+      () async {
+        final saved = PhotoProject(
+          id: 'project-1',
+          createdAt: DateTime.utc(2026, 8, 4),
+          updatedAt: DateTime.utc(2026, 8, 4),
+          photos: const [
+            ProjectPhoto(
+              id: 'photo-1',
+              localPath: '/app/media/photo-1.jpg',
+              originalName: 'first.jpg',
+            ),
+          ],
+          flowState: PhotoProjectFlowState.analyzing,
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        store.failOnSave = true;
+
+        await expectLater(
+          session.transitionTo(PhotoProjectFlowState.choosingRecommendation),
+          throwsA(isA<FileSystemException>()),
+        );
+
+        expect(session.project, saved);
+        expect(store.savedProject, saved);
+      },
+    );
+
+    test(
+      'removes newly copied photos when the project cannot be saved',
+      () async {
+        const copied = ProjectPhoto(
+          id: 'photo-new',
+          localPath: '/app/media/photo-new.jpg',
+          originalName: 'new.jpg',
+        );
+        final store = _MemoryPhotoProjectStore()..failOnSave = true;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const [copied]),
+          store: store,
+        );
+
+        await expectLater(
+          session.importPhotos(),
+          throwsA(isA<FileSystemException>()),
+        );
+
+        expect(session.project, isNull);
+        expect(store.deletedPhotoIds, ['photo-new']);
+      },
+    );
 
     test('restores the latest saved project before editing', () async {
       final saved = PhotoProject(
@@ -248,6 +341,42 @@ void main() {
       expect(store.savedProject, session.project);
     });
 
+    test('persists a stable analysis state for one project photo', () async {
+      final saved = _twoPhotoProject();
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+
+      await session.setPhotoAnalysisState('photo-2', PhotoAnalysisState.ready);
+
+      expect(session.project?.analysisStates, {
+        'photo-1': PhotoAnalysisState.pending,
+        'photo-2': PhotoAnalysisState.ready,
+      });
+      expect(store.savedProject, session.project);
+    });
+
+    test('persists a stable export state for one project photo', () async {
+      final saved = _twoPhotoProject();
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+
+      await session.setPhotoExportState('photo-1', PhotoExportState.queued);
+
+      expect(session.project?.exportStates, {
+        'photo-1': PhotoExportState.queued,
+        'photo-2': PhotoExportState.notQueued,
+      });
+      expect(store.savedProject, session.project);
+    });
+
     test(
       'removes a photo and its layers, then chooses a valid focus',
       () async {
@@ -289,6 +418,8 @@ void main() {
         expect(session.project?.focusPhotoId, 'photo-1');
         expect(session.project?.adaptiveCompensations, isEmpty);
         expect(session.project?.photoOverrides, isEmpty);
+        expect(session.project?.analysisStates.keys, ['photo-1']);
+        expect(session.project?.exportStates.keys, ['photo-1']);
         expect(store.deletedPhotoIds, ['photo-2']);
       },
     );
@@ -354,6 +485,26 @@ void main() {
   });
 }
 
+PhotoProject _twoPhotoProject() {
+  return PhotoProject(
+    id: 'project-1',
+    createdAt: DateTime.utc(2026, 8, 4),
+    updatedAt: DateTime.utc(2026, 8, 4),
+    photos: const [
+      ProjectPhoto(
+        id: 'photo-1',
+        localPath: '/app/media/photo-1.jpg',
+        originalName: 'first.jpg',
+      ),
+      ProjectPhoto(
+        id: 'photo-2',
+        localPath: '/app/media/photo-2.jpg',
+        originalName: 'second.jpg',
+      ),
+    ],
+  );
+}
+
 final class _FakePhotoImporter implements PhotoImporter {
   _FakePhotoImporter(this.photos, {this.failures = const []});
 
@@ -370,6 +521,7 @@ final class _FakePhotoImporter implements PhotoImporter {
 
 final class _MemoryPhotoProjectStore implements PhotoProjectLifecycleStore {
   PhotoProject? savedProject;
+  bool failOnSave = false;
   final List<String> deletedPhotoIds = [];
   final List<String> deletedProjectIds = [];
 
@@ -378,6 +530,9 @@ final class _MemoryPhotoProjectStore implements PhotoProjectLifecycleStore {
 
   @override
   Future<void> save(PhotoProject project) async {
+    if (failOnSave) {
+      throw FileSystemException('save failed');
+    }
     savedProject = project;
   }
 

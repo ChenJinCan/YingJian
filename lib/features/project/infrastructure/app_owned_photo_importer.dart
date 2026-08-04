@@ -8,6 +8,27 @@ import 'package:yingjian/features/project/domain/photo_project.dart';
 
 typedef MediaDirectoryProvider = Future<Directory> Function();
 typedef HeifSupportProvider = Future<bool> Function();
+typedef PhotoInspectionProvider =
+    Future<PhotoContentInspection> Function(String path);
+
+@immutable
+class PhotoContentInspection {
+  const PhotoContentInspection({
+    required this.contentSha256,
+    required this.pixelWidth,
+    required this.pixelHeight,
+    required this.orientation,
+    required this.colorSpace,
+    required this.inputFormat,
+  });
+
+  final String contentSha256;
+  final int pixelWidth;
+  final int pixelHeight;
+  final int orientation;
+  final PhotoColorSpace colorSpace;
+  final PhotoInputFormat inputFormat;
+}
 
 @immutable
 class SelectedPhoto {
@@ -30,12 +51,14 @@ final class AppOwnedPhotoImporter implements PhotoImporter {
     required PhotoSource source,
     required MediaDirectoryProvider mediaDirectory,
     HeifSupportProvider? supportsHeif,
+    PhotoInspectionProvider? inspectPhoto,
     String Function()? createId,
   }) {
     return AppOwnedPhotoImporter._(
       source,
       mediaDirectory,
       supportsHeif ?? _defaultSupportsHeif,
+      inspectPhoto ?? _defaultInspectPhoto,
       createId ?? _defaultId,
     );
   }
@@ -44,12 +67,14 @@ final class AppOwnedPhotoImporter implements PhotoImporter {
     this._source,
     this._mediaDirectory,
     this._supportsHeif,
+    this._inspectPhoto,
     this._createId,
   );
 
   final PhotoSource _source;
   final MediaDirectoryProvider _mediaDirectory;
   final HeifSupportProvider _supportsHeif;
+  final PhotoInspectionProvider _inspectPhoto;
   final String Function() _createId;
 
   @override
@@ -67,25 +92,54 @@ final class AppOwnedPhotoImporter implements PhotoImporter {
     final imported = <ProjectPhoto>[];
     final failures = <PhotoImportFailure>[];
     for (final photo in selected) {
+      File? destination;
       try {
         await _validateInput(photo, supportsHeif: _supportsHeif);
         final id = _createId();
-        final destination = File(
-          '${directory.path}/$id${_extension(photo.name)}',
-        );
+        destination = File('${directory.path}/$id.importing');
         await File(photo.path).copy(destination.path);
+        await _validateInput(
+          SelectedPhoto(path: destination.path, name: photo.name),
+          supportsHeif: _supportsHeif,
+        );
+        final inspection = await _inspectPhoto(destination.path);
+        _validateInspection(inspection);
+        final finalCopy = File(
+          '${directory.path}/$id${_extensionFor(inspection.inputFormat)}',
+        );
+        await destination.rename(finalCopy.path);
+        destination = finalCopy;
         imported.add(
           ProjectPhoto(
             id: id,
             localPath: destination.path,
             originalName: photo.name,
+            contentSha256: inspection.contentSha256,
+            pixelWidth: inspection.pixelWidth,
+            pixelHeight: inspection.pixelHeight,
+            orientation: inspection.orientation,
+            colorSpace: inspection.colorSpace,
+            inputFormat: inspection.inputFormat,
+            supportState: PhotoSupportState.supported,
           ),
         );
       } on _PhotoValidationException catch (error) {
+        await _deleteIfExists(destination);
         failures.add(
           PhotoImportFailure(photoName: photo.name, reason: error.reason),
         );
+      } on PlatformException catch (error) {
+        await _deleteIfExists(destination);
+        failures.add(
+          PhotoImportFailure(
+            photoName: photo.name,
+            reason: error.code == 'unsupportedColorSpace'
+                ? PhotoImportFailureReason.unsupportedColorSpace
+                : PhotoImportFailureReason.unreadable,
+          ),
+        );
       } on FileSystemException {
+        await _deleteIfExists(destination);
         failures.add(
           PhotoImportFailure(
             photoName: photo.name,
@@ -95,6 +149,27 @@ final class AppOwnedPhotoImporter implements PhotoImporter {
       }
     }
     return PhotoImportBatch(photos: imported, failures: failures);
+  }
+
+  static Future<void> _deleteIfExists(File? file) async {
+    if (file == null) return;
+    try {
+      if (await file.exists()) await file.delete();
+    } on FileSystemException {
+      // The import failure remains item-scoped even if best-effort cleanup fails.
+    }
+  }
+
+  static void _validateInspection(PhotoContentInspection inspection) {
+    if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(inspection.contentSha256) ||
+        inspection.orientation < 1 ||
+        inspection.orientation > 8 ||
+        inspection.inputFormat == PhotoInputFormat.unknown) {
+      throw const _PhotoValidationException(
+        PhotoImportFailureReason.unreadable,
+      );
+    }
+    _validateDimensions(inspection.pixelWidth, inspection.pixelHeight);
   }
 
   static Future<void> _validateInput(
@@ -256,7 +331,13 @@ final class AppOwnedPhotoImporter implements PhotoImporter {
     for (var offset = 8; offset + 4 <= payload.length; offset += 4) {
       brands.add(String.fromCharCodes(payload.sublist(offset, offset + 4)));
     }
-    const supported = {'heic', 'heix', 'hevc', 'hevx', 'mif1', 'msf1'};
+    const sequenceBrands = {'hevc', 'hevx', 'msf1'};
+    if (brands.any(sequenceBrands.contains)) {
+      throw const _PhotoValidationException(
+        PhotoImportFailureReason.animatedImage,
+      );
+    }
+    const supported = {'heic', 'heix', 'mif1'};
     return brands.any(supported.contains) &&
         !brands.contains('avif') &&
         !brands.contains('avis');
@@ -340,13 +421,13 @@ final class AppOwnedPhotoImporter implements PhotoImporter {
     return (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
   }
 
-  static String _extension(String name) {
-    final dot = name.lastIndexOf('.');
-    if (dot < 0 || name.length - dot > 10) {
-      return '';
-    }
-    final extension = name.substring(dot).toLowerCase();
-    return RegExp(r'^\.[a-z0-9]+$').hasMatch(extension) ? extension : '';
+  static String _extensionFor(PhotoInputFormat format) {
+    return switch (format) {
+      PhotoInputFormat.jpeg => '.jpg',
+      PhotoInputFormat.png => '.png',
+      PhotoInputFormat.heic => '.heic',
+      PhotoInputFormat.unknown => '',
+    };
   }
 
   static String _defaultId() {
@@ -366,6 +447,52 @@ final class AppOwnedPhotoImporter implements PhotoImporter {
           'yingjian/photo_input',
         ).invokeMethod<bool>('supportsHeif') ??
         false;
+  }
+
+  static Future<PhotoContentInspection> _defaultInspectPhoto(
+    String path,
+  ) async {
+    final raw = await const MethodChannel(
+      'yingjian/photo_input',
+    ).invokeMapMethod<String, Object?>('inspectPhoto', {'path': path});
+    if (raw == null) {
+      throw const _PhotoValidationException(
+        PhotoImportFailureReason.unreadable,
+      );
+    }
+    final contentSha256 = raw['contentSha256'];
+    final pixelWidth = raw['pixelWidth'];
+    final pixelHeight = raw['pixelHeight'];
+    final orientation = raw['orientation'];
+    if (contentSha256 is! String ||
+        pixelWidth is! num ||
+        pixelHeight is! num ||
+        orientation is! num) {
+      throw const _PhotoValidationException(
+        PhotoImportFailureReason.unreadable,
+      );
+    }
+    T enumValue<T extends Enum>(Object? name, List<T> values, T fallback) {
+      return values.where((value) => value.name == name).firstOrNull ??
+          fallback;
+    }
+
+    return PhotoContentInspection(
+      contentSha256: contentSha256,
+      pixelWidth: pixelWidth.toInt(),
+      pixelHeight: pixelHeight.toInt(),
+      orientation: orientation.toInt(),
+      colorSpace: enumValue(
+        raw['colorSpace'],
+        PhotoColorSpace.values,
+        PhotoColorSpace.unknown,
+      ),
+      inputFormat: enumValue(
+        raw['inputFormat'],
+        PhotoInputFormat.values,
+        PhotoInputFormat.unknown,
+      ),
+    );
   }
 }
 

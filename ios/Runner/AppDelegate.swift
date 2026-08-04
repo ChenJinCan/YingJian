@@ -1,13 +1,19 @@
 import Flutter
 import CoreImage
+import CryptoKit
 import ImageIO
 import Photos
 import UIKit
 import Vision
 
+private enum PhotoInputInspectionError: Error {
+  case unreadable
+}
+
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var photoExportChannel: FlutterMethodChannel?
+  private var photoInputChannel: FlutterMethodChannel?
   private var photoPreviewRenderer: IOSPhotoPreviewRenderer?
   private let photoExportContext = CIContext(options: [.cacheIntermediates: false])
 #if DEBUG
@@ -40,6 +46,7 @@ import Vision
       self?.exportPhoto(arguments: call.arguments, result: result)
     }
     photoExportChannel = channel
+    configurePhotoInput(messenger: registrar.messenger())
     photoPreviewRenderer = IOSPhotoPreviewRenderer(
       messenger: registrar.messenger(),
       textureRegistry: registrar.textures()
@@ -47,6 +54,110 @@ import Vision
 #if DEBUG
     configurePortraitMaskSpike(messenger: registrar.messenger())
 #endif
+  }
+
+  private func configurePhotoInput(messenger: FlutterBinaryMessenger) {
+    let channel = FlutterMethodChannel(
+      name: "yingjian/photo_input",
+      binaryMessenger: messenger
+    )
+    channel.setMethodCallHandler { call, result in
+      if call.method == "supportsHeif" {
+        result(true)
+        return
+      }
+      guard
+        call.method == "inspectPhoto",
+        let values = call.arguments as? [String: Any],
+        let path = values["path"] as? String
+      else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      DispatchQueue.global(qos: .userInitiated).async {
+        do {
+          let inspection = try Self.inspectPhoto(path: path)
+          DispatchQueue.main.async { result(inspection) }
+        } catch {
+          DispatchQueue.main.async {
+            result(FlutterError(
+              code: "unreadable",
+              message: "Photo could not be inspected",
+              details: nil
+            ))
+          }
+        }
+      }
+    }
+    photoInputChannel = channel
+  }
+
+  private static func inspectPhoto(path: String) throws -> [String: Any] {
+    let url = URL(fileURLWithPath: path)
+    guard
+      let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+      CGImageSourceGetCount(source) == 1,
+      let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
+        as? [CFString: Any],
+      let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+      let height = properties[kCGImagePropertyPixelHeight] as? NSNumber,
+      width.intValue > 0,
+      height.intValue > 0
+    else {
+      throw PhotoInputInspectionError.unreadable
+    }
+    let thumbnailOptions: [CFString: Any] = [
+      kCGImageSourceCreateThumbnailFromImageAlways: true,
+      kCGImageSourceThumbnailMaxPixelSize: 2048,
+      kCGImageSourceCreateThumbnailWithTransform: false,
+      kCGImageSourceShouldCacheImmediately: true,
+    ]
+    guard let decoded = CGImageSourceCreateThumbnailAtIndex(
+      source,
+      0,
+      thumbnailOptions as CFDictionary
+    ) else {
+      throw PhotoInputInspectionError.unreadable
+    }
+    let orientation = (properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
+    let normalizedOrientation = (1...8).contains(orientation) ? orientation : 1
+    let type = (CGImageSourceGetType(source) as String?)?.lowercased() ?? ""
+    let inputFormat: String
+    if type.contains("jpeg") {
+      inputFormat = "jpeg"
+    } else if type.contains("png") {
+      inputFormat = "png"
+    } else if type.contains("heic") || type.contains("heif") {
+      inputFormat = "heic"
+    } else {
+      throw PhotoInputInspectionError.unreadable
+    }
+    let colorName = (decoded.colorSpace?.name as String?)?.lowercased() ?? ""
+    let colorSpace: String
+    if colorName.contains("displayp3") || colorName.contains("display p3") {
+      colorSpace = "displayP3"
+    } else if colorName.contains("srgb") {
+      colorSpace = "srgb"
+    } else {
+      colorSpace = "unknown"
+    }
+    let handle = try FileHandle(forReadingFrom: url)
+    defer { try? handle.close() }
+    var hasher = SHA256()
+    while true {
+      let chunk = try handle.read(upToCount: 1024 * 1024) ?? Data()
+      if chunk.isEmpty { break }
+      hasher.update(data: chunk)
+    }
+    let hash = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    return [
+      "contentSha256": hash,
+      "pixelWidth": width.intValue,
+      "pixelHeight": height.intValue,
+      "orientation": normalizedOrientation,
+      "colorSpace": colorSpace,
+      "inputFormat": inputFormat,
+    ]
   }
 
 #if DEBUG

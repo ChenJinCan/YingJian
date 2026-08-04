@@ -667,6 +667,8 @@ String _photoImportFailureMessage(
   return switch (failure.reason) {
     PhotoImportFailureReason.unsupportedFormat =>
       context.l10n.photoUnsupportedFormat(failure.photoName),
+    PhotoImportFailureReason.unsupportedColorSpace =>
+      context.l10n.photoUnsupportedFormat(failure.photoName),
     PhotoImportFailureReason.animatedImage =>
       context.l10n.photoAnimatedUnsupported(failure.photoName),
     PhotoImportFailureReason.fileTooLarge => context.l10n.photoFileTooLarge(

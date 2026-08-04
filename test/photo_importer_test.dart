@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
+import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/project/infrastructure/app_owned_photo_importer.dart';
 
 void main() {
@@ -20,6 +21,7 @@ void main() {
           SelectedPhoto(path: sourceFile.path, name: 'camera photo.jpg'),
         ]),
         mediaDirectory: () async => mediaDirectory,
+        inspectPhoto: _inspectJpeg,
         createId: () => 'photo-1',
       );
 
@@ -29,6 +31,16 @@ void main() {
       expect(batch.photos.single.id, 'photo-1');
       expect(batch.photos.single.originalName, 'camera photo.jpg');
       expect(batch.photos.single.localPath, isNot(sourceFile.path));
+      expect(
+        batch.photos.single.contentSha256,
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      );
+      expect(batch.photos.single.pixelWidth, 4000);
+      expect(batch.photos.single.pixelHeight, 3000);
+      expect(batch.photos.single.orientation, 1);
+      expect(batch.photos.single.colorSpace, PhotoColorSpace.srgb);
+      expect(batch.photos.single.inputFormat, PhotoInputFormat.jpeg);
+      expect(batch.photos.single.supportState, PhotoSupportState.supported);
       expect(
         await File(batch.photos.single.localPath).readAsBytes(),
         _jpeg(width: 4000, height: 3000),
@@ -54,6 +66,7 @@ void main() {
           SelectedPhoto(path: raw.path, name: 'portrait.dng'),
         ]),
         mediaDirectory: () async => Directory('${directory.path}/app-media'),
+        inspectPhoto: _inspectJpeg,
         createId: () => 'photo-valid',
       );
 
@@ -82,6 +95,7 @@ void main() {
         SelectedPhoto(path: source.path, name: 'oversized.jpg'),
       ]),
       mediaDirectory: () async => media,
+      inspectPhoto: _inspectJpeg,
       createId: () => 'must-not-be-copied',
     );
 
@@ -107,6 +121,7 @@ void main() {
         SelectedPhoto(path: source.path, name: 'portrait.png'),
       ]),
       mediaDirectory: () async => Directory('${directory.path}/app-media'),
+      inspectPhoto: _inspectJpeg,
       createId: () => 'photo-png',
     );
 
@@ -132,6 +147,7 @@ void main() {
         SelectedPhoto(path: valid.path, name: 'still.png'),
       ]),
       mediaDirectory: () async => Directory('${directory.path}/app-media'),
+      inspectPhoto: _inspectJpeg,
       createId: () => 'photo-${++nextId}',
     );
 
@@ -161,6 +177,7 @@ void main() {
         SelectedPhoto(path: source.path, name: 'huge.jpg'),
       ]),
       mediaDirectory: () async => media,
+      inspectPhoto: _inspectJpeg,
       createId: () => 'must-not-be-copied',
     );
 
@@ -183,6 +200,7 @@ void main() {
         SelectedPhoto(path: source.path, name: 'portrait.heic'),
       ]),
       mediaDirectory: () async => Directory('${directory.path}/app-media'),
+      inspectPhoto: _inspectJpeg,
       supportsHeif: () async => true,
       createId: () => 'photo-heic',
     );
@@ -192,6 +210,73 @@ void main() {
     expect(batch.failures, isEmpty);
     expect(batch.photos.single.originalName, 'portrait.heic');
   });
+
+  test('rejects a HEIF image sequence as an animated image', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'yingjian-photo-heif-sequence-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final source = File('${directory.path}/sequence.heic');
+    await source.writeAsBytes(_heic(width: 1920, height: 1080, sequence: true));
+    final importer = AppOwnedPhotoImporter(
+      source: _FakePhotoSource([
+        SelectedPhoto(path: source.path, name: 'sequence.heic'),
+      ]),
+      mediaDirectory: () async => Directory('${directory.path}/app-media'),
+      supportsHeif: () async => true,
+      inspectPhoto: _inspectJpeg,
+      createId: () => 'sequence',
+    );
+
+    final batch = await importer.importPhotos(limit: 6);
+
+    expect(batch.photos, isEmpty);
+    expect(
+      batch.failures.single.reason,
+      PhotoImportFailureReason.animatedImage,
+    );
+  });
+
+  test('inspects the app copy and names it from decoded content', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'yingjian-photo-content-copy-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final source = File('${directory.path}/misleading.png');
+    final bytes = _jpeg(width: 4000, height: 3000);
+    await source.writeAsBytes(bytes);
+    String? inspectedPath;
+    final importer = AppOwnedPhotoImporter(
+      source: _FakePhotoSource([
+        SelectedPhoto(path: source.path, name: 'misleading.png'),
+      ]),
+      mediaDirectory: () async => Directory('${directory.path}/app-media'),
+      inspectPhoto: (path) async {
+        inspectedPath = path;
+        expect(await File(path).readAsBytes(), bytes);
+        return _inspectJpeg(path);
+      },
+      createId: () => 'content-copy',
+    );
+
+    final batch = await importer.importPhotos(limit: 6);
+
+    expect(inspectedPath, endsWith('.importing'));
+    expect(batch.photos.single.localPath, endsWith('content-copy.jpg'));
+    expect(await File(batch.photos.single.localPath).readAsBytes(), bytes);
+  });
+}
+
+Future<PhotoContentInspection> _inspectJpeg(String path) async {
+  return const PhotoContentInspection(
+    contentSha256:
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    pixelWidth: 4000,
+    pixelHeight: 3000,
+    orientation: 1,
+    colorSpace: PhotoColorSpace.srgb,
+    inputFormat: PhotoInputFormat.jpeg,
+  );
 }
 
 List<int> _jpeg({required int width, required int height}) => [
@@ -249,7 +334,11 @@ List<int> _uint32(int value) => [
   value & 0xFF,
 ];
 
-List<int> _heic({required int width, required int height}) {
+List<int> _heic({
+  required int width,
+  required int height,
+  bool sequence = false,
+}) {
   List<int> box(String type, List<int> payload) => [
     ..._uint32(8 + payload.length),
     ...type.codeUnits,
@@ -257,13 +346,13 @@ List<int> _heic({required int width, required int height}) {
   ];
 
   final ftyp = box('ftyp', [
-    ...'heic'.codeUnits,
+    ...(sequence ? 'msf1' : 'heic').codeUnits,
     0,
     0,
     0,
     0,
     ...'mif1'.codeUnits,
-    ...'heic'.codeUnits,
+    ...(sequence ? 'msf1' : 'heic').codeUnits,
   ]);
   final ispe = box('ispe', [0, 0, 0, 0, ..._uint32(width), ..._uint32(height)]);
   final ipco = box('ipco', ispe);

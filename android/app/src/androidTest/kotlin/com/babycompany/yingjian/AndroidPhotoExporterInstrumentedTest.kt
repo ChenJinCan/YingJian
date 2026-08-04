@@ -22,6 +22,32 @@ class AndroidPhotoExporterInstrumentedTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
     @Test
+    fun inputInspectionActuallyDecodesAndRecordsStableContentIdentity() {
+        val source = File(context.cacheDir, "inspect-source.jpg")
+        createJpeg(source, width = 8, height = 6)
+        ExifInterface(source.absolutePath).apply {
+            setAttribute(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_ROTATE_90.toString(),
+            )
+            saveAttributes()
+        }
+
+        try {
+            val result = AndroidPhotoInputInspector().inspect(source.absolutePath)
+
+            assertEquals(sha256(source), result["contentSha256"])
+            assertEquals(8, result["pixelWidth"])
+            assertEquals(6, result["pixelHeight"])
+            assertEquals(ExifInterface.ORIENTATION_ROTATE_90, result["orientation"])
+            assertEquals("jpeg", result["inputFormat"])
+            assertEquals("srgb", result["colorSpace"])
+        } finally {
+            source.delete()
+        }
+    }
+
+    @Test
     fun exportNormalizesOrientationAndKeepsOnlySafeMetadataWithoutChangingSource() {
         val source = File(context.cacheDir, "export-source.jpg")
         createJpeg(source, width = 4, height = 2)

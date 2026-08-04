@@ -8,6 +8,7 @@ abstract interface class PhotoImporter {
 
 enum PhotoImportFailureReason {
   unsupportedFormat,
+  unsupportedColorSpace,
   animatedImage,
   fileTooLarge,
   dimensionsTooLarge,
@@ -80,12 +81,14 @@ class PhotoProjectSession extends ChangeNotifier {
   PhotoProject? _project;
   Object? _restoreError;
   bool _isRestoring = false;
+  bool _isImporting = false;
   List<PhotoImportFailure> _importFailures = const [];
 
   PhotoProject? get project => _project;
   List<ProjectPhoto> get photos => _project?.photos ?? const [];
   Object? get restoreError => _restoreError;
   bool get isRestoring => _isRestoring;
+  bool get isImporting => _isImporting;
   List<PhotoImportFailure> get importFailures => _importFailures;
 
   Future<void> restore() async {
@@ -108,7 +111,15 @@ class PhotoProjectSession extends ChangeNotifier {
       return PhotoImportResult.limitReached;
     }
 
-    final batch = await _importer.importPhotos(limit: remaining);
+    _isImporting = true;
+    notifyListeners();
+    late final PhotoImportBatch batch;
+    try {
+      batch = await _importer.importPhotos(limit: remaining);
+    } finally {
+      _isImporting = false;
+      notifyListeners();
+    }
     _importFailures = List.unmodifiable(batch.failures);
     final imported = batch.photos;
     if (imported.isEmpty) {
@@ -130,15 +141,50 @@ class PhotoProjectSession extends ChangeNotifier {
             createdAt: timestamp,
             updatedAt: timestamp,
             photos: imported,
+            flowState: PhotoProjectFlowState.analyzing,
           )
         : existing.copyWith(
             updatedAt: timestamp,
             photos: [...existing.photos, ...imported],
+            flowState: PhotoProjectFlowState.analyzing,
+            selectedRecommendationId: null,
           );
-    await _store.save(next);
+    try {
+      await _store.save(next);
+    } on Object catch (error, stackTrace) {
+      final lifecycleStore = _store;
+      if (lifecycleStore is PhotoProjectLifecycleStore) {
+        for (final photo in imported) {
+          try {
+            await lifecycleStore.deletePhotoCopy(photo);
+          } on Object {
+            // Preserve the save failure; cleanup remains best-effort.
+          }
+        }
+      }
+      Error.throwWithStackTrace(error, stackTrace);
+    }
     _project = next;
     notifyListeners();
     return PhotoImportResult.imported;
+  }
+
+  Future<void> transitionTo(PhotoProjectFlowState nextState) async {
+    final current = _project;
+    if (current == null) {
+      throw StateError('A project is required before changing its flow state');
+    }
+    if (!current.flowState.canTransitionTo(nextState)) {
+      throw StateError(
+        'Project cannot transition from ${current.flowState.name} '
+        'to ${nextState.name}',
+      );
+    }
+    if (current.flowState == nextState) return;
+    final next = current.copyWith(updatedAt: _now(), flowState: nextState);
+    await _store.save(next);
+    _project = next;
+    notifyListeners();
   }
 
   Future<void> updateRecipe(EditRecipe recipe) async {
@@ -196,6 +242,32 @@ class PhotoProjectSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setPhotoAnalysisState(
+    String photoId,
+    PhotoAnalysisState state,
+  ) async {
+    final current = _requirePhoto(photoId);
+    if (current.analysisStates[photoId] == state) return;
+    final states = Map.of(current.analysisStates)..[photoId] = state;
+    final next = current.copyWith(updatedAt: _now(), analysisStates: states);
+    await _store.save(next);
+    _project = next;
+    notifyListeners();
+  }
+
+  Future<void> setPhotoExportState(
+    String photoId,
+    PhotoExportState state,
+  ) async {
+    final current = _requirePhoto(photoId);
+    if (current.exportStates[photoId] == state) return;
+    final states = Map.of(current.exportStates)..[photoId] = state;
+    final next = current.copyWith(updatedAt: _now(), exportStates: states);
+    await _store.save(next);
+    _project = next;
+    notifyListeners();
+  }
+
   Future<void> removePhoto(String photoId) async {
     final current = _project;
     if (current == null) {
@@ -223,6 +295,8 @@ class PhotoProjectSession extends ChangeNotifier {
     final adaptiveCompensations = Map.of(current.adaptiveCompensations)
       ..remove(photoId);
     final photoOverrides = Map.of(current.photoOverrides)..remove(photoId);
+    final analysisStates = Map.of(current.analysisStates)..remove(photoId);
+    final exportStates = Map.of(current.exportStates)..remove(photoId);
     final focusPhotoId = current.focusPhotoId == photoId
         ? remainingPhotos[photoIndex.clamp(0, remainingPhotos.length - 1)].id
         : current.focusPhotoId;
@@ -231,6 +305,8 @@ class PhotoProjectSession extends ChangeNotifier {
       photos: remainingPhotos,
       adaptiveCompensations: adaptiveCompensations,
       photoOverrides: photoOverrides,
+      analysisStates: analysisStates,
+      exportStates: exportStates,
       focusPhotoId: focusPhotoId,
     );
     await lifecycleStore.save(next);
@@ -251,6 +327,17 @@ class PhotoProjectSession extends ChangeNotifier {
     await lifecycleStore.deleteProject(current);
     _project = null;
     notifyListeners();
+  }
+
+  PhotoProject _requirePhoto(String photoId) {
+    final current = _project;
+    if (current == null) {
+      throw StateError('A project is required before updating a photo');
+    }
+    if (!current.photos.any((photo) => photo.id == photoId)) {
+      throw ArgumentError.value(photoId, 'photoId', 'Photo is not in project');
+    }
+    return current;
   }
 
   static String _defaultId() {

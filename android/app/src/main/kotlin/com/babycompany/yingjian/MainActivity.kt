@@ -27,6 +27,26 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 if (call.method == "supportsHeif") {
                     result.success(Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
+                } else if (call.method == "inspectPhoto") {
+                    val path = call.argument<String>("path")
+                    if (path == null) {
+                        result.error("invalidArguments", "Photo path is required", null)
+                        return@setMethodCallHandler
+                    }
+                    exportExecutor.execute {
+                        try {
+                            val inspection = AndroidPhotoInputInspector().inspect(path)
+                            mainHandler.post { result.success(inspection) }
+                        } catch (error: AndroidPhotoExportException) {
+                            mainHandler.post {
+                                result.error(error.code, error.message, null)
+                            }
+                        } catch (_: Throwable) {
+                            mainHandler.post {
+                                result.error("unreadable", "Photo could not be inspected", null)
+                            }
+                        }
+                    }
                 } else {
                     result.notImplemented()
                 }

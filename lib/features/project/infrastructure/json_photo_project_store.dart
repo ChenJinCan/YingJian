@@ -34,6 +34,13 @@ final class JsonPhotoProjectStore implements PhotoProjectLifecycleStore {
             id: photo.id,
             localPath: await _resolvePath(root, photo.localPath),
             originalName: photo.originalName,
+            contentSha256: photo.contentSha256,
+            pixelWidth: photo.pixelWidth,
+            pixelHeight: photo.pixelHeight,
+            orientation: photo.orientation,
+            colorSpace: photo.colorSpace,
+            inputFormat: photo.inputFormat,
+            supportState: photo.supportState,
           ),
         ),
       ),
@@ -63,18 +70,15 @@ final class JsonPhotoProjectStore implements PhotoProjectLifecycleStore {
   Future<void> deletePhotoCopy(ProjectPhoto photo) async {
     final root = await _directory();
     final file = File(photo.localPath);
-    if (!await file.exists()) {
-      return;
-    }
     final media = Directory('${root.path}/media');
-    if (!await media.exists()) {
-      return;
+    if (await file.exists() && await media.exists()) {
+      final mediaPath = await media.resolveSymbolicLinks();
+      final filePath = await file.resolveSymbolicLinks();
+      if (filePath.startsWith('$mediaPath/')) {
+        await file.delete();
+      }
     }
-    final mediaPath = await media.resolveSymbolicLinks();
-    final filePath = await file.resolveSymbolicLinks();
-    if (filePath.startsWith('$mediaPath/')) {
-      await file.delete();
-    }
+    await _deletePhotoDerivedArtifacts(root, photo.id);
   }
 
   @override
@@ -86,6 +90,12 @@ final class JsonPhotoProjectStore implements PhotoProjectLifecycleStore {
     }
     for (final photo in project.photos) {
       await deletePhotoCopy(photo);
+    }
+    for (final name in const ['previews', 'analysis', 'debug']) {
+      final directory = Directory('${root.path}/$name');
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
+      }
     }
   }
 
@@ -113,5 +123,22 @@ final class JsonPhotoProjectStore implements PhotoProjectLifecycleStore {
       throw const FormatException('Photo path leaves the project directory');
     }
     return '${root.path}/$path';
+  }
+
+  Future<void> _deletePhotoDerivedArtifacts(
+    Directory root,
+    String photoId,
+  ) async {
+    if (!RegExp(r'^[A-Za-z0-9._-]+$').hasMatch(photoId) ||
+        photoId == '.' ||
+        photoId == '..') {
+      return;
+    }
+    for (final name in const ['previews', 'analysis', 'debug']) {
+      final directory = Directory('${root.path}/$name/$photoId');
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
+      }
+    }
   }
 }

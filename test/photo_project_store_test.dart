@@ -20,6 +20,14 @@ void main() {
           id: 'photo-1',
           localPath: '/app/media/photo-1.jpg',
           originalName: 'holiday.jpg',
+          contentSha256:
+              'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          pixelWidth: 4032,
+          pixelHeight: 3024,
+          orientation: 6,
+          colorSpace: PhotoColorSpace.displayP3,
+          inputFormat: PhotoInputFormat.jpeg,
+          supportState: PhotoSupportState.supported,
         ),
       ],
     );
@@ -182,8 +190,15 @@ void main() {
     );
     addTearDown(() => root.delete(recursive: true));
     final appCopy = File('${root.path}/media/photo-1.jpg');
+    final preview = File('${root.path}/previews/photo-1/preview.jpg');
+    final analysis = File('${root.path}/analysis/photo-1/result.json');
+    final debugArtifact = File('${root.path}/debug/photo-1/trace.txt');
     await appCopy.parent.create(recursive: true);
     await appCopy.writeAsBytes(const [1, 2, 3]);
+    for (final derived in [preview, analysis, debugArtifact]) {
+      await derived.parent.create(recursive: true);
+      await derived.writeAsString('derived');
+    }
     final project = PhotoProject(
       id: 'project-1',
       createdAt: DateTime.utc(2026, 8, 4),
@@ -203,5 +218,33 @@ void main() {
 
     expect(await store.loadLatest(), isNull);
     expect(await appCopy.exists(), isFalse);
+    expect(await preview.exists(), isFalse);
+    expect(await analysis.exists(), isFalse);
+    expect(await debugArtifact.exists(), isFalse);
+  });
+
+  test('deleting one photo also removes only its derived artifacts', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'yingjian-project-delete-derived-',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final first = File('${root.path}/previews/photo-1/preview.jpg');
+    final second = File('${root.path}/previews/photo-2/preview.jpg');
+    for (final file in [first, second]) {
+      await file.parent.create(recursive: true);
+      await file.writeAsString('preview');
+    }
+    final store = JsonPhotoProjectStore(directory: () async => root);
+
+    await store.deletePhotoCopy(
+      ProjectPhoto(
+        id: 'photo-1',
+        localPath: '${root.path}/media/missing.jpg',
+        originalName: 'first.jpg',
+      ),
+    );
+
+    expect(await first.exists(), isFalse);
+    expect(await second.exists(), isTrue);
   });
 }

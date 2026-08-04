@@ -38,7 +38,7 @@ void main() {
     expect(project.effectiveRecipeFor(second.id), EditRecipe(exposure: 0.2));
   });
 
-  test('version two layered project survives a JSON round trip', () {
+  test('version three project keeps per-photo analysis and export state', () {
     final project = PhotoProject(
       id: 'project-1',
       createdAt: DateTime.utc(2026, 8, 4),
@@ -54,20 +54,60 @@ void main() {
       photoOverrides: {
         first.id: PhotoOverride(recipe: EditRecipe(contrast: 0.2)),
       },
+      analysisStates: {first.id: PhotoAnalysisState.ready},
+      exportStates: {first.id: PhotoExportState.queued},
     );
 
     final restored = PhotoProject.fromJson(project.toJson());
 
     expect(restored, project);
-    expect(project.toJson()['schemaVersion'], 2);
+    expect(restored.analysisStates[first.id], PhotoAnalysisState.ready);
+    expect(restored.exportStates[first.id], PhotoExportState.queued);
+    expect(project.toJson()['schemaVersion'], 3);
   });
+
+  test(
+    'version two project migrates stable per-photo states without layers',
+    () {
+      final restored = PhotoProject.fromJson({
+        'schemaVersion': 2,
+        'id': 'version-two',
+        'createdAt': '2026-08-04T00:00:00.000Z',
+        'updatedAt': '2026-08-04T01:00:00.000Z',
+        'photos': [
+          {
+            'id': first.id,
+            'localPath': first.localPath,
+            'originalName': first.originalName,
+          },
+        ],
+        'flowState': 'analyzing',
+        'sharedStyle': {
+          'recipe': {'exposure': 0.0, 'contrast': 0.0, 'warmth': 0.0},
+        },
+        'adaptiveCompensations': <String, Object>{},
+        'photoOverrides': <String, Object>{},
+      });
+
+      expect(restored.analysisStates, {first.id: PhotoAnalysisState.pending});
+      expect(restored.exportStates, {first.id: PhotoExportState.notQueued});
+      expect(restored.adaptiveCompensations, isEmpty);
+      expect(restored.photoOverrides, isEmpty);
+    },
+  );
 
   test('legacy recipe migrates to the shared style without duplication', () {
     final restored = PhotoProject.fromJson({
       'id': 'legacy',
       'createdAt': '2026-08-04T00:00:00.000Z',
       'updatedAt': '2026-08-04T01:00:00.000Z',
-      'photos': [first.toJson()],
+      'photos': [
+        {
+          'id': first.id,
+          'localPath': first.localPath,
+          'originalName': first.originalName,
+        },
+      ],
       'recipe': {'exposure': 0.25, 'contrast': 0.1, 'warmth': -0.2},
     });
 
@@ -77,6 +117,8 @@ void main() {
     );
     expect(restored.adaptiveCompensations, isEmpty);
     expect(restored.photoOverrides, isEmpty);
+    expect(restored.analysisStates, {first.id: PhotoAnalysisState.pending});
+    expect(restored.exportStates, {first.id: PhotoExportState.notQueued});
     expect(restored.effectiveRecipeFor(first.id), restored.sharedStyle.recipe);
   });
 
@@ -92,6 +134,18 @@ void main() {
         },
       ),
       throwsArgumentError,
+    );
+  });
+
+  test('rejects an invalid stored orientation outside debug mode', () {
+    expect(
+      () => ProjectPhoto.fromJson({
+        'id': 'invalid',
+        'localPath': '/app/media/invalid.jpg',
+        'originalName': 'invalid.jpg',
+        'orientation': 9,
+      }),
+      throwsFormatException,
     );
   });
 }
