@@ -91,5 +91,14 @@
   "useThisLook": "使用这套效果",
   "recommendationNaturalClean": "自然干净",
   "recommendationAtmosphericColor": "氛围色彩",
-  "recommendationTexturedStyle": "质感风格"
+  "recommendationTexturedStyle": "质感风格",
+  "editWholeGroup": "编辑整组",
+  "editCurrentPhoto": "仅当前照片",
+  "photoPositionAndScope": "第 {current} / {total} 张 · {scope}",
+  "@photoPositionAndScope": {"placeholders": {"current": {"type": "int"}, "total": {"type": "int"}, "scope": {"type": "String"}}},
+  "photoStatusUnprocessed": "未处理",
+  "photoStatusAutoCompensated": "自动补偿",
+  "photoStatusOverridden": "单张精修",
+  "photoStatusFailed": "处理失败",
+  "photoStatusQueued": "待导出"
 }

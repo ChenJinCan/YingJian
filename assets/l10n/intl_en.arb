@@ -89,5 +89,14 @@
   "useThisLook": "Use this look",
   "recommendationNaturalClean": "Natural clean",
   "recommendationAtmosphericColor": "Atmospheric color",
-  "recommendationTexturedStyle": "Textured style"
+  "recommendationTexturedStyle": "Textured style",
+  "editWholeGroup": "Edit whole group",
+  "editCurrentPhoto": "Current photo only",
+  "photoPositionAndScope": "Photo {current} of {total} · {scope}",
+  "@photoPositionAndScope": {"placeholders": {"current": {"type": "int"}, "total": {"type": "int"}, "scope": {"type": "String"}}},
+  "photoStatusUnprocessed": "Not processed",
+  "photoStatusAutoCompensated": "Auto adjusted",
+  "photoStatusOverridden": "Photo refined",
+  "photoStatusFailed": "Processing failed",
+  "photoStatusQueued": "Ready to export"
 }

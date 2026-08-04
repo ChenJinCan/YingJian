@@ -589,6 +589,54 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'质感风格'**
   String get recommendationTexturedStyle;
+
+  /// No description provided for @editWholeGroup.
+  ///
+  /// In zh, this message translates to:
+  /// **'编辑整组'**
+  String get editWholeGroup;
+
+  /// No description provided for @editCurrentPhoto.
+  ///
+  /// In zh, this message translates to:
+  /// **'仅当前照片'**
+  String get editCurrentPhoto;
+
+  /// No description provided for @photoPositionAndScope.
+  ///
+  /// In zh, this message translates to:
+  /// **'第 {current} / {total} 张 · {scope}'**
+  String photoPositionAndScope(int current, int total, String scope);
+
+  /// No description provided for @photoStatusUnprocessed.
+  ///
+  /// In zh, this message translates to:
+  /// **'未处理'**
+  String get photoStatusUnprocessed;
+
+  /// No description provided for @photoStatusAutoCompensated.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动补偿'**
+  String get photoStatusAutoCompensated;
+
+  /// No description provided for @photoStatusOverridden.
+  ///
+  /// In zh, this message translates to:
+  /// **'单张精修'**
+  String get photoStatusOverridden;
+
+  /// No description provided for @photoStatusFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'处理失败'**
+  String get photoStatusFailed;
+
+  /// No description provided for @photoStatusQueued.
+  ///
+  /// In zh, this message translates to:
+  /// **'待导出'**
+  String get photoStatusQueued;
 }
 
 class _AppLocalizationsDelegate

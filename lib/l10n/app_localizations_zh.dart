@@ -269,4 +269,30 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get recommendationTexturedStyle => '质感风格';
+
+  @override
+  String get editWholeGroup => '编辑整组';
+
+  @override
+  String get editCurrentPhoto => '仅当前照片';
+
+  @override
+  String photoPositionAndScope(int current, int total, String scope) {
+    return '第 $current / $total 张 · $scope';
+  }
+
+  @override
+  String get photoStatusUnprocessed => '未处理';
+
+  @override
+  String get photoStatusAutoCompensated => '自动补偿';
+
+  @override
+  String get photoStatusOverridden => '单张精修';
+
+  @override
+  String get photoStatusFailed => '处理失败';
+
+  @override
+  String get photoStatusQueued => '待导出';
 }

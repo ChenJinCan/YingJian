@@ -284,4 +284,30 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get recommendationTexturedStyle => 'Textured style';
+
+  @override
+  String get editWholeGroup => 'Edit whole group';
+
+  @override
+  String get editCurrentPhoto => 'Current photo only';
+
+  @override
+  String photoPositionAndScope(int current, int total, String scope) {
+    return 'Photo $current of $total · $scope';
+  }
+
+  @override
+  String get photoStatusUnprocessed => 'Not processed';
+
+  @override
+  String get photoStatusAutoCompensated => 'Auto adjusted';
+
+  @override
+  String get photoStatusOverridden => 'Photo refined';
+
+  @override
+  String get photoStatusFailed => 'Processing failed';
+
+  @override
+  String get photoStatusQueued => 'Ready to export';
 }

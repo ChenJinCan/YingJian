@@ -184,6 +184,24 @@ class _EditorPageState extends State<EditorPage> {
     }
   }
 
+  Future<void> _setEditingScope(ProjectEditingScope scope) async {
+    final session = _session!;
+    final photo = session.photos[_selectedIndex];
+    try {
+      await session.setEditingScope(
+        scope,
+        photoId: scope == ProjectEditingScope.currentPhoto ? photo.id : null,
+      );
+      _editorSession.load(session.editableRecipe);
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
+      }
+    }
+  }
+
   Future<bool> _confirm({
     required String title,
     required String message,
@@ -404,6 +422,7 @@ class _EditorPageState extends State<EditorPage> {
                   )
                 : _PhotoWorkspace(
                     photos: photos,
+                    project: session.project!,
                     importFailures: session.importFailures,
                     selectedIndex: _selectedIndex,
                     busy: _busy,
@@ -431,6 +450,8 @@ class _EditorPageState extends State<EditorPage> {
                         setState(() => _previewRecommendationIndex = index),
                     onRecommendationSelected: (recommendation) =>
                         unawaited(_selectRecommendation(recommendation)),
+                    onEditingScopeChanged: (scope) =>
+                        unawaited(_setEditingScope(scope)),
                   ),
           ),
         );
@@ -532,6 +553,7 @@ class _EmptyProject extends StatelessWidget {
 class _PhotoWorkspace extends StatelessWidget {
   const _PhotoWorkspace({
     required this.photos,
+    required this.project,
     required this.importFailures,
     required this.selectedIndex,
     required this.busy,
@@ -556,9 +578,11 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.onReset,
     required this.onRecommendationPreviewed,
     required this.onRecommendationSelected,
+    required this.onEditingScopeChanged,
   });
 
   final List<ProjectPhoto> photos;
+  final PhotoProject project;
   final List<PhotoImportFailure> importFailures;
   final int selectedIndex;
   final bool busy;
@@ -583,6 +607,7 @@ class _PhotoWorkspace extends StatelessWidget {
   final VoidCallback onReset;
   final ValueChanged<int> onRecommendationPreviewed;
   final ValueChanged<LocalRecommendation> onRecommendationSelected;
+  final ValueChanged<ProjectEditingScope> onEditingScopeChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -648,39 +673,97 @@ class _PhotoWorkspace extends StatelessWidget {
             ),
           ],
         ),
+        Text(
+          context.l10n.photoPositionAndScope(
+            selectedIndex + 1,
+            photos.length,
+            project.editingScope == ProjectEditingScope.group
+                ? context.l10n.editWholeGroup
+                : context.l10n.editCurrentPhoto,
+          ),
+          style: Theme.of(context).textTheme.labelLarge,
+        ),
+        if (photos.length > 1 && editingEnabled) ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<ProjectEditingScope>(
+              segments: [
+                ButtonSegment(
+                  value: ProjectEditingScope.group,
+                  icon: const Icon(Icons.collections_outlined),
+                  label: Text(context.l10n.editWholeGroup),
+                ),
+                ButtonSegment(
+                  value: ProjectEditingScope.currentPhoto,
+                  icon: const Icon(Icons.photo_outlined),
+                  label: Text(context.l10n.editCurrentPhoto),
+                ),
+              ],
+              selected: {project.editingScope},
+              onSelectionChanged: (selection) =>
+                  onEditingScopeChanged(selection.single),
+            ),
+          ),
+        ],
         const SizedBox(height: 16),
         SizedBox(
-          height: 72,
+          height: 100,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: photos.length,
             separatorBuilder: (_, _) => const SizedBox(width: 8),
             itemBuilder: (context, index) {
               final photo = photos[index];
+              final status = _photoStatus(context, project, photo.id);
               return Semantics(
                 selected: index == selectedIndex,
                 button: true,
-                label: photo.originalName,
+                label: '${photo.originalName}, ${status.$2}',
                 child: InkWell(
                   onTap: () => onSelected(index),
                   borderRadius: BorderRadius.circular(12),
-                  child: Container(
-                    width: 72,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: index == selectedIndex
-                            ? Theme.of(context).colorScheme.primary
-                            : Colors.transparent,
-                        width: 3,
-                      ),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Image.file(
-                      File(photo.localPath),
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) =>
-                          const Icon(Icons.broken_image_outlined),
+                  child: SizedBox(
+                    width: 88,
+                    child: Column(
+                      children: [
+                        Container(
+                          width: 68,
+                          height: 68,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: index == selectedIndex
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Colors.transparent,
+                              width: 3,
+                            ),
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: Image.file(
+                            File(photo.localPath),
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) =>
+                                const Icon(Icons.broken_image_outlined),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(status.$1, size: 13),
+                            const SizedBox(width: 3),
+                            Flexible(
+                              child: Text(
+                                status.$2,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.labelSmall,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -767,6 +850,26 @@ class _PhotoWorkspace extends StatelessWidget {
       ],
     );
   }
+}
+
+(IconData, String) _photoStatus(
+  BuildContext context,
+  PhotoProject project,
+  String photoId,
+) {
+  if (project.exportStates[photoId] == PhotoExportState.queued) {
+    return (Icons.outbox_outlined, context.l10n.photoStatusQueued);
+  }
+  if (project.analysisStates[photoId] == PhotoAnalysisState.failed) {
+    return (Icons.error_outline, context.l10n.photoStatusFailed);
+  }
+  if (project.photoOverrides.containsKey(photoId)) {
+    return (Icons.tune, context.l10n.photoStatusOverridden);
+  }
+  if (project.adaptiveCompensations.containsKey(photoId)) {
+    return (Icons.auto_fix_high, context.l10n.photoStatusAutoCompensated);
+  }
+  return (Icons.hourglass_empty, context.l10n.photoStatusUnprocessed);
 }
 
 class _RecommendationPanel extends StatelessWidget {

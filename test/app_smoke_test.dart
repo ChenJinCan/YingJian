@@ -241,6 +241,85 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
+  testWidgets(
+    'multi-photo editing makes group and current-photo scope explicit',
+    (tester) async {
+      final photoFile = File(
+        'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+        'Icon-App-1024x1024@1x.png',
+      );
+      final photos = [
+        ProjectPhoto(
+          id: 'photo-1',
+          localPath: photoFile.path,
+          originalName: 'first.png',
+        ),
+        ProjectPhoto(
+          id: 'photo-2',
+          localPath: photoFile.path,
+          originalName: 'second.png',
+        ),
+      ];
+      final store = MemoryPhotoProjectStore(
+        PhotoProject(
+          id: 'project-1',
+          createdAt: DateTime.utc(2026, 8, 4),
+          updatedAt: DateTime.utc(2026, 8, 4),
+          photos: photos,
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'mvp-catalog-v1:clean-balanced',
+          sharedStyle: SharedStyle(recipe: EditRecipe(exposure: 0.1)),
+          adaptiveCompensations: {
+            for (final photo in photos)
+              photo.id: AdaptiveCompensation(
+                recipe: EditRecipe.neutral,
+                source: AdaptiveCompensationSource.safeFallbackV1,
+              ),
+          },
+        ),
+      );
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+      await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
+
+      await tester.tap(find.text('开始修图'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('第 1 / 2 张 · 编辑整组'), findsOneWidget);
+      expect(find.text('编辑整组'), findsOneWidget);
+      expect(find.text('仅当前照片'), findsOneWidget);
+      expect(find.text('自动补偿'), findsNWidgets(2));
+
+      await tester.tap(find.text('仅当前照片'));
+      await tester.pumpAndSettle();
+      expect(store.project?.editingScope, ProjectEditingScope.currentPhoto);
+      expect(find.text('第 1 / 2 张 · 仅当前照片'), findsOneWidget);
+
+      await tester.dragUntilVisible(
+        find.text('曝光'),
+        find.byType(ListView).first,
+        const Offset(0, -240),
+      );
+      await tester.drag(find.byType(Slider).first, const Offset(90, 0));
+      await tester.pumpAndSettle();
+
+      expect(store.project?.photoOverrides.containsKey('photo-1'), isTrue);
+      expect(store.project?.photoOverrides.containsKey('photo-2'), isFalse);
+      expect(store.project?.effectiveRecipeFor('photo-2').exposure, 0.1);
+      expect(find.text('单张精修'), findsOneWidget);
+
+      await tester.dragUntilVisible(
+        find.text('重置'),
+        find.byType(ListView).first,
+        const Offset(0, -180),
+      );
+      await tester.tap(find.text('重置'));
+      await tester.pumpAndSettle();
+      expect(store.project?.photoOverrides.containsKey('photo-1'), isFalse);
+      expect(store.project?.sharedStyle.recipe.exposure, 0.1);
+    },
+  );
+
   testWidgets('project restore failure has a visible retry state', (
     tester,
   ) async {
@@ -299,6 +378,8 @@ void main() {
       find.byType(ListView).first,
       const Offset(0, -300),
     );
+    await tester.drag(find.byType(ListView).first, const Offset(0, -80));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('原画质导出'));
     await tester.pump();
 
