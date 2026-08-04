@@ -10,7 +10,9 @@ import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
+import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
 
+import 'support/memory_photo_analysis_cache.dart';
 import 'support/test_services.dart';
 
 void main() {
@@ -172,6 +174,472 @@ void main() {
       store.project?.adaptiveCompensations['photo-1']?.source,
       AdaptiveCompensationSource.safeFallbackV1,
     );
+  });
+
+  testWidgets('restored recommendations reuse project-local analysis', (
+    tester,
+  ) async {
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final photo = ProjectPhoto(
+      id: 'photo-1',
+      localPath: photoFile.path,
+      originalName: '推荐样片.png',
+      contentSha256:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      pixelWidth: 1024,
+      pixelHeight: 1024,
+      colorSpace: PhotoColorSpace.srgb,
+      inputFormat: PhotoInputFormat.png,
+      supportState: PhotoSupportState.supported,
+    );
+    final store = MemoryPhotoProjectStore();
+    final analyzer = _CountingPhotoAnalyzer();
+    final cache = MemoryPhotoAnalysisCache();
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+
+    Widget app() => buildTestApp(
+      settings,
+      photoProjectStore: store,
+      photoImporter: FakePhotoImporter([photo]),
+      photoAnalyzer: analyzer,
+      photoAnalysisCache: cache,
+    );
+
+    await tester.pumpWidget(app());
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('选择照片'));
+    await tester.pumpAndSettle();
+    expect(analyzer.calls, 1);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(app());
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+
+    expect(analyzer.calls, 1);
+    await tester.dragUntilVisible(
+      find.text('自然干净'),
+      find.byKey(const Key('photo-workspace-scroll')),
+      const Offset(0, -200),
+    );
+    expect(find.text('自然干净'), findsOneWidget);
+    expect(find.text('氛围色彩'), findsOneWidget);
+    expect(find.text('质感风格'), findsOneWidget);
+  });
+
+  testWidgets('backgrounding analysis discards a late native result', (
+    tester,
+  ) async {
+    addTearDown(
+      () => tester.binding.handleAppLifecycleStateChanged(
+        AppLifecycleState.resumed,
+      ),
+    );
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final photo = ProjectPhoto(
+      id: 'photo-1',
+      localPath: photoFile.path,
+      originalName: '后台样片.png',
+      contentSha256:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      pixelWidth: 1024,
+      pixelHeight: 1024,
+      colorSpace: PhotoColorSpace.srgb,
+      inputFormat: PhotoInputFormat.png,
+      supportState: PhotoSupportState.supported,
+    );
+    final store = MemoryPhotoProjectStore();
+    final analyzer = _DeferredPhotoAnalyzer();
+    final cache = MemoryPhotoAnalysisCache();
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoProjectStore: store,
+        photoImporter: FakePhotoImporter([photo]),
+        photoAnalyzer: analyzer,
+        photoAnalysisCache: cache,
+      ),
+    );
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('选择照片'));
+    await tester.pump();
+    await analyzer.started.future;
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    analyzer.complete();
+    await tester.pumpAndSettle();
+
+    expect(
+      store.project?.analysisStates[photo.id],
+      PhotoAnalysisState.fallback,
+    );
+    expect(
+      await cache.read(
+        projectId: store.project!.id,
+        photo: photo,
+        engineIdentity: analyzer.identityFor(photo),
+      ),
+      isNull,
+    );
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+
+    expect(
+      store.project?.flowState,
+      PhotoProjectFlowState.choosingRecommendation,
+    );
+    await tester.dragUntilVisible(
+      find.text('自然干净'),
+      find.byKey(const Key('photo-workspace-scroll')),
+      const Offset(0, -200),
+    );
+    expect(find.text('自然干净'), findsOneWidget);
+  });
+
+  testWidgets('rapid resume waits for the serialized lifecycle fallback', (
+    tester,
+  ) async {
+    addTearDown(
+      () => tester.binding.handleAppLifecycleStateChanged(
+        AppLifecycleState.resumed,
+      ),
+    );
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final photo = ProjectPhoto(
+      id: 'photo-1',
+      localPath: photoFile.path,
+      originalName: '快速恢复.png',
+      contentSha256:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      pixelWidth: 1024,
+      pixelHeight: 1024,
+      colorSpace: PhotoColorSpace.srgb,
+      inputFormat: PhotoInputFormat.png,
+      supportState: PhotoSupportState.supported,
+    );
+    final store = _DeferredFallbackProjectStore();
+    final analyzer = _DeferredPhotoAnalyzer();
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoProjectStore: store,
+        photoImporter: FakePhotoImporter([photo]),
+        photoAnalyzer: analyzer,
+      ),
+    );
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('选择照片'));
+    await tester.pump();
+    await analyzer.started.future;
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    analyzer.complete();
+    await tester.pump();
+    await store.fallbackSaveStarted.future;
+
+    expect(store.project?.flowState, PhotoProjectFlowState.analyzing);
+    store.completeFallbackSave();
+    await tester.pumpAndSettle();
+
+    expect(
+      store.project?.flowState,
+      PhotoProjectFlowState.choosingRecommendation,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('leaving the editor ignores a late analysis completion', (
+    tester,
+  ) async {
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final photo = ProjectPhoto(
+      id: 'photo-1',
+      localPath: photoFile.path,
+      originalName: '退出样片.png',
+      contentSha256:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      pixelWidth: 1024,
+      pixelHeight: 1024,
+      colorSpace: PhotoColorSpace.srgb,
+      inputFormat: PhotoInputFormat.png,
+      supportState: PhotoSupportState.supported,
+    );
+    final analyzer = _DeferredPhotoAnalyzer();
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoImporter: FakePhotoImporter([photo]),
+        photoAnalyzer: analyzer,
+      ),
+    );
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('选择照片'));
+    await tester.pump();
+    await analyzer.started.future;
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    analyzer.complete();
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('deleting a project discards its late analysis and cache', (
+    tester,
+  ) async {
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final photo = ProjectPhoto(
+      id: 'photo-1',
+      localPath: photoFile.path,
+      originalName: '删除样片.png',
+      contentSha256:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      pixelWidth: 1024,
+      pixelHeight: 1024,
+      colorSpace: PhotoColorSpace.srgb,
+      inputFormat: PhotoInputFormat.png,
+      supportState: PhotoSupportState.supported,
+    );
+    final store = MemoryPhotoProjectStore();
+    final analyzer = _DeferredPhotoAnalyzer();
+    final cache = MemoryPhotoAnalysisCache();
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoProjectStore: store,
+        photoImporter: FakePhotoImporter([photo]),
+        photoAnalyzer: analyzer,
+        photoAnalysisCache: cache,
+      ),
+    );
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('选择照片'));
+    await tester.pump();
+    await analyzer.started.future;
+
+    await tester.tap(find.byTooltip('删除项目'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('删除').last);
+    await tester.pump();
+    analyzer.complete();
+    await tester.pumpAndSettle();
+
+    expect(store.project, isNull);
+    expect(
+      await cache.read(
+        projectId: 'project-1',
+        photo: photo,
+        engineIdentity: analyzer.identityFor(photo),
+      ),
+      isNull,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('project deletion drains a claimed analysis state save', (
+    tester,
+  ) async {
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final photo = ProjectPhoto(
+      id: 'photo-1',
+      localPath: photoFile.path,
+      originalName: '慢保存删除.png',
+      contentSha256:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      pixelWidth: 1024,
+      pixelHeight: 1024,
+      colorSpace: PhotoColorSpace.srgb,
+      inputFormat: PhotoInputFormat.png,
+      supportState: PhotoSupportState.supported,
+    );
+    final store = _DeferredAnalysisStateProjectStore();
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoProjectStore: store,
+        photoImporter: FakePhotoImporter([photo]),
+        photoAnalyzer: _CountingPhotoAnalyzer(),
+      ),
+    );
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('选择照片'));
+    await tester.pump();
+    await store.analysisSaveStarted.future;
+
+    await tester.tap(find.byTooltip('删除项目'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('删除').last);
+    await tester.pump();
+    expect(store.project, isNotNull);
+
+    store.completeAnalysisSave();
+    await tester.pumpAndSettle();
+
+    expect(store.project, isNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('removing a photo restarts analysis for the remaining group', (
+    tester,
+  ) async {
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    ProjectPhoto photo(String id) => ProjectPhoto(
+      id: id,
+      localPath: photoFile.path,
+      originalName: '$id.png',
+      contentSha256: id == 'photo-1'
+          ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+          : 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      pixelWidth: 1024,
+      pixelHeight: 1024,
+      colorSpace: PhotoColorSpace.srgb,
+      inputFormat: PhotoInputFormat.png,
+      supportState: PhotoSupportState.supported,
+    );
+    final store = MemoryPhotoProjectStore();
+    final analyzer = _FirstDeferredPhotoAnalyzer();
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoProjectStore: store,
+        photoImporter: FakePhotoImporter([photo('photo-1'), photo('photo-2')]),
+        photoAnalyzer: analyzer,
+      ),
+    );
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('选择照片'));
+    await tester.pump();
+    await analyzer.started.future;
+
+    await tester.tap(find.byTooltip('移除照片'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('删除').last);
+    await tester.pump();
+    analyzer.completeFirst();
+    await tester.pumpAndSettle();
+
+    expect(store.project?.photos.map((photo) => photo.id), ['photo-2']);
+    expect(
+      store.project?.flowState,
+      PhotoProjectFlowState.choosingRecommendation,
+    );
+    expect(analyzer.calls, greaterThanOrEqualTo(2));
+    await tester.dragUntilVisible(
+      find.text('自然干净'),
+      find.byKey(const Key('photo-workspace-scroll')),
+      const Offset(0, -200),
+    );
+    expect(find.text('自然干净'), findsOneWidget);
+  });
+
+  testWidgets('photo removal drains a claimed analysis state save', (
+    tester,
+  ) async {
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    ProjectPhoto photo(String id, String hash) => ProjectPhoto(
+      id: id,
+      localPath: photoFile.path,
+      originalName: '$id.png',
+      contentSha256: hash,
+      pixelWidth: 1024,
+      pixelHeight: 1024,
+      colorSpace: PhotoColorSpace.srgb,
+      inputFormat: PhotoInputFormat.png,
+      supportState: PhotoSupportState.supported,
+    );
+    final store = _DeferredAnalysisStateProjectStore();
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoProjectStore: store,
+        photoImporter: FakePhotoImporter([
+          photo(
+            'photo-1',
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          ),
+          photo(
+            'photo-2',
+            'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+          ),
+        ]),
+        photoAnalyzer: _CountingPhotoAnalyzer(),
+      ),
+    );
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('选择照片'));
+    await tester.pump();
+    await store.analysisSaveStarted.future;
+
+    await tester.tap(find.byTooltip('移除照片'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('删除').last);
+    await tester.pump();
+    expect(store.project?.photos, hasLength(2));
+
+    store.completeAnalysisSave();
+    await tester.pumpAndSettle();
+
+    expect(store.project?.photos.map((photo) => photo.id), ['photo-2']);
+    expect(
+      store.project?.flowState,
+      PhotoProjectFlowState.choosingRecommendation,
+    );
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('user adjusts a photo and exports from its original', (
@@ -741,6 +1209,163 @@ final class _FailingProjectStore implements PhotoProjectStore {
 
   @override
   Future<void> save(PhotoProject project) async {}
+}
+
+final class _DeferredFallbackProjectStore
+    implements PhotoProjectLifecycleStore {
+  final Completer<void> fallbackSaveStarted = Completer<void>();
+  final Completer<void> _fallbackSaveRelease = Completer<void>();
+  PhotoProject? project;
+  bool _delayFallback = true;
+
+  void completeFallbackSave() => _fallbackSaveRelease.complete();
+
+  @override
+  Future<PhotoProject?> loadLatest() async => project;
+
+  @override
+  Future<void> save(PhotoProject project) async {
+    if (_delayFallback &&
+        project.analysisStates.values.contains(PhotoAnalysisState.fallback)) {
+      _delayFallback = false;
+      fallbackSaveStarted.complete();
+      await _fallbackSaveRelease.future;
+    }
+    this.project = project;
+  }
+
+  @override
+  Future<void> deletePhotoCopy(ProjectPhoto photo) async {}
+
+  @override
+  Future<void> deleteProject(PhotoProject project) async {
+    this.project = null;
+  }
+}
+
+final class _DeferredAnalysisStateProjectStore
+    implements PhotoProjectLifecycleStore {
+  final Completer<void> analysisSaveStarted = Completer<void>();
+  final Completer<void> _analysisSaveRelease = Completer<void>();
+  PhotoProject? project;
+  bool _delayReady = true;
+
+  void completeAnalysisSave() => _analysisSaveRelease.complete();
+
+  @override
+  Future<PhotoProject?> loadLatest() async => project;
+
+  @override
+  Future<void> save(PhotoProject project) async {
+    if (_delayReady &&
+        project.analysisStates.values.contains(PhotoAnalysisState.ready)) {
+      _delayReady = false;
+      analysisSaveStarted.complete();
+      await _analysisSaveRelease.future;
+    }
+    this.project = project;
+  }
+
+  @override
+  Future<void> deletePhotoCopy(ProjectPhoto photo) async {}
+
+  @override
+  Future<void> deleteProject(PhotoProject project) async {
+    this.project = null;
+  }
+}
+
+final class _CountingPhotoAnalyzer implements PhotoAnalyzer {
+  int calls = 0;
+
+  @override
+  PhotoAnalysisEngineIdentity identityFor(ProjectPhoto photo) =>
+      const PhotoAnalysisEngineIdentity(
+        analysisVersion: 'widget-analysis-v1',
+        capabilityVersion: 'widget-capability-v1',
+      );
+
+  @override
+  Future<LocalPhotoAnalysis> analyze(ProjectPhoto photo) async {
+    calls += 1;
+    return LocalPhotoAnalysis(
+      analysisVersion: 'widget-analysis-v1',
+      capabilityVersion: 'widget-capability-v1',
+      contentSha256: photo.contentSha256,
+      orientation: photo.orientation,
+      pixelWidth: photo.pixelWidth,
+      pixelHeight: photo.pixelHeight,
+      colorSpace: photo.colorSpace,
+      disposition: PhotoAnalysisDisposition.ready,
+      fallbackReason: AnalysisFallbackReason.none,
+    );
+  }
+}
+
+final class _DeferredPhotoAnalyzer implements PhotoAnalyzer {
+  final Completer<void> started = Completer<void>();
+  final Completer<void> _release = Completer<void>();
+
+  void complete() => _release.complete();
+
+  @override
+  PhotoAnalysisEngineIdentity identityFor(ProjectPhoto photo) =>
+      const PhotoAnalysisEngineIdentity(
+        analysisVersion: 'widget-deferred-v1',
+        capabilityVersion: 'widget-capability-v1',
+      );
+
+  @override
+  Future<LocalPhotoAnalysis> analyze(ProjectPhoto photo) async {
+    started.complete();
+    await _release.future;
+    return LocalPhotoAnalysis(
+      analysisVersion: 'widget-deferred-v1',
+      capabilityVersion: 'widget-capability-v1',
+      contentSha256: photo.contentSha256,
+      orientation: photo.orientation,
+      pixelWidth: photo.pixelWidth,
+      pixelHeight: photo.pixelHeight,
+      colorSpace: photo.colorSpace,
+      disposition: PhotoAnalysisDisposition.ready,
+      fallbackReason: AnalysisFallbackReason.none,
+    );
+  }
+}
+
+final class _FirstDeferredPhotoAnalyzer implements PhotoAnalyzer {
+  final Completer<void> started = Completer<void>();
+  final Completer<void> _firstRelease = Completer<void>();
+  int calls = 0;
+
+  void completeFirst() => _firstRelease.complete();
+
+  @override
+  PhotoAnalysisEngineIdentity identityFor(ProjectPhoto photo) =>
+      const PhotoAnalysisEngineIdentity(
+        analysisVersion: 'widget-restart-v1',
+        capabilityVersion: 'widget-capability-v1',
+      );
+
+  @override
+  Future<LocalPhotoAnalysis> analyze(ProjectPhoto photo) async {
+    calls += 1;
+    if (calls == 1) {
+      started.complete();
+      await _firstRelease.future;
+    }
+    return LocalPhotoAnalysis(
+      analysisVersion: 'widget-restart-v1',
+      capabilityVersion: 'widget-capability-v1',
+      contentSha256: photo.contentSha256,
+      orientation: photo.orientation,
+      pixelWidth: photo.pixelWidth,
+      pixelHeight: photo.pixelHeight,
+      colorSpace: photo.colorSpace,
+      disposition: PhotoAnalysisDisposition.ready,
+      fallbackReason: AnalysisFallbackReason.none,
+    );
+  }
 }
 
 final class _FailingSaveProjectStore implements PhotoProjectStore {

@@ -13,6 +13,7 @@ import 'package:yingjian/features/editor/presentation/native_photo_preview.dart'
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/recommendations/application/local_recommendation_coordinator.dart';
+import 'package:yingjian/features/recommendations/application/photo_analysis_cache.dart';
 import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
 import 'package:yingjian/features/recommendations/domain/recipe_catalog.dart';
 import 'package:yingjian/l10n/l10n.dart';
@@ -24,7 +25,7 @@ class EditorPage extends StatefulWidget {
   State<EditorPage> createState() => _EditorPageState();
 }
 
-class _EditorPageState extends State<EditorPage> {
+class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   PhotoProjectSession? _session;
   final EditorSession _editorSession = EditorSession();
   ScrollController? _photoStripController;
@@ -38,6 +39,74 @@ class _EditorPageState extends State<EditorPage> {
   int _previewRecommendationIndex = -1;
   double? _pendingPhotoStripOffset;
   bool _savingPhotoStripPosition = false;
+  PhotoAnalysisCancellationToken? _analysisCancellation;
+  Future<void>? _analysisCompletion;
+  Future<void> _lifecycleAnalysisUpdates = Future.value();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_restartRecommendationsIfNeeded());
+    } else if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      _analysisCancellation?.cancel();
+      final analysisCompletion = _analysisCompletion;
+      _lifecycleAnalysisUpdates = _lifecycleAnalysisUpdates.then((_) async {
+        if (analysisCompletion != null) await analysisCompletion;
+        await _markRunningAnalysesAsFallback();
+      });
+    }
+  }
+
+  Future<void> _markRunningAnalysesAsFallback() async {
+    final session = _session;
+    final project = session?.project;
+    if (session == null || project == null) return;
+    for (final photo in project.photos) {
+      if (session.project?.id != project.id) return;
+      if (session.project?.analysisStates[photo.id] !=
+          PhotoAnalysisState.running) {
+        continue;
+      }
+      try {
+        await session.setPhotoAnalysisState(
+          photo.id,
+          PhotoAnalysisState.fallback,
+        );
+      } on Object {
+        return;
+      }
+    }
+  }
+
+  Future<void> _restartRecommendationsIfNeeded() async {
+    final previousCompletion = _analysisCompletion;
+    if (previousCompletion != null) await previousCompletion;
+    await _lifecycleAnalysisUpdates;
+    final session = _session;
+    if (!mounted ||
+        session == null ||
+        session.photos.isEmpty ||
+        session.project?.flowState != PhotoProjectFlowState.analyzing) {
+      return;
+    }
+    await _prepareRecommendations(persistAnalysisStates: true);
+  }
+
+  Future<void> _cancelAndDrainAnalysis() async {
+    _analysisCancellation?.cancel();
+    final analysisCompletion = _analysisCompletion;
+    if (analysisCompletion != null) await analysisCompletion;
+    await _lifecycleAnalysisUpdates;
+  }
 
   @override
   void didChangeDependencies() {
@@ -92,32 +161,88 @@ class _EditorPageState extends State<EditorPage> {
   }) async {
     final session = _session!;
     if (_preparingRecommendations || session.photos.isEmpty) return;
+    final cancellation = PhotoAnalysisCancellationToken();
+    final completion = Completer<void>();
+    _analysisCompletion = completion.future;
+    final projectId = session.project!.id;
+    final photos = List<ProjectPhoto>.unmodifiable(session.photos);
+    _analysisCancellation?.cancel();
+    _analysisCancellation = cancellation;
     if (mounted) setState(() => _preparingRecommendations = true);
     try {
       final preparation =
           await LocalRecommendationCoordinator(
             analyzer: context.read<PhotoAnalyzer>(),
+            cache: context.read<PhotoAnalysisCache>(),
           ).prepare(
-            photos: session.photos,
+            projectId: projectId,
+            photos: photos,
+            cancellation: cancellation,
             onStateChanged: persistAnalysisStates
-                ? session.setPhotoAnalysisState
+                ? (photoId, state) async {
+                    if (!_isCurrentAnalysisInput(
+                      cancellation: cancellation,
+                      projectId: projectId,
+                      photos: photos,
+                      photoId: photoId,
+                    )) {
+                      return;
+                    }
+                    await session.setPhotoAnalysisState(photoId, state);
+                  }
                 : null,
           );
-      if (persistAnalysisStates &&
+      if (_isCurrentAnalysisRun(cancellation, projectId) &&
+          persistAnalysisStates &&
           session.project?.flowState == PhotoProjectFlowState.analyzing) {
         await session.transitionTo(
           PhotoProjectFlowState.choosingRecommendation,
         );
       }
-      if (mounted) {
+      if (_isCurrentAnalysisRun(cancellation, projectId)) {
         setState(() {
           _recommendationPreparation = preparation;
           _previewRecommendationIndex = -1;
         });
       }
     } finally {
+      completion.complete();
+      if (identical(_analysisCompletion, completion.future)) {
+        _analysisCompletion = null;
+      }
+      if (identical(_analysisCancellation, cancellation)) {
+        _analysisCancellation = null;
+      }
       if (mounted) setState(() => _preparingRecommendations = false);
     }
+  }
+
+  bool _isCurrentAnalysisRun(
+    PhotoAnalysisCancellationToken cancellation,
+    String projectId,
+  ) =>
+      mounted &&
+      !cancellation.isCancelled &&
+      identical(_analysisCancellation, cancellation) &&
+      _session?.project?.id == projectId;
+
+  bool _isCurrentAnalysisInput({
+    required PhotoAnalysisCancellationToken cancellation,
+    required String projectId,
+    required List<ProjectPhoto> photos,
+    required String photoId,
+  }) {
+    if (!mounted ||
+        cancellation.isCancelled ||
+        !identical(_analysisCancellation, cancellation) ||
+        _session?.project?.id != projectId) {
+      return false;
+    }
+    final expected = photos.where((photo) => photo.id == photoId).firstOrNull;
+    final current = _session!.photos
+        .where((photo) => photo.id == photoId)
+        .firstOrNull;
+    return expected != null && current == expected;
   }
 
   Future<void> _selectRecommendation(LocalRecommendation recommendation) async {
@@ -306,6 +431,7 @@ class _EditorPageState extends State<EditorPage> {
 
   Future<void> _removePhoto(ProjectPhoto photo) async {
     if (_exporting) return;
+    final analysisCache = context.read<PhotoAnalysisCache>();
     final confirmed = await _confirm(
       title: context.l10n.removePhoto,
       message: context.l10n.removePhotoConfirmation,
@@ -313,8 +439,11 @@ class _EditorPageState extends State<EditorPage> {
     if (!confirmed) {
       return;
     }
+    final projectId = _session!.project!.id;
     try {
+      await _cancelAndDrainAnalysis();
       await _session!.removePhoto(photo.id);
+      await analysisCache.clearPhoto(projectId: projectId, photoId: photo.id);
       final focusPhotoId = _session!.project?.focusPhotoId;
       if (focusPhotoId != null) {
         _selectedIndex = _session!.photos.indexWhere(
@@ -324,6 +453,7 @@ class _EditorPageState extends State<EditorPage> {
         _selectedIndex = 0;
       }
       _editorSession.load(_session!.editableRecipe);
+      unawaited(_restartRecommendationsIfNeeded());
     } on Object {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -335,6 +465,7 @@ class _EditorPageState extends State<EditorPage> {
 
   Future<void> _deleteProject() async {
     if (_exporting) return;
+    final analysisCache = context.read<PhotoAnalysisCache>();
     final confirmed = await _confirm(
       title: context.l10n.deleteProject,
       message: context.l10n.deleteProjectConfirmation,
@@ -342,8 +473,11 @@ class _EditorPageState extends State<EditorPage> {
     if (!confirmed) {
       return;
     }
+    final projectId = _session!.project!.id;
     try {
+      await _cancelAndDrainAnalysis();
       await _session!.deleteProject();
+      await analysisCache.clearProject(projectId);
       _selectedIndex = 0;
       _editorSession.load(EditRecipe.neutral);
     } on Object {
@@ -371,7 +505,22 @@ class _EditorPageState extends State<EditorPage> {
 
   @override
   void dispose() {
-    _session?.dispose();
+    WidgetsBinding.instance.removeObserver(this);
+    _analysisCancellation?.cancel();
+    final session = _session;
+    final analysisCompletion = _analysisCompletion;
+    final lifecycleAnalysisUpdates = _lifecycleAnalysisUpdates;
+    if (session != null) {
+      final pending = <Future<void>>[
+        ?analysisCompletion,
+        lifecycleAnalysisUpdates,
+      ];
+      if (pending.isEmpty) {
+        session.dispose();
+      } else {
+        unawaited(Future.wait(pending).whenComplete(session.dispose));
+      }
+    }
     _editorSession.dispose();
     _photoStripController?.dispose();
     super.dispose();

@@ -15,7 +15,9 @@ import 'package:yingjian/features/project/application/photo_project_session.dart
 import 'package:yingjian/features/project/infrastructure/app_owned_photo_importer.dart';
 import 'package:yingjian/features/project/infrastructure/image_picker_photo_source.dart';
 import 'package:yingjian/features/project/infrastructure/json_photo_project_store.dart';
+import 'package:yingjian/features/recommendations/application/photo_analysis_cache.dart';
 import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
+import 'package:yingjian/features/recommendations/infrastructure/json_photo_analysis_cache.dart';
 import 'package:yingjian/features/recommendations/infrastructure/method_channel_photo_analyzer.dart';
 import 'package:yingjian/observability/app_observability.dart';
 import 'package:yingjian/observability/firebase_observability_backend.dart';
@@ -36,6 +38,7 @@ Future<void> _startApplication() async {
   late PhotoExporter photoExporter;
   late PhotoPreviewRenderer photoPreviewRenderer;
   late PhotoAnalyzer photoAnalyzer;
+  late PhotoAnalysisCache photoAnalysisCache;
 
   final startup = StartupCoordinator(
     prepareApp: () async {
@@ -64,6 +67,9 @@ Future<void> _startApplication() async {
       photoExporter = MethodChannelPhotoExporter();
       photoPreviewRenderer = MethodChannelPhotoPreviewRenderer();
       photoAnalyzer = const MethodChannelPhotoAnalyzer();
+      photoAnalysisCache = JsonPhotoAnalysisCache(
+        directory: getApplicationSupportDirectory,
+      );
     },
     showApp: () {
       runApp(
@@ -79,6 +85,7 @@ Future<void> _startApplication() async {
             Provider<PhotoExporter>.value(value: photoExporter),
             Provider<PhotoPreviewRenderer>.value(value: photoPreviewRenderer),
             Provider<PhotoAnalyzer>.value(value: photoAnalyzer),
+            Provider<PhotoAnalysisCache>.value(value: photoAnalysisCache),
           ],
           child: const YingjianApp(),
         ),

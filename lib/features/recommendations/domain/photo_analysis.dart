@@ -9,6 +9,7 @@ enum AnalysisFallbackReason {
   unsupportedInput,
   capabilityUnavailable,
   analysisFailed,
+  cancelled,
 }
 
 enum AnalysisConfidence { unknown, low, medium, high }
@@ -22,6 +23,21 @@ enum ClarityCondition { unknown, clear, soft, blurred }
 enum PortraitApplicability { unavailable, unsafe, applicable }
 
 enum SceneKind { unknown, people, landscape, food, night }
+
+@immutable
+class PhotoAnalysisEngineIdentity {
+  const PhotoAnalysisEngineIdentity({
+    required this.analysisVersion,
+    required this.capabilityVersion,
+  });
+
+  final String analysisVersion;
+  final String capabilityVersion;
+
+  bool matches(LocalPhotoAnalysis analysis) =>
+      analysis.analysisVersion == analysisVersion &&
+      analysis.capabilityVersion == capabilityVersion;
+}
 
 @immutable
 class LocalPhotoAnalysis {
@@ -71,6 +87,63 @@ class LocalPhotoAnalysis {
 
   bool get usesSafeFallback =>
       disposition == PhotoAnalysisDisposition.safeFallback;
+
+  Map<String, Object> toJson() => {
+    'analysisVersion': analysisVersion,
+    'capabilityVersion': capabilityVersion,
+    'contentSha256': contentSha256,
+    'orientation': orientation,
+    'pixelWidth': pixelWidth,
+    'pixelHeight': pixelHeight,
+    'colorSpace': colorSpace.name,
+    'disposition': disposition.name,
+    'fallbackReason': fallbackReason.name,
+    'confidence': confidence.name,
+    'exposure': exposure.name,
+    'whiteBalance': whiteBalance.name,
+    'clarity': clarity.name,
+    'portrait': portrait.name,
+    'scene': scene.name,
+  };
+
+  factory LocalPhotoAnalysis.fromJson(Map<String, Object?> json) {
+    String requiredString(String key) {
+      final value = json[key];
+      if (value is! String || value.trim().isEmpty) {
+        throw FormatException('Missing analysis field $key');
+      }
+      return value;
+    }
+
+    T enumValue<T extends Enum>(String key, List<T> values) {
+      final raw = requiredString(key);
+      return values.firstWhere(
+        (value) => value.name == raw,
+        orElse: () => throw FormatException('Unsupported $key: $raw'),
+      );
+    }
+
+    return LocalPhotoAnalysis(
+      analysisVersion: requiredString('analysisVersion'),
+      capabilityVersion: requiredString('capabilityVersion'),
+      contentSha256: requiredString('contentSha256'),
+      orientation: (json['orientation'] as num).toInt(),
+      pixelWidth: (json['pixelWidth'] as num).toInt(),
+      pixelHeight: (json['pixelHeight'] as num).toInt(),
+      colorSpace: enumValue('colorSpace', PhotoColorSpace.values),
+      disposition: enumValue('disposition', PhotoAnalysisDisposition.values),
+      fallbackReason: enumValue(
+        'fallbackReason',
+        AnalysisFallbackReason.values,
+      ),
+      confidence: enumValue('confidence', AnalysisConfidence.values),
+      exposure: enumValue('exposure', ExposureCondition.values),
+      whiteBalance: enumValue('whiteBalance', WhiteBalanceCondition.values),
+      clarity: enumValue('clarity', ClarityCondition.values),
+      portrait: enumValue('portrait', PortraitApplicability.values),
+      scene: enumValue('scene', SceneKind.values),
+    );
+  }
 
   bool matchesInput(ProjectPhoto photo) =>
       analysisVersion.trim().isNotEmpty &&
@@ -125,6 +198,8 @@ class LocalPhotoAnalysis {
 }
 
 abstract interface class PhotoAnalyzer {
+  PhotoAnalysisEngineIdentity identityFor(ProjectPhoto photo);
+
   Future<LocalPhotoAnalysis> analyze(ProjectPhoto photo);
 }
 
@@ -139,6 +214,13 @@ final class MetadataSafePhotoAnalyzer implements PhotoAnalyzer {
 
   final String analysisVersion;
   final String capabilityVersion;
+
+  @override
+  PhotoAnalysisEngineIdentity identityFor(ProjectPhoto photo) =>
+      PhotoAnalysisEngineIdentity(
+        analysisVersion: analysisVersion,
+        capabilityVersion: capabilityVersion,
+      );
 
   @override
   Future<LocalPhotoAnalysis> analyze(ProjectPhoto photo) async {

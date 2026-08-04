@@ -8,11 +8,14 @@ import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
+import 'package:yingjian/features/recommendations/application/photo_analysis_cache.dart';
 import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
 import 'package:yingjian/observability/analytics_event.dart';
 import 'package:yingjian/observability/app_observability.dart';
 import 'package:yingjian/observability/observability_backend.dart';
 import 'package:yingjian/review/review_manager.dart';
+
+import 'memory_photo_analysis_cache.dart';
 
 Widget buildTestApp(
   AppSettings settings, {
@@ -21,6 +24,7 @@ Widget buildTestApp(
   PhotoExporter? photoExporter,
   PhotoPreviewRenderer? photoPreviewRenderer,
   PhotoAnalyzer? photoAnalyzer,
+  PhotoAnalysisCache? photoAnalysisCache,
 }) {
   final observability = AppObservability(FakeObservabilityBackend());
   return MultiProvider(
@@ -42,6 +46,9 @@ Widget buildTestApp(
       ),
       Provider<PhotoAnalyzer>.value(
         value: photoAnalyzer ?? const MetadataSafePhotoAnalyzer(),
+      ),
+      Provider<PhotoAnalysisCache>.value(
+        value: photoAnalysisCache ?? MemoryPhotoAnalysisCache(),
       ),
     ],
     child: const YingjianApp(),

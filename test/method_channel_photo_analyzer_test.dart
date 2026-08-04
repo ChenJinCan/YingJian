@@ -45,6 +45,7 @@ void main() {
 
       final result = await const MethodChannelPhotoAnalyzer(
         channel: channel,
+        nativeAnalysisAvailable: true,
       ).analyze(photo);
 
       expect(captured?.method, 'analyzePhoto');
@@ -67,9 +68,59 @@ void main() {
 
     final result = await const MethodChannelPhotoAnalyzer(
       channel: channel,
+      nativeAnalysisAvailable: true,
     ).analyze(photo);
 
     expect(result.usesSafeFallback, isTrue);
     expect(result.fallbackReason.name, 'capabilityUnavailable');
   });
+
+  test(
+    'native analysis with an unexpected engine version is rejected',
+    () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (_) async {
+            return <String, Object>{
+              'analysisVersion': 'local-pixels-v0',
+              'capabilityVersion': 'ios-core-image-vision-v1',
+              'confidence': 'high',
+              'exposure': 'underexposed',
+              'whiteBalance': 'balanced',
+              'clarity': 'clear',
+              'portrait': 'applicable',
+              'scene': 'people',
+            };
+          });
+
+      final result = await const MethodChannelPhotoAnalyzer(
+        channel: channel,
+        nativeAnalysisAvailable: true,
+      ).analyze(photo);
+
+      expect(result.usesSafeFallback, isTrue);
+      expect(result.analysisVersion, 'metadata-safe-v1');
+    },
+  );
+
+  test(
+    'platforms without native analysis use the declared fallback directly',
+    () async {
+      var nativeCalls = 0;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (_) async {
+            nativeCalls += 1;
+            throw StateError('native analysis must not run');
+          });
+      const analyzer = MethodChannelPhotoAnalyzer(
+        channel: channel,
+        nativeAnalysisAvailable: false,
+      );
+
+      final result = await analyzer.analyze(photo);
+
+      expect(nativeCalls, 0);
+      expect(result.usesSafeFallback, isTrue);
+      expect(analyzer.identityFor(photo).capabilityVersion, 'metadata-only');
+    },
+  );
 }

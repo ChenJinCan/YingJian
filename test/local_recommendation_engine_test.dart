@@ -1,8 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/recommendations/application/local_recommendation_coordinator.dart';
+import 'package:yingjian/features/recommendations/application/photo_analysis_cache.dart';
 import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
 import 'package:yingjian/features/recommendations/domain/recipe_catalog.dart';
+
+import 'support/memory_photo_analysis_cache.dart';
 
 void main() {
   const hash =
@@ -166,6 +171,7 @@ void main() {
           await LocalRecommendationCoordinator(
             analyzer: _FailingAnalyzer(),
           ).prepare(
+            projectId: 'project-1',
             photos: const [photo],
             onStateChanged: (_, state) async => states.add(state),
           );
@@ -179,6 +185,182 @@ void main() {
       expect(result.recommendations, hasLength(3));
     },
   );
+
+  test(
+    'coordinator reuses matching project analysis without rerunning',
+    () async {
+      final analyzer = _CountingAnalyzer();
+      final cache = MemoryPhotoAnalysisCache();
+      final coordinator = LocalRecommendationCoordinator(
+        analyzer: analyzer,
+        cache: cache,
+      );
+
+      final first = await coordinator.prepare(
+        projectId: 'project-1',
+        photos: const [photo],
+      );
+      final second = await coordinator.prepare(
+        projectId: 'project-1',
+        photos: const [photo],
+      );
+
+      expect(analyzer.calls, 1);
+      expect(second.analyses, first.analyses);
+      expect(
+        second.recommendations.map((item) => item.id),
+        first.recommendations.map((item) => item.id),
+      );
+    },
+  );
+
+  test(
+    'analysis cache misses after capability or input identity changes',
+    () async {
+      final cache = MemoryPhotoAnalysisCache();
+      final firstAnalyzer = _CountingAnalyzer();
+      await LocalRecommendationCoordinator(
+        analyzer: firstAnalyzer,
+        cache: cache,
+      ).prepare(projectId: 'project-1', photos: const [photo]);
+
+      final upgradedAnalyzer = _CountingAnalyzer(
+        capabilityVersion: 'fixture-v2',
+      );
+      await LocalRecommendationCoordinator(
+        analyzer: upgradedAnalyzer,
+        cache: cache,
+      ).prepare(projectId: 'project-1', photos: const [photo]);
+      final changedPhoto = ProjectPhoto(
+        id: photo.id,
+        localPath: photo.localPath,
+        originalName: photo.originalName,
+        contentSha256:
+            'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        pixelWidth: photo.pixelWidth,
+        pixelHeight: photo.pixelHeight,
+        colorSpace: photo.colorSpace,
+        inputFormat: photo.inputFormat,
+        supportState: photo.supportState,
+      );
+      await LocalRecommendationCoordinator(
+        analyzer: upgradedAnalyzer,
+        cache: cache,
+      ).prepare(projectId: 'project-1', photos: [changedPhoto]);
+
+      expect(firstAnalyzer.calls, 1);
+      expect(upgradedAnalyzer.calls, 2);
+    },
+  );
+
+  test(
+    'cancelled analysis discards the late result and is not cached',
+    () async {
+      final analyzer = _DeferredAnalyzer();
+      final cache = MemoryPhotoAnalysisCache();
+      final cancellation = PhotoAnalysisCancellationToken();
+      final states = <PhotoAnalysisState>[];
+      final preparing =
+          LocalRecommendationCoordinator(
+            analyzer: analyzer,
+            cache: cache,
+          ).prepare(
+            projectId: 'project-1',
+            photos: const [photo],
+            cancellation: cancellation,
+            onStateChanged: (_, state) async => states.add(state),
+          );
+      await analyzer.started.future;
+
+      cancellation.cancel();
+      analyzer.complete();
+      final result = await preparing;
+
+      expect(states, [PhotoAnalysisState.running, PhotoAnalysisState.fallback]);
+      expect(
+        result.analyses[photo.id]?.fallbackReason,
+        AnalysisFallbackReason.cancelled,
+      );
+      expect(result.recommendations, hasLength(3));
+      expect(
+        await cache.read(
+          projectId: 'project-1',
+          photo: photo,
+          engineIdentity: analyzer.identityFor(photo),
+        ),
+        isNull,
+      );
+    },
+  );
+
+  test(
+    'coordinator rejects analysis from an unexpected engine version',
+    () async {
+      final result = await LocalRecommendationCoordinator(
+        analyzer: _WrongVersionAnalyzer(),
+        cache: MemoryPhotoAnalysisCache(),
+      ).prepare(projectId: 'project-1', photos: const [photo]);
+
+      expect(
+        result.analyses[photo.id]?.fallbackReason,
+        AnalysisFallbackReason.analysisFailed,
+      );
+    },
+  );
+
+  test('cancellation during cache write rolls back only that write', () async {
+    final cache = _DeferredWriteCache();
+    final cancellation = PhotoAnalysisCancellationToken();
+    final states = <PhotoAnalysisState>[];
+    final preparing =
+        LocalRecommendationCoordinator(
+          analyzer: _CountingAnalyzer(),
+          cache: cache,
+        ).prepare(
+          projectId: 'project-1',
+          photos: const [photo],
+          cancellation: cancellation,
+          onStateChanged: (_, state) async => states.add(state),
+        );
+    await cache.started.future;
+
+    cancellation.cancel();
+    cache.complete();
+    final result = await preparing;
+
+    expect(states, [PhotoAnalysisState.running, PhotoAnalysisState.fallback]);
+    expect(
+      result.analyses[photo.id]?.fallbackReason,
+      AnalysisFallbackReason.cancelled,
+    );
+    expect(cache.current, isNull);
+  });
+
+  test('cancellation during cache commit rejects the staged result', () async {
+    final cache = _DeferredCommitCache();
+    final cancellation = PhotoAnalysisCancellationToken();
+    final preparing =
+        LocalRecommendationCoordinator(
+          analyzer: _CountingAnalyzer(),
+          cache: cache,
+        ).prepare(
+          projectId: 'project-1',
+          photos: const [photo],
+          cancellation: cancellation,
+        );
+    await cache.commitStarted.future;
+
+    cancellation.cancel();
+    cache.completeCommitCheck();
+    final result = await preparing;
+
+    expect(
+      result.analyses[photo.id]?.fallbackReason,
+      AnalysisFallbackReason.cancelled,
+    );
+    expect(cache.current, isNull);
+    expect(cache.staged, isNull);
+  });
 
   test('recommendation engine rejects stale content analysis', () async {
     final analysis = await const MetadataSafePhotoAnalyzer().analyze(photo);
@@ -207,7 +389,226 @@ void main() {
 
 final class _FailingAnalyzer implements PhotoAnalyzer {
   @override
+  PhotoAnalysisEngineIdentity identityFor(ProjectPhoto photo) =>
+      const PhotoAnalysisEngineIdentity(
+        analysisVersion: 'failing-v1',
+        capabilityVersion: 'fixture-v1',
+      );
+
+  @override
   Future<LocalPhotoAnalysis> analyze(ProjectPhoto photo) {
     throw StateError('fixture failure must not escape');
+  }
+}
+
+final class _CountingAnalyzer implements PhotoAnalyzer {
+  _CountingAnalyzer({this.capabilityVersion = 'fixture-v1'});
+
+  final String capabilityVersion;
+  int calls = 0;
+
+  @override
+  PhotoAnalysisEngineIdentity identityFor(ProjectPhoto photo) =>
+      PhotoAnalysisEngineIdentity(
+        analysisVersion: 'counting-v1',
+        capabilityVersion: capabilityVersion,
+      );
+
+  @override
+  Future<LocalPhotoAnalysis> analyze(ProjectPhoto photo) async {
+    calls += 1;
+    return LocalPhotoAnalysis(
+      analysisVersion: 'counting-v1',
+      capabilityVersion: capabilityVersion,
+      contentSha256: photo.contentSha256,
+      orientation: photo.orientation,
+      pixelWidth: photo.pixelWidth,
+      pixelHeight: photo.pixelHeight,
+      colorSpace: photo.colorSpace,
+      disposition: PhotoAnalysisDisposition.ready,
+      fallbackReason: AnalysisFallbackReason.none,
+    );
+  }
+}
+
+final class _DeferredAnalyzer implements PhotoAnalyzer {
+  final Completer<void> started = Completer<void>();
+  final Completer<void> _release = Completer<void>();
+
+  void complete() => _release.complete();
+
+  @override
+  PhotoAnalysisEngineIdentity identityFor(ProjectPhoto photo) =>
+      const PhotoAnalysisEngineIdentity(
+        analysisVersion: 'deferred-v1',
+        capabilityVersion: 'fixture-v1',
+      );
+
+  @override
+  Future<LocalPhotoAnalysis> analyze(ProjectPhoto photo) async {
+    started.complete();
+    await _release.future;
+    return LocalPhotoAnalysis(
+      analysisVersion: 'deferred-v1',
+      capabilityVersion: 'fixture-v1',
+      contentSha256: photo.contentSha256,
+      orientation: photo.orientation,
+      pixelWidth: photo.pixelWidth,
+      pixelHeight: photo.pixelHeight,
+      colorSpace: photo.colorSpace,
+      disposition: PhotoAnalysisDisposition.ready,
+      fallbackReason: AnalysisFallbackReason.none,
+    );
+  }
+}
+
+final class _WrongVersionAnalyzer implements PhotoAnalyzer {
+  @override
+  PhotoAnalysisEngineIdentity identityFor(ProjectPhoto photo) =>
+      const PhotoAnalysisEngineIdentity(
+        analysisVersion: 'expected-v1',
+        capabilityVersion: 'fixture-v1',
+      );
+
+  @override
+  Future<LocalPhotoAnalysis> analyze(ProjectPhoto photo) async =>
+      LocalPhotoAnalysis(
+        analysisVersion: 'unexpected-v0',
+        capabilityVersion: 'fixture-v1',
+        contentSha256: photo.contentSha256,
+        orientation: photo.orientation,
+        pixelWidth: photo.pixelWidth,
+        pixelHeight: photo.pixelHeight,
+        colorSpace: photo.colorSpace,
+        disposition: PhotoAnalysisDisposition.ready,
+        fallbackReason: AnalysisFallbackReason.none,
+      );
+}
+
+final class _DeferredWriteCache implements PhotoAnalysisCache {
+  final Completer<void> started = Completer<void>();
+  final Completer<void> _release = Completer<void>();
+  PhotoAnalysisCacheWrite? current;
+  PhotoAnalysisCacheWrite? staged;
+
+  void complete() => _release.complete();
+
+  @override
+  Future<LocalPhotoAnalysis?> read({
+    required String projectId,
+    required ProjectPhoto photo,
+    required PhotoAnalysisEngineIdentity engineIdentity,
+  }) async => null;
+
+  @override
+  Future<PhotoAnalysisCacheWrite> stage({
+    required String projectId,
+    required String photoId,
+    required LocalPhotoAnalysis analysis,
+  }) async {
+    started.complete();
+    await _release.future;
+    return staged = PhotoAnalysisCacheWrite(
+      projectId: projectId,
+      photoId: photoId,
+      token: 'deferred-write',
+      analysis: analysis,
+    );
+  }
+
+  @override
+  Future<bool> commit(
+    PhotoAnalysisCacheWrite write, {
+    required bool Function() canCommit,
+  }) async {
+    if (identical(staged, write) && canCommit()) {
+      staged = null;
+      current = write;
+      return true;
+    }
+    staged = null;
+    return false;
+  }
+
+  @override
+  Future<void> discard(PhotoAnalysisCacheWrite write) async {
+    if (identical(staged, write)) staged = null;
+  }
+
+  @override
+  Future<void> clearPhoto({
+    required String projectId,
+    required String photoId,
+  }) async {
+    current = null;
+  }
+
+  @override
+  Future<void> clearProject(String projectId) async {
+    current = null;
+  }
+}
+
+final class _DeferredCommitCache implements PhotoAnalysisCache {
+  final Completer<void> commitStarted = Completer<void>();
+  final Completer<void> _releaseCommitCheck = Completer<void>();
+  PhotoAnalysisCacheWrite? staged;
+  PhotoAnalysisCacheWrite? current;
+
+  void completeCommitCheck() => _releaseCommitCheck.complete();
+
+  @override
+  Future<LocalPhotoAnalysis?> read({
+    required String projectId,
+    required ProjectPhoto photo,
+    required PhotoAnalysisEngineIdentity engineIdentity,
+  }) async => null;
+
+  @override
+  Future<PhotoAnalysisCacheWrite> stage({
+    required String projectId,
+    required String photoId,
+    required LocalPhotoAnalysis analysis,
+  }) async => staged = PhotoAnalysisCacheWrite(
+    projectId: projectId,
+    photoId: photoId,
+    token: 'deferred-commit',
+    analysis: analysis,
+  );
+
+  @override
+  Future<bool> commit(
+    PhotoAnalysisCacheWrite write, {
+    required bool Function() canCommit,
+  }) async {
+    commitStarted.complete();
+    await _releaseCommitCheck.future;
+    if (!identical(staged, write) || !canCommit()) {
+      staged = null;
+      return false;
+    }
+    staged = null;
+    current = write;
+    return true;
+  }
+
+  @override
+  Future<void> discard(PhotoAnalysisCacheWrite write) async {
+    if (identical(staged, write)) staged = null;
+  }
+
+  @override
+  Future<void> clearPhoto({
+    required String projectId,
+    required String photoId,
+  }) async {
+    staged = null;
+    current = null;
+  }
+
+  @override
+  Future<void> clearProject(String projectId) async {
+    staged = null;
+    current = null;
   }
 }

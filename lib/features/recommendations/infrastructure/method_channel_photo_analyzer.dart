@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/services.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
@@ -6,14 +8,32 @@ final class MethodChannelPhotoAnalyzer implements PhotoAnalyzer {
   const MethodChannelPhotoAnalyzer({
     this.channel = const MethodChannel('yingjian/photo_analysis'),
     this.fallback = const MetadataSafePhotoAnalyzer(),
+    this.nativeAnalysisAvailable,
   });
 
   final MethodChannel channel;
   final PhotoAnalyzer fallback;
+  final bool? nativeAnalysisAvailable;
+
+  bool get _canUseNativeAnalysis => nativeAnalysisAvailable ?? Platform.isIOS;
+
+  @override
+  PhotoAnalysisEngineIdentity identityFor(ProjectPhoto photo) {
+    if (!_canUseNativeAnalysis ||
+        photo.supportState != PhotoSupportState.supported ||
+        !RegExp(r'^[a-f0-9]{64}$').hasMatch(photo.contentSha256)) {
+      return fallback.identityFor(photo);
+    }
+    return const PhotoAnalysisEngineIdentity(
+      analysisVersion: 'local-pixels-v1',
+      capabilityVersion: 'ios-core-image-vision-v1',
+    );
+  }
 
   @override
   Future<LocalPhotoAnalysis> analyze(ProjectPhoto photo) async {
-    if (photo.supportState != PhotoSupportState.supported ||
+    if (!_canUseNativeAnalysis ||
+        photo.supportState != PhotoSupportState.supported ||
         !RegExp(r'^[a-f0-9]{64}$').hasMatch(photo.contentSha256)) {
       return fallback.analyze(photo);
     }
@@ -40,7 +60,10 @@ final class MethodChannelPhotoAnalyzer implements PhotoAnalyzer {
         portrait: _enum(raw['portrait'], PortraitApplicability.values),
         scene: _enum(raw['scene'], SceneKind.values),
       );
-      return analysis.matchesInput(photo) ? analysis : fallback.analyze(photo);
+      return analysis.matchesInput(photo) &&
+              identityFor(photo).matches(analysis)
+          ? analysis
+          : fallback.analyze(photo);
     } on Object {
       return fallback.analyze(photo);
     }
