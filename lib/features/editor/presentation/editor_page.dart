@@ -753,7 +753,7 @@ class _PhotoWorkspace extends StatelessWidget {
         ],
         const SizedBox(height: 16),
         SizedBox(
-          height: 100,
+          height: 112,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: photos.length,
