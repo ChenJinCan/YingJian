@@ -15,7 +15,22 @@
 
 每个候选的 `provenance` 必须记录 producer、能力或应用版本、设备、系统、variant、source/export/preview 身份和完整参数；非原图候选的 `source_sha256` 必须等于该项原图哈希；竞品还必须记录可复现的 `operation_path`。评分冻结只接受映见 `default + export` 身份，不能拿 Preview 或高强度结果替代。
 
-iOS Debug-only 人像采集工具会为单个输入生成 baseline、off/default/high-safe 原像素导出、默认代理预览和 `capture-manifest.json`。工具启动和每次新分析都会删除上一批临时采集，因此必须先将整组目录从设备复制到 `.quality/review-inputs/<asset-id>/`，再继续下一张。复制后必须核对 manifest 中的原始输入哈希、源尺寸、设备/系统、候选版本、强度和五个映见产物哈希；随后再补入同设备固定路径的竞品结果并生成正式 review plan。manifest 只证明产物身份，不证明人像质量，也不能把 `productionEligible=false` 改成生产资格。
+iOS Debug-only 人像采集工具会为单个输入生成 baseline、off/default/high-safe 原像素导出、默认代理预览和 `capture-manifest.json`。工具启动和每次新分析都会删除上一批临时采集，因此必须先将整组目录从设备复制到 `.quality/review-inputs/<asset-id>/`，再继续下一张。复制后先运行严格采集检查；它会核对物理设备身份、原始输入哈希、源尺寸、候选版本、强度、sRGB/方向/尺寸、五个产物哈希、关闭档字节等价和无人脸降级：
+
+```sh
+ruby scripts/check_portrait_capture_manifest.rb \
+  .quality/review-inputs/<asset-id>/capture-manifest.json
+```
+
+随后把 `quality/portrait-review-intake.example.yaml` 复制到被忽略的 `.quality/portrait-review-intake.yaml`，逐项记录不可逆 asset ID、标签、原图来源记录，以及同一设备和系统上的竞品版本、固定操作路径、完整参数和独立文件哈希。生成器会再次验证所有采集目录和竞品文件，并冻结整轮映见/竞品版本、设备、系统、强度与操作路径；它拒绝 Simulator、重复原图或竞品、跨设备、跨配置、非 sRGB/方向 1/原像素竞品、哈希漂移、符号链接逃逸和已有输出覆盖，再确定性生成六槽计划：
+
+```sh
+ruby scripts/build_portrait_review_plan.rb \
+  .quality/portrait-review-intake.yaml \
+  .quality/review-plan.yaml
+```
+
+`capture-manifest.json` 只证明产物身份，不证明人像质量，也不能把 `productionEligible=false` 改成生产资格。`--allow-simulator` 只允许单独诊断采集合同，生成正式 review plan 仍只接受 `physical-device`。
 
 候选 `id` 只进入独立映射键，不进入评审页面或评分表。
 

@@ -230,6 +230,7 @@
 ruby scripts/check_image_quality_corpus.rb --allow-incomplete
 ruby scripts/check_image_quality_corpus.rb
 ruby scripts/test_image_quality_corpus.rb
+ruby scripts/test_portrait_review_plan_tools.rb
 ruby scripts/test_blind_review_tools.rb
 ```
 
