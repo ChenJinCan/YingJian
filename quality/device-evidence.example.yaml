@@ -1,0 +1,66 @@
+schema: 1
+status: blocked_missing_runs
+source_commit: replace_with_full_40_character_git_sha
+runs:
+  - run_id: ios-mid-001
+    platform: ios
+    tier: mid
+    device:
+      device_id: replace_with_sha256_of_local_opaque_device_label
+      model: iPhone 14 Plus
+      hardware_class: A15 / 6 GB
+      os_version: iOS 26.5.2
+      tier_basis: approved mid-tier substitution
+      physical_memory_mb: 6144
+      physical: true
+    build:
+      mode: profile
+      source_commit: replace_with_same_full_git_sha
+      bundle_id: com.babycompany.yingjian
+      version: replace_with_candidate_version
+      build_number: replace_with_candidate_build
+      artifact_sha256: replace_with_64_character_lowercase_sha256
+    coverage: [12mp, 24mp, display_p3, heic, six_photo_group]
+    methodology:
+      timing_tool: replace_with_monotonic_trace_and_parser
+      memory_tool: replace_with_instruments_or_platform_sampler
+      frame_tool: replace_with_frame_timing_collector
+      thermal_tool: replace_with_platform_thermal_collector
+      lifecycle_protocol: replace_with_repeatable_background_memory_cancel_steps
+    measurements:
+      first_preview_ms: [0, 0, 0, 0, 0]
+      six_photo_recommendations_ms: [0, 0, 0, 0, 0]
+      slider_response_ms: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      continuous_preview_fps: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      export_12mp_ms: [0, 0, 0]
+      export_24mp_ms: [0, 0, 0]
+      batch_six_12mp_ms: [0, 0, 0]
+      ui_main_thread_stalls_ms: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      peak_additional_memory_mb: 0
+      thermal_states: [nominal]
+      thermal_mitigation_activated: false
+    outcomes:
+      source_hash_unchanged: false
+      final_artifacts_valid: false
+      three_batch_rounds_completed: false
+      no_system_kill: false
+      background_restore: false
+      low_memory_restore: false
+      cancellation_recover: false
+      offline_journey: false
+      diagnostics_disabled: false
+      cloud_image_tasks_zero: false
+      accessibility_task_completed: false
+      system_share_success: false
+      system_share_cancel: false
+      system_share_failure: false
+    artifacts:
+      - kind: build_artifact
+        file: .quality/device-evidence/ios-mid-001/profile-build.zip
+        sha256: replace_with_64_character_lowercase_sha256
+      - kind: metrics_log
+        file: .quality/device-evidence/ios-mid-001/metrics.json
+        sha256: replace_with_64_character_lowercase_sha256
+      - kind: final_artifact_probe
+        file: .quality/device-evidence/ios-mid-001/final-artifacts.json
+        sha256: replace_with_64_character_lowercase_sha256

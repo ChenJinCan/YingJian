@@ -18,7 +18,7 @@
 | 当前预览 | iOS Core Image Texture、Android GLES3 Texture；Flutter 矩阵仅兼容降级 | 目标接缝已实现，真机质量未验证 |
 | iOS 导出 | Core Image 从原图输出 sRGB JPEG 95 并应用安全元数据策略 | 模拟器测试通过，真机未验证 |
 | Android 导出 | API 28+ 单 Bitmap 原位分块变换；API 24–27 分块方向解码到单输出 Bitmap；JPEG 95 | 模拟器真实文件/48 MP 通过，真机内存门未验证 |
-| 当前物理设备 | iPhone 当前离线，未发现可用 Android 物理设备；仅双端模拟器/仿真器 | 物理验证阻断 |
+| 当前物理设备 | iPhone 14 Plus 已配对但当前锁屏阻止测试启动；未发现可用 Android 物理设备 | 物理验证阻断 |
 | 授权质量样片 | 尚未放入本地质量语料目录 | 质量验证阻断 |
 
 ## 3. 冻结图像合同
@@ -232,7 +232,10 @@ ruby scripts/check_image_quality_corpus.rb
 ruby scripts/test_image_quality_corpus.rb
 ruby scripts/test_portrait_review_plan_tools.rb
 ruby scripts/test_blind_review_tools.rb
+ruby scripts/check_device_evidence.rb --allow-incomplete
+ruby scripts/test_device_evidence.rb
 ```
 
 第一条只检查当前清单结构，第二条是完整门禁；在样片缺失时第二条必须失败。
 匿名包构建、评分表字段和人像冻结门见[本地匿名图片评审工作流](blind-review-workflow.md)。
+六档 Profile/Release 原始测量、产物回查和生命周期门见[物理设备性能与生命周期证据工作流](device-evidence-workflow.md)。
