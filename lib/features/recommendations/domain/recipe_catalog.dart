@@ -226,10 +226,29 @@ final class LocalRecommendationEngine {
     final allFallback = analyses.values.every(
       (analysis) => analysis.usesSafeFallback,
     );
+    final uncertain = analyses.values.any(
+      (analysis) =>
+          analysis.usesSafeFallback ||
+          analysis.confidence == AnalysisConfidence.low ||
+          analysis.confidence == AnalysisConfidence.unknown,
+    );
+    final values = analyses.values.toList(growable: false);
     final selected = <RecipeCatalogEntry>[
-      _entry(allFallback ? 'clean-balanced' : _naturalId(analyses.values)),
-      _entry(allFallback ? 'atmosphere-warm' : _atmosphereId(analyses.values)),
-      _entry(allFallback ? 'texture-gentle' : _textureId(analyses.values)),
+      _safeEntry(
+        preferredId: allFallback ? 'clean-balanced' : _naturalId(values),
+        family: SharedStyleFamily.naturalClean,
+        analyses: values,
+      ),
+      _safeEntry(
+        preferredId: allFallback ? 'atmosphere-warm' : _atmosphereId(values),
+        family: SharedStyleFamily.atmosphericColor,
+        analyses: values,
+      ),
+      _safeEntry(
+        preferredId: allFallback ? 'texture-gentle' : _textureId(values),
+        family: SharedStyleFamily.texturedStyle,
+        analyses: values,
+      ),
     ];
     if (allFallback && selected.any((entry) => !entry.safeForFallback)) {
       throw StateError(
@@ -252,7 +271,7 @@ final class LocalRecommendationEngine {
             intensity: allFallback ? 0.72 : 1,
           ),
           adaptiveCompensations: Map.unmodifiable(compensations),
-          reason: _reason(entry.family, allFallback),
+          reason: _reason(entry.family, allFallback, uncertain),
         );
       }),
     );
@@ -260,6 +279,62 @@ final class LocalRecommendationEngine {
 
   RecipeCatalogEntry _entry(String id) =>
       catalog.singleWhere((entry) => entry.id == id);
+
+  RecipeCatalogEntry _safeEntry({
+    required String preferredId,
+    required SharedStyleFamily family,
+    required List<LocalPhotoAnalysis> analyses,
+  }) {
+    final preferred = _entry(preferredId);
+    if (preferred.family != family) {
+      throw StateError(
+        'Preferred recipe $preferredId belongs to another family',
+      );
+    }
+    if (_isSafeFor(preferred, analyses)) return preferred;
+    return catalog.firstWhere(
+      (entry) => entry.family == family && _isSafeFor(entry, analyses),
+      orElse: () => throw StateError(
+        'No safe ${family.name} recipe exists for the current analysis',
+      ),
+    );
+  }
+
+  bool _isSafeFor(RecipeCatalogEntry entry, List<LocalPhotoAnalysis> analyses) {
+    final recipe = entry.recipe;
+    for (final analysis in analyses) {
+      final compensation = _compensation(analysis).recipe;
+      final effectiveExposure = recipe.exposure + compensation.exposure;
+      final effectiveWarmth = recipe.warmth + compensation.warmth;
+      if ((analysis.usesSafeFallback ||
+              analysis.confidence == AnalysisConfidence.low ||
+              analysis.confidence == AnalysisConfidence.unknown) &&
+          !entry.safeForFallback) {
+        return false;
+      }
+      if (analysis.exposure == ExposureCondition.overexposed &&
+          effectiveExposure > 0) {
+        return false;
+      }
+      if (analysis.exposure == ExposureCondition.underexposed &&
+          effectiveExposure < 0) {
+        return false;
+      }
+      if (analysis.whiteBalance == WhiteBalanceCondition.warmCast &&
+          effectiveWarmth > 0) {
+        return false;
+      }
+      if (analysis.whiteBalance == WhiteBalanceCondition.coolCast &&
+          effectiveWarmth < 0) {
+        return false;
+      }
+      if (analysis.clarity == ClarityCondition.blurred &&
+          recipe.clarity > 0.08) {
+        return false;
+      }
+    }
+    return true;
+  }
 
   String _naturalId(Iterable<LocalPhotoAnalysis> values) =>
       values.any((value) => value.clarity == ClarityCondition.blurred)
@@ -316,7 +391,14 @@ final class LocalRecommendationEngine {
     );
   }
 
-  RecommendationReason _reason(SharedStyleFamily family, bool fallback) {
+  RecommendationReason _reason(
+    SharedStyleFamily family,
+    bool fallback,
+    bool uncertain,
+  ) {
+    if (!fallback && uncertain) {
+      return RecommendationReason.protectsUncertainInput;
+    }
     if (!fallback) {
       return switch (family) {
         SharedStyleFamily.naturalClean => RecommendationReason.correctsExposure,
@@ -366,6 +448,17 @@ final class LocalRecommendationEngine {
         'catalog',
         'The three MVP recommendation families are required',
       );
+    }
+    for (final family in requiredFamilies) {
+      if (!catalog.any(
+        (entry) => entry.family == family && entry.safeForFallback,
+      )) {
+        throw ArgumentError.value(
+          family,
+          'catalog',
+          'Every MVP family needs a safe fallback recipe',
+        );
+      }
     }
   }
 }

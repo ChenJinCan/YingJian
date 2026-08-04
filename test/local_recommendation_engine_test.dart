@@ -88,6 +88,22 @@ void main() {
         () => LocalRecommendationEngine(catalog: entries.take(11).toList()),
         throwsArgumentError,
       );
+      final naturalFallbackRemoved = entries
+          .map(
+            (entry) => entry.family == SharedStyleFamily.naturalClean
+                ? RecipeCatalogEntry(
+                    id: entry.id,
+                    family: entry.family,
+                    recipe: entry.recipe,
+                    safeForFallback: false,
+                  )
+                : entry,
+          )
+          .toList();
+      expect(
+        () => LocalRecommendationEngine(catalog: naturalFallbackRemoved),
+        throwsArgumentError,
+      );
     },
   );
 
@@ -172,6 +188,107 @@ void main() {
       );
     },
   );
+
+  test('unknown confidence excludes recipes not marked safe for fallback', () {
+    const analysis = LocalPhotoAnalysis(
+      analysisVersion: 'native-v1',
+      capabilityVersion: 'core-image-v1',
+      contentSha256: hash,
+      orientation: 1,
+      pixelWidth: 4032,
+      pixelHeight: 3024,
+      colorSpace: PhotoColorSpace.srgb,
+      disposition: PhotoAnalysisDisposition.ready,
+      fallbackReason: AnalysisFallbackReason.none,
+      confidence: AnalysisConfidence.unknown,
+      exposure: ExposureCondition.balanced,
+      whiteBalance: WhiteBalanceCondition.balanced,
+      clarity: ClarityCondition.clear,
+    );
+
+    final recommendations = LocalRecommendationEngine().recommend(
+      photos: const [photo],
+      analyses: const {'photo-1': analysis},
+    );
+
+    expect(
+      recommendations.map((item) => item.id),
+      isNot(contains('${MvpRecipeCatalog.version}:clean-clear')),
+    );
+    expect(
+      recommendations.map((item) => item.id),
+      isNot(contains('${MvpRecipeCatalog.version}:texture-crisp')),
+    );
+    expect(
+      recommendations.every(
+        (item) => item.reason == RecommendationReason.protectsUncertainInput,
+      ),
+      isTrue,
+    );
+  });
+
+  test('shared recipes never reinforce detected exposure or color casts', () {
+    const secondPhoto = ProjectPhoto(
+      id: 'photo-2',
+      localPath: '/private/project/photo-2.jpg',
+      originalName: 'photo-2.jpg',
+      contentSha256:
+          'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      pixelWidth: 4032,
+      pixelHeight: 3024,
+      colorSpace: PhotoColorSpace.srgb,
+      inputFormat: PhotoInputFormat.jpeg,
+      supportState: PhotoSupportState.supported,
+    );
+    const warmOverexposed = LocalPhotoAnalysis(
+      analysisVersion: 'native-v1',
+      capabilityVersion: 'core-image-v1',
+      contentSha256: hash,
+      orientation: 1,
+      pixelWidth: 4032,
+      pixelHeight: 3024,
+      colorSpace: PhotoColorSpace.srgb,
+      disposition: PhotoAnalysisDisposition.ready,
+      fallbackReason: AnalysisFallbackReason.none,
+      confidence: AnalysisConfidence.high,
+      exposure: ExposureCondition.overexposed,
+      whiteBalance: WhiteBalanceCondition.warmCast,
+      clarity: ClarityCondition.blurred,
+    );
+    const coolUnderexposed = LocalPhotoAnalysis(
+      analysisVersion: 'native-v1',
+      capabilityVersion: 'core-image-v1',
+      contentSha256:
+          'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      orientation: 1,
+      pixelWidth: 4032,
+      pixelHeight: 3024,
+      colorSpace: PhotoColorSpace.srgb,
+      disposition: PhotoAnalysisDisposition.ready,
+      fallbackReason: AnalysisFallbackReason.none,
+      confidence: AnalysisConfidence.high,
+      exposure: ExposureCondition.underexposed,
+      whiteBalance: WhiteBalanceCondition.coolCast,
+      clarity: ClarityCondition.clear,
+    );
+
+    final recommendations = LocalRecommendationEngine().recommend(
+      photos: const [photo, secondPhoto],
+      analyses: const {'photo-1': warmOverexposed, 'photo-2': coolUnderexposed},
+    );
+
+    for (final recommendation in recommendations) {
+      final shared = recommendation.sharedStyle.recipe;
+      final first = recommendation.adaptiveCompensations[photo.id]!.recipe;
+      final second =
+          recommendation.adaptiveCompensations[secondPhoto.id]!.recipe;
+      expect(shared.exposure + first.exposure, lessThanOrEqualTo(0));
+      expect(shared.warmth + first.warmth, lessThanOrEqualTo(0));
+      expect(shared.clarity, lessThanOrEqualTo(0.08));
+      expect(shared.exposure + second.exposure, greaterThanOrEqualTo(0));
+      expect(shared.warmth + second.warmth, greaterThanOrEqualTo(0));
+    }
+  });
 
   test(
     'coordinator isolates a failed analysis and still returns three options',

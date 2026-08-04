@@ -2036,6 +2036,10 @@ final class _CountingPhotoAnalyzer implements PhotoAnalyzer {
       colorSpace: photo.colorSpace,
       disposition: PhotoAnalysisDisposition.ready,
       fallbackReason: AnalysisFallbackReason.none,
+      confidence: AnalysisConfidence.high,
+      exposure: ExposureCondition.underexposed,
+      whiteBalance: WhiteBalanceCondition.warmCast,
+      clarity: ClarityCondition.clear,
     );
   }
 }
