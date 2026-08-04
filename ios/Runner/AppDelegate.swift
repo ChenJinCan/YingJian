@@ -547,36 +547,18 @@ private enum PhotoInputInspectionError: Error {
     pipeline: IOSImagePipeline,
     result: @escaping FlutterResult
   ) {
-    guard let input = CIImage(
-      contentsOf: URL(fileURLWithPath: sourcePath),
-      options: [.applyOrientationProperty: true]
-    ) else {
-      finishWithError(code: "decodeFailed", message: "Photo could not be decoded", result: result)
-      return
-    }
-    let normalizedInput = input.transformed(
-      by: CGAffineTransform(translationX: -input.extent.minX, y: -input.extent.minY)
-    )
-    let metadata = ImageExportMetadata.sanitize(input.properties)
-    let output = pipeline
-      .applying(to: normalizedInput, extent: normalizedInput.extent.integral)
-      .settingProperties(metadata)
-    let outputExtent = output.extent.integral
-    guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
-      finishWithError(code: "renderFailed", message: "sRGB is unavailable", result: result)
-      return
-    }
     let temporaryURL = FileManager.default.temporaryDirectory
       .appendingPathComponent("Yingjian_\(UUID().uuidString).jpg")
+    let artifact: IOSPhotoRenderedFile
     do {
-      try photoExportContext.writeJPEGRepresentation(
-        of: output,
-        to: temporaryURL,
-        colorSpace: colorSpace,
-        options: [
-          kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.95
-        ]
+      artifact = try IOSPhotoFileRenderer(context: photoExportContext).render(
+        sourcePath: sourcePath,
+        pipeline: pipeline,
+        destinationURL: temporaryURL
       )
+    } catch IOSPhotoFileRenderError.decodeFailed {
+      finishWithError(code: "decodeFailed", message: "Photo could not be decoded", result: result)
+      return
     } catch {
       finishWithError(code: "renderFailed", message: "Photo could not be rendered", result: result)
       return
@@ -585,7 +567,7 @@ private enum PhotoInputInspectionError: Error {
     var assetId: String?
     PHPhotoLibrary.shared().performChanges {
       let request = PHAssetCreationRequest.forAsset()
-      request.creationDate = ImageExportMetadata.captureDate(from: metadata)
+      request.creationDate = ImageExportMetadata.captureDate(from: artifact.metadata)
       let options = PHAssetResourceCreationOptions()
       options.originalFilename = "Yingjian_\(Int(Date().timeIntervalSince1970)).jpg"
       request.addResource(with: .photo, fileURL: temporaryURL, options: options)
@@ -599,8 +581,8 @@ private enum PhotoInputInspectionError: Error {
         }
         result([
           "assetId": assetId,
-          "width": Int(outputExtent.width),
-          "height": Int(outputExtent.height),
+          "width": artifact.width,
+          "height": artifact.height,
           "sharePath": temporaryURL.path,
         ])
       }
@@ -615,6 +597,67 @@ private enum PhotoInputInspectionError: Error {
     DispatchQueue.main.async {
       result(FlutterError(code: code, message: message, details: nil))
     }
+  }
+}
+
+enum IOSPhotoFileRenderError: Error {
+  case decodeFailed
+  case renderFailed
+}
+
+struct IOSPhotoRenderedFile {
+  let width: Int
+  let height: Int
+  let metadata: [String: Any]
+}
+
+/// Renders one app-owned source file through the same production pipeline used
+/// before PhotoKit persistence. Keeping this seam independent from PhotoKit
+/// makes the final JPEG contract directly inspectable without weakening the
+/// system-library save boundary.
+struct IOSPhotoFileRenderer {
+  let context: CIContext
+
+  func render(
+    sourcePath: String,
+    pipeline: IOSImagePipeline,
+    destinationURL: URL
+  ) throws -> IOSPhotoRenderedFile {
+    guard let input = CIImage(
+      contentsOf: URL(fileURLWithPath: sourcePath),
+      options: [.applyOrientationProperty: true]
+    ) else {
+      throw IOSPhotoFileRenderError.decodeFailed
+    }
+    let normalizedInput = input.transformed(
+      by: CGAffineTransform(translationX: -input.extent.minX, y: -input.extent.minY)
+    )
+    let metadata = ImageExportMetadata.sanitize(input.properties)
+    let output = pipeline
+      .applying(to: normalizedInput, extent: normalizedInput.extent.integral)
+      .settingProperties(metadata)
+    let outputExtent = output.extent.integral
+    guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
+      throw IOSPhotoFileRenderError.renderFailed
+    }
+    do {
+      try context.writeJPEGRepresentation(
+        of: output,
+        to: destinationURL,
+        colorSpace: colorSpace,
+        options: [
+          kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.95
+        ]
+      )
+    } catch {
+      try? FileManager.default.removeItem(at: destinationURL)
+      throw IOSPhotoFileRenderError.renderFailed
+    }
+    return IOSPhotoRenderedFile(
+      width: Int(outputExtent.width),
+      height: Int(outputExtent.height),
+      metadata: metadata
+    )
   }
 }
 

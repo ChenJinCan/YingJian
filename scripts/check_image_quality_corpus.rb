@@ -1,6 +1,7 @@
 #!/usr/bin/env ruby
 
 require "digest"
+require "open3"
 require "pathname"
 require "yaml"
 
@@ -27,7 +28,7 @@ unless manifest.is_a?(Hash)
   exit 1
 end
 
-errors << "schema must equal 1" unless manifest["schema"] == 1
+errors << "schema must equal 2" unless manifest["schema"] == 2
 status = manifest["status"]
 unless ["blocked_missing_assets", "ready"].include?(status)
   errors << "status must be blocked_missing_assets or ready"
@@ -43,6 +44,17 @@ else
   errors << "corpus_root must not escape the repository" if path.each_filename.include?("..")
   corpus_root = File.expand_path(corpus_root_value, repo_root)
 end
+if File.exist?(corpus_root)
+  begin
+    repo_real = File.realpath(repo_root)
+    corpus_real = File.realpath(corpus_root)
+    unless corpus_real.start_with?("#{repo_real}/")
+      errors << "corpus_root resolves outside the repository"
+    end
+  rescue SystemCallError
+    errors << "corpus_root could not be resolved"
+  end
+end
 
 assets = manifest["assets"]
 unless assets.is_a?(Array)
@@ -50,15 +62,19 @@ unless assets.is_a?(Array)
   assets = []
 end
 
-minimum_assets = manifest["minimum_assets"]
-minimum_group_sets = manifest["minimum_group_sets"]
-minimum_members_per_group = manifest["minimum_members_per_group"]
+required_assets = manifest["required_assets"]
+required_single_assets = manifest["required_single_assets"]
+required_group_sets = manifest["required_group_sets"]
+required_members_per_group = manifest["required_members_per_group"]
 minimum_tag_counts = manifest["minimum_tag_counts"]
 
-errors << "minimum_assets must be a positive integer" unless minimum_assets.is_a?(Integer) && minimum_assets.positive?
-errors << "minimum_group_sets must be a positive integer" unless minimum_group_sets.is_a?(Integer) && minimum_group_sets.positive?
-unless minimum_members_per_group.is_a?(Integer) && minimum_members_per_group.positive?
-  errors << "minimum_members_per_group must be a positive integer"
+errors << "required_assets must be a positive integer" unless required_assets.is_a?(Integer) && required_assets.positive?
+unless required_single_assets.is_a?(Integer) && required_single_assets >= 0
+  errors << "required_single_assets must be a non-negative integer"
+end
+errors << "required_group_sets must be a positive integer" unless required_group_sets.is_a?(Integer) && required_group_sets.positive?
+unless required_members_per_group.is_a?(Integer) && required_members_per_group.positive?
+  errors << "required_members_per_group must be a positive integer"
 end
 unless minimum_tag_counts.is_a?(Hash) && minimum_tag_counts.values.all? { |count| count.is_a?(Integer) && count.positive? }
   errors << "minimum_tag_counts must map tags to positive integers"
@@ -70,6 +86,7 @@ files = {}
 hashes = {}
 tag_counts = Hash.new(0)
 group_counts = Hash.new(0)
+single_asset_count = 0
 
 assets.each_with_index do |asset, index|
   prefix = "assets[#{index}]"
@@ -83,6 +100,7 @@ assets.each_with_index do |asset, index|
   sha256 = asset["sha256"]
   tags = asset["tags"]
   license = asset["license"]
+  media = asset["media"]
 
   if !id.is_a?(String) || id.empty?
     errors << "#{prefix}.id must be a non-empty string"
@@ -125,6 +143,11 @@ assets.each_with_index do |asset, index|
       else
         group_counts[group_id] += 1
       end
+    else
+      single_asset_count += 1
+      if asset.key?("group_id")
+        errors << "#{prefix}.group_id is only allowed for group_member"
+      end
     end
   end
 
@@ -140,9 +163,30 @@ assets.each_with_index do |asset, index|
     evidence_path = Pathname.new(license["evidence_ref"])
     if evidence_path.absolute? || evidence_path.each_filename.include?("..")
       errors << "#{prefix}.license.evidence_ref must remain inside the repository"
-    elsif !File.file?(File.expand_path(license["evidence_ref"], repo_root))
-      errors << "#{prefix}.license.evidence_ref is missing"
+    elsif !license["evidence_ref"].start_with?(".quality/evidence/")
+      errors << "#{prefix}.license.evidence_ref must remain inside .quality/evidence"
+    else
+      evidence_file = File.expand_path(license["evidence_ref"], repo_root)
+      if !File.file?(evidence_file)
+        errors << "#{prefix}.license.evidence_ref is missing"
+      else
+        evidence_root = File.expand_path(".quality/evidence", repo_root)
+        evidence_real = File.realpath(evidence_file)
+        unless evidence_real.start_with?("#{evidence_root}/")
+          errors << "#{prefix}.license.evidence_ref resolves outside .quality/evidence"
+        end
+      end
     end
+  end
+
+  valid_media = media.is_a?(Hash) &&
+                ["jpeg", "png", "heic"].include?(media["format"]) &&
+                media["width"].is_a?(Integer) && media["width"].positive? &&
+                media["height"].is_a?(Integer) && media["height"].positive? &&
+                ["srgb", "display_p3"].include?(media["color_space"]) &&
+                media["orientation"].is_a?(Integer) && (1..8).cover?(media["orientation"])
+  unless valid_media
+    errors << "#{prefix}.media must include format, positive width/height, color_space, and orientation"
   end
 
   next unless safe_relative_file
@@ -156,18 +200,102 @@ assets.each_with_index do |asset, index|
     errors << "#{prefix}.file is missing"
     next
   end
+  begin
+    real_path = File.realpath(full_path)
+    resolved_corpus_root = File.realpath(corpus_root)
+    unless real_path.start_with?("#{resolved_corpus_root}/")
+      errors << "#{prefix}.file resolves outside corpus_root"
+      next
+    end
+  rescue SystemCallError
+    errors << "#{prefix}.file could not be resolved"
+    next
+  end
   if sha256.is_a?(String) && sha256.match?(/\A[0-9a-f]{64}\z/)
     actual = Digest::SHA256.file(full_path).hexdigest
     errors << "#{prefix}.sha256 does not match the file" unless actual == sha256
   end
+
+  begin
+    stdout, stderr, probe_status = Open3.capture3(
+      "sips",
+      "-g", "pixelWidth",
+      "-g", "pixelHeight",
+      "-g", "format",
+      "-g", "profile",
+      "-g", "orientation",
+      full_path,
+    )
+  rescue Errno::ENOENT
+    errors << "#{prefix}.file media probe unavailable: macOS sips was not found"
+    next
+  end
+  unless probe_status.success?
+    errors << "#{prefix}.file media probe failed: #{stderr.lines.first&.strip || "unknown error"}"
+    next
+  end
+  probed = stdout.each_line.each_with_object({}) do |line, values|
+    match = line.match(/^\s+(pixelWidth|pixelHeight|format|profile|orientation):\s*(.+)$/)
+    values[match[1]] = match[2].strip if match
+  end
+  actual_format = probed["format"] == "heif" ? "heic" : probed["format"]
+  actual_width = Integer(probed["pixelWidth"], exception: false)
+  actual_height = Integer(probed["pixelHeight"], exception: false)
+  actual_orientation = probed["orientation"] == "<nil>" ? 1 : Integer(probed["orientation"], exception: false)
+  actual_color_space = if probed["profile"]&.match?(/display\s*p3|\bp3\b/i)
+                         "display_p3"
+                       elsif probed["profile"]&.match?(/srgb/i)
+                         "srgb"
+                       end
+  if valid_media
+    errors << "#{prefix}.media.format does not match the file" unless media["format"] == actual_format
+    errors << "#{prefix}.media.width does not match the file" unless media["width"] == actual_width
+    errors << "#{prefix}.media.height does not match the file" unless media["height"] == actual_height
+    errors << "#{prefix}.media.orientation does not match the file" unless media["orientation"] == actual_orientation
+    errors << "#{prefix}.media.color_space does not match the embedded profile" unless media["color_space"] == actual_color_space
+  end
+  if tags.is_a?(Array)
+    errors << "#{prefix} is tagged jpeg but is not JPEG" if tags.include?("jpeg") && actual_format != "jpeg"
+    errors << "#{prefix} is tagged png but is not PNG" if tags.include?("png") && actual_format != "png"
+    errors << "#{prefix} is tagged heic but is not HEIC" if tags.include?("heic") && actual_format != "heic"
+    errors << "#{prefix} is tagged srgb but is not tagged sRGB" if tags.include?("srgb") && actual_color_space != "srgb"
+    if tags.include?("display_p3") && actual_color_space != "display_p3"
+      errors << "#{prefix} is tagged display_p3 but is not tagged Display P3"
+    end
+    pixels = actual_width.to_i * actual_height.to_i
+    if tags.include?("high_resolution") && pixels < 24_000_000
+      errors << "#{prefix} is tagged high_resolution but is below 24 MP"
+    end
+    if tags.include?("exif_rotated") && actual_orientation == 1
+      errors << "#{prefix} is tagged exif_rotated but has normal orientation"
+    end
+  end
+  if actual_width.to_i * actual_height.to_i > 48_000_000
+    errors << "#{prefix}.file exceeds the 48 MP input contract"
+  end
+  if [actual_width.to_i, actual_height.to_i].max > 12_000
+    errors << "#{prefix}.file exceeds the 12,000 px edge contract"
+  end
+  errors << "#{prefix}.file exceeds the 100 MB input contract" if File.size(full_path) > 100 * 1024 * 1024
 end
 
 unless allow_incomplete
   errors << "status must be ready for the complete gate" unless status == "ready"
-  errors << "asset count #{assets.length} is below #{minimum_assets}" if minimum_assets.is_a?(Integer) && assets.length < minimum_assets
-  if minimum_group_sets.is_a?(Integer)
-    complete_groups = group_counts.count { |_group_id, count| minimum_members_per_group.is_a?(Integer) && count >= minimum_members_per_group }
-    errors << "complete group set count #{complete_groups} is below #{minimum_group_sets}" if complete_groups < minimum_group_sets
+  if required_assets.is_a?(Integer) && assets.length != required_assets
+    errors << "asset count #{assets.length} must equal #{required_assets}"
+  end
+  if required_single_assets.is_a?(Integer) && single_asset_count != required_single_assets
+    errors << "single asset count #{single_asset_count} must equal #{required_single_assets}"
+  end
+  if required_group_sets.is_a?(Integer) && group_counts.length != required_group_sets
+    errors << "group set count #{group_counts.length} must equal #{required_group_sets}"
+  end
+  if required_members_per_group.is_a?(Integer)
+    group_counts.each do |group_id, count|
+      unless count == required_members_per_group
+        errors << "group #{group_id} member count #{count} must equal #{required_members_per_group}"
+      end
+    end
   end
   minimum_tag_counts.each do |tag, minimum|
     errors << "tag #{tag} count #{tag_counts[tag]} is below #{minimum}" if tag_counts[tag] < minimum

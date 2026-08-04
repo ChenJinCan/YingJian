@@ -1,9 +1,10 @@
-schema: 1
+schema: 2
 status: blocked_missing_assets
 corpus_root: .quality/corpus
-minimum_assets: 48
-minimum_group_sets: 6
-minimum_members_per_group: 4
+required_assets: 48
+required_single_assets: 24
+required_group_sets: 6
+required_members_per_group: 4
 minimum_tag_counts:
   portrait_single: 8
   portrait_multi: 4

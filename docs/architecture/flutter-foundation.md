@@ -42,7 +42,7 @@ app（组装、主题、路由）
 
 `PhotoAnalyzer` 是确定性端侧分析 seam。iOS 使用 Core Image 缩略像素统计和 Vision 有限人物场景，Android 使用有界 sRGB Bitmap 缩略图、同阈值像素统计和系统 `FaceDetector`；两端只返回曝光、白平衡、清晰度、人物适用性和场景等有限枚举，不把像素、人脸框或供应商对象传入 Flutter。引擎能力版本参与项目缓存身份，解码、能力或结果验证失败时稳定退回 metadata-safe 配方。
 
-`ImagePipelineV1` 冻结首个光色纵切，`ImagePipelineV2` 在不改写 V1 的前提下增加完整基础光色与构图；iOS Core Image 和 Android GLES3/CPU 导出均严格解析 V2，未知版本、非整数版本/旋转字段、越界字段和未冻结的非零人像强度会被拒绝。`PhotoPreviewRenderer` 是原生预览 seam：Android Adapter 通过独立 GL 线程、GLES3 和 Flutter Texture 提供路径驱动的代理图预览；iOS Adapter 使用 Core Image 和 Flutter Texture，原生预览不可用时才使用 `PhotoColorTransform` Flutter 矩阵作为仅限 V1 的兼容降级。`PhotoExporter` 从原图重新渲染并输出 JPEG 95/sRGB：iOS 写入 Photos；Android 规范化 EXIF 方向后执行同义配方并写入 MediaStore。V2 几何通过应用私有、立即 unlink 的临时像素映射，在创建唯一完整输出 Bitmap 前回收源 Bitmap；完整 48 MP 的映射页、格式、色彩和物理设备预算仍以 Ticket 02 的样片与 Profile/Release 证据为关闭门，不能由 Profile 模拟器烟测替代。原始项目文件始终只读。详细决定见 [`ADR 0002`](../adr/0002-native-preview-pipeline.md)。
+`ImagePipelineV1` 冻结首个光色纵切，`ImagePipelineV2` 在不改写 V1 的前提下增加完整基础光色与构图；iOS Core Image 和 Android GLES3/CPU 导出均严格解析 V2，未知版本、非整数版本/旋转字段、越界字段和未冻结的非零人像强度会被拒绝。`PhotoPreviewRenderer` 是原生预览 seam：Android Adapter 通过独立 GL 线程、GLES3 和 Flutter Texture 提供路径驱动的代理图预览；iOS Adapter 使用 Core Image 和 Flutter Texture，原生预览不可用时才使用 `PhotoColorTransform` Flutter 矩阵作为仅限 V1 的兼容降级。`PhotoExporter` 从原图重新渲染并输出 JPEG 95/sRGB：iOS 的 `IOSPhotoFileRenderer` 先生成可独立回查的最终 JPEG，再由 PhotoKit 保存同一文件；Android 规范化 EXIF 方向后执行同义配方并写入 MediaStore。文件渲染测试与生产 PhotoKit 路径共享同一实现，不用测试专用算法替代最终产物。V2 几何通过应用私有、立即 unlink 的临时像素映射，在创建唯一完整输出 Bitmap 前回收源 Bitmap；完整 48 MP 的映射页、格式、色彩和物理设备预算仍以 Ticket 02 的样片与 Profile/Release 证据为关闭门，不能由 Profile 模拟器烟测替代。原始项目文件始终只读。详细决定见 [`ADR 0002`](../adr/0002-native-preview-pipeline.md)。
 
 ## 暂不引入
 

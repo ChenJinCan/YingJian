@@ -1,7 +1,9 @@
 import CoreImage
+import CryptoKit
 import Flutter
 import ImageIO
 import UIKit
+import UniformTypeIdentifiers
 import XCTest
 @testable import Runner
 
@@ -208,6 +210,169 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(components.second, 15)
   }
 
+  func testFileRendererNormalizesRealJpegOrientationAndMetadataWithoutChangingSource() throws {
+    let sourceURL = temporaryURL(extension: "jpg")
+    let outputURL = temporaryURL(extension: "jpg")
+    defer { removeTemporaryFiles(sourceURL, outputURL) }
+    try writeJpeg(
+      to: sourceURL,
+      width: 6,
+      height: 4,
+      colorSpace: sRGB,
+      properties: [
+        kCGImagePropertyOrientation as String: 6,
+        kCGImagePropertyGPSDictionary as String: [
+          kCGImagePropertyGPSLatitude as String: 31.2
+        ],
+        kCGImagePropertyExifDictionary as String: [
+          kCGImagePropertyExifDateTimeOriginal as String: "2026:08:04 13:14:15",
+          kCGImagePropertyExifMakerNote as String: Data([1, 2, 3]),
+        ],
+        kCGImagePropertyTIFFDictionary as String: [
+          kCGImagePropertyTIFFDateTime as String: "2026:08:04 13:14:15",
+          kCGImagePropertyTIFFMake as String: "Private camera make",
+        ],
+      ]
+    )
+    let sourceHash = try sha256(sourceURL)
+
+    let artifact = try render(sourceURL: sourceURL, outputURL: outputURL)
+    let properties = try imageProperties(outputURL)
+    let exif = properties[kCGImagePropertyExifDictionary as String] as? [String: Any]
+    let tiff = properties[kCGImagePropertyTIFFDictionary as String] as? [String: Any]
+
+    XCTAssertEqual(artifact.width, 4)
+    XCTAssertEqual(artifact.height, 6)
+    XCTAssertEqual(properties[kCGImagePropertyOrientation as String] as? Int, 1)
+    XCTAssertNil(properties[kCGImagePropertyGPSDictionary as String])
+    XCTAssertEqual(
+      exif?[kCGImagePropertyExifDateTimeOriginal as String] as? String,
+      "2026:08:04 13:14:15"
+    )
+    XCTAssertNil(exif?[kCGImagePropertyExifMakerNote as String])
+    XCTAssertEqual(
+      tiff?[kCGImagePropertyTIFFDateTime as String] as? String,
+      "2026:08:04 13:14:15"
+    )
+    XCTAssertNil(tiff?[kCGImagePropertyTIFFMake as String])
+    XCTAssertEqual(try sha256(sourceURL), sourceHash)
+  }
+
+  func testFileRendererNormalizesAllExifOrientationsWithAsymmetricPixels() throws {
+    var temporaryFiles: [URL] = []
+    defer { removeTemporaryFiles(temporaryFiles) }
+    let baselineURL = temporaryURL(extension: "jpg")
+    temporaryFiles.append(baselineURL)
+    try writeAsymmetricJpeg(to: baselineURL, orientation: 1)
+    let baseline = try XCTUnwrap(
+      CIImage(
+        contentsOf: baselineURL,
+        options: [.applyOrientationProperty: false]
+      )
+    )
+
+    for orientation in 1...8 {
+      let sourceURL = temporaryURL(extension: "jpg")
+      let outputURL = temporaryURL(extension: "jpg")
+      temporaryFiles.append(contentsOf: [sourceURL, outputURL])
+      try writeAsymmetricJpeg(to: sourceURL, orientation: orientation)
+      let sourceHash = try sha256(sourceURL)
+
+      let artifact = try render(sourceURL: sourceURL, outputURL: outputURL)
+      let actual = try XCTUnwrap(
+        CIImage(
+          contentsOf: outputURL,
+          options: [.applyOrientationProperty: true]
+        )
+      )
+      let expected = normalized(
+        baseline.oriented(forExifOrientation: Int32(orientation))
+      )
+      let actualBytes = try rgbaBytes(normalized(actual))
+      let expectedBytes = try rgbaBytes(expected)
+      let difference = meanAbsoluteDifference(actualBytes, expectedBytes)
+      let properties = try imageProperties(outputURL)
+
+      XCTAssertEqual(artifact.width, Int(expected.extent.width), "orientation \(orientation)")
+      XCTAssertEqual(artifact.height, Int(expected.extent.height), "orientation \(orientation)")
+      XCTAssertEqual(actualBytes.count, expectedBytes.count, "orientation \(orientation)")
+      XCTAssertLessThan(difference, 8, "orientation \(orientation) changed asymmetric pixels")
+      XCTAssertEqual(
+        properties[kCGImagePropertyOrientation as String] as? Int,
+        1,
+        "orientation \(orientation)"
+      )
+      XCTAssertEqual(try sha256(sourceURL), sourceHash, "orientation \(orientation)")
+    }
+  }
+
+  func testFileRendererCompositesTransparentPngOntoWhite() throws {
+    let sourceURL = temporaryURL(extension: "png")
+    let outputURL = temporaryURL(extension: "jpg")
+    defer { removeTemporaryFiles(sourceURL, outputURL) }
+    let transparent = CIImage(
+      color: CIColor(red: 0, green: 0, blue: 0, alpha: 0)
+    ).cropped(to: CGRect(x: 0, y: 0, width: 8, height: 8))
+    try imageContext.writePNGRepresentation(
+      of: transparent,
+      to: sourceURL,
+      format: .RGBA8,
+      colorSpace: sRGB,
+      options: [:]
+    )
+
+    _ = try render(sourceURL: sourceURL, outputURL: outputURL)
+    let output = try XCTUnwrap(CIImage(contentsOf: outputURL))
+    let pixel = try firstPixel(output)
+
+    XCTAssertGreaterThanOrEqual(pixel[0], 250)
+    XCTAssertGreaterThanOrEqual(pixel[1], 250)
+    XCTAssertGreaterThanOrEqual(pixel[2], 250)
+    XCTAssertEqual(pixel[3], 255)
+  }
+
+  func testFileRendererConvertsDisplayP3JpegToSrgb() throws {
+    let sourceURL = temporaryURL(extension: "jpg")
+    let outputURL = temporaryURL(extension: "jpg")
+    defer { removeTemporaryFiles(sourceURL, outputURL) }
+    let displayP3 = try XCTUnwrap(CGColorSpace(name: CGColorSpace.displayP3))
+    try writeJpeg(
+      to: sourceURL,
+      width: 8,
+      height: 8,
+      colorSpace: displayP3
+    )
+
+    _ = try render(sourceURL: sourceURL, outputURL: outputURL)
+    let source = try XCTUnwrap(CGImageSourceCreateWithURL(outputURL as CFURL, nil))
+    let output = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+
+    XCTAssertEqual(output.colorSpace?.name, CGColorSpace.sRGB)
+  }
+
+  func testFileRendererAcceptsRealHeicInputAndProducesJpeg() throws {
+    let sourceURL = temporaryURL(extension: "heic")
+    let outputURL = temporaryURL(extension: "jpg")
+    defer { removeTemporaryFiles(sourceURL, outputURL) }
+    let image = CIImage(color: CIColor(red: 0.2, green: 0.4, blue: 0.6))
+      .cropped(to: CGRect(x: 0, y: 0, width: 8, height: 6))
+    try imageContext.writeHEIFRepresentation(
+      of: image,
+      to: sourceURL,
+      format: .RGBA8,
+      colorSpace: sRGB,
+      options: [:]
+    )
+
+    let artifact = try render(sourceURL: sourceURL, outputURL: outputURL)
+    let outputSource = try XCTUnwrap(CGImageSourceCreateWithURL(outputURL as CFURL, nil))
+    let outputType = try XCTUnwrap(CGImageSourceGetType(outputSource))
+
+    XCTAssertEqual(artifact.width, 8)
+    XCTAssertEqual(artifact.height, 6)
+    XCTAssertEqual(outputType as String, UTType.jpeg.identifier)
+  }
+
   private func pipelineV2(
     schemaVersion: NSNumber = 2,
     exposureEV: Double = 0,
@@ -244,6 +409,10 @@ class RunnerTests: XCTestCase {
   }
 
   private func firstPixel(_ image: CIImage) throws -> [Int] {
+    try Array(rgbaBytes(image).prefix(4)).map(Int.init)
+  }
+
+  private func rgbaBytes(_ image: CIImage) throws -> [UInt8] {
     let bounds = image.extent.integral
     var bytes = [UInt8](repeating: 0, count: Int(bounds.width * bounds.height) * 4)
     bytes.withUnsafeMutableBytes { buffer in
@@ -256,7 +425,108 @@ class RunnerTests: XCTestCase {
         colorSpace: sRGB
       )
     }
-    return bytes.prefix(4).map(Int.init)
+    return bytes
+  }
+
+  private func normalized(_ image: CIImage) -> CIImage {
+    image.transformed(
+      by: CGAffineTransform(
+        translationX: -image.extent.minX,
+        y: -image.extent.minY
+      )
+    )
+  }
+
+  private func meanAbsoluteDifference(_ left: [UInt8], _ right: [UInt8]) -> Double {
+    guard left.count == right.count, !left.isEmpty else { return .infinity }
+    let total = zip(left, right).reduce(0) { result, pair in
+      result + abs(Int(pair.0) - Int(pair.1))
+    }
+    return Double(total) / Double(left.count)
+  }
+
+  private func render(sourceURL: URL, outputURL: URL) throws -> IOSPhotoRenderedFile {
+    let pipeline = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV2()))
+    return try IOSPhotoFileRenderer(context: imageContext).render(
+      sourcePath: sourceURL.path,
+      pipeline: pipeline,
+      destinationURL: outputURL
+    )
+  }
+
+  private func writeJpeg(
+    to url: URL,
+    width: Int,
+    height: Int,
+    colorSpace: CGColorSpace,
+    properties: [String: Any] = [:]
+  ) throws {
+    let image = CIImage(color: CIColor(red: 0.2, green: 0.4, blue: 0.6))
+      .cropped(to: CGRect(x: 0, y: 0, width: width, height: height))
+      .settingProperties(properties)
+    try imageContext.writeJPEGRepresentation(
+      of: image,
+      to: url,
+      colorSpace: colorSpace,
+      options: [
+        kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.95
+      ]
+    )
+  }
+
+  private func writeAsymmetricJpeg(to url: URL, orientation: Int) throws {
+    let extent = CGRect(x: 0, y: 0, width: 96, height: 64)
+    let halfWidth = extent.width / 2
+    let halfHeight = extent.height / 2
+    var image = CIImage(color: CIColor.black).cropped(to: extent)
+    let quadrants: [(CGRect, CIColor)] = [
+      (CGRect(x: 0, y: halfHeight, width: halfWidth, height: halfHeight), .red),
+      (CGRect(x: halfWidth, y: halfHeight, width: halfWidth, height: halfHeight), .green),
+      (CGRect(x: 0, y: 0, width: halfWidth, height: halfHeight), .blue),
+      (CGRect(x: halfWidth, y: 0, width: halfWidth, height: halfHeight), .yellow),
+    ]
+    for (rectangle, color) in quadrants {
+      image = CIImage(color: color).cropped(to: rectangle).composited(over: image)
+    }
+    try imageContext.writeJPEGRepresentation(
+      of: image.settingProperties([
+        kCGImagePropertyOrientation as String: orientation
+      ]),
+      to: url,
+      colorSpace: sRGB,
+      options: [
+        kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.95
+      ]
+    )
+  }
+
+  private func imageProperties(_ url: URL) throws -> [String: Any] {
+    let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
+    return try XCTUnwrap(
+      CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any]
+    )
+  }
+
+  private func sha256(_ url: URL) throws -> String {
+    SHA256.hash(data: try Data(contentsOf: url)).map { String(format: "%02x", $0) }.joined()
+  }
+
+  private func temporaryURL(extension fileExtension: String) -> URL {
+    FileManager.default.temporaryDirectory
+      .appendingPathComponent("yingjian-test-\(UUID().uuidString)")
+      .appendingPathExtension(fileExtension)
+  }
+
+  private func removeTemporaryFiles(_ urls: URL...) {
+    for url in urls {
+      try? FileManager.default.removeItem(at: url)
+    }
+  }
+
+  private func removeTemporaryFiles(_ urls: [URL]) {
+    for url in urls {
+      try? FileManager.default.removeItem(at: url)
+    }
   }
 
 }

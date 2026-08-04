@@ -86,12 +86,20 @@
   file: portraits/portrait-001.jpg
   sha256: 64位小写十六进制
   tags: [portrait_single, jpeg, srgb]
+  media:
+    format: jpeg
+    width: 4032
+    height: 3024
+    color_space: srgb
+    orientation: 1
   license:
     source_type: team_capture
     rights_basis: written_consent_for_internal_testing
     redistributable: false
     evidence_ref: .quality/evidence/portrait-001-consent.pdf
 ```
+
+清单 schema 2 会用系统 ImageIO 工具实际回查格式、像素尺寸、嵌入色彩配置和方向，不接受只修改扩展名或标签来满足配额。完整门精确要求 48 张：24 张独立单图，以及 6 组各 4 张组图；不能用额外组图挤占单图，也不能用超额成员掩盖缺组。对应根字段为 `required_assets`、`required_single_assets`、`required_group_sets` 与 `required_members_per_group`。`high_resolution` 必须至少 24 MP，`exif_rotated` 必须具有非 1 的真实方向；所有资产同时受 48 MP、12,000 px 和 100 MB 输入硬门约束。许可证据必须位于被忽略的 `.quality/evidence/` 内，语料和许可证据的符号链接均不得逃逸仓库边界。
 
 ## 5. 自动质量门
 
@@ -221,6 +229,7 @@
 ```sh
 ruby scripts/check_image_quality_corpus.rb --allow-incomplete
 ruby scripts/check_image_quality_corpus.rb
+ruby scripts/test_image_quality_corpus.rb
 ruby scripts/test_blind_review_tools.rb
 ```
 
