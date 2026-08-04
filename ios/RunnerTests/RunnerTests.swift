@@ -373,6 +373,203 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(outputType as String, UTType.jpeg.identifier)
   }
 
+  func testPortraitSpikeProducesReviewReadyFullResolutionArtifactsWithoutFace() throws {
+    let sourceURL = temporaryURL(extension: "png")
+    defer { removeTemporaryFiles(sourceURL) }
+    let source = CIImage(color: CIColor(red: 0.1, green: 0.3, blue: 0.7))
+      .cropped(to: CGRect(x: 0, y: 0, width: 96, height: 64))
+    try imageContext.writePNGRepresentation(
+      of: source,
+      to: sourceURL,
+      format: .RGBA8,
+      colorSpace: sRGB,
+      options: [:]
+    )
+    let sourceHash = try sha256(sourceURL)
+
+    let result = try PortraitMaskSpike.analyze(sourcePath: sourceURL.path)
+    XCTAssertEqual(result["faceCount"] as? Int, 0)
+    XCTAssertEqual(result["sourceWidth"] as? Int, 96)
+    XCTAssertEqual(result["sourceHeight"] as? Int, 64)
+    XCTAssertEqual(result["productionEligible"] as? Bool, false)
+
+    let baselinePath = try XCTUnwrap(result["baselineOriginalPath"] as? String)
+    let offPath = try XCTUnwrap(result["offExportPath"] as? String)
+    let defaultPath = try XCTUnwrap(result["defaultExportPath"] as? String)
+    let highSafePath = try XCTUnwrap(result["highSafeExportPath"] as? String)
+    let previewPath = try XCTUnwrap(result["defaultPreviewPath"] as? String)
+    let manifestPath = try XCTUnwrap(result["captureManifestPath"] as? String)
+    let captureRelativePath = try XCTUnwrap(result["captureRelativePath"] as? String)
+    defer {
+      removeTemporaryFiles(
+        URL(fileURLWithPath: baselinePath).deletingLastPathComponent()
+      )
+    }
+
+    for path in [baselinePath, offPath, defaultPath, highSafePath] {
+      let url = URL(fileURLWithPath: path)
+      let properties = try imageProperties(url)
+      XCTAssertEqual(properties[kCGImagePropertyPixelWidth as String] as? Int, 96)
+      XCTAssertEqual(properties[kCGImagePropertyPixelHeight as String] as? Int, 64)
+      XCTAssertEqual(properties[kCGImagePropertyOrientation as String] as? Int, 1)
+      let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
+      XCTAssertEqual(CGImageSourceGetType(source) as String?, UTType.jpeg.identifier)
+      let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+      XCTAssertEqual(image.colorSpace?.name, CGColorSpace.sRGB)
+    }
+    XCTAssertEqual(try sha256(URL(fileURLWithPath: baselinePath)), try sha256(URL(fileURLWithPath: offPath)))
+    XCTAssertEqual(try sha256(URL(fileURLWithPath: baselinePath)), try sha256(URL(fileURLWithPath: defaultPath)))
+    XCTAssertEqual(try sha256(URL(fileURLWithPath: baselinePath)), try sha256(URL(fileURLWithPath: highSafePath)))
+    let previewURL = URL(fileURLWithPath: previewPath)
+    let previewProperties = try imageProperties(previewURL)
+    XCTAssertEqual(previewProperties[kCGImagePropertyPixelWidth as String] as? Int, 96)
+    XCTAssertEqual(previewProperties[kCGImagePropertyPixelHeight as String] as? Int, 64)
+    XCTAssertEqual((previewProperties[kCGImagePropertyOrientation as String] as? Int) ?? 1, 1)
+    let previewSource = try XCTUnwrap(CGImageSourceCreateWithURL(previewURL as CFURL, nil))
+    XCTAssertEqual(CGImageSourceGetType(previewSource) as String?, UTType.png.identifier)
+    let previewImage = try XCTUnwrap(CGImageSourceCreateImageAtIndex(previewSource, 0, nil))
+    XCTAssertEqual(previewImage.colorSpace?.name, CGColorSpace.sRGB)
+
+    let manifestData = try Data(contentsOf: URL(fileURLWithPath: manifestPath))
+    let manifest = try XCTUnwrap(
+      JSONSerialization.jsonObject(with: manifestData) as? [String: Any]
+    )
+    XCTAssertEqual(manifest["schema"] as? Int, 1)
+    XCTAssertEqual(manifest["rawSourceSha256"] as? String, sourceHash)
+    XCTAssertEqual(manifest["productionEligible"] as? Bool, false)
+    XCTAssertTrue(captureRelativePath.hasPrefix("tmp/portrait-mask-spike/"))
+    XCTAssertFalse((manifest["device"] as? String ?? "").isEmpty)
+    XCTAssertFalse((manifest["appVersion"] as? String ?? "").isEmpty)
+    XCTAssertFalse((manifest["appBuild"] as? String ?? "").isEmpty)
+    let outputs = try XCTUnwrap(manifest["outputs"] as? [String: [String: Any]])
+    let expectedOutputs = [
+      "baselineOriginal": baselinePath,
+      "offExport": offPath,
+      "defaultExport": defaultPath,
+      "highSafeExport": highSafePath,
+      "defaultPreview": previewPath,
+    ]
+    for (name, path) in expectedOutputs {
+      let entry = try XCTUnwrap(outputs[name])
+      let url = URL(fileURLWithPath: path)
+      XCTAssertEqual(entry["file"] as? String, url.lastPathComponent)
+      XCTAssertEqual(entry["sha256"] as? String, try sha256(url))
+    }
+    XCTAssertEqual(try sha256(sourceURL), sourceHash)
+
+    XCTAssertThrowsError(
+      try PortraitMaskSpike.removeCaptureRoot { _ in
+        throw NSError(domain: "fixture.cleanup", code: 1)
+      }
+    ) { error in
+      XCTAssertEqual((error as? PortraitMaskSpikeError)?.code, "cleanupFailed")
+    }
+    XCTAssertTrue(FileManager.default.fileExists(atPath: manifestPath))
+
+    let replacement = try PortraitMaskSpike.analyze(sourcePath: sourceURL.path)
+    let replacementManifest = try XCTUnwrap(replacement["captureManifestPath"] as? String)
+    defer {
+      removeTemporaryFiles(
+        URL(fileURLWithPath: replacementManifest).deletingLastPathComponent()
+      )
+    }
+    XCTAssertFalse(FileManager.default.fileExists(atPath: manifestPath))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: replacementManifest))
+  }
+
+  func testPortraitSpikeRejectsInputsOutsideTheFrozenResourceContract() throws {
+    XCTAssertThrowsError(
+      try PortraitMaskSpike.validateDimensions(
+        width: 12_001,
+        height: 1,
+        fileBytes: 1,
+        isSupportedFormat: true,
+        imageCount: 1
+      )
+    )
+    XCTAssertThrowsError(
+      try PortraitMaskSpike.validateDimensions(
+        width: 8_000,
+        height: 6_001,
+        fileBytes: 1,
+        isSupportedFormat: true,
+        imageCount: 1
+      )
+    )
+    XCTAssertThrowsError(
+      try PortraitMaskSpike.validateDimensions(
+        width: 1,
+        height: 1,
+        fileBytes: 100 * 1024 * 1024 + 1,
+        isSupportedFormat: true,
+        imageCount: 1
+      )
+    )
+    XCTAssertThrowsError(
+      try PortraitMaskSpike.validateDimensions(
+        width: 1,
+        height: 1,
+        fileBytes: 1,
+        isSupportedFormat: false,
+        imageCount: 1
+      )
+    )
+    XCTAssertNoThrow(
+      try PortraitMaskSpike.validateDimensions(
+        width: 8_000,
+        height: 6_000,
+        fileBytes: 100 * 1024 * 1024,
+        isSupportedFormat: true,
+        imageCount: 1
+      )
+    )
+  }
+
+  func testPortraitSpikeFullResolutionCandidateUsesMaskAndMonotonicStrengths() throws {
+    let sourceExtent = CGRect(x: 0, y: 0, width: 80, height: 60)
+    let proxyExtent = CGRect(x: 0, y: 0, width: 40, height: 30)
+    let source = CIImage(color: CIColor(red: 0.42, green: 0.31, blue: 0.24, alpha: 1))
+      .cropped(to: sourceExtent)
+    let whiteHalf = CIImage(color: .white)
+      .cropped(to: CGRect(x: 0, y: 0, width: 20, height: 30))
+    let black = CIImage(color: .black).cropped(to: proxyExtent)
+    let proxyMask = whiteHalf.composited(over: black).cropped(to: proxyExtent)
+
+    let candidates = PortraitMaskSpike.fullResolutionCandidates(
+      source: source,
+      effectiveProxyMask: proxyMask,
+      proxyExtent: proxyExtent,
+      sourceExtent: sourceExtent
+    )
+    let sourceBytes = try rgbaBytes(source)
+    let defaultBytes = try rgbaBytes(candidates.defaultImage)
+    let highSafeBytes = try rgbaBytes(candidates.highSafeImage)
+    let defaultDifference = meanAbsoluteDifference(sourceBytes, defaultBytes)
+    let highSafeDifference = meanAbsoluteDifference(sourceBytes, highSafeBytes)
+
+    XCTAssertGreaterThan(defaultDifference, 0.1)
+    XCTAssertGreaterThan(highSafeDifference, defaultDifference)
+    XCTAssertGreaterThan(meanAbsoluteDifference(defaultBytes, highSafeBytes), 0.1)
+    var largestOutsideDifference = 0
+    for y in 0..<60 {
+      for x in 40..<80 {
+        let offset = (y * 80 + x) * 4
+        for channel in 0..<3 {
+          largestOutsideDifference = max(
+            largestOutsideDifference,
+            max(
+              abs(Int(defaultBytes[offset + channel]) - Int(sourceBytes[offset + channel])),
+              abs(Int(highSafeBytes[offset + channel]) - Int(sourceBytes[offset + channel]))
+            )
+          )
+        }
+        XCTAssertEqual(defaultBytes[offset + 3], sourceBytes[offset + 3])
+        XCTAssertEqual(highSafeBytes[offset + 3], sourceBytes[offset + 3])
+      }
+    }
+    XCTAssertLessThanOrEqual(largestOutsideDifference, 3)
+  }
+
   private func pipelineV2(
     schemaVersion: NSNumber = 2,
     exposureEV: Double = 0,

@@ -9,14 +9,20 @@ void main() {
         'faceCount': 1,
         'width': 1200,
         'height': 800,
+        'sourceWidth': 4032,
+        'sourceHeight': 3024,
         'sourceProxyPath': '/tmp/source.png',
         'candidateMaskPath': '/tmp/candidate.png',
         'protectionMaskPath': '/tmp/protection.png',
         'effectiveMaskPath': '/tmp/effective.png',
         'overlayPath': '/tmp/overlay.png',
-        'offPath': '/tmp/off.png',
-        'defaultPath': '/tmp/default.png',
-        'highSafePath': '/tmp/high-safe.png',
+        'baselineOriginalPath': '/tmp/original.jpg',
+        'offExportPath': '/tmp/off.jpg',
+        'defaultExportPath': '/tmp/default.jpg',
+        'highSafeExportPath': '/tmp/high-safe.jpg',
+        'defaultPreviewPath': '/tmp/default-preview.png',
+        'captureManifestPath': '/tmp/capture-manifest.json',
+        'captureRelativePath': 'tmp/portrait-mask-spike/capture-001',
         'candidateKind': 'vision-landmarks-geometry-roi',
         'geometryOnly': true,
         'effectVersion': 'ios-geometry-retouch-spike-v1',
@@ -29,7 +35,12 @@ void main() {
       });
 
       expect(result.productionEligible, isFalse);
-      expect(result.offPath, endsWith('/off.png'));
+      expect(result.offExportPath, endsWith('/off.jpg'));
+      expect(result.sourceWidth, 4032);
+      expect(
+        result.captureRelativePath,
+        startsWith('tmp/portrait-mask-spike/'),
+      );
       expect(result.defaultStrength, 0.35);
       expect(result.highSafeStrength, 0.55);
     },

@@ -183,12 +183,14 @@ class _AnalysisState extends StatelessWidget {
             SelectableText(
               'faceCount: ${result.faceCount}\n'
               'proxy: ${result.width} × ${result.height}\n'
+              'source: ${result.sourceWidth} × ${result.sourceHeight}\n'
               'candidateKind: ${result.candidateKind}\n'
               'geometryOnly: ${result.geometryOnly}\n'
               'effectVersion: ${result.effectVersion}\n'
               'strengths: ${result.defaultStrength} / ${result.highSafeStrength}\n'
               'productionEligible: ${result.productionEligible}\n'
               'environment: ${result.executionEnvironment}\n'
+              'device copy source: ${result.captureRelativePath}\n'
               'landmarks: ${result.landmarkSummary}\n'
               'bounds: ${result.landmarkBoundsSummary}',
             ),
@@ -258,22 +260,48 @@ class _DebugImageWrap extends StatelessWidget {
         SizedBox(
           width: cardWidth,
           child: _DebugImageCard(
-            title: '6. 人像候选关闭（像素基线）',
-            path: result.offPath,
+            title: '6. 方向规范化原像素基线 JPEG',
+            path: result.baselineOriginalPath,
           ),
         ),
         SizedBox(
           width: cardWidth,
           child: _DebugImageCard(
-            title: '7. 人像候选默认强度',
-            path: result.defaultPath,
+            title: '7. 人像关闭原像素导出',
+            path: result.offExportPath,
           ),
         ),
         SizedBox(
           width: cardWidth,
           child: _DebugImageCard(
-            title: '8. 人像候选高安全强度',
-            path: result.highSafePath,
+            title: '8. 默认强度代理预览',
+            path: result.defaultPreviewPath,
+          ),
+        ),
+        SizedBox(
+          width: cardWidth,
+          child: _DebugImageCard(
+            title: '9. 默认强度原像素导出',
+            path: result.defaultExportPath,
+          ),
+        ),
+        SizedBox(
+          width: cardWidth,
+          child: _DebugImageCard(
+            title: '10. 高安全强度原像素导出',
+            path: result.highSafeExportPath,
+          ),
+        ),
+        SizedBox(
+          width: cardWidth,
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: SelectableText(
+                '采集清单：${result.captureManifestPath}\n'
+                '设备复制路径：${result.captureRelativePath}',
+              ),
+            ),
           ),
         ),
       ],
@@ -328,14 +356,20 @@ class PortraitMaskSpikeResult {
     required this.faceCount,
     required this.width,
     required this.height,
+    required this.sourceWidth,
+    required this.sourceHeight,
     required this.sourceProxyPath,
     required this.candidateMaskPath,
     required this.protectionMaskPath,
     required this.effectiveMaskPath,
     required this.overlayPath,
-    required this.offPath,
-    required this.defaultPath,
-    required this.highSafePath,
+    required this.baselineOriginalPath,
+    required this.offExportPath,
+    required this.defaultExportPath,
+    required this.highSafeExportPath,
+    required this.defaultPreviewPath,
+    required this.captureManifestPath,
+    required this.captureRelativePath,
     required this.candidateKind,
     required this.geometryOnly,
     required this.effectVersion,
@@ -360,14 +394,20 @@ class PortraitMaskSpikeResult {
       faceCount: read<int>('faceCount'),
       width: read<int>('width'),
       height: read<int>('height'),
+      sourceWidth: read<int>('sourceWidth'),
+      sourceHeight: read<int>('sourceHeight'),
       sourceProxyPath: read<String>('sourceProxyPath'),
       candidateMaskPath: read<String>('candidateMaskPath'),
       protectionMaskPath: read<String>('protectionMaskPath'),
       effectiveMaskPath: read<String>('effectiveMaskPath'),
       overlayPath: read<String>('overlayPath'),
-      offPath: read<String>('offPath'),
-      defaultPath: read<String>('defaultPath'),
-      highSafePath: read<String>('highSafePath'),
+      baselineOriginalPath: read<String>('baselineOriginalPath'),
+      offExportPath: read<String>('offExportPath'),
+      defaultExportPath: read<String>('defaultExportPath'),
+      highSafeExportPath: read<String>('highSafeExportPath'),
+      defaultPreviewPath: read<String>('defaultPreviewPath'),
+      captureManifestPath: read<String>('captureManifestPath'),
+      captureRelativePath: read<String>('captureRelativePath'),
       candidateKind: read<String>('candidateKind'),
       geometryOnly: read<bool>('geometryOnly'),
       effectVersion: read<String>('effectVersion'),
@@ -383,14 +423,20 @@ class PortraitMaskSpikeResult {
   final int faceCount;
   final int width;
   final int height;
+  final int sourceWidth;
+  final int sourceHeight;
   final String sourceProxyPath;
   final String candidateMaskPath;
   final String protectionMaskPath;
   final String effectiveMaskPath;
   final String overlayPath;
-  final String offPath;
-  final String defaultPath;
-  final String highSafePath;
+  final String baselineOriginalPath;
+  final String offExportPath;
+  final String defaultExportPath;
+  final String highSafeExportPath;
+  final String defaultPreviewPath;
+  final String captureManifestPath;
+  final String captureRelativePath;
   final String candidateKind;
   final bool geometryOnly;
   final String effectVersion;

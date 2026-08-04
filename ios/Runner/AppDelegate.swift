@@ -21,6 +21,7 @@ private enum PhotoInputInspectionError: Error {
   private var photoShareInProgress = false
 #if DEBUG
   private var portraitMaskSpikeChannel: FlutterMethodChannel?
+  private var portraitMaskSpikeStartupError: PortraitMaskSpikeError?
 #endif
 
   override func application(
@@ -472,13 +473,25 @@ private enum PhotoInputInspectionError: Error {
 
 #if DEBUG
   private func configurePortraitMaskSpike(messenger: FlutterBinaryMessenger) {
+    portraitMaskSpikeStartupError = nil
+    do {
+      try PortraitMaskSpike.discardAllCaptures()
+    } catch let error as PortraitMaskSpikeError {
+      portraitMaskSpikeStartupError = error
+    } catch {
+      portraitMaskSpikeStartupError = PortraitMaskSpikeError.cleanupFailed
+    }
     let channel = FlutterMethodChannel(
       name: "yingjian/portrait_mask_spike",
       binaryMessenger: messenger
     )
-    channel.setMethodCallHandler { call, result in
+    channel.setMethodCallHandler { [weak self] call, result in
       guard call.method == "analyzePortrait" else {
         result(FlutterMethodNotImplemented)
+        return
+      }
+      if let error = self?.portraitMaskSpikeStartupError {
+        result(FlutterError(code: error.code, message: error.message, details: nil))
         return
       }
       guard
@@ -1266,13 +1279,33 @@ private enum IOSPhotoPreviewError: Error {
 #if DEBUG
 /// THROWAWAY PROTOTYPE: validates Vision geometry and mask alignment only.
 /// It deliberately does not claim to be a production skin-segmentation engine.
-private enum PortraitMaskSpike {
+enum PortraitMaskSpike {
   private static let maxEdge: CGFloat = 1_600
+  private static let maxPixels = 48_000_000
+  private static let maxSourceEdge = 12_000
+  private static let maxFileBytes = 100 * 1024 * 1024
   private static let context = CIContext(options: [.cacheIntermediates: false])
+  private static let captureLock = NSLock()
+
+  private static var captureRoot: URL {
+    FileManager.default.temporaryDirectory
+      .appendingPathComponent("portrait-mask-spike", isDirectory: true)
+  }
+
+  static func discardAllCaptures() throws {
+    captureLock.lock()
+    defer { captureLock.unlock() }
+    try removeCaptureRoot()
+  }
 
   static func analyze(sourcePath: String) throws -> [String: Any] {
+    captureLock.lock()
+    defer { captureLock.unlock() }
+    let sourceURL = URL(fileURLWithPath: sourcePath)
+    try validateInput(sourceURL)
+    try removeCaptureRoot()
     guard let input = CIImage(
-      contentsOf: URL(fileURLWithPath: sourcePath),
+      contentsOf: sourceURL,
       options: [.applyOrientationProperty: true]
     ) else {
       throw PortraitMaskSpikeError(code: "decodeFailed", message: "Photo could not be decoded")
@@ -1280,12 +1313,14 @@ private enum PortraitMaskSpike {
     let normalized = input.transformed(
       by: CGAffineTransform(translationX: -input.extent.minX, y: -input.extent.minY)
     )
+    let sourceExtent = normalized.extent.integral
+    let source = normalized.cropped(to: sourceExtent)
     let longestEdge = max(normalized.extent.width, normalized.extent.height)
     guard longestEdge > 0 else {
       throw PortraitMaskSpikeError(code: "decodeFailed", message: "Photo dimensions are invalid")
     }
     let scale = min(1, maxEdge / longestEdge)
-    let proxy = normalized.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+    let proxy = source.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
     let extent = proxy.extent.integral
     guard
       extent.width >= 1,
@@ -1311,7 +1346,7 @@ private enum PortraitMaskSpike {
     let observations = request.results ?? []
     let width = Int(extent.width)
     let height = Int(extent.height)
-    let candidate = try makeMask(width: width, height: height) { graphics in
+    let candidateMask = try makeMask(width: width, height: height) { graphics in
       graphics.setFillColor(gray: 1, alpha: 1)
       for face in observations {
         graphics.fillEllipse(in: candidateFaceRect(face.boundingBox, size: extent.size))
@@ -1325,7 +1360,7 @@ private enum PortraitMaskSpike {
       }
     }
 
-    let candidateImage = CIImage(cgImage: candidate)
+    let candidateImage = CIImage(cgImage: candidateMask)
       .clampedToExtent()
       .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 8])
       .cropped(to: extent)
@@ -1343,92 +1378,218 @@ private enum PortraitMaskSpike {
       )
       .cropped(to: extent)
 
-    let directory = FileManager.default.temporaryDirectory
-      .appendingPathComponent("portrait-mask-spike", isDirectory: true)
+    let directory = captureRoot
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
     try FileManager.default.createDirectory(
       at: directory,
       withIntermediateDirectories: true
     )
-    let sourceProxyPath = try writePNG(
-      proxy,
-      extent: extent,
-      to: directory.appendingPathComponent("source-proxy.png")
-    )
-    let candidatePath = try writePNG(
-      candidateImage,
-      extent: extent,
-      to: directory.appendingPathComponent("candidate-face-region.png")
-    )
-    let protectionPath = try writePNG(
-      protectionImage,
-      extent: extent,
-      to: directory.appendingPathComponent("protected-features.png")
-    )
-    let effectivePath = try writePNG(
-      effectiveImage,
-      extent: extent,
-      to: directory.appendingPathComponent("effective-region.png")
-    )
-    let overlayPath = try writePNG(
-      overlay(mask: effectiveImage, source: proxy, extent: extent),
-      extent: extent,
-      to: directory.appendingPathComponent("effective-region-overlay.png")
-    )
-    let offPath = try writePNG(
-      proxy,
-      extent: extent,
-      to: directory.appendingPathComponent("candidate-off.png")
-    )
-    let defaultCandidate = observations.isEmpty
-      ? proxy
-      : retouch(
-          source: proxy,
-          mask: effectiveImage,
-          strength: 0.35,
-          extent: extent
-        )
-    let highSafeCandidate = observations.isEmpty
-      ? proxy
-      : retouch(
-          source: proxy,
-          mask: effectiveImage,
-          strength: 0.55,
-          extent: extent
-        )
-    let defaultPath = try writePNG(
-      defaultCandidate,
-      extent: extent,
-      to: directory.appendingPathComponent("candidate-default.png")
-    )
-    let highSafePath = try writePNG(
-      highSafeCandidate,
-      extent: extent,
-      to: directory.appendingPathComponent("candidate-high-safe.png")
-    )
+    do {
+      let sourceProxyPath = try writePNG(
+        proxy,
+        extent: extent,
+        to: directory.appendingPathComponent("source-proxy.png")
+      )
+      let candidatePath = try writePNG(
+        candidateImage,
+        extent: extent,
+        to: directory.appendingPathComponent("candidate-face-region.png")
+      )
+      let protectionPath = try writePNG(
+        protectionImage,
+        extent: extent,
+        to: directory.appendingPathComponent("protected-features.png")
+      )
+      let effectivePath = try writePNG(
+        effectiveImage,
+        extent: extent,
+        to: directory.appendingPathComponent("effective-region.png")
+      )
+      let overlayPath = try writePNG(
+        overlay(mask: effectiveImage, source: proxy, extent: extent),
+        extent: extent,
+        to: directory.appendingPathComponent("effective-region-overlay.png")
+      )
+      let defaultPreview = candidate(
+        source: proxy,
+        mask: effectiveImage,
+        strength: observations.isEmpty ? 0 : 0.35,
+        extent: extent
+      )
+      let defaultPreviewPath = try writePNG(
+        defaultPreview,
+        extent: extent,
+        to: directory.appendingPathComponent("candidate-default-preview.png")
+      )
 
-    return [
-      "faceCount": observations.count,
-      "width": width,
-      "height": height,
-      "sourceProxyPath": sourceProxyPath,
-      "candidateMaskPath": candidatePath,
-      "protectionMaskPath": protectionPath,
-      "effectiveMaskPath": effectivePath,
-      "overlayPath": overlayPath,
-      "offPath": offPath,
-      "defaultPath": defaultPath,
-      "highSafePath": highSafePath,
-      "candidateKind": "vision-landmarks-geometry-roi",
-      "geometryOnly": true,
-      "effectVersion": "ios-geometry-retouch-spike-v1",
-      "defaultStrength": 0.35,
-      "highSafeStrength": 0.55,
-      "productionEligible": false,
-      "executionEnvironment": executionEnvironment,
-      "landmarkSummary": landmarkSummary(observations.first?.landmarks),
-      "landmarkBoundsSummary": landmarkBoundsSummary(observations.first?.landmarks),
-    ]
+      let exportMetadata = ImageExportMetadata.sanitize(input.properties)
+      let baselineURL = directory.appendingPathComponent("baseline-original.jpg")
+      let offExportURL = directory.appendingPathComponent("yingjian-off-export.jpg")
+      let defaultExportURL = directory.appendingPathComponent("yingjian-default-export.jpg")
+      let highSafeExportURL = directory.appendingPathComponent("yingjian-high-safe-export.jpg")
+      try writeJPEG(
+        source.settingProperties(exportMetadata),
+        extent: sourceExtent,
+        to: baselineURL
+      )
+      try FileManager.default.copyItem(at: baselineURL, to: offExportURL)
+
+      if observations.isEmpty {
+        try FileManager.default.copyItem(at: baselineURL, to: defaultExportURL)
+        try FileManager.default.copyItem(at: baselineURL, to: highSafeExportURL)
+      } else {
+        let candidates = fullResolutionCandidates(
+          source: source,
+          effectiveProxyMask: effectiveImage,
+          proxyExtent: extent,
+          sourceExtent: sourceExtent
+        )
+        try writeJPEG(
+          candidates.defaultImage.settingProperties(exportMetadata),
+          extent: sourceExtent,
+          to: defaultExportURL
+        )
+        try writeJPEG(
+          candidates.highSafeImage.settingProperties(exportMetadata),
+          extent: sourceExtent,
+          to: highSafeExportURL
+        )
+      }
+
+      let manifestURL = directory.appendingPathComponent("capture-manifest.json")
+      let rawSourceSha256 = try sha256(sourceURL)
+      let captureRelativePath = "tmp/portrait-mask-spike/\(directory.lastPathComponent)"
+      let result: [String: Any] = [
+        "faceCount": observations.count,
+        "width": width,
+        "height": height,
+        "sourceWidth": Int(sourceExtent.width),
+        "sourceHeight": Int(sourceExtent.height),
+        "sourceProxyPath": sourceProxyPath,
+        "candidateMaskPath": candidatePath,
+        "protectionMaskPath": protectionPath,
+        "effectiveMaskPath": effectivePath,
+        "overlayPath": overlayPath,
+        "offPath": offExportURL.path,
+        "defaultPath": defaultPreviewPath,
+        "highSafePath": highSafeExportURL.path,
+        "baselineOriginalPath": baselineURL.path,
+        "offExportPath": offExportURL.path,
+        "defaultExportPath": defaultExportURL.path,
+        "highSafeExportPath": highSafeExportURL.path,
+        "defaultPreviewPath": defaultPreviewPath,
+        "captureManifestPath": manifestURL.path,
+        "captureRelativePath": captureRelativePath,
+        "candidateKind": "vision-landmarks-geometry-roi",
+        "geometryOnly": true,
+        "effectVersion": "ios-geometry-retouch-spike-v1",
+        "defaultStrength": 0.35,
+        "highSafeStrength": 0.55,
+        "productionEligible": false,
+        "executionEnvironment": executionEnvironment,
+        "landmarkSummary": landmarkSummary(observations.first?.landmarks),
+        "landmarkBoundsSummary": landmarkBoundsSummary(observations.first?.landmarks),
+      ]
+      try writeCaptureManifest(
+        to: manifestURL,
+        rawSourceSha256: rawSourceSha256,
+        sourceWidth: Int(sourceExtent.width),
+        sourceHeight: Int(sourceExtent.height),
+        faceCount: observations.count,
+        baselineURL: baselineURL,
+        offExportURL: offExportURL,
+        defaultExportURL: defaultExportURL,
+        highSafeExportURL: highSafeExportURL,
+        defaultPreviewURL: URL(fileURLWithPath: defaultPreviewPath)
+      )
+      return result
+    } catch {
+      do {
+        try removeItemIfPresent(directory)
+      } catch {
+        throw PortraitMaskSpikeError.cleanupFailed
+      }
+      throw error
+    }
+  }
+
+  static func removeCaptureRoot(
+    removeItem: (URL) throws -> Void
+  ) throws {
+    guard FileManager.default.fileExists(atPath: captureRoot.path) else { return }
+    do {
+      try removeItem(captureRoot)
+    } catch {
+      throw PortraitMaskSpikeError.cleanupFailed
+    }
+  }
+
+  private static func removeCaptureRoot() throws {
+    try removeCaptureRoot { url in
+      try FileManager.default.removeItem(at: url)
+    }
+  }
+
+  private static func removeItemIfPresent(_ url: URL) throws {
+    guard FileManager.default.fileExists(atPath: url.path) else { return }
+    try FileManager.default.removeItem(at: url)
+  }
+
+  static func validateDimensions(
+    width: Int,
+    height: Int,
+    fileBytes: Int,
+    isSupportedFormat: Bool,
+    imageCount: Int
+  ) throws {
+    guard fileBytes > 0, fileBytes <= maxFileBytes else {
+      throw PortraitMaskSpikeError(code: "inputTooLarge", message: "Photo exceeds 100 MB")
+    }
+    guard isSupportedFormat, imageCount == 1 else {
+      throw PortraitMaskSpikeError(
+        code: "unsupportedInput",
+        message: "Portrait spike supports one JPEG, PNG, HEIC, or HEIF image"
+      )
+    }
+    guard width > 0, height > 0 else {
+      throw PortraitMaskSpikeError(code: "decodeFailed", message: "Photo dimensions are invalid")
+    }
+    guard width <= maxSourceEdge, height <= maxSourceEdge else {
+      throw PortraitMaskSpikeError(code: "inputTooLarge", message: "Photo edge exceeds 12,000 px")
+    }
+    guard width <= maxPixels / height else {
+      throw PortraitMaskSpikeError(code: "inputTooLarge", message: "Photo exceeds 48 MP")
+    }
+  }
+
+  private static func validateInput(_ url: URL) throws {
+    let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+    let fileBytes = (attributes[.size] as? NSNumber)?.intValue ?? 0
+    guard fileBytes > 0, fileBytes <= maxFileBytes else {
+      throw PortraitMaskSpikeError(code: "inputTooLarge", message: "Photo exceeds 100 MB")
+    }
+    guard
+      let source = CGImageSourceCreateWithURL(
+        url as CFURL,
+        [kCGImageSourceShouldCache: false] as CFDictionary
+      ),
+      let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
+        as? [CFString: Any],
+      let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
+      let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue
+    else {
+      throw PortraitMaskSpikeError(code: "decodeFailed", message: "Photo could not be inspected")
+    }
+    let type = (CGImageSourceGetType(source) as String?)?.lowercased() ?? ""
+    let supported = type.contains("jpeg") || type.contains("png") ||
+      type.contains("heic") || type.contains("heif")
+    try validateDimensions(
+      width: width,
+      height: height,
+      fileBytes: fileBytes,
+      isSupportedFormat: supported,
+      imageCount: CGImageSourceGetCount(source)
+    )
   }
 
   private static var executionEnvironment: String {
@@ -1630,7 +1791,7 @@ private enum PortraitMaskSpike {
 
   /// Debug candidate only. The geometry ROI is intentionally conservative and
   /// must pass the frozen portrait corpus before any production integration.
-  private static func retouch(
+  static func candidate(
     source: CIImage,
     mask: CIImage,
     strength: Double,
@@ -1678,24 +1839,176 @@ private enum PortraitMaskSpike {
     return blended.composited(over: opaqueSource).cropped(to: extent)
   }
 
+  static func fullResolutionCandidates(
+    source: CIImage,
+    effectiveProxyMask: CIImage,
+    proxyExtent: CGRect,
+    sourceExtent: CGRect
+  ) -> (defaultImage: CIImage, highSafeImage: CIImage) {
+    let fullMask = effectiveProxyMask.transformed(
+      by: CGAffineTransform(
+        scaleX: sourceExtent.width / proxyExtent.width,
+        y: sourceExtent.height / proxyExtent.height
+      )
+    ).cropped(to: sourceExtent)
+    return (
+      candidate(source: source, mask: fullMask, strength: 0.35, extent: sourceExtent),
+      candidate(source: source, mask: fullMask, strength: 0.55, extent: sourceExtent)
+    )
+  }
+
   private static func writePNG(_ image: CIImage, extent: CGRect, to url: URL) throws -> String {
-    guard
-      let cgImage = context.createCGImage(image, from: extent),
-      let data = UIImage(cgImage: cgImage).pngData()
-    else {
-      throw PortraitMaskSpikeError(code: "renderFailed", message: "Debug image could not be rendered")
+    guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
+      throw PortraitMaskSpikeError(code: "renderFailed", message: "sRGB is unavailable")
     }
     do {
-      try data.write(to: url, options: .atomic)
+      try context.writePNGRepresentation(
+        of: image.cropped(to: extent),
+        to: url,
+        format: .RGBA8,
+        colorSpace: colorSpace,
+        options: [:]
+      )
     } catch {
       throw PortraitMaskSpikeError(code: "writeFailed", message: "Debug image could not be written")
     }
     return url.path
   }
+
+  private static func writeJPEG(_ image: CIImage, extent: CGRect, to url: URL) throws {
+    guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
+      throw PortraitMaskSpikeError(code: "renderFailed", message: "sRGB is unavailable")
+    }
+    do {
+      try context.writeJPEGRepresentation(
+        of: image.cropped(to: extent),
+        to: url,
+        colorSpace: colorSpace,
+        options: [
+          kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.95
+        ]
+      )
+    } catch {
+      throw PortraitMaskSpikeError(
+        code: "writeFailed",
+        message: "Full-resolution candidate could not be written"
+      )
+    }
+  }
+
+  private static func sha256(_ url: URL) throws -> String {
+    let handle = try FileHandle(forReadingFrom: url)
+    defer { try? handle.close() }
+    var hasher = SHA256()
+    while true {
+      let data = try handle.read(upToCount: 1024 * 1024) ?? Data()
+      if data.isEmpty { break }
+      hasher.update(data: data)
+    }
+    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+  }
+
+  private static func writeCaptureManifest(
+    to url: URL,
+    rawSourceSha256: String,
+    sourceWidth: Int,
+    sourceHeight: Int,
+    faceCount: Int,
+    baselineURL: URL,
+    offExportURL: URL,
+    defaultExportURL: URL,
+    highSafeExportURL: URL,
+    defaultPreviewURL: URL
+  ) throws {
+    func output(_ outputURL: URL, variant: String, renderKind: String) throws -> [String: Any] {
+      [
+        "file": outputURL.lastPathComponent,
+        "sha256": try sha256(outputURL),
+        "variant": variant,
+        "renderKind": renderKind,
+      ]
+    }
+    let manifest: [String: Any] = [
+      "schema": 1,
+      "candidateKind": "vision-landmarks-geometry-roi",
+      "effectVersion": "ios-geometry-retouch-spike-v1",
+      "productionEligible": false,
+      "executionEnvironment": executionEnvironment,
+      "device": hardwareIdentifier,
+      "os": "\(UIDevice.current.systemName) \(UIDevice.current.systemVersion)",
+      "appVersion": Bundle.main.object(
+        forInfoDictionaryKey: "CFBundleShortVersionString"
+      ) as? String ?? "unknown",
+      "appBuild": Bundle.main.object(
+        forInfoDictionaryKey: kCFBundleVersionKey as String
+      ) as? String ?? "unknown",
+      "capturedAtUtc": ISO8601DateFormatter().string(from: Date()),
+      "rawSourceSha256": rawSourceSha256,
+      "sourceWidth": sourceWidth,
+      "sourceHeight": sourceHeight,
+      "faceCount": faceCount,
+      "defaultStrength": 0.35,
+      "highSafeStrength": 0.55,
+      "outputs": [
+        "baselineOriginal": try output(
+          baselineURL,
+          variant: "original",
+          renderKind: "source"
+        ),
+        "offExport": try output(offExportURL, variant: "off", renderKind: "export"),
+        "defaultExport": try output(
+          defaultExportURL,
+          variant: "default",
+          renderKind: "export"
+        ),
+        "highSafeExport": try output(
+          highSafeExportURL,
+          variant: "high_safe",
+          renderKind: "export"
+        ),
+        "defaultPreview": try output(
+          defaultPreviewURL,
+          variant: "default",
+          renderKind: "preview"
+        ),
+      ],
+    ]
+    do {
+      let data = try JSONSerialization.data(
+        withJSONObject: manifest,
+        options: [.prettyPrinted, .sortedKeys]
+      )
+      try data.write(to: url, options: .atomic)
+    } catch {
+      throw PortraitMaskSpikeError(
+        code: "writeFailed",
+        message: "Candidate capture manifest could not be written"
+      )
+    }
+  }
+
+  private static var hardwareIdentifier: String {
+#if targetEnvironment(simulator)
+    if let identifier = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"],
+       !identifier.isEmpty {
+      return identifier
+    }
+#endif
+    var systemInfo = utsname()
+    uname(&systemInfo)
+    return withUnsafeBytes(of: &systemInfo.machine) { bytes in
+      String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self)
+    }
+  }
 }
 
-private struct PortraitMaskSpikeError: Error {
+struct PortraitMaskSpikeError: Error {
   let code: String
   let message: String
+
+  static let cleanupFailed = PortraitMaskSpikeError(
+    code: "cleanupFailed",
+    message: "Previous portrait capture could not be removed"
+  )
 }
 #endif

@@ -15,6 +15,8 @@
 
 每个候选的 `provenance` 必须记录 producer、能力或应用版本、设备、系统、variant、source/export/preview 身份和完整参数；非原图候选的 `source_sha256` 必须等于该项原图哈希；竞品还必须记录可复现的 `operation_path`。评分冻结只接受映见 `default + export` 身份，不能拿 Preview 或高强度结果替代。
 
+iOS Debug-only 人像采集工具会为单个输入生成 baseline、off/default/high-safe 原像素导出、默认代理预览和 `capture-manifest.json`。工具启动和每次新分析都会删除上一批临时采集，因此必须先将整组目录从设备复制到 `.quality/review-inputs/<asset-id>/`，再继续下一张。复制后必须核对 manifest 中的原始输入哈希、源尺寸、设备/系统、候选版本、强度和五个映见产物哈希；随后再补入同设备固定路径的竞品结果并生成正式 review plan。manifest 只证明产物身份，不证明人像质量，也不能把 `productionEligible=false` 改成生产资格。
+
 候选 `id` 只进入独立映射键，不进入评审页面或评分表。
 
 ## 2. 构建盲评包
