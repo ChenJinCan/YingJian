@@ -5,7 +5,7 @@ import 'package:yingjian/features/project/domain/photo_project.dart';
 
 void main() {
   group('PhotoProjectSession', () {
-    test('imports up to nine app-owned photos and saves the project', () async {
+    test('imports up to six app-owned photos and saves the project', () async {
       final importer = _FakePhotoImporter([
         const ProjectPhoto(
           id: 'photo-1',
@@ -29,7 +29,7 @@ void main() {
       final result = await session.importPhotos();
 
       expect(result, PhotoImportResult.imported);
-      expect(importer.requestedLimits, [9]);
+      expect(importer.requestedLimits, [6]);
       expect(session.project?.id, 'project-1');
       expect(session.photos, hasLength(2));
       expect(session.photos.first.localPath, '/app/media/photo-1.jpg');
@@ -120,14 +120,14 @@ void main() {
     });
 
     test(
-      'does not open the picker after a project reaches nine photos',
+      'does not open the picker after a project reaches six photos',
       () async {
         final saved = PhotoProject(
           id: 'full-project',
           createdAt: DateTime.utc(2026, 8, 4),
           updatedAt: DateTime.utc(2026, 8, 4),
           photos: List.generate(
-            9,
+            6,
             (index) => ProjectPhoto(
               id: 'photo-$index',
               localPath: '/app/media/photo-$index.jpg',
@@ -148,24 +148,230 @@ void main() {
         expect(importer.requestedLimits, isEmpty);
       },
     );
+
+    test(
+      'publishes valid photos and item-level import failures together',
+      () async {
+        final importer = _FakePhotoImporter(
+          const [
+            ProjectPhoto(
+              id: 'photo-1',
+              localPath: '/app/media/photo-1.jpg',
+              originalName: 'valid.jpg',
+            ),
+          ],
+          failures: const [
+            PhotoImportFailure(
+              photoName: 'animated.png',
+              reason: PhotoImportFailureReason.animatedImage,
+            ),
+          ],
+        );
+        final session = PhotoProjectSession(
+          importer: importer,
+          store: _MemoryPhotoProjectStore(),
+        );
+
+        final result = await session.importPhotos();
+
+        expect(result, PhotoImportResult.imported);
+        expect(session.photos.single.originalName, 'valid.jpg');
+        expect(session.importFailures, importer.failures);
+      },
+    );
+
+    test(
+      'moves a photo and saves the new project order before publishing',
+      () async {
+        final saved = PhotoProject(
+          id: 'project-1',
+          createdAt: DateTime.utc(2026, 8, 4),
+          updatedAt: DateTime.utc(2026, 8, 4),
+          photos: const [
+            ProjectPhoto(
+              id: 'photo-1',
+              localPath: '/app/media/photo-1.jpg',
+              originalName: 'first.jpg',
+            ),
+            ProjectPhoto(
+              id: 'photo-2',
+              localPath: '/app/media/photo-2.jpg',
+              originalName: 'second.jpg',
+            ),
+          ],
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+          now: () => DateTime.utc(2026, 8, 4, 1),
+        );
+        await session.restore();
+
+        await session.movePhoto(photoId: 'photo-2', toIndex: 0);
+
+        expect(session.photos.map((photo) => photo.id), ['photo-2', 'photo-1']);
+        expect(store.savedProject, session.project);
+        expect(session.project?.updatedAt, DateTime.utc(2026, 8, 4, 1));
+      },
+    );
+
+    test('selects and persists the focus photo', () async {
+      final saved = PhotoProject(
+        id: 'project-1',
+        createdAt: DateTime.utc(2026, 8, 4),
+        updatedAt: DateTime.utc(2026, 8, 4),
+        photos: const [
+          ProjectPhoto(
+            id: 'photo-1',
+            localPath: '/app/media/photo-1.jpg',
+            originalName: 'first.jpg',
+          ),
+          ProjectPhoto(
+            id: 'photo-2',
+            localPath: '/app/media/photo-2.jpg',
+            originalName: 'second.jpg',
+          ),
+        ],
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+        now: () => DateTime.utc(2026, 8, 4, 2),
+      );
+      await session.restore();
+
+      await session.setFocusPhoto('photo-2');
+
+      expect(session.project?.focusPhotoId, 'photo-2');
+      expect(store.savedProject, session.project);
+    });
+
+    test(
+      'removes a photo and its layers, then chooses a valid focus',
+      () async {
+        final saved = PhotoProject(
+          id: 'project-1',
+          createdAt: DateTime.utc(2026, 8, 4),
+          updatedAt: DateTime.utc(2026, 8, 4),
+          photos: const [
+            ProjectPhoto(
+              id: 'photo-1',
+              localPath: '/app/media/photo-1.jpg',
+              originalName: 'first.jpg',
+            ),
+            ProjectPhoto(
+              id: 'photo-2',
+              localPath: '/app/media/photo-2.jpg',
+              originalName: 'second.jpg',
+            ),
+          ],
+          focusPhotoId: 'photo-2',
+          adaptiveCompensations: {
+            'photo-2': AdaptiveCompensation(recipe: EditRecipe(exposure: 0.1)),
+          },
+          photoOverrides: {
+            'photo-2': PhotoOverride(recipe: EditRecipe(warmth: 0.2)),
+          },
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+          now: () => DateTime.utc(2026, 8, 4, 3),
+        );
+        await session.restore();
+
+        await session.removePhoto('photo-2');
+
+        expect(session.photos.map((photo) => photo.id), ['photo-1']);
+        expect(session.project?.focusPhotoId, 'photo-1');
+        expect(session.project?.adaptiveCompensations, isEmpty);
+        expect(session.project?.photoOverrides, isEmpty);
+        expect(store.deletedPhotoIds, ['photo-2']);
+      },
+    );
+
+    test('removing the final photo deletes the project', () async {
+      final saved = PhotoProject(
+        id: 'project-1',
+        createdAt: DateTime.utc(2026, 8, 4),
+        updatedAt: DateTime.utc(2026, 8, 4),
+        photos: const [
+          ProjectPhoto(
+            id: 'photo-1',
+            localPath: '/app/media/photo-1.jpg',
+            originalName: 'only.jpg',
+          ),
+        ],
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+
+      await session.removePhoto('photo-1');
+
+      expect(session.project, isNull);
+      expect(store.savedProject, isNull);
+      expect(store.deletedProjectIds, ['project-1']);
+    });
+
+    test('deletes the complete project on request', () async {
+      final saved = PhotoProject(
+        id: 'project-1',
+        createdAt: DateTime.utc(2026, 8, 4),
+        updatedAt: DateTime.utc(2026, 8, 4),
+        photos: const [
+          ProjectPhoto(
+            id: 'photo-1',
+            localPath: '/app/media/photo-1.jpg',
+            originalName: 'first.jpg',
+          ),
+          ProjectPhoto(
+            id: 'photo-2',
+            localPath: '/app/media/photo-2.jpg',
+            originalName: 'second.jpg',
+          ),
+        ],
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+
+      await session.deleteProject();
+
+      expect(session.project, isNull);
+      expect(store.savedProject, isNull);
+      expect(store.deletedProjectIds, ['project-1']);
+    });
   });
 }
 
 final class _FakePhotoImporter implements PhotoImporter {
-  _FakePhotoImporter(this.photos);
+  _FakePhotoImporter(this.photos, {this.failures = const []});
 
   final List<ProjectPhoto> photos;
+  final List<PhotoImportFailure> failures;
   final List<int> requestedLimits = [];
 
   @override
-  Future<List<ProjectPhoto>> importPhotos({required int limit}) async {
+  Future<PhotoImportBatch> importPhotos({required int limit}) async {
     requestedLimits.add(limit);
-    return photos;
+    return PhotoImportBatch(photos: photos, failures: failures);
   }
 }
 
-final class _MemoryPhotoProjectStore implements PhotoProjectStore {
+final class _MemoryPhotoProjectStore implements PhotoProjectLifecycleStore {
   PhotoProject? savedProject;
+  final List<String> deletedPhotoIds = [];
+  final List<String> deletedProjectIds = [];
 
   @override
   Future<PhotoProject?> loadLatest() async => savedProject;
@@ -173,6 +379,17 @@ final class _MemoryPhotoProjectStore implements PhotoProjectStore {
   @override
   Future<void> save(PhotoProject project) async {
     savedProject = project;
+  }
+
+  @override
+  Future<void> deletePhotoCopy(ProjectPhoto photo) async {
+    deletedPhotoIds.add(photo.id);
+  }
+
+  @override
+  Future<void> deleteProject(PhotoProject project) async {
+    deletedProjectIds.add(project.id);
+    savedProject = null;
   }
 }
 

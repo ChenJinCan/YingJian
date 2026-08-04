@@ -13,10 +13,11 @@ void main() {
         platform: TargetPlatform.iOS,
       );
 
-      final photos = await source.pickPhotos(limit: 9);
+      final photos = await source.pickPhotos(limit: 6);
 
       expect(picker.retrieveLostDataCalled, isFalse);
-      expect(picker.requestedLimit, 9);
+      expect(picker.requestedLimit, 6);
+      expect(picker.requestedFullMetadata, isTrue);
       expect(photos.single.name, 'selected.jpg');
     },
   );
@@ -25,6 +26,7 @@ void main() {
 final class _FakeImagePicker extends ImagePicker {
   bool retrieveLostDataCalled = false;
   int? requestedLimit;
+  bool? requestedFullMetadata;
 
   @override
   Future<LostDataResponse> retrieveLostData() async {
@@ -41,6 +43,7 @@ final class _FakeImagePicker extends ImagePicker {
     bool requestFullMetadata = true,
   }) async {
     requestedLimit = limit;
+    requestedFullMetadata = requestFullMetadata;
     return [XFile('/tmp/selected.jpg', name: 'selected.jpg')];
   }
 }

@@ -8,7 +8,9 @@ import 'package:provider/provider.dart';
 import 'package:yingjian/app/app.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
+import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
 import 'package:yingjian/features/editor/infrastructure/method_channel_photo_exporter.dart';
+import 'package:yingjian/features/editor/infrastructure/method_channel_photo_preview_renderer.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/infrastructure/app_owned_photo_importer.dart';
 import 'package:yingjian/features/project/infrastructure/image_picker_photo_source.dart';
@@ -30,6 +32,7 @@ Future<void> _startApplication() async {
   late PhotoImporter photoImporter;
   late PhotoProjectStore photoProjectStore;
   late PhotoExporter photoExporter;
+  late PhotoPreviewRenderer photoPreviewRenderer;
 
   final startup = StartupCoordinator(
     prepareApp: () async {
@@ -56,6 +59,7 @@ Future<void> _startApplication() async {
         directory: getApplicationSupportDirectory,
       );
       photoExporter = MethodChannelPhotoExporter();
+      photoPreviewRenderer = MethodChannelPhotoPreviewRenderer();
     },
     showApp: () {
       runApp(
@@ -69,6 +73,7 @@ Future<void> _startApplication() async {
             Provider<PhotoImporter>.value(value: photoImporter),
             Provider<PhotoProjectStore>.value(value: photoProjectStore),
             Provider<PhotoExporter>.value(value: photoExporter),
+            Provider<PhotoPreviewRenderer>.value(value: photoPreviewRenderer),
           ],
           child: const YingjianApp(),
         ),

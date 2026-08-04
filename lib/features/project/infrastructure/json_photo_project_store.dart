@@ -6,7 +6,7 @@ import 'package:yingjian/features/project/domain/photo_project.dart';
 
 typedef ProjectDirectoryProvider = Future<Directory> Function();
 
-final class JsonPhotoProjectStore implements PhotoProjectStore {
+final class JsonPhotoProjectStore implements PhotoProjectLifecycleStore {
   factory JsonPhotoProjectStore({required ProjectDirectoryProvider directory}) {
     return JsonPhotoProjectStore._(directory);
   }
@@ -57,6 +57,36 @@ final class JsonPhotoProjectStore implements PhotoProjectStore {
         .toList();
     await temporary.writeAsString(jsonEncode(value), flush: true);
     await temporary.rename(file.path);
+  }
+
+  @override
+  Future<void> deletePhotoCopy(ProjectPhoto photo) async {
+    final root = await _directory();
+    final file = File(photo.localPath);
+    if (!await file.exists()) {
+      return;
+    }
+    final media = Directory('${root.path}/media');
+    if (!await media.exists()) {
+      return;
+    }
+    final mediaPath = await media.resolveSymbolicLinks();
+    final filePath = await file.resolveSymbolicLinks();
+    if (filePath.startsWith('$mediaPath/')) {
+      await file.delete();
+    }
+  }
+
+  @override
+  Future<void> deleteProject(PhotoProject project) async {
+    final root = await _directory();
+    final snapshot = _projectFile(root);
+    if (await snapshot.exists()) {
+      await snapshot.delete();
+    }
+    for (final photo in project.photos) {
+      await deletePhotoCopy(photo);
+    }
   }
 
   File _projectFile(Directory root) {

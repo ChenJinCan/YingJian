@@ -25,7 +25,7 @@ final class ImagePickerPhotoSource implements PhotoSource {
 
     final selected = await _picker.pickMultiImage(
       limit: limit,
-      requestFullMetadata: false,
+      requestFullMetadata: true,
     );
     return selected
         .map((file) => SelectedPhoto(path: file.path, name: file.name))

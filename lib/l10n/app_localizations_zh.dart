@@ -24,13 +24,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get undo => '撤销';
 
   @override
+  String get redo => '重做';
+
+  @override
   String get reset => '重置';
 
   @override
   String get photoPreviewArea => '照片预览区域';
 
   @override
-  String get selectPhotosTitle => '选择 1–9 张照片';
+  String get selectPhotosTitle => '选择 1–6 张照片';
 
   @override
   String get selectPhotos => '选择照片';
@@ -43,7 +46,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String photoCount(int count) {
-    return '$count/9';
+    return '$count/6';
   }
 
   @override
@@ -53,13 +56,70 @@ class AppLocalizationsZh extends AppLocalizations {
   String get photoImportFailed => '照片导入失败，请重试';
 
   @override
-  String get photoLimitReached => '每个项目最多导入 9 张照片';
+  String get photoImportIssuesTitle => '部分照片未导入';
+
+  @override
+  String photoUnsupportedFormat(String name) {
+    return '$name：格式暂不支持';
+  }
+
+  @override
+  String photoAnimatedUnsupported(String name) {
+    return '$name：暂不支持动态图片';
+  }
+
+  @override
+  String photoFileTooLarge(String name) {
+    return '$name：文件超过 100 MB';
+  }
+
+  @override
+  String photoDimensionsTooLarge(String name) {
+    return '$name：超过 48 MP 或最长边 12,000 px';
+  }
+
+  @override
+  String photoUnreadable(String name) {
+    return '$name：图片损坏或无法读取';
+  }
+
+  @override
+  String photoCopyFailed(String name) {
+    return '$name：无法创建本地工作副本';
+  }
+
+  @override
+  String get photoLimitReached => '每个项目最多导入 6 张照片';
 
   @override
   String get projectRestoreFailed => '无法恢复上次项目';
 
   @override
   String get projectSaveFailed => '无法保存本次调整，请重试';
+
+  @override
+  String get removePhoto => '移除照片';
+
+  @override
+  String get removePhotoConfirmation => '仅删除映见项目中的本地副本，不影响系统相册原图。';
+
+  @override
+  String get deleteProject => '删除项目';
+
+  @override
+  String get deleteProjectConfirmation => '删除项目和映见保存的工作副本？系统相册原图不会被删除。';
+
+  @override
+  String get movePhotoEarlier => '向前移动';
+
+  @override
+  String get movePhotoLater => '向后移动';
+
+  @override
+  String get cancel => '取消';
+
+  @override
+  String get delete => '删除';
 
   @override
   String get retry => '重试';

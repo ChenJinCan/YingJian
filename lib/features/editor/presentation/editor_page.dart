@@ -5,8 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:yingjian/features/editor/application/editor_session.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
+import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
-import 'package:yingjian/features/editor/domain/photo_color_transform.dart';
+import 'package:yingjian/features/editor/presentation/native_photo_preview.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/l10n/l10n.dart';
@@ -41,12 +42,121 @@ class _EditorPageState extends State<EditorPage> {
 
   Future<void> _restoreProject(PhotoProjectSession session) async {
     await session.restore();
-    _editorSession.load(session.project?.recipe ?? EditRecipe.neutral);
+    final project = session.project;
+    _editorSession.load(project?.recipe ?? EditRecipe.neutral);
+    final focusPhotoId = project?.focusPhotoId;
+    if (focusPhotoId != null) {
+      final focusIndex = project!.photos.indexWhere(
+        (photo) => photo.id == focusPhotoId,
+      );
+      if (focusIndex >= 0) {
+        _selectedIndex = focusIndex;
+      }
+    }
   }
 
   Future<void> _persistRecipe() async {
     try {
       await _session?.updateRecipe(_editorSession.recipe);
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
+      }
+    }
+  }
+
+  Future<void> _selectPhoto(int index) async {
+    final photo = _session!.photos[index];
+    setState(() => _selectedIndex = index);
+    try {
+      await _session!.setFocusPhoto(photo.id);
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
+      }
+    }
+  }
+
+  Future<bool> _confirm({
+    required String title,
+    required String message,
+  }) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(title),
+            content: Text(message),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text(context.l10n.cancel),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(context.l10n.delete),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  Future<void> _removePhoto(ProjectPhoto photo) async {
+    final confirmed = await _confirm(
+      title: context.l10n.removePhoto,
+      message: context.l10n.removePhotoConfirmation,
+    );
+    if (!confirmed) {
+      return;
+    }
+    try {
+      await _session!.removePhoto(photo.id);
+      final focusPhotoId = _session!.project?.focusPhotoId;
+      if (focusPhotoId != null) {
+        _selectedIndex = _session!.photos.indexWhere(
+          (candidate) => candidate.id == focusPhotoId,
+        );
+      } else {
+        _selectedIndex = 0;
+      }
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
+      }
+    }
+  }
+
+  Future<void> _deleteProject() async {
+    final confirmed = await _confirm(
+      title: context.l10n.deleteProject,
+      message: context.l10n.deleteProjectConfirmation,
+    );
+    if (!confirmed) {
+      return;
+    }
+    try {
+      await _session!.deleteProject();
+      _selectedIndex = 0;
+      _editorSession.load(EditRecipe.neutral);
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
+      }
+    }
+  }
+
+  Future<void> _movePhoto(ProjectPhoto photo, int destination) async {
+    try {
+      await _session!.movePhoto(photoId: photo.id, toIndex: destination);
+      _selectedIndex = destination;
     } on Object {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -135,23 +245,40 @@ class _EditorPageState extends State<EditorPage> {
           _selectedIndex = photos.length - 1;
         }
         return Scaffold(
-          appBar: AppBar(title: Text(context.l10n.editorTitle)),
+          appBar: AppBar(
+            title: Text(context.l10n.editorTitle),
+            actions: photos.isEmpty
+                ? null
+                : [
+                    IconButton(
+                      tooltip: context.l10n.deleteProject,
+                      onPressed: () => unawaited(_deleteProject()),
+                      icon: const Icon(Icons.delete_outline),
+                    ),
+                  ],
+          ),
           body: SafeArea(
             child: session.isRestoring
                 ? const Center(child: CircularProgressIndicator())
                 : session.restoreError != null
                 ? _RestoreError(onRetry: session.restore)
                 : photos.isEmpty
-                ? _EmptyProject(busy: _busy, onImport: _importPhotos)
+                ? _EmptyProject(
+                    busy: _busy,
+                    failures: session.importFailures,
+                    onImport: _importPhotos,
+                  )
                 : _PhotoWorkspace(
                     photos: photos,
+                    importFailures: session.importFailures,
                     selectedIndex: _selectedIndex,
                     busy: _busy,
                     exporting: _exporting,
                     editorSession: _editorSession,
-                    onSelected: (index) {
-                      setState(() => _selectedIndex = index);
-                    },
+                    onSelected: (index) => unawaited(_selectPhoto(index)),
+                    onMove: (photo, destination) =>
+                        unawaited(_movePhoto(photo, destination)),
+                    onRemove: (photo) => unawaited(_removePhoto(photo)),
                     onImport: _importPhotos,
                     onExport: _exportPhoto,
                     onRecipeCommitted: () => unawaited(_persistRecipe()),
@@ -196,9 +323,14 @@ class _RestoreError extends StatelessWidget {
 }
 
 class _EmptyProject extends StatelessWidget {
-  const _EmptyProject({required this.busy, required this.onImport});
+  const _EmptyProject({
+    required this.busy,
+    required this.failures,
+    required this.onImport,
+  });
 
   final bool busy;
+  final List<PhotoImportFailure> failures;
   final VoidCallback onImport;
 
   @override
@@ -209,6 +341,10 @@ class _EmptyProject extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            if (failures.isNotEmpty) ...[
+              _ImportFailures(failures: failures),
+              const SizedBox(height: 24),
+            ],
             Icon(
               Icons.photo_library_outlined,
               size: 56,
@@ -247,22 +383,28 @@ class _EmptyProject extends StatelessWidget {
 class _PhotoWorkspace extends StatelessWidget {
   const _PhotoWorkspace({
     required this.photos,
+    required this.importFailures,
     required this.selectedIndex,
     required this.busy,
     required this.exporting,
     required this.editorSession,
     required this.onSelected,
+    required this.onMove,
+    required this.onRemove,
     required this.onImport,
     required this.onExport,
     required this.onRecipeCommitted,
   });
 
   final List<ProjectPhoto> photos;
+  final List<PhotoImportFailure> importFailures;
   final int selectedIndex;
   final bool busy;
   final bool exporting;
   final EditorSession editorSession;
   final ValueChanged<int> onSelected;
+  final void Function(ProjectPhoto photo, int destination) onMove;
+  final ValueChanged<ProjectPhoto> onRemove;
   final VoidCallback onImport;
   final ValueChanged<ProjectPhoto> onExport;
   final VoidCallback onRecipeCommitted;
@@ -271,10 +413,14 @@ class _PhotoWorkspace extends StatelessWidget {
   Widget build(BuildContext context) {
     final selected = photos[selectedIndex];
     final recipe = editorSession.recipe;
-    final transform = PhotoColorTransform.fromRecipe(recipe);
+    final previewRenderer = context.read<PhotoPreviewRenderer>();
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
+        if (importFailures.isNotEmpty) ...[
+          _ImportFailures(failures: importFailures),
+          const SizedBox(height: 12),
+        ],
         Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 480),
@@ -284,15 +430,13 @@ class _PhotoWorkspace extends StatelessWidget {
                 borderRadius: BorderRadius.circular(24),
                 child: ColoredBox(
                   color: Theme.of(context).colorScheme.surfaceContainerHigh,
-                  child: ColorFiltered(
-                    colorFilter: ColorFilter.matrix(transform.flutterMatrix),
-                    child: Image.file(
-                      File(selected.localPath),
-                      key: ValueKey('photo-preview-${selected.id}'),
-                      fit: BoxFit.contain,
-                      errorBuilder: (context, error, stackTrace) =>
-                          Center(child: Text(context.l10n.photoLoadFailed)),
-                    ),
+                  child: NativePhotoPreview(
+                    key: ValueKey('photo-preview-${selected.id}'),
+                    sourcePath: selected.localPath,
+                    recipe: recipe,
+                    renderer: previewRenderer,
+                    errorBuilder: (context) =>
+                        Center(child: Text(context.l10n.photoLoadFailed)),
                   ),
                 ),
               ),
@@ -310,6 +454,25 @@ class _PhotoWorkspace extends StatelessWidget {
               ),
             ),
             Text(context.l10n.photoCount(photos.length)),
+            IconButton(
+              tooltip: context.l10n.movePhotoEarlier,
+              onPressed: selectedIndex == 0
+                  ? null
+                  : () => onMove(selected, selectedIndex - 1),
+              icon: const Icon(Icons.arrow_back),
+            ),
+            IconButton(
+              tooltip: context.l10n.movePhotoLater,
+              onPressed: selectedIndex == photos.length - 1
+                  ? null
+                  : () => onMove(selected, selectedIndex + 1),
+              icon: const Icon(Icons.arrow_forward),
+            ),
+            IconButton(
+              tooltip: context.l10n.removePhoto,
+              onPressed: () => onRemove(selected),
+              icon: const Icon(Icons.remove_circle_outline),
+            ),
           ],
         ),
         const SizedBox(height: 16),
@@ -404,6 +567,18 @@ class _PhotoWorkspace extends StatelessWidget {
               ),
             ),
             Expanded(
+              child: TextButton.icon(
+                onPressed: editorSession.canRedo
+                    ? () {
+                        editorSession.redo();
+                        onRecipeCommitted();
+                      }
+                    : null,
+                icon: const Icon(Icons.redo),
+                label: Text(context.l10n.redo),
+              ),
+            ),
+            Expanded(
               child: TextButton(
                 onPressed: editorSession.isEdited
                     ? () {
@@ -438,6 +613,74 @@ class _PhotoWorkspace extends StatelessWidget {
       ],
     );
   }
+}
+
+class _ImportFailures extends StatelessWidget {
+  const _ImportFailures({required this.failures});
+
+  final List<PhotoImportFailure> failures;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Card(
+      color: colors.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.info_outline, color: colors.onErrorContainer),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    context.l10n.photoImportIssuesTitle,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: colors.onErrorContainer,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            for (final failure in failures)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  _photoImportFailureMessage(context, failure),
+                  style: TextStyle(color: colors.onErrorContainer),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _photoImportFailureMessage(
+  BuildContext context,
+  PhotoImportFailure failure,
+) {
+  return switch (failure.reason) {
+    PhotoImportFailureReason.unsupportedFormat =>
+      context.l10n.photoUnsupportedFormat(failure.photoName),
+    PhotoImportFailureReason.animatedImage =>
+      context.l10n.photoAnimatedUnsupported(failure.photoName),
+    PhotoImportFailureReason.fileTooLarge => context.l10n.photoFileTooLarge(
+      failure.photoName,
+    ),
+    PhotoImportFailureReason.dimensionsTooLarge =>
+      context.l10n.photoDimensionsTooLarge(failure.photoName),
+    PhotoImportFailureReason.unreadable => context.l10n.photoUnreadable(
+      failure.photoName,
+    ),
+    PhotoImportFailureReason.copyFailed => context.l10n.photoCopyFailed(
+      failure.photoName,
+    ),
+  };
 }
 
 class _AdjustmentSlider extends StatelessWidget {

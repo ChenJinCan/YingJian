@@ -139,4 +139,69 @@ void main() {
 
     expect(restored?.photos.single.localPath, currentPhoto.path);
   });
+
+  test('deletes only an app-owned media copy', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'yingjian-project-delete-photo-',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final appCopy = File('${root.path}/media/photo-1.jpg');
+    final externalSource = File('${root.parent.path}/source-photo.jpg');
+    await appCopy.parent.create(recursive: true);
+    await appCopy.writeAsBytes(const [1, 2, 3]);
+    await externalSource.writeAsBytes(const [4, 5, 6]);
+    addTearDown(() async {
+      if (await externalSource.exists()) {
+        await externalSource.delete();
+      }
+    });
+    final store = JsonPhotoProjectStore(directory: () async => root);
+
+    await store.deletePhotoCopy(
+      ProjectPhoto(
+        id: 'photo-1',
+        localPath: appCopy.path,
+        originalName: 'source-photo.jpg',
+      ),
+    );
+    await store.deletePhotoCopy(
+      ProjectPhoto(
+        id: 'external',
+        localPath: externalSource.path,
+        originalName: 'source-photo.jpg',
+      ),
+    );
+
+    expect(await appCopy.exists(), isFalse);
+    expect(await externalSource.exists(), isTrue);
+  });
+
+  test('deletes the project snapshot and its app-owned media copies', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'yingjian-project-delete-',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final appCopy = File('${root.path}/media/photo-1.jpg');
+    await appCopy.parent.create(recursive: true);
+    await appCopy.writeAsBytes(const [1, 2, 3]);
+    final project = PhotoProject(
+      id: 'project-1',
+      createdAt: DateTime.utc(2026, 8, 4),
+      updatedAt: DateTime.utc(2026, 8, 4),
+      photos: [
+        ProjectPhoto(
+          id: 'photo-1',
+          localPath: appCopy.path,
+          originalName: 'photo.jpg',
+        ),
+      ],
+    );
+    final store = JsonPhotoProjectStore(directory: () async => root);
+    await store.save(project);
+
+    await store.deleteProject(project);
+
+    expect(await store.loadLatest(), isNull);
+    expect(await appCopy.exists(), isFalse);
+  });
 }

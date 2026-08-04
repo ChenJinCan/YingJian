@@ -50,5 +50,30 @@ void main() {
         throwsStateError,
       );
     });
+
+    test('user can redo an undone semantic edit', () {
+      final session = EditorSession();
+      final edited = EditRecipe(exposure: 0.4);
+      session.apply(edited);
+
+      session.undo();
+      expect(session.recipe, EditRecipe.neutral);
+      expect(session.canRedo, isTrue);
+
+      session.redo();
+      expect(session.recipe, edited);
+      expect(session.canUndo, isTrue);
+      expect(session.canRedo, isFalse);
+    });
+
+    test('a new edit discards the redo branch', () {
+      final session = EditorSession();
+      session.apply(EditRecipe(exposure: 0.4));
+      session.undo();
+
+      session.apply(EditRecipe(contrast: 0.3));
+
+      expect(session.canRedo, isFalse);
+    });
   });
 }

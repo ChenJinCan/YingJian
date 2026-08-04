@@ -3,7 +3,9 @@ import 'package:provider/provider.dart';
 import 'package:yingjian/app/app.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
+import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/image_pipeline_v1.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/observability/analytics_event.dart';
@@ -16,6 +18,7 @@ Widget buildTestApp(
   PhotoImporter? photoImporter,
   PhotoProjectStore? photoProjectStore,
   PhotoExporter? photoExporter,
+  PhotoPreviewRenderer? photoPreviewRenderer,
 }) {
   final observability = AppObservability(FakeObservabilityBackend());
   return MultiProvider(
@@ -32,9 +35,52 @@ Widget buildTestApp(
       Provider<PhotoExporter>.value(
         value: photoExporter ?? FakePhotoExporter(),
       ),
+      Provider<PhotoPreviewRenderer>.value(
+        value: photoPreviewRenderer ?? FakePhotoPreviewRenderer.unsupported(),
+      ),
     ],
     child: const YingjianApp(),
   );
+}
+
+final class FakePhotoPreviewRenderer implements PhotoPreviewRenderer {
+  FakePhotoPreviewRenderer.unsupported() : unsupported = true;
+
+  FakePhotoPreviewRenderer.supported() : unsupported = false;
+
+  final bool unsupported;
+  final List<ImagePipelineV1> updates = [];
+  int disposeCount = 0;
+
+  @override
+  Future<PhotoPreviewHandle> create({
+    required String sourcePath,
+    required ImagePipelineV1 pipeline,
+    int maxEdge = 2048,
+  }) async {
+    if (unsupported) {
+      throw UnsupportedError('Native preview is unavailable in widget tests');
+    }
+    return const PhotoPreviewHandle(
+      textureId: 42,
+      width: 1600,
+      height: 1200,
+      backend: 'fake',
+    );
+  }
+
+  @override
+  Future<void> update({
+    required PhotoPreviewHandle handle,
+    required ImagePipelineV1 pipeline,
+  }) async {
+    updates.add(pipeline);
+  }
+
+  @override
+  Future<void> dispose(PhotoPreviewHandle handle) async {
+    disposeCount += 1;
+  }
 }
 
 final class FakePhotoExporter implements PhotoExporter {
@@ -53,17 +99,21 @@ final class FakePhotoExporter implements PhotoExporter {
 }
 
 final class FakePhotoImporter implements PhotoImporter {
-  FakePhotoImporter([this.photos = const []]);
+  FakePhotoImporter([this.photos = const [], this.failures = const []]);
 
   final List<ProjectPhoto> photos;
+  final List<PhotoImportFailure> failures;
 
   @override
-  Future<List<ProjectPhoto>> importPhotos({required int limit}) async {
-    return photos.take(limit).toList();
+  Future<PhotoImportBatch> importPhotos({required int limit}) async {
+    return PhotoImportBatch(
+      photos: photos.take(limit).toList(),
+      failures: failures,
+    );
   }
 }
 
-final class MemoryPhotoProjectStore implements PhotoProjectStore {
+final class MemoryPhotoProjectStore implements PhotoProjectLifecycleStore {
   MemoryPhotoProjectStore([this.project]);
 
   PhotoProject? project;
@@ -74,6 +124,14 @@ final class MemoryPhotoProjectStore implements PhotoProjectStore {
   @override
   Future<void> save(PhotoProject project) async {
     this.project = project;
+  }
+
+  @override
+  Future<void> deletePhotoCopy(ProjectPhoto photo) async {}
+
+  @override
+  Future<void> deleteProject(PhotoProject project) async {
+    this.project = null;
   }
 }
 

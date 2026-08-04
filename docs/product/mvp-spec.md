@@ -283,6 +283,7 @@ empty
 - Reshaping, beautification presets and makeup are excluded.
 - A system/self-built candidate and at least one commercial candidate are compared on the same licensed corpus unless evidence eliminates a candidate earlier.
 - Failure or license unavailability degrades to base editing and never prevents project access or export.
+- The normative quality corpus, blind-review rubric, safety subsets, capability boundary and stop conditions are defined in [Natural Portrait Retouch Vertical Slice Spec](natural-portrait-retouch-vertical-slice-spec.md). Portrait implementation must not proceed to product integration until that slice freezes a candidate.
 
 ### Export and failure behavior
 

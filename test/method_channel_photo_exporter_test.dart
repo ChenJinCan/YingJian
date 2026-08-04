@@ -40,6 +40,11 @@ void main() {
     final arguments = receivedCall?.arguments! as Map<Object?, Object?>;
     expect(arguments['sourcePath'], photo.localPath);
     expect(arguments.containsKey('imageBytes'), isFalse);
+    final pipeline = arguments['pipeline']! as Map<Object?, Object?>;
+    expect(pipeline['schemaVersion'], 1);
+    expect(pipeline['workingColorSpace'], 'srgb');
+    final adjustments = pipeline['adjustments']! as Map<Object?, Object?>;
+    expect(adjustments['exposureEv'], 0.5);
     expect(exported.assetId, 'asset-42');
     expect(exported.width, 4032);
     expect(exported.height, 3024);

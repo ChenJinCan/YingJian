@@ -24,13 +24,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get undo => 'Undo';
 
   @override
+  String get redo => 'Redo';
+
+  @override
   String get reset => 'Reset';
 
   @override
   String get photoPreviewArea => 'Photo preview';
 
   @override
-  String get selectPhotosTitle => 'Choose 1–9 photos';
+  String get selectPhotosTitle => 'Choose 1–6 photos';
 
   @override
   String get selectPhotos => 'Choose photos';
@@ -44,7 +47,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String photoCount(int count) {
-    return '$count/9';
+    return '$count/6';
   }
 
   @override
@@ -54,7 +57,40 @@ class AppLocalizationsEn extends AppLocalizations {
   String get photoImportFailed => 'Photo import failed. Try again.';
 
   @override
-  String get photoLimitReached => 'A project can contain up to 9 photos';
+  String get photoImportIssuesTitle => 'Some photos were not imported';
+
+  @override
+  String photoUnsupportedFormat(String name) {
+    return '$name: this format is not supported';
+  }
+
+  @override
+  String photoAnimatedUnsupported(String name) {
+    return '$name: animated images are not supported';
+  }
+
+  @override
+  String photoFileTooLarge(String name) {
+    return '$name: the file is larger than 100 MB';
+  }
+
+  @override
+  String photoDimensionsTooLarge(String name) {
+    return '$name: exceeds 48 MP or a 12,000 px edge';
+  }
+
+  @override
+  String photoUnreadable(String name) {
+    return '$name: the image is damaged or unreadable';
+  }
+
+  @override
+  String photoCopyFailed(String name) {
+    return '$name: a local working copy could not be created';
+  }
+
+  @override
+  String get photoLimitReached => 'A project can contain up to 6 photos';
 
   @override
   String get projectRestoreFailed =>
@@ -63,6 +99,32 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get projectSaveFailed =>
       'This adjustment could not be saved. Try again.';
+
+  @override
+  String get removePhoto => 'Remove photo';
+
+  @override
+  String get removePhotoConfirmation =>
+      'This removes only Yingjian\'s local project copy. The original in Photos is not changed.';
+
+  @override
+  String get deleteProject => 'Delete project';
+
+  @override
+  String get deleteProjectConfirmation =>
+      'Delete this project and Yingjian\'s working copies? Originals in Photos will not be deleted.';
+
+  @override
+  String get movePhotoEarlier => 'Move earlier';
+
+  @override
+  String get movePhotoLater => 'Move later';
+
+  @override
+  String get cancel => 'Cancel';
+
+  @override
+  String get delete => 'Delete';
 
   @override
   String get retry => 'Try again';

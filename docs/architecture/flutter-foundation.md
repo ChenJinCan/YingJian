@@ -40,7 +40,7 @@ app（组装、主题、路由）
 
 `PhotoProjectSession` 是照片项目 Module。它只接收已经复制到应用目录的 `ProjectPhoto`，执行 1–9 张数量约束，并在向 UI 发布新状态前保存照片与编辑配方快照。系统相册临时路径由 `AppOwnedPhotoImporter` 转为应用自有副本；`JsonPhotoProjectStore` 使用相对媒体路径保存最新项目，避免 iOS 数据容器 UUID 变化后绝对路径失效，并兼容迁移旧快照。页面不依赖 `image_picker`、文件复制或 JSON 格式。
 
-`PhotoColorTransform` 把规范化配方转换为预览和双平台导出共用的颜色系数。预览由 Flutter GPU 色彩矩阵提供即时反馈；原始分辨率处理位于平台 Adapter 后，iOS 使用 Core Image 写入 Photos，Android 使用 Bitmap 色彩矩阵写入 MediaStore。原始项目文件始终只读。
+`ImagePipelineV1` 冻结预览和双平台导出共用的版本化参数语义。`PhotoPreviewRenderer` 是原生预览 seam：Android Adapter 通过独立 GL 线程、GLES3 和 Flutter Texture 提供路径驱动的代理图预览；iOS 原生 Texture 尚未实现时，以及原生预览不可用时，使用 `PhotoColorTransform` Flutter 矩阵作为兼容降级。`PhotoExporter` 从原图重新渲染，iOS 使用 Core Image 写入 Photos，Android 当前仍使用 Bitmap 色彩矩阵写入 MediaStore。后者尚不满足 48 MP 受控内存合同。原始项目文件始终只读。详细决定见 [`ADR 0002`](../adr/0002-native-preview-pipeline.md)。
 
 ## 暂不引入
 

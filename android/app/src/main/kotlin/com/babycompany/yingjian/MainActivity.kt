@@ -28,9 +28,22 @@ class MainActivity : FlutterActivity() {
     private val exportExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pendingExport: Pair<MethodCall, MethodChannel.Result>? = null
+    private var photoPreviewRenderer: GlesPhotoPreviewRenderer? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        photoPreviewRenderer = GlesPhotoPreviewRenderer(
+            messenger = flutterEngine.dartExecutor.binaryMessenger,
+            textureRegistry = flutterEngine.renderer,
+        )
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PHOTO_INPUT_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                if (call.method == "supportsHeif") {
+                    result.success(Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
+                } else {
+                    result.notImplemented()
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PHOTO_EXPORT_CHANNEL)
             .setMethodCallHandler { call, result ->
                 if (call.method != "exportPhoto") {
@@ -67,6 +80,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        photoPreviewRenderer?.close()
+        photoPreviewRenderer = null
         exportExecutor.shutdown()
         super.cleanUpFlutterEngine(flutterEngine)
     }
@@ -78,19 +93,17 @@ class MainActivity : FlutterActivity() {
 
     private fun exportPhoto(call: MethodCall, result: MethodChannel.Result) {
         val sourcePath = call.argument<String>("sourcePath")
-        val redScale = call.argument<Double>("redScale")
-        val greenScale = call.argument<Double>("greenScale")
-        val blueScale = call.argument<Double>("blueScale")
-        val redBias = call.argument<Double>("redBias")
-        val greenBias = call.argument<Double>("greenBias")
-        val blueBias = call.argument<Double>("blueBias")
-        if (
-            sourcePath == null || redScale == null || greenScale == null || blueScale == null ||
-            redBias == null || greenBias == null || blueBias == null
-        ) {
+        val pipeline = try {
+            ImagePipelineV1.parse(call.argument<Any>("pipeline"))
+        } catch (error: IllegalArgumentException) {
+            result.error("invalidArguments", error.message, null)
+            return
+        }
+        if (sourcePath == null) {
             result.error("invalidArguments", "Invalid export request", null)
             return
         }
+        val transform = pipeline.colorTransform()
         exportExecutor.execute {
             try {
                 val source = BitmapFactory.decodeFile(
@@ -110,9 +123,12 @@ class MainActivity : FlutterActivity() {
                     drawColor(Color.WHITE)
                     val colorMatrix = ColorMatrix(
                         floatArrayOf(
-                            redScale.toFloat(), 0f, 0f, 0f, (redBias * 255).toFloat(),
-                            0f, greenScale.toFloat(), 0f, 0f, (greenBias * 255).toFloat(),
-                            0f, 0f, blueScale.toFloat(), 0f, (blueBias * 255).toFloat(),
+                            transform.redScale.toFloat(), 0f, 0f, 0f,
+                            (transform.redBias * 255).toFloat(),
+                            0f, transform.greenScale.toFloat(), 0f, 0f,
+                            (transform.greenBias * 255).toFloat(),
+                            0f, 0f, transform.blueScale.toFloat(), 0f,
+                            (transform.blueBias * 255).toFloat(),
                             0f, 0f, 0f, 1f, 0f,
                         ),
                     )
@@ -190,7 +206,7 @@ class MainActivity : FlutterActivity() {
             ?: throw IllegalStateException("Photo destination could not be created")
         try {
             contentResolver.openOutputStream(uri)?.use { stream ->
-                if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 100, stream)) {
+                if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 95, stream)) {
                     throw IllegalStateException("Photo could not be encoded")
                 }
             } ?: throw IllegalStateException("Photo destination could not be opened")
@@ -211,6 +227,7 @@ class MainActivity : FlutterActivity() {
 
     private companion object {
         const val PHOTO_EXPORT_CHANNEL = "yingjian/photo_export"
+        const val PHOTO_INPUT_CHANNEL = "yingjian/photo_input"
         const val WRITE_REQUEST = 8021
     }
 }

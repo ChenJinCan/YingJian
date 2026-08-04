@@ -6,16 +6,19 @@ class EditorSession extends ChangeNotifier {
     : _recipe = initialRecipe ?? EditRecipe.neutral;
 
   final List<EditRecipe> _history = [];
+  final List<EditRecipe> _redoHistory = [];
   EditRecipe _recipe;
   EditRecipe? _adjustmentStart;
 
   EditRecipe get recipe => _recipe;
   bool get canUndo => _history.isNotEmpty;
+  bool get canRedo => _redoHistory.isNotEmpty;
   bool get isEdited => _recipe != EditRecipe.neutral;
 
   void load(EditRecipe recipe) {
     final changed = _recipe != recipe || _history.isNotEmpty;
     _history.clear();
+    _redoHistory.clear();
     _adjustmentStart = null;
     _recipe = recipe;
     if (changed) {
@@ -28,6 +31,7 @@ class EditorSession extends ChangeNotifier {
       return;
     }
     _history.add(_recipe);
+    _redoHistory.clear();
     _recipe = nextRecipe;
     notifyListeners();
   }
@@ -55,6 +59,7 @@ class EditorSession extends ChangeNotifier {
     _adjustmentStart = null;
     if (start != _recipe) {
       _history.add(start);
+      _redoHistory.clear();
       notifyListeners();
     }
   }
@@ -64,7 +69,18 @@ class EditorSession extends ChangeNotifier {
     if (_history.isEmpty) {
       return;
     }
+    _redoHistory.add(_recipe);
     _recipe = _history.removeLast();
+    notifyListeners();
+  }
+
+  void redo() {
+    _adjustmentStart = null;
+    if (_redoHistory.isEmpty) {
+      return;
+    }
+    _history.add(_recipe);
+    _recipe = _redoHistory.removeLast();
     notifyListeners();
   }
 

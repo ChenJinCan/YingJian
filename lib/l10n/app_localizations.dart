@@ -128,6 +128,12 @@ abstract class AppLocalizations {
   /// **'撤销'**
   String get undo;
 
+  /// No description provided for @redo.
+  ///
+  /// In zh, this message translates to:
+  /// **'重做'**
+  String get redo;
+
   /// No description provided for @reset.
   ///
   /// In zh, this message translates to:
@@ -143,7 +149,7 @@ abstract class AppLocalizations {
   /// No description provided for @selectPhotosTitle.
   ///
   /// In zh, this message translates to:
-  /// **'选择 1–9 张照片'**
+  /// **'选择 1–6 张照片'**
   String get selectPhotosTitle;
 
   /// No description provided for @selectPhotos.
@@ -167,7 +173,7 @@ abstract class AppLocalizations {
   /// No description provided for @photoCount.
   ///
   /// In zh, this message translates to:
-  /// **'{count}/9'**
+  /// **'{count}/6'**
   String photoCount(int count);
 
   /// No description provided for @photoLoadFailed.
@@ -182,10 +188,52 @@ abstract class AppLocalizations {
   /// **'照片导入失败，请重试'**
   String get photoImportFailed;
 
+  /// No description provided for @photoImportIssuesTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'部分照片未导入'**
+  String get photoImportIssuesTitle;
+
+  /// No description provided for @photoUnsupportedFormat.
+  ///
+  /// In zh, this message translates to:
+  /// **'{name}：格式暂不支持'**
+  String photoUnsupportedFormat(String name);
+
+  /// No description provided for @photoAnimatedUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'{name}：暂不支持动态图片'**
+  String photoAnimatedUnsupported(String name);
+
+  /// No description provided for @photoFileTooLarge.
+  ///
+  /// In zh, this message translates to:
+  /// **'{name}：文件超过 100 MB'**
+  String photoFileTooLarge(String name);
+
+  /// No description provided for @photoDimensionsTooLarge.
+  ///
+  /// In zh, this message translates to:
+  /// **'{name}：超过 48 MP 或最长边 12,000 px'**
+  String photoDimensionsTooLarge(String name);
+
+  /// No description provided for @photoUnreadable.
+  ///
+  /// In zh, this message translates to:
+  /// **'{name}：图片损坏或无法读取'**
+  String photoUnreadable(String name);
+
+  /// No description provided for @photoCopyFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'{name}：无法创建本地工作副本'**
+  String photoCopyFailed(String name);
+
   /// No description provided for @photoLimitReached.
   ///
   /// In zh, this message translates to:
-  /// **'每个项目最多导入 9 张照片'**
+  /// **'每个项目最多导入 6 张照片'**
   String get photoLimitReached;
 
   /// No description provided for @projectRestoreFailed.
@@ -199,6 +247,54 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'无法保存本次调整，请重试'**
   String get projectSaveFailed;
+
+  /// No description provided for @removePhoto.
+  ///
+  /// In zh, this message translates to:
+  /// **'移除照片'**
+  String get removePhoto;
+
+  /// No description provided for @removePhotoConfirmation.
+  ///
+  /// In zh, this message translates to:
+  /// **'仅删除映见项目中的本地副本，不影响系统相册原图。'**
+  String get removePhotoConfirmation;
+
+  /// No description provided for @deleteProject.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除项目'**
+  String get deleteProject;
+
+  /// No description provided for @deleteProjectConfirmation.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除项目和映见保存的工作副本？系统相册原图不会被删除。'**
+  String get deleteProjectConfirmation;
+
+  /// No description provided for @movePhotoEarlier.
+  ///
+  /// In zh, this message translates to:
+  /// **'向前移动'**
+  String get movePhotoEarlier;
+
+  /// No description provided for @movePhotoLater.
+  ///
+  /// In zh, this message translates to:
+  /// **'向后移动'**
+  String get movePhotoLater;
+
+  /// No description provided for @cancel.
+  ///
+  /// In zh, this message translates to:
+  /// **'取消'**
+  String get cancel;
+
+  /// No description provided for @delete.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除'**
+  String get delete;
 
   /// No description provided for @retry.
   ///
