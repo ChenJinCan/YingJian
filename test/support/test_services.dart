@@ -64,6 +64,7 @@ final class FakePhotoPreviewRenderer implements PhotoPreviewRenderer {
   FakePhotoPreviewRenderer.supported() : unsupported = false;
 
   final bool unsupported;
+  final List<ImagePipeline> creates = [];
   final List<ImagePipeline> updates = [];
   int disposeCount = 0;
 
@@ -73,6 +74,7 @@ final class FakePhotoPreviewRenderer implements PhotoPreviewRenderer {
     required ImagePipeline pipeline,
     int maxEdge = 2048,
   }) async {
+    creates.add(pipeline);
     if (unsupported) {
       throw UnsupportedError('Native preview is unavailable in widget tests');
     }

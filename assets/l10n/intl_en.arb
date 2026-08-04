@@ -24,6 +24,7 @@
   "photoLoadFailed": "This photo cannot be opened",
   "compositionPreviewUnavailable": "Composition preview is temporarily unavailable. Reset composition or try again; your original is safe.",
   "effectPreviewUnavailable": "This effect preview is temporarily unavailable. Reset the adjustment or try again; your original is safe.",
+  "recommendationPreviewUnavailable": "This recommendation preview is temporarily unavailable. Try again or view another direction; your original is safe.",
   "photoImportCanceled": "No photos were added",
   "importingPhotos": "Importing photos locally…",
   "restoringProject": "Restoring your local project…",

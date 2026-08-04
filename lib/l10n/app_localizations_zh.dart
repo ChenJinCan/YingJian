@@ -79,6 +79,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get effectPreviewUnavailable => '当前效果预览暂不可用。可重置本次调整或稍后重试；原图不受影响。';
 
   @override
+  String get recommendationPreviewUnavailable =>
+      '这套推荐预览暂不可用。可重试或查看其他方向；原图不受影响。';
+
+  @override
   String get photoImportCanceled => '未添加任何照片';
 
   @override

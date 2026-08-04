@@ -211,7 +211,9 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       if (_isCurrentAnalysisRun(cancellation, projectId)) {
         setState(() {
           _recommendationPreparation = preparation;
-          _previewRecommendationIndex = -1;
+          _previewRecommendationIndex = preparation.recommendations.isEmpty
+              ? -1
+              : 0;
         });
       }
     } finally {
@@ -1148,6 +1150,9 @@ class _PhotoWorkspace extends StatelessWidget {
                     sourcePath: selected.localPath,
                     recipe: previewRecipe,
                     renderer: previewRenderer,
+                    recommendationMode:
+                        flowState ==
+                        PhotoProjectFlowState.choosingRecommendation,
                   ),
                 ),
               ),
@@ -1784,12 +1789,14 @@ class _BeforeAfterPreview extends StatefulWidget {
     required this.sourcePath,
     required this.recipe,
     required this.renderer,
+    required this.recommendationMode,
     super.key,
   });
 
   final String sourcePath;
   final EditRecipe recipe;
   final PhotoPreviewRenderer renderer;
+  final bool recommendationMode;
 
   @override
   State<_BeforeAfterPreview> createState() => _BeforeAfterPreviewState();
@@ -1797,6 +1804,7 @@ class _BeforeAfterPreview extends StatefulWidget {
 
 class _BeforeAfterPreviewState extends State<_BeforeAfterPreview> {
   bool _showOriginal = false;
+  int _retryToken = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -1810,14 +1818,38 @@ class _BeforeAfterPreviewState extends State<_BeforeAfterPreview> {
           sourcePath: widget.sourcePath,
           recipe: recipe,
           renderer: widget.renderer,
-          errorBuilder: (context) => Center(
-            child: Text(
-              !widget.recipe.crop.isOriginal
-                  ? context.l10n.compositionPreviewUnavailable
-                  : !widget.recipe.isLegacyColorOnly
-                  ? context.l10n.effectPreviewUnavailable
-                  : context.l10n.photoLoadFailed,
-              textAlign: TextAlign.center,
+          retryToken: _retryToken,
+          errorBuilder: (context) => Semantics(
+            liveRegion: true,
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      widget.recommendationMode
+                          ? context.l10n.recommendationPreviewUnavailable
+                          : !widget.recipe.crop.isOriginal
+                          ? context.l10n.compositionPreviewUnavailable
+                          : !widget.recipe.isLegacyColorOnly
+                          ? context.l10n.effectPreviewUnavailable
+                          : context.l10n.photoLoadFailed,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton.tonalIcon(
+                      key: const ValueKey('photo-preview-retry'),
+                      onPressed: () => setState(() => _retryToken += 1),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(96, 48),
+                      ),
+                      icon: const Icon(Icons.refresh),
+                      label: Text(context.l10n.retry),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ),

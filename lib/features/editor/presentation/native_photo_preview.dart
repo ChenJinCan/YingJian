@@ -13,6 +13,7 @@ class NativePhotoPreview extends StatefulWidget {
     required this.recipe,
     required this.renderer,
     required this.errorBuilder,
+    this.retryToken = 0,
     super.key,
   });
 
@@ -20,6 +21,7 @@ class NativePhotoPreview extends StatefulWidget {
   final EditRecipe recipe;
   final PhotoPreviewRenderer renderer;
   final WidgetBuilder errorBuilder;
+  final int retryToken;
 
   @override
   State<NativePhotoPreview> createState() => _NativePhotoPreviewState();
@@ -77,7 +79,8 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
   @override
   void didUpdateWidget(covariant NativePhotoPreview oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.sourcePath != widget.sourcePath ||
+    if (oldWidget.retryToken != widget.retryToken ||
+        oldWidget.sourcePath != widget.sourcePath ||
         !identical(oldWidget.renderer, widget.renderer)) {
       unawaited(_replacePreview());
       return;
@@ -86,7 +89,11 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
       unawaited(_replacePreview());
       return;
     }
-    if (oldWidget.recipe != widget.recipe && !_useFallback) {
+    if (oldWidget.recipe != widget.recipe && _useFallback) {
+      unawaited(_replacePreview());
+      return;
+    }
+    if (oldWidget.recipe != widget.recipe) {
       _pendingRecipe = widget.recipe;
       unawaited(_drainUpdates());
     }

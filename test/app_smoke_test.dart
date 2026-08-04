@@ -289,6 +289,7 @@ void main() {
       'Icon-App-1024x1024@1x.png',
     );
     final store = MemoryPhotoProjectStore();
+    final previewRenderer = FakePhotoPreviewRenderer.supported();
     const frameKey = ValueKey('reduced-motion-frame');
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
     final settings = await AppSettings.load();
@@ -298,6 +299,7 @@ void main() {
         child: buildTestApp(
           settings,
           photoProjectStore: store,
+          photoPreviewRenderer: previewRenderer,
           photoImporter: FakePhotoImporter([
             ProjectPhoto(
               id: 'photo-1',
@@ -323,6 +325,17 @@ void main() {
     expect(find.text('均衡克制的安全回退'), findsOneWidget);
     expect(find.text('安全增加轻微暖意'), findsOneWidget);
     expect(find.text('克制增强质感，不激进锐化'), findsOneWidget);
+    final initialPreviewPipeline = previewRenderer.updates.isNotEmpty
+        ? previewRenderer.updates.last
+        : previewRenderer.creates.last;
+    final initialAdjustments =
+        initialPreviewPipeline.toPlatformArguments()['adjustments']!
+            as Map<String, double>;
+    expect(
+      initialAdjustments.values.any((value) => value != 0),
+      isTrue,
+      reason: 'The first selected recommendation must be the visible preview.',
+    );
     expect(
       store.project?.flowState,
       PhotoProjectFlowState.choosingRecommendation,
@@ -424,6 +437,56 @@ void main() {
     expect(find.text('修正检测到的偏色'), findsOneWidget);
     expect(find.text('保留细节与局部反差'), findsOneWidget);
   });
+
+  testWidgets(
+    'an unavailable recommendation preview is explicit and retryable',
+    (tester) async {
+      final photoFile = File(
+        'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+        'Icon-App-1024x1024@1x.png',
+      );
+      final renderer = FakePhotoPreviewRenderer.unsupported();
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoPreviewRenderer: renderer,
+          photoImporter: FakePhotoImporter([
+            ProjectPhoto(
+              id: 'photo-preview-failure',
+              localPath: photoFile.path,
+              originalName: '推荐预览失败.png',
+            ),
+          ]),
+        ),
+      );
+
+      await tester.tap(find.text('开始修图'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('选择照片'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('这套推荐预览暂不可用'), findsOneWidget);
+      expect(find.textContaining('原图不受影响'), findsOneWidget);
+      expect(find.byKey(const ValueKey('photo-preview-retry')), findsOneWidget);
+      final createCountBeforeRetry = renderer.creates.length;
+
+      await tester.tap(find.byKey(const ValueKey('photo-preview-retry')));
+      await tester.pumpAndSettle();
+
+      expect(renderer.creates.length, createCountBeforeRetry + 1);
+      expect(find.textContaining('这套推荐预览暂不可用'), findsOneWidget);
+      await tester.dragUntilVisible(
+        find.text('自然干净'),
+        find.byKey(const Key('photo-workspace-scroll')),
+        const Offset(0, -200),
+      );
+      expect(find.text('自然干净'), findsOneWidget);
+      expect(find.text('氛围色彩'), findsOneWidget);
+      expect(find.text('质感风格'), findsOneWidget);
+    },
+  );
 
   testWidgets('backgrounding analysis discards a late native result', (
     tester,

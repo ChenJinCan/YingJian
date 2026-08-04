@@ -230,6 +230,12 @@ abstract class AppLocalizations {
   /// **'当前效果预览暂不可用。可重置本次调整或稍后重试；原图不受影响。'**
   String get effectPreviewUnavailable;
 
+  /// No description provided for @recommendationPreviewUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'这套推荐预览暂不可用。可重试或查看其他方向；原图不受影响。'**
+  String get recommendationPreviewUnavailable;
+
   /// No description provided for @photoImportCanceled.
   ///
   /// In zh, this message translates to:

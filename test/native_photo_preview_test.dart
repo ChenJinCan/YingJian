@@ -48,6 +48,72 @@ void main() {
     expect(renderer.createCount, 2);
     expect(find.byType(Texture), findsOneWidget);
   });
+
+  testWidgets('retries the same failed preview when retryToken changes', (
+    tester,
+  ) async {
+    final renderer = _FailFirstCreatePreviewRenderer();
+    var retryToken = 0;
+    late StateSetter rebuild;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setState) {
+            rebuild = setState;
+            return NativePhotoPreview(
+              sourcePath: '/tmp/Yingjian_preview_fixture.jpg',
+              recipe: EditRecipe(clarity: 0.1),
+              renderer: renderer,
+              retryToken: retryToken,
+              errorBuilder: (_) => const Text('preview unavailable'),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('preview unavailable'), findsOneWidget);
+    rebuild(() => retryToken += 1);
+    await tester.pumpAndSettle();
+
+    expect(renderer.createCount, 2);
+    expect(find.byType(Texture), findsOneWidget);
+  });
+
+  testWidgets('a new recipe recovers after one preview update fails', (
+    tester,
+  ) async {
+    final renderer = _FailFirstUpdatePreviewRenderer();
+    var recipe = EditRecipe.neutral;
+    late StateSetter rebuild;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setState) {
+            rebuild = setState;
+            return NativePhotoPreview(
+              sourcePath: '/tmp/Yingjian_preview_fixture.jpg',
+              recipe: recipe,
+              renderer: renderer,
+              errorBuilder: (_) => const Text('preview unavailable'),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    rebuild(() => recipe = EditRecipe(clarity: 0.1));
+    await tester.pumpAndSettle();
+    expect(find.text('preview unavailable'), findsOneWidget);
+
+    rebuild(() => recipe = EditRecipe(warmth: 0.1));
+    await tester.pumpAndSettle();
+
+    expect(renderer.createCount, 2);
+    expect(find.byType(Texture), findsOneWidget);
+  });
 }
 
 Widget _previewApp(PhotoPreviewRenderer renderer) => MaterialApp(
@@ -61,7 +127,7 @@ Widget _previewApp(PhotoPreviewRenderer renderer) => MaterialApp(
   ),
 );
 
-final class _RecordingPreviewRenderer implements PhotoPreviewRenderer {
+class _RecordingPreviewRenderer implements PhotoPreviewRenderer {
   int createCount = 0;
   final List<int> disposedTextureIds = [];
 
@@ -90,4 +156,38 @@ final class _RecordingPreviewRenderer implements PhotoPreviewRenderer {
     required PhotoPreviewHandle handle,
     required ImagePipeline pipeline,
   }) async {}
+}
+
+final class _FailFirstCreatePreviewRenderer extends _RecordingPreviewRenderer {
+  @override
+  Future<PhotoPreviewHandle> create({
+    required String sourcePath,
+    required ImagePipeline pipeline,
+    int maxEdge = 2048,
+  }) async {
+    if (createCount == 0) {
+      createCount += 1;
+      throw StateError('fixture create failure');
+    }
+    return super.create(
+      sourcePath: sourcePath,
+      pipeline: pipeline,
+      maxEdge: maxEdge,
+    );
+  }
+}
+
+final class _FailFirstUpdatePreviewRenderer extends _RecordingPreviewRenderer {
+  bool _failed = false;
+
+  @override
+  Future<void> update({
+    required PhotoPreviewHandle handle,
+    required ImagePipeline pipeline,
+  }) async {
+    if (!_failed) {
+      _failed = true;
+      throw StateError('fixture update failure');
+    }
+  }
 }

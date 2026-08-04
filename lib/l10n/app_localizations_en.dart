@@ -89,6 +89,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'This effect preview is temporarily unavailable. Reset the adjustment or try again; your original is safe.';
 
   @override
+  String get recommendationPreviewUnavailable =>
+      'This recommendation preview is temporarily unavailable. Try again or view another direction; your original is safe.';
+
+  @override
   String get photoImportCanceled => 'No photos were added';
 
   @override
