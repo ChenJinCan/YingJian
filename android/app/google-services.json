@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "686956579548",
+    "project_id": "yingjian-ce1d1",
+    "storage_bucket": "yingjian-ce1d1.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:686956579548:android:a4928934bd0136bb768219",
+        "android_client_info": {
+          "package_name": "com.babycompany.yingjian"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyArwn06YgVzJqKPbvF_HbHdYpWcIFDRSp8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

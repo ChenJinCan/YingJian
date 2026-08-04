@@ -4,17 +4,17 @@
 
 应用已经提供供应商隔离层、事件白名单、Crashlytics 错误入口、Performance 自定义 Trace 和用户开关。Android 与 iOS 的原生默认值均为不采集；只有用户在设置页明确开启匿名诊断后，SDK 才会启用采集。
 
-当前仓库没有 Firebase 远端项目和原生配置文件，因此本地运行时会保持可用并把诊断状态标记为不可用。不得复制 NextNote、NatureID 或 animalplant 的 Firebase 配置。
+仓库已绑定独立 Firebase 项目 `yingjian-ce1d1`，Android 与 iOS 应用标识均为 `com.babycompany.yingjian`。原生配置和 `firebase_options.dart` 只能来自该项目，不得复制 NextNote、NatureID 或 animalplant 的 Firebase 配置。
 
 ## 首次配置
 
-在独立的映见 Firebase 项目获批后，由已认证的维护者执行：
+新增平台或 Firebase 产品时，由已认证的维护者重新执行：
 
 ```sh
 firebase login
 dart pub global activate flutterfire_cli
 flutterfire configure \
-  --project <approved-yingjian-project-id> \
+  --project yingjian-ce1d1 \
   --platforms android,ios \
   --android-package-name com.babycompany.yingjian \
   --ios-bundle-id com.babycompany.yingjian

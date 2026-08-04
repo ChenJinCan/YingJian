@@ -2,6 +2,7 @@ import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:firebase_performance/firebase_performance.dart';
+import 'package:yingjian/firebase_options.dart';
 import 'package:yingjian/observability/observability_backend.dart';
 
 final class FirebaseObservabilityBackend implements ObservabilityBackend {
@@ -9,12 +10,13 @@ final class FirebaseObservabilityBackend implements ObservabilityBackend {
   Future<bool> initialize() async {
     try {
       if (Firebase.apps.isEmpty) {
-        await Firebase.initializeApp();
+        await Firebase.initializeApp(
+          options: DefaultFirebaseOptions.currentPlatform,
+        );
       }
       return true;
     } on Object {
-      // Native Firebase files are intentionally absent until an independent
-      // Yingjian project is configured. Product startup must remain available.
+      // Provider failures must never prevent product startup.
       return false;
     }
   }

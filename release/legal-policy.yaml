@@ -1,13 +1,14 @@
 schema_version: 1
 
 privacy_policy:
-  public_url:
-  support_url:
-  support_contact:
+  public_url: https://everyday-apps-websites.baby-animals-ai-cjc.workers.dev/privacy
+  support_url: https://everyday-apps-websites.baby-animals-ai-cjc.workers.dev/support
+  support_contact: 865525900@qq.com
 
 store_verification:
-  app_store_privacy_verified: false
-  google_play_data_safety_verified: false
+  app_store_privacy_verified: true
+  google_play_data_safety_verified: true
 
 apple:
+  app_store_id: "6797692747"
   eula_mode: standard

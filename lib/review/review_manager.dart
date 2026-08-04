@@ -298,7 +298,11 @@ final class InAppReviewGateway implements ReviewGateway {
          platform: platform,
          review: review ?? InAppReview.instance,
          iosAppStoreId:
-             iosAppStoreId ?? const String.fromEnvironment('IOS_APP_STORE_ID'),
+             iosAppStoreId ??
+             const String.fromEnvironment(
+               'IOS_APP_STORE_ID',
+               defaultValue: '6797692747',
+             ),
        );
 
   InAppReviewGateway._({

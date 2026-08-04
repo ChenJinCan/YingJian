@@ -14,7 +14,7 @@
 | 主题 | 都集中定义主题，并让主题状态触发应用重建 | 采用 `AppTheme + AppSettings` |
 | 首屏配置 | NextNote、NatureID 都设置方向、透明状态栏和 100 MB 图片缓存 | 采用；作为启动关键步骤 |
 | 测试 | 都有 Flutter 单测/Widget 测试；NextNote、NatureID 明确包含 integration_test | 采用单元、Widget、integration_test 三层入口 |
-| Firebase | 三者均有 Analytics、Crashlytics、Performance | 暂缓；必须先创建映见独立 Firebase 项目和平台配置，再作为延迟初始化接入 |
+| Firebase | 三者均有 Analytics、Crashlytics、Performance | 已通过独立项目 `yingjian-ce1d1` 接入，并保持默认关闭、用户显式开启和供应商失败不阻塞启动 |
 | Wiredash | 三者均使用，但项目 ID、隐私设置和页面包装方式不同 | 暂缓；不得复制其他应用凭据 |
 | EasyLoading | 三者均有历史使用 | 不作为新项目底层标准；先使用页面内明确状态，避免全局遮罩耦合 |
 | 图片选择 | 三者都依赖 `image_picker` | 在“照片导入”功能实现时接入，不提前增加未使用插件 |
@@ -24,7 +24,7 @@
 ## 没有照搬的历史模式
 
 - 不复制 `AppState.instance`、`AppStore.instance` 和全局 `BuildContext`。它们在成熟应用中承载大量历史调用，但会扩大隐式依赖和测试初始化成本。
-- 不复制任何 Firebase、Wiredash、RevenueCat、广告或商店凭据。
+- 不复制任何其他应用的 Firebase、Wiredash、RevenueCat、广告或商店凭据；映见只使用独立项目 `yingjian-ce1d1` 的平台配置。
 - 不复制 `managers/`、`services/`、`utils/` 空目录；只有真实 Module 和 Adapter 出现时才建立目录。
 - 不把数据库、HTTP 客户端或图片插件仅作为“以后可能用”加入依赖。
 - 不复制会在生产错误页显示完整异常和堆栈的 `ErrorWidget.builder`。
@@ -35,6 +35,7 @@
 - `flutter_localizations` + `intl`：官方本地化生成和运行时代理。
 - `provider`：从应用根部注入可观察状态。
 - `shared_preferences`：主题和语言等非敏感轻量设置。
+- Firebase Analytics、Crashlytics、Performance：匿名诊断的供应商实现，默认关闭并由用户显式开启。
 - `flutter_test` + `integration_test`：Module、Widget 和未来真机链路验证。
 
 新增依赖必须对应当前用户能力或已存在的第二个 Adapter，不能为了目录完整而引入。
