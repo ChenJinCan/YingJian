@@ -13,6 +13,16 @@ class EditorSession extends ChangeNotifier {
   bool get canUndo => _history.isNotEmpty;
   bool get isEdited => _recipe != EditRecipe.neutral;
 
+  void load(EditRecipe recipe) {
+    final changed = _recipe != recipe || _history.isNotEmpty;
+    _history.clear();
+    _adjustmentStart = null;
+    _recipe = recipe;
+    if (changed) {
+      notifyListeners();
+    }
+  }
+
   void apply(EditRecipe nextRecipe) {
     if (nextRecipe == _recipe) {
       return;

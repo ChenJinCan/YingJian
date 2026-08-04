@@ -17,7 +17,7 @@
 | Firebase | 三者均有 Analytics、Crashlytics、Performance | 已通过独立项目 `yingjian-ce1d1` 接入，并保持默认关闭、用户显式开启和供应商失败不阻塞启动 |
 | Wiredash | 三者均使用，但项目 ID、隐私设置和页面包装方式不同 | 暂缓；不得复制其他应用凭据 |
 | EasyLoading | 三者均有历史使用 | 不作为新项目底层标准；先使用页面内明确状态，避免全局遮罩耦合 |
-| 图片选择 | 三者都依赖 `image_picker` | 在“照片导入”功能实现时接入，不提前增加未使用插件 |
+| 图片选择 | 三者都依赖 `image_picker` | 已在“照片导入”纵向切片接入；关闭完整元数据请求，并立即复制到应用自有目录，不能跨会话保存选择器临时路径 |
 | 数据库 | NextNote、NatureID、animalplant 分别存在不同 SQLite/Drift/Hive 组合 | 不选统一数据库；等项目恢复、草稿和素材索引的数据模型确定后决策 |
 | 网络 | 三者都有 `http`，NatureID 另有 Dio | 当前不添加；本地编辑 MVP 没有网络调用，云端 AI 出现真实 seam 后再接入 |
 
@@ -35,6 +35,8 @@
 - `flutter_localizations` + `intl`：官方本地化生成和运行时代理。
 - `provider`：从应用根部注入可观察状态。
 - `shared_preferences`：主题和语言等非敏感轻量设置。
+- `image_picker`：用户主动选择 1–9 张照片；不请求完整元数据。
+- `path_provider`：把照片副本和项目快照保存在应用支持目录。
 - Firebase Analytics、Crashlytics、Performance：匿名诊断的供应商实现，默认关闭并由用户显式开启。
 - `flutter_test` + `integration_test`：Module、Widget 和未来真机链路验证。
 

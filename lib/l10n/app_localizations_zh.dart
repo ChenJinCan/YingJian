@@ -30,6 +30,41 @@ class AppLocalizationsZh extends AppLocalizations {
   String get photoPreviewArea => '照片预览区域';
 
   @override
+  String get selectPhotosTitle => '选择 1–9 张照片';
+
+  @override
+  String get selectPhotos => '选择照片';
+
+  @override
+  String get addPhotos => '继续添加照片';
+
+  @override
+  String get photoImportPrivacy => '照片仅复制到映见的本地项目中，不会因选择照片而上传云端。';
+
+  @override
+  String photoCount(int count) {
+    return '$count/9';
+  }
+
+  @override
+  String get photoLoadFailed => '无法读取这张照片';
+
+  @override
+  String get photoImportFailed => '照片导入失败，请重试';
+
+  @override
+  String get photoLimitReached => '每个项目最多导入 9 张照片';
+
+  @override
+  String get projectRestoreFailed => '无法恢复上次项目';
+
+  @override
+  String get projectSaveFailed => '无法保存本次调整，请重试';
+
+  @override
+  String get retry => '重试';
+
+  @override
   String get exposure => '曝光';
 
   @override
@@ -37,6 +72,17 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get warmth => '色温';
+
+  @override
+  String get exportOriginalQuality => '原画质导出';
+
+  @override
+  String photoExported(int width, int height) {
+    return '已保存到系统相册（$width × $height）';
+  }
+
+  @override
+  String get photoExportFailed => '导出失败，请检查相册权限后重试';
 
   @override
   String get unknownPageTitle => '页面不存在';

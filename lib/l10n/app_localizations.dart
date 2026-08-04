@@ -140,6 +140,72 @@ abstract class AppLocalizations {
   /// **'照片预览区域'**
   String get photoPreviewArea;
 
+  /// No description provided for @selectPhotosTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择 1–9 张照片'**
+  String get selectPhotosTitle;
+
+  /// No description provided for @selectPhotos.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择照片'**
+  String get selectPhotos;
+
+  /// No description provided for @addPhotos.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续添加照片'**
+  String get addPhotos;
+
+  /// No description provided for @photoImportPrivacy.
+  ///
+  /// In zh, this message translates to:
+  /// **'照片仅复制到映见的本地项目中，不会因选择照片而上传云端。'**
+  String get photoImportPrivacy;
+
+  /// No description provided for @photoCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count}/9'**
+  String photoCount(int count);
+
+  /// No description provided for @photoLoadFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法读取这张照片'**
+  String get photoLoadFailed;
+
+  /// No description provided for @photoImportFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'照片导入失败，请重试'**
+  String get photoImportFailed;
+
+  /// No description provided for @photoLimitReached.
+  ///
+  /// In zh, this message translates to:
+  /// **'每个项目最多导入 9 张照片'**
+  String get photoLimitReached;
+
+  /// No description provided for @projectRestoreFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法恢复上次项目'**
+  String get projectRestoreFailed;
+
+  /// No description provided for @projectSaveFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法保存本次调整，请重试'**
+  String get projectSaveFailed;
+
+  /// No description provided for @retry.
+  ///
+  /// In zh, this message translates to:
+  /// **'重试'**
+  String get retry;
+
   /// No description provided for @exposure.
   ///
   /// In zh, this message translates to:
@@ -157,6 +223,24 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'色温'**
   String get warmth;
+
+  /// No description provided for @exportOriginalQuality.
+  ///
+  /// In zh, this message translates to:
+  /// **'原画质导出'**
+  String get exportOriginalQuality;
+
+  /// No description provided for @photoExported.
+  ///
+  /// In zh, this message translates to:
+  /// **'已保存到系统相册（{width} × {height}）'**
+  String photoExported(int width, int height);
+
+  /// No description provided for @photoExportFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'导出失败，请检查相册权限后重试'**
+  String get photoExportFailed;
 
   /// No description provided for @unknownPageTitle.
   ///

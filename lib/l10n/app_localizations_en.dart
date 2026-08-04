@@ -30,6 +30,44 @@ class AppLocalizationsEn extends AppLocalizations {
   String get photoPreviewArea => 'Photo preview';
 
   @override
+  String get selectPhotosTitle => 'Choose 1–9 photos';
+
+  @override
+  String get selectPhotos => 'Choose photos';
+
+  @override
+  String get addPhotos => 'Add more photos';
+
+  @override
+  String get photoImportPrivacy =>
+      'Photos are copied only into your local Yingjian project and are not uploaded just because you selected them.';
+
+  @override
+  String photoCount(int count) {
+    return '$count/9';
+  }
+
+  @override
+  String get photoLoadFailed => 'This photo cannot be opened';
+
+  @override
+  String get photoImportFailed => 'Photo import failed. Try again.';
+
+  @override
+  String get photoLimitReached => 'A project can contain up to 9 photos';
+
+  @override
+  String get projectRestoreFailed =>
+      'Your previous project could not be restored';
+
+  @override
+  String get projectSaveFailed =>
+      'This adjustment could not be saved. Try again.';
+
+  @override
+  String get retry => 'Try again';
+
+  @override
   String get exposure => 'Exposure';
 
   @override
@@ -37,6 +75,18 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get warmth => 'Warmth';
+
+  @override
+  String get exportOriginalQuality => 'Export at original quality';
+
+  @override
+  String photoExported(int width, int height) {
+    return 'Saved to Photos ($width × $height)';
+  }
+
+  @override
+  String get photoExportFailed =>
+      'Export failed. Check photo access and try again.';
 
   @override
   String get unknownPageTitle => 'Page not found';

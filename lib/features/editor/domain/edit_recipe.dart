@@ -25,6 +25,20 @@ class EditRecipe {
   final double contrast;
   final double warmth;
 
+  Map<String, double> toJson() => {
+    'exposure': exposure,
+    'contrast': contrast,
+    'warmth': warmth,
+  };
+
+  factory EditRecipe.fromJson(Map<String, Object?> json) {
+    return EditRecipe(
+      exposure: (json['exposure']! as num).toDouble(),
+      contrast: (json['contrast']! as num).toDouble(),
+      warmth: (json['warmth']! as num).toDouble(),
+    );
+  }
+
   EditRecipe copyWith({double? exposure, double? contrast, double? warmth}) {
     return EditRecipe(
       exposure: exposure ?? this.exposure,

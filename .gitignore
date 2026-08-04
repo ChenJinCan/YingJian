@@ -8,6 +8,7 @@
 .build/
 .buildlog/
 .history
+.scratch/
 .svn/
 .swiftpm/
 migrate_working_dir/

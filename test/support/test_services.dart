@@ -2,21 +2,79 @@ import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 import 'package:yingjian/app/app.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
+import 'package:yingjian/features/editor/application/photo_exporter.dart';
+import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/project/application/photo_project_session.dart';
+import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/observability/analytics_event.dart';
 import 'package:yingjian/observability/app_observability.dart';
 import 'package:yingjian/observability/observability_backend.dart';
 import 'package:yingjian/review/review_manager.dart';
 
-Widget buildTestApp(AppSettings settings) {
+Widget buildTestApp(
+  AppSettings settings, {
+  PhotoImporter? photoImporter,
+  PhotoProjectStore? photoProjectStore,
+  PhotoExporter? photoExporter,
+}) {
   final observability = AppObservability(FakeObservabilityBackend());
   return MultiProvider(
     providers: [
       ChangeNotifierProvider<AppSettings>.value(value: settings),
       ChangeNotifierProvider<AppObservability>.value(value: observability),
       Provider<ReviewManager>.value(value: FakeReviewManager.create()),
+      Provider<PhotoImporter>.value(
+        value: photoImporter ?? FakePhotoImporter(),
+      ),
+      Provider<PhotoProjectStore>.value(
+        value: photoProjectStore ?? MemoryPhotoProjectStore(),
+      ),
+      Provider<PhotoExporter>.value(
+        value: photoExporter ?? FakePhotoExporter(),
+      ),
     ],
     child: const YingjianApp(),
   );
+}
+
+final class FakePhotoExporter implements PhotoExporter {
+  ProjectPhoto? exportedPhoto;
+  EditRecipe? exportedRecipe;
+
+  @override
+  Future<ExportedPhoto> export({
+    required ProjectPhoto photo,
+    required EditRecipe recipe,
+  }) async {
+    exportedPhoto = photo;
+    exportedRecipe = recipe;
+    return const ExportedPhoto(assetId: 'asset-42', width: 4032, height: 3024);
+  }
+}
+
+final class FakePhotoImporter implements PhotoImporter {
+  FakePhotoImporter([this.photos = const []]);
+
+  final List<ProjectPhoto> photos;
+
+  @override
+  Future<List<ProjectPhoto>> importPhotos({required int limit}) async {
+    return photos.take(limit).toList();
+  }
+}
+
+final class MemoryPhotoProjectStore implements PhotoProjectStore {
+  MemoryPhotoProjectStore([this.project]);
+
+  PhotoProject? project;
+
+  @override
+  Future<PhotoProject?> loadLatest() async => project;
+
+  @override
+  Future<void> save(PhotoProject project) async {
+    this.project = project;
+  }
 }
 
 final class FakeObservabilityBackend implements ObservabilityBackend {
