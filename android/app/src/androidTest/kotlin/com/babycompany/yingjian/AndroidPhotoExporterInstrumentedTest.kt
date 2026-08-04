@@ -6,12 +6,14 @@ import android.graphics.Color
 import android.graphics.ColorSpace
 import android.net.Uri
 import android.os.Build
+import android.system.Os
 import androidx.exifinterface.media.ExifInterface
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import java.security.MessageDigest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -100,6 +102,7 @@ class AndroidPhotoExporterInstrumentedTest {
         } finally {
             context.contentResolver.delete(outputUri, null, null)
             source.delete()
+            assertNoGeometryTemporaryFiles()
         }
     }
 
@@ -196,6 +199,129 @@ class AndroidPhotoExporterInstrumentedTest {
     }
 
     @Test
+    fun V2CropQuarterTurnAndAdjustmentsReachTheFinalArtifact() {
+        val source = File(context.cacheDir, "v2-geometry-source.jpg")
+        createJpeg(source, width = 10, height = 6)
+        val pipeline = AndroidImagePipeline(
+            exposureEv = 0.5,
+            contrast = 0.0,
+            warmth = 0.6,
+            highlights = 0.2,
+            shadows = 0.2,
+            tint = 0.1,
+            saturation = 0.2,
+            clarity = 0.1,
+            geometry = ImageGeometry(
+                left = 0.2,
+                top = 0.0,
+                right = 0.8,
+                bottom = 0.5,
+                quarterTurns = 1,
+                straightenDegrees = 0.0,
+            ),
+            schemaVersion = 2,
+        )
+
+        val result = AndroidPhotoExporter(context.contentResolver).export(
+            source.absolutePath,
+            pipeline,
+        )
+        val outputUri = Uri.parse(result.assetId)
+        try {
+            assertEquals(3, result.width)
+            assertEquals(6, result.height)
+            val output = readBitmap(outputUri)
+            assertEquals(3, output.width)
+            assertEquals(6, output.height)
+            assertTrue(output.colorSpace?.isSrgb == true)
+            val sourceBitmap = requireNotNull(BitmapFactory.decodeFile(source.absolutePath))
+            assertTrue(
+                averageLuminance(output, 0, 0, output.width, output.height) >
+                    averageLuminance(sourceBitmap, 2, 0, 8, 3),
+            )
+            sourceBitmap.recycle()
+            output.recycle()
+        } finally {
+            context.contentResolver.delete(outputUri, null, null)
+            source.delete()
+            assertNoGeometryTemporaryFiles()
+        }
+    }
+
+    @Test
+    fun V2QuarterTurnMapsAsymmetricPixelsClockwise() {
+        val source = Bitmap.createBitmap(4, 6, Bitmap.Config.ARGB_8888).apply {
+            eraseColor(Color.WHITE)
+            setPixel(0, 0, Color.RED)
+            setPixel(3, 0, Color.GREEN)
+            setPixel(0, 5, Color.BLUE)
+            setPixel(3, 5, Color.YELLOW)
+        }
+        val output = AndroidBitmapGeometry.apply(
+            source,
+            ImageGeometry(
+                left = 0.0,
+                top = 0.0,
+                right = 1.0,
+                bottom = 1.0,
+                quarterTurns = 1,
+                straightenDegrees = 0.0,
+            ),
+            context.cacheDir,
+        )
+        try {
+            assertEquals(6, output.width)
+            assertEquals(4, output.height)
+            assertColorsNear(Color.BLUE, output.getPixel(0, 0))
+            assertColorsNear(Color.RED, output.getPixel(5, 0))
+            assertColorsNear(Color.YELLOW, output.getPixel(0, 3))
+            assertColorsNear(Color.GREEN, output.getPixel(5, 3))
+        } finally {
+            output.recycle()
+            if (!source.isRecycled) source.recycle()
+            assertNoGeometryTemporaryFiles()
+        }
+    }
+
+    @Test
+    fun geometrySetupFailureDoesNotLeaveRawTemporaryPixels() {
+        val invalidDirectory = File(context.cacheDir, "geometry-not-a-directory").apply {
+            writeText("not a directory")
+        }
+        val source = Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)
+        try {
+            val failure = runCatching {
+                AndroidBitmapGeometry.apply(
+                    source,
+                    ImageGeometry(0.0, 0.0, 1.0, 1.0, 1, 0.0),
+                    invalidDirectory,
+                )
+            }
+
+            assertTrue(failure.isFailure)
+            assertNoGeometryTemporaryFiles()
+        } finally {
+            if (!source.isRecycled) source.recycle()
+            invalidDirectory.delete()
+        }
+    }
+
+    @Test
+    fun unlinkFailureClearsPixelsAndCannotBeTreatedAsSuccess() {
+        val directory = File(context.cacheDir, "geometry-unlink-test").apply { mkdirs() }
+        val raw = File(directory, "pixels.rgba").apply { writeBytes(ByteArray(32) { 7 }) }
+        Os.chmod(directory.absolutePath, 0b101_000_000)
+        try {
+            assertFalse(AndroidBitmapGeometry.unlinkTemporary(raw))
+            assertEquals(0L, raw.length())
+        } finally {
+            Os.chmod(directory.absolutePath, 0b111_000_000)
+            raw.delete()
+            directory.delete()
+        }
+    }
+
+    @Test
     fun displayP3JpegIsConvertedToSrgbByTheExportPath() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val source = File(context.cacheDir, "display-p3-source.jpg")
@@ -253,6 +379,36 @@ class AndroidPhotoExporterInstrumentedTest {
         getPixel(0, 0)
     } finally {
         recycle()
+    }
+
+    private fun averageLuminance(
+        bitmap: Bitmap,
+        left: Int,
+        top: Int,
+        right: Int,
+        bottom: Int,
+    ): Double {
+        var total = 0.0
+        var count = 0
+        for (y in top until bottom) {
+            for (x in left until right) {
+                val pixel = bitmap.getPixel(x, y)
+                total +=
+                    Color.red(pixel) * 0.2126 +
+                        Color.green(pixel) * 0.7152 +
+                        Color.blue(pixel) * 0.0722
+                count += 1
+            }
+        }
+        return total / count
+    }
+
+    private fun assertNoGeometryTemporaryFiles() {
+        assertTrue(
+            context.cacheDir.listFiles().orEmpty().none {
+                it.name.startsWith("yingjian-geometry-")
+            },
+        )
     }
 
     private fun sha256(file: File): String {

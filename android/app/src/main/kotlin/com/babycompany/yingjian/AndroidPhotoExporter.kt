@@ -35,12 +35,22 @@ internal class AndroidPhotoExportException(
 
 internal class AndroidPhotoExporter(
     private val contentResolver: ContentResolver,
+    private val temporaryDirectory: File? = null,
 ) {
-    fun export(sourcePath: String, pipeline: ImagePipelineV1): AndroidPhotoExportResult {
+    fun export(sourcePath: String, pipeline: AndroidImagePipeline): AndroidPhotoExportResult {
         val metadata = AndroidExportMetadata.fromSource(sourcePath)
-        val output = AndroidExportBitmapDecoder.decode(sourcePath)
+        var output = AndroidExportBitmapDecoder.decode(sourcePath)
         return try {
-            ArgbPixelTransformer.transformInPlace(output, pipeline.colorTransform())
+            ArgbPixelTransformer.transformInPlace(output, pipeline)
+            output = AndroidBitmapGeometry.apply(
+                output,
+                pipeline.geometry,
+                temporaryDirectory ?: File(sourcePath).parentFile
+                ?: throw AndroidPhotoExportException(
+                    code = ERROR_EXPORT_FAILED,
+                    message = "Temporary image storage is unavailable",
+                ),
+            )
             val assetId = saveToPhotos(output, metadata)
             AndroidPhotoExportResult(
                 assetId = assetId,
@@ -48,7 +58,7 @@ internal class AndroidPhotoExporter(
                 height = output.height,
             )
         } finally {
-            output.recycle()
+            if (!output.isRecycled) output.recycle()
         }
     }
 

@@ -2,13 +2,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_for_platform.dart';
-import 'package:yingjian/features/editor/domain/image_pipeline_v1.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_v2.dart';
 
 void main() {
   tearDown(() => debugDefaultTargetPlatformOverride = null);
 
-  test('selects V2 only for the implemented iOS adapter', () {
+  test('selects V2 for both implemented native adapters', () {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     expect(
       imagePipelineForCurrentPlatform(EditRecipe.neutral),
@@ -18,7 +17,7 @@ void main() {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     expect(
       imagePipelineForCurrentPlatform(EditRecipe.neutral),
-      isA<ImagePipelineV1>(),
+      isA<ImagePipelineV2>(),
     );
   });
 

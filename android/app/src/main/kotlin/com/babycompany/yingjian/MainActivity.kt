@@ -101,7 +101,7 @@ class MainActivity : FlutterActivity() {
     private fun exportPhoto(call: MethodCall, result: MethodChannel.Result) {
         val sourcePath = call.argument<String>("sourcePath")
         val pipeline = try {
-            ImagePipelineV1.parse(call.argument<Any>("pipeline"))
+            AndroidImagePipeline.parse(call.argument<Any>("pipeline"))
         } catch (error: IllegalArgumentException) {
             result.error("invalidArguments", error.message, null)
             return
@@ -112,7 +112,8 @@ class MainActivity : FlutterActivity() {
         }
         exportExecutor.execute {
             try {
-                val response = AndroidPhotoExporter(contentResolver).export(sourcePath, pipeline)
+                val response = AndroidPhotoExporter(contentResolver, cacheDir)
+                    .export(sourcePath, pipeline)
                 mainHandler.post {
                     result.success(
                         mapOf(

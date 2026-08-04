@@ -33,17 +33,24 @@ class GlesPhotoPreviewRenderer(
     private val renderHandler = Handler(renderThread.looper)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val sessions = ConcurrentHashMap<Long, PreviewSession>()
+    @Volatile
+    private var closed = false
 
     init {
         channel.setMethodCallHandler(::handleMethodCall)
     }
 
     fun close() {
+        if (closed) return
+        closed = true
         channel.setMethodCallHandler(null)
-        val activeSessions = sessions.values.toList()
-        sessions.clear()
         renderHandler.post {
+            val activeSessions = sessions.values.toList()
+            sessions.clear()
             activeSessions.forEach(PreviewSession::close)
+            mainHandler.post {
+                activeSessions.forEach(PreviewSession::releaseProducer)
+            }
             renderThread.quitSafely()
         }
     }
@@ -61,7 +68,7 @@ class GlesPhotoPreviewRenderer(
         val sourcePath = call.argument<String>("sourcePath")
         val maxEdge = call.argument<Int>("maxEdge")
         val pipeline = try {
-            ImagePipelineV1.parse(call.argument<Any>("pipeline"))
+            AndroidImagePipeline.parse(call.argument<Any>("pipeline"))
         } catch (error: IllegalArgumentException) {
             result.error("invalidArguments", error.message, null)
             return
@@ -74,15 +81,27 @@ class GlesPhotoPreviewRenderer(
             TextureRegistry.SurfaceLifecycle.manual,
         )
         renderHandler.post {
+            if (closed) {
+                mainHandler.post(producer::release)
+                return@post
+            }
+            var session: PreviewSession? = null
             try {
-                val session = PreviewSession.create(
+                session = PreviewSession.create(
                     sourcePath = sourcePath,
                     maxEdge = maxEdge,
                     producer = producer,
+                    pipeline = pipeline,
                 )
                 session.render(pipeline)
+                if (closed) {
+                    session.close()
+                    mainHandler.post(producer::release)
+                    return@post
+                }
                 sessions[producer.id()] = session
                 mainHandler.post {
+                    if (closed) return@post
                     result.success(
                         mapOf(
                             "textureId" to producer.id(),
@@ -93,9 +112,16 @@ class GlesPhotoPreviewRenderer(
                     )
                 }
             } catch (_: Throwable) {
-                producer.release()
+                session?.close()
                 mainHandler.post {
-                    result.error("previewUnavailable", "Native preview could not be created", null)
+                    producer.release()
+                    if (!closed) {
+                        result.error(
+                            "previewUnavailable",
+                            "Native preview could not be created",
+                            null,
+                        )
+                    }
                 }
             }
         }
@@ -104,7 +130,7 @@ class GlesPhotoPreviewRenderer(
     private fun updatePreview(call: MethodCall, result: MethodChannel.Result) {
         val textureId = call.argument<Number>("textureId")?.toLong()
         val pipeline = try {
-            ImagePipelineV1.parse(call.argument<Any>("pipeline"))
+            AndroidImagePipeline.parse(call.argument<Any>("pipeline"))
         } catch (error: IllegalArgumentException) {
             result.error("invalidArguments", error.message, null)
             return
@@ -115,12 +141,21 @@ class GlesPhotoPreviewRenderer(
             return
         }
         renderHandler.post {
+            if (closed) return@post
             try {
                 session.render(pipeline)
-                mainHandler.post { result.success(null) }
+                mainHandler.post {
+                    if (!closed) result.success(null)
+                }
             } catch (_: Throwable) {
                 mainHandler.post {
-                    result.error("previewRenderFailed", "Native preview could not be updated", null)
+                    if (!closed) {
+                        result.error(
+                            "previewRenderFailed",
+                            "Native preview could not be updated",
+                            null,
+                        )
+                    }
                 }
             }
         }
@@ -139,7 +174,10 @@ class GlesPhotoPreviewRenderer(
         }
         renderHandler.post {
             session.close()
-            mainHandler.post { result.success(null) }
+            mainHandler.post {
+                session.releaseProducer()
+                if (!closed) result.success(null)
+            }
         }
     }
 
@@ -153,10 +191,26 @@ class GlesPhotoPreviewRenderer(
         private val program: Int,
         private val sourceTexture: Int,
         private val vertexBuffer: FloatBuffer,
+        private val sourceWidth: Int,
+        private val sourceHeight: Int,
     ) {
-        fun render(pipeline: ImagePipelineV1) {
+        fun render(pipeline: AndroidImagePipeline) {
             check(EGL14.eglMakeCurrent(display, surface, surface, context)) {
                 "Could not activate GLES preview context"
+            }
+            val crop = pipeline.geometry.pixelCrop(sourceWidth, sourceHeight)
+            val expectedWidth = if (pipeline.geometry.quarterTurns % 2 == 0) {
+                crop.width
+            } else {
+                crop.height
+            }
+            val expectedHeight = if (pipeline.geometry.quarterTurns % 2 == 0) {
+                crop.height
+            } else {
+                crop.width
+            }
+            check(expectedWidth == width && expectedHeight == height) {
+                "Preview dimensions changed"
             }
             val transform = pipeline.colorTransform()
             GLES30.glViewport(0, 0, width, height)
@@ -177,6 +231,32 @@ class GlesPhotoPreviewRenderer(
                 transform.redBias.toFloat(),
                 transform.greenBias.toFloat(),
                 transform.blueBias.toFloat(),
+            )
+            GLES30.glUniform4f(
+                GLES30.glGetUniformLocation(program, "uCrop"),
+                crop.left.toFloat() / sourceWidth,
+                crop.top.toFloat() / sourceHeight,
+                crop.width.toFloat() / sourceWidth,
+                crop.height.toFloat() / sourceHeight,
+            )
+            GLES30.glUniform1i(
+                GLES30.glGetUniformLocation(program, "uQuarterTurns"),
+                pipeline.geometry.quarterTurns,
+            )
+            GLES30.glUniform1f(
+                GLES30.glGetUniformLocation(program, "uStraightenRadians"),
+                Math.toRadians(-pipeline.geometry.straightenDegrees).toFloat(),
+            )
+            GLES30.glUniform4f(
+                GLES30.glGetUniformLocation(program, "uSecondaryAdjustments"),
+                pipeline.highlights.toFloat(),
+                pipeline.shadows.toFloat(),
+                pipeline.tint.toFloat(),
+                pipeline.saturation.toFloat(),
+            )
+            GLES30.glUniform1f(
+                GLES30.glGetUniformLocation(program, "uClarity"),
+                pipeline.clarity.toFloat(),
             )
             vertexBuffer.position(0)
             GLES30.glVertexAttribPointer(0, 2, GLES30.GL_FLOAT, false, STRIDE_BYTES, vertexBuffer)
@@ -209,6 +289,9 @@ class GlesPhotoPreviewRenderer(
             EGL14.eglDestroySurface(display, surface)
             EGL14.eglDestroyContext(display, context)
             EGL14.eglTerminate(display)
+        }
+
+        fun releaseProducer() {
             producer.release()
         }
 
@@ -217,12 +300,24 @@ class GlesPhotoPreviewRenderer(
                 sourcePath: String,
                 maxEdge: Int,
                 producer: TextureRegistry.SurfaceProducer,
+                pipeline: AndroidImagePipeline,
             ): PreviewSession {
                 val decoded = decodePreview(sourcePath, maxEdge)
                 val oriented = applyExifOrientation(sourcePath, decoded)
                 if (oriented !== decoded) decoded.recycle()
-                val width = oriented.width
-                val height = oriented.height
+                val sourceWidth = oriented.width
+                val sourceHeight = oriented.height
+                val crop = pipeline.geometry.pixelCrop(sourceWidth, sourceHeight)
+                val width = if (pipeline.geometry.quarterTurns % 2 == 0) {
+                    crop.width
+                } else {
+                    crop.height
+                }
+                val height = if (pipeline.geometry.quarterTurns % 2 == 0) {
+                    crop.height
+                } else {
+                    crop.width
+                }
                 var display = EGL14.EGL_NO_DISPLAY
                 var context = EGL14.EGL_NO_CONTEXT
                 var surface = EGL14.EGL_NO_SURFACE
@@ -324,6 +419,8 @@ class GlesPhotoPreviewRenderer(
                         surface = surface,
                         program = program,
                         sourceTexture = sourceTexture,
+                        sourceWidth = sourceWidth,
+                        sourceHeight = sourceHeight,
                         vertexBuffer = ByteBuffer
                             .allocateDirect(VERTICES.size * Float.SIZE_BYTES)
                             .order(ByteOrder.nativeOrder())
@@ -478,12 +575,102 @@ class GlesPhotoPreviewRenderer(
                 uniform sampler2D uTexture;
                 uniform vec3 uScale;
                 uniform vec3 uBias;
+                uniform vec4 uCrop;
+                uniform int uQuarterTurns;
+                uniform float uStraightenRadians;
+                uniform vec4 uSecondaryAdjustments;
+                uniform float uClarity;
                 in vec2 vTexCoord;
                 out vec4 outColor;
+
+                vec2 sourceCoordinate(vec2 outputCoordinate) {
+                    vec2 local = outputCoordinate;
+                    if (uQuarterTurns == 1) {
+                        local = vec2(outputCoordinate.y, 1.0 - outputCoordinate.x);
+                    } else if (uQuarterTurns == 2) {
+                        local = vec2(1.0 - outputCoordinate.x, 1.0 - outputCoordinate.y);
+                    } else if (uQuarterTurns == 3) {
+                        local = vec2(1.0 - outputCoordinate.y, outputCoordinate.x);
+                    }
+                    vec2 centered = local - vec2(0.5);
+                    float cosine = cos(uStraightenRadians);
+                    float sine = sin(uStraightenRadians);
+                    local = mat2(cosine, sine, -sine, cosine) * centered + vec2(0.5);
+                    return uCrop.xy + local * uCrop.zw;
+                }
+
+                vec3 adjustedPixel(ivec2 coordinate) {
+                    ivec2 size = textureSize(uTexture, 0);
+                    if (any(lessThan(coordinate, ivec2(0)))
+                        || any(greaterThanEqual(coordinate, size))) {
+                        return vec3(1.0);
+                    }
+                    vec4 sampled = texelFetch(uTexture, coordinate, 0);
+                    vec3 color = sampled.rgb * sampled.a + vec3(1.0) * (1.0 - sampled.a);
+                    color = clamp(color * uScale + uBias, 0.0, 1.0);
+                    float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
+                    float tonalDelta = uSecondaryAdjustments.y * (1.0 - luminance) * 0.25
+                        + uSecondaryAdjustments.x * luminance * 0.15;
+                    color = clamp(color + vec3(tonalDelta), 0.0, 1.0);
+                    luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
+                    color = vec3(luminance) + (color - vec3(luminance))
+                        * (1.0 + uSecondaryAdjustments.w);
+                    color += vec3(0.04, -0.025, 0.04) * uSecondaryAdjustments.z;
+                    return clamp(color, 0.0, 1.0);
+                }
+
+                vec3 clarifiedPixel(ivec2 coordinate) {
+                    ivec2 size = textureSize(uTexture, 0);
+                    if (any(lessThan(coordinate, ivec2(0)))
+                        || any(greaterThanEqual(coordinate, size))) {
+                        return vec3(1.0);
+                    }
+                    vec3 color = adjustedPixel(coordinate);
+                    if (uClarity == 0.0) return color;
+                    float neighbors = 0.0;
+                    for (int y = -1; y <= 1; y++) {
+                        for (int x = -1; x <= 1; x++) {
+                            if (x == 0 && y == 0) continue;
+                            ivec2 neighbor = clamp(
+                                coordinate + ivec2(x, y),
+                                ivec2(0),
+                                size - ivec2(1)
+                            );
+                            neighbors += dot(
+                                adjustedPixel(neighbor),
+                                vec3(0.2126, 0.7152, 0.0722)
+                            );
+                        }
+                    }
+                    float center = dot(color, vec3(0.2126, 0.7152, 0.0722));
+                    return clamp(
+                        color + vec3(uClarity * 0.5 * (center - neighbors / 8.0)),
+                        0.0,
+                        1.0
+                    );
+                }
+
+                vec3 sampledColor(vec2 coordinate) {
+                    vec2 sourceSize = vec2(textureSize(uTexture, 0));
+                    vec2 pixel = coordinate * sourceSize - vec2(0.5);
+                    ivec2 origin = ivec2(floor(pixel));
+                    vec2 amount = fract(pixel);
+                    vec3 top = mix(
+                        clarifiedPixel(origin),
+                        clarifiedPixel(origin + ivec2(1, 0)),
+                        amount.x
+                    );
+                    vec3 bottom = mix(
+                        clarifiedPixel(origin + ivec2(0, 1)),
+                        clarifiedPixel(origin + ivec2(1, 1)),
+                        amount.x
+                    );
+                    return mix(top, bottom, amount.y);
+                }
+
                 void main() {
-                    vec4 sampled = texture(uTexture, vTexCoord);
-                    vec3 onWhite = sampled.rgb * sampled.a + vec3(1.0) * (1.0 - sampled.a);
-                    outColor = vec4(clamp(onWhite * uScale + uBias, 0.0, 1.0), 1.0);
+                    vec2 source = sourceCoordinate(vTexCoord);
+                    outColor = vec4(sampledColor(source), 1.0);
                 }
             """
         }

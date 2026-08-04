@@ -1851,15 +1851,28 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: parameters.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            separatorBuilder: (_, _) => const SizedBox(width: 4),
             itemBuilder: (context, index) {
               final parameter = parameters[index];
-              return ChoiceChip(
-                label: Text(_label(context, parameter)),
-                selected: parameter == _selected,
-                onSelected: widget.enabled
-                    ? (_) => setState(() => _selected = parameter)
-                    : null,
+              final label = _label(context, parameter);
+              final selected = parameter == _selected;
+              void select() => setState(() => _selected = parameter);
+              return Semantics(
+                container: true,
+                excludeSemantics: true,
+                button: true,
+                enabled: widget.enabled,
+                selected: selected,
+                label: label,
+                onTap: widget.enabled ? select : null,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minWidth: 48),
+                  child: ChoiceChip(
+                    label: Text(label),
+                    selected: selected,
+                    onSelected: widget.enabled ? (_) => select() : null,
+                  ),
+                ),
               );
             },
           ),

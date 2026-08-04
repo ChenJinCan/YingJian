@@ -48,6 +48,27 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(output.extent.height, 6)
   }
 
+  func testImagePipelineV2CropTranslationKeepsPixelAlignedDimensions() throws {
+    let first = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV2(crop: [0.11, 0.1, 0.69, 0.51]))
+    )
+    let shifted = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV2(crop: [0.21, 0.2, 0.79, 0.61]))
+    )
+    let extent = CGRect(x: 0, y: 0, width: 10, height: 6)
+    let source = CIImage(color: CIColor(red: 0.2, green: 0.3, blue: 0.4))
+      .cropped(to: extent)
+
+    XCTAssertEqual(
+      first.applying(to: source, extent: extent).extent.size,
+      CGSize(width: 6, height: 2)
+    )
+    XCTAssertEqual(
+      shifted.applying(to: source, extent: extent).extent.size,
+      CGSize(width: 6, height: 2)
+    )
+  }
+
   func testImagePipelineV2ExposureAndWarmthHaveDeclaredTrend() throws {
     let neutral = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV2()))
     let adjusted = try XCTUnwrap(
@@ -65,11 +86,60 @@ class RunnerTests: XCTestCase {
     XCTAssertGreaterThan(adjustedPixel[0], adjustedPixel[2])
   }
 
+  func testImagePipelineV2StraightenUsesWhiteOutsideTheSource() throws {
+    let pipeline = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV2(straightenDegrees: 45))
+    )
+    let extent = CGRect(x: 0, y: 0, width: 8, height: 8)
+    let source = CIImage(color: CIColor(red: 0, green: 0, blue: 0))
+      .cropped(to: extent)
+
+    let corner = try firstPixel(pipeline.applying(to: source, extent: extent))
+
+    XCTAssertEqual(corner, [255, 255, 255, 255])
+  }
+
   func testImagePipelineRejectsUnknownOrUnsafeV2Contracts() {
     XCTAssertNil(IOSImagePipeline(arguments: pipelineV2(schemaVersion: 3)))
     XCTAssertNil(IOSImagePipeline(arguments: pipelineV2(portraitStrength: 0.1)))
     XCTAssertNil(IOSImagePipeline(arguments: pipelineV2(crop: [0.8, 0, 0.2, 1])))
     XCTAssertNil(IOSImagePipeline(arguments: pipelineV2(straightenDegrees: 46)))
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV2(schemaVersion: 1.9)))
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV2(quarterTurns: 1.9)))
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV2(portraitRecipeVersion: 1.9)))
+    var booleanSchema = pipelineV2()
+    booleanSchema["schemaVersion"] = true
+    XCTAssertNil(IOSImagePipeline(arguments: booleanSchema))
+    var booleanGeometry = pipelineV2()
+    var geometry = booleanGeometry["geometry"] as! [String: Any]
+    geometry["quarterTurns"] = false
+    booleanGeometry["geometry"] = geometry
+    XCTAssertNil(IOSImagePipeline(arguments: booleanGeometry))
+    var booleanPortrait = pipelineV2()
+    var portrait = booleanPortrait["portrait"] as! [String: Any]
+    portrait["recipeVersion"] = true
+    booleanPortrait["portrait"] = portrait
+    XCTAssertNil(IOSImagePipeline(arguments: booleanPortrait))
+    var booleanAdjustment = pipelineV2()
+    var adjustments = booleanAdjustment["adjustments"] as! [String: Any]
+    adjustments["exposureEv"] = true
+    booleanAdjustment["adjustments"] = adjustments
+    XCTAssertNil(IOSImagePipeline(arguments: booleanAdjustment))
+    var booleanCrop = pipelineV2()
+    geometry = booleanCrop["geometry"] as! [String: Any]
+    geometry["normalizedCrop"] = [false, 0.0, 1.0, 1.0]
+    booleanCrop["geometry"] = geometry
+    XCTAssertNil(IOSImagePipeline(arguments: booleanCrop))
+    var booleanStraighten = pipelineV2()
+    geometry = booleanStraighten["geometry"] as! [String: Any]
+    geometry["straightenDegrees"] = false
+    booleanStraighten["geometry"] = geometry
+    XCTAssertNil(IOSImagePipeline(arguments: booleanStraighten))
+    var booleanStrength = pipelineV2()
+    portrait = booleanStrength["portrait"] as! [String: Any]
+    portrait["strength"] = false
+    booleanStrength["portrait"] = portrait
+    XCTAssertNil(IOSImagePipeline(arguments: booleanStrength))
   }
 
   func testLocalAnalysisUsesBoundedCategoriesForDarkCoolInput() throws {
@@ -139,13 +209,14 @@ class RunnerTests: XCTestCase {
   }
 
   private func pipelineV2(
-    schemaVersion: Int = 2,
+    schemaVersion: NSNumber = 2,
     exposureEV: Double = 0,
     warmth: Double = 0,
     crop: [Double] = [0, 0, 1, 1],
-    quarterTurns: Int = 0,
+    quarterTurns: NSNumber = 0,
     straightenDegrees: Double = 0,
-    portraitStrength: Double = 0
+    portraitStrength: Double = 0,
+    portraitRecipeVersion: NSNumber = 1
   ) -> [String: Any] {
     [
       "schemaVersion": schemaVersion,
@@ -166,7 +237,7 @@ class RunnerTests: XCTestCase {
         "straightenDegrees": straightenDegrees,
       ],
       "portrait": [
-        "recipeVersion": 1,
+        "recipeVersion": portraitRecipeVersion,
         "strength": portraitStrength,
       ],
     ]

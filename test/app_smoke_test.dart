@@ -1462,9 +1462,14 @@ void main() {
     await tester.pumpAndSettle();
     await tester.dragUntilVisible(
       find.text('批量导出 1 张'),
-      find.byType(ListView).first,
+      find.byKey(const Key('photo-workspace-scroll')),
       const Offset(0, -300),
     );
+    await tester.drag(
+      find.byKey(const Key('photo-workspace-scroll')),
+      const Offset(0, -80),
+    );
+    await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('批量导出 1 张'));
     await tester.tap(find.text('批量导出 1 张'));
     await tester.pumpAndSettle();
@@ -1623,9 +1628,15 @@ void main() {
     await tester.pumpAndSettle();
     await tester.dragUntilVisible(
       find.text('批量导出 1 张'),
-      find.byType(ListView).first,
+      find.byKey(const Key('photo-workspace-scroll')),
       const Offset(0, -300),
     );
+    await tester.drag(
+      find.byKey(const Key('photo-workspace-scroll')),
+      const Offset(0, -80),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('批量导出 1 张'));
     await tester.tap(find.text('批量导出 1 张'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('开始导出'));

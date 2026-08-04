@@ -694,13 +694,13 @@ struct IOSImagePipeline {
   init?(arguments: Any?) {
     guard
       let pipeline = arguments as? [String: Any],
-      let schemaVersion = (pipeline["schemaVersion"] as? NSNumber)?.intValue,
+      let schemaVersion = Self.exactInteger(pipeline["schemaVersion"]),
       schemaVersion == 1 || schemaVersion == 2,
       pipeline["workingColorSpace"] as? String == "srgb",
       let adjustments = pipeline["adjustments"] as? [String: Any],
-      let exposureEV = (adjustments["exposureEv"] as? NSNumber)?.doubleValue,
-      let contrast = (adjustments["contrast"] as? NSNumber)?.doubleValue,
-      let warmth = (adjustments["warmth"] as? NSNumber)?.doubleValue,
+      let exposureEV = Self.finiteNumber(adjustments["exposureEv"]),
+      let contrast = Self.finiteNumber(adjustments["contrast"]),
+      let warmth = Self.finiteNumber(adjustments["warmth"]),
       exposureEV.isFinite,
       contrast.isFinite,
       warmth.isFinite,
@@ -731,22 +731,22 @@ struct IOSImagePipeline {
       let saturation = Self.normalized(adjustments["saturation"]),
       let clarity = Self.normalized(adjustments["clarity"]),
       let geometry = pipeline["geometry"] as? [String: Any],
-      let normalizedCrop = geometry["normalizedCrop"] as? [NSNumber],
+      let normalizedCrop = geometry["normalizedCrop"] as? [Any],
       normalizedCrop.count == 4,
-      let quarterTurns = (geometry["quarterTurns"] as? NSNumber)?.intValue,
+      let quarterTurns = Self.exactInteger(geometry["quarterTurns"]),
       (0...3).contains(quarterTurns),
-      let straightenDegrees = (geometry["straightenDegrees"] as? NSNumber)?.doubleValue,
-      straightenDegrees.isFinite,
+      let straightenDegrees = Self.finiteNumber(geometry["straightenDegrees"]),
       (-45.0...45.0).contains(straightenDegrees),
       let portrait = pipeline["portrait"] as? [String: Any],
-      (portrait["recipeVersion"] as? NSNumber)?.intValue == 1,
-      let portraitStrength = (portrait["strength"] as? NSNumber)?.doubleValue,
+      Self.exactInteger(portrait["recipeVersion"]) == 1,
+      let portraitStrength = Self.finiteNumber(portrait["strength"]),
       portraitStrength == 0
     else {
       return nil
     }
-    let values = normalizedCrop.map(\.doubleValue)
+    let values = normalizedCrop.compactMap(Self.finiteNumber)
     guard
+      values.count == normalizedCrop.count,
       values.allSatisfy({ $0.isFinite && (0.0...1.0).contains($0) }),
       values[2] > values[0],
       values[3] > values[1]
@@ -768,9 +768,22 @@ struct IOSImagePipeline {
     self.straightenDegrees = straightenDegrees
   }
 
+  private static func exactInteger(_ value: Any?) -> Int? {
+    guard let double = finiteNumber(value), double.rounded(.towardZero) == double else {
+      return nil
+    }
+    return Int(exactly: double)
+  }
+
+  private static func finiteNumber(_ value: Any?) -> Double? {
+    guard let number = value as? NSNumber else { return nil }
+    guard CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+    let result = number.doubleValue
+    return result.isFinite ? result : nil
+  }
+
   private static func normalized(_ value: Any?) -> Double? {
-    guard let result = (value as? NSNumber)?.doubleValue,
-          result.isFinite,
+    guard let result = finiteNumber(value),
           (-1.0...1.0).contains(result)
     else { return nil }
     return result
@@ -846,24 +859,51 @@ struct IOSImagePipeline {
         parameters: [kCIInputSharpnessKey: clarity * 0.8]
       ).cropped(to: extent)
     }
-    return applyingGeometry(to: output, sourceExtent: extent)
+    let geometricallyAdjusted = applyingGeometry(to: output, sourceExtent: extent)
+    let geometryExtent = geometricallyAdjusted.extent.integral
+    let geometryBackground = CIImage(
+      color: CIColor(red: 1, green: 1, blue: 1, alpha: 1)
+    ).cropped(to: geometryExtent)
+    return geometricallyAdjusted
+      .composited(over: geometryBackground)
+      .cropped(to: geometryExtent)
   }
 
   private func applyingGeometry(to input: CIImage, sourceExtent: CGRect) -> CIImage {
+    func aligned(_ value: CGFloat) -> CGFloat {
+      floor(value + 0.5)
+    }
+    let cropWidth = min(
+      sourceExtent.width,
+      max(1, aligned(crop.width * sourceExtent.width))
+    )
+    let cropHeight = min(
+      sourceExtent.height,
+      max(1, aligned(crop.height * sourceExtent.height))
+    )
+    let top = min(
+      sourceExtent.height - cropHeight,
+      max(0, aligned(crop.minY * sourceExtent.height))
+    )
     let cropRect = CGRect(
-      x: sourceExtent.minX + crop.minX * sourceExtent.width,
-      y: sourceExtent.minY + (1 - crop.maxY) * sourceExtent.height,
-      width: crop.width * sourceExtent.width,
-      height: crop.height * sourceExtent.height
-    ).integral.intersection(sourceExtent)
-    var output = input.cropped(to: cropRect)
+      x: sourceExtent.minX + min(
+        sourceExtent.width - cropWidth,
+        max(0, aligned(crop.minX * sourceExtent.width))
+      ),
+      y: sourceExtent.minY + sourceExtent.height - top - cropHeight,
+      width: cropWidth,
+      height: cropHeight
+    )
+    var output: CIImage
     if straightenDegrees != 0 {
       let radians = CGFloat(-straightenDegrees * .pi / 180)
       let center = CGPoint(x: cropRect.midX, y: cropRect.midY)
       let transform = CGAffineTransform(translationX: center.x, y: center.y)
         .rotated(by: radians)
         .translatedBy(x: -center.x, y: -center.y)
-      output = output.clampedToExtent().transformed(by: transform).cropped(to: cropRect)
+      output = input.transformed(by: transform).cropped(to: cropRect)
+    } else {
+      output = input.cropped(to: cropRect)
     }
     if quarterTurns != 0 {
       let expectedSize = quarterTurns.isMultiple(of: 2)
