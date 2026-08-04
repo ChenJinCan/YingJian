@@ -255,4 +255,33 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get legalDocumentLoadFailed =>
       'This document cannot be loaded right now';
+
+  @override
+  String get analysisPreparing => 'Preparing three local looks…';
+
+  @override
+  String get recommendationsTitle => 'Choose an overall direction';
+
+  @override
+  String get recommendationsSubtitle =>
+      'All three looks are created on device. Choose one, then fine-tune it.';
+
+  @override
+  String get safeFallbackNotice =>
+      'Using restrained safe recipes until pixel analysis passes its quality gate.';
+
+  @override
+  String get localEffect => 'On-device effect';
+
+  @override
+  String get useThisLook => 'Use this look';
+
+  @override
+  String get recommendationNaturalClean => 'Natural clean';
+
+  @override
+  String get recommendationAtmosphericColor => 'Atmospheric color';
+
+  @override
+  String get recommendationTexturedStyle => 'Textured style';
 }

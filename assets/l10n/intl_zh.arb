@@ -82,5 +82,14 @@
   "rateAppDescription": "打开应用商店评分页面",
   "storeListingUnavailable": "应用商店页面尚未配置",
   "openSourceLicenses": "开源许可",
-  "legalDocumentLoadFailed": "暂时无法加载此文档"
+  "legalDocumentLoadFailed": "暂时无法加载此文档",
+  "analysisPreparing": "正在本地准备三套效果…",
+  "recommendationsTitle": "先选一个整体方向",
+  "recommendationsSubtitle": "三套效果都在本机生成，不上传照片。选中后可继续细调。",
+  "safeFallbackNotice": "当前使用克制的安全配方；像素级分析能力完成质量验证后再启用。",
+  "localEffect": "本地效果",
+  "useThisLook": "使用这套效果",
+  "recommendationNaturalClean": "自然干净",
+  "recommendationAtmosphericColor": "氛围色彩",
+  "recommendationTexturedStyle": "质感风格"
 }

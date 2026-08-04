@@ -114,6 +114,66 @@ void main() {
     expect(find.textContaining('暂不支持动态图片'), findsOneWidget);
   });
 
+  testWidgets('user chooses one of three local recommendation directions', (
+    tester,
+  ) async {
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final store = MemoryPhotoProjectStore();
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoProjectStore: store,
+        photoImporter: FakePhotoImporter([
+          ProjectPhoto(
+            id: 'photo-1',
+            localPath: photoFile.path,
+            originalName: '推荐样片.png',
+          ),
+        ]),
+      ),
+    );
+
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('选择照片'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView).first, const Offset(0, -520));
+    await tester.pumpAndSettle();
+
+    expect(find.text('自然干净'), findsOneWidget);
+    expect(find.text('氛围色彩'), findsOneWidget);
+    expect(find.text('质感风格'), findsOneWidget);
+    expect(find.textContaining('不上传照片'), findsOneWidget);
+    expect(
+      store.project?.flowState,
+      PhotoProjectFlowState.choosingRecommendation,
+    );
+
+    await tester.tap(find.text('氛围色彩'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('使用这套效果'));
+    await tester.pumpAndSettle();
+
+    expect(store.project?.flowState, PhotoProjectFlowState.editing);
+    expect(
+      store.project?.selectedRecommendationId,
+      contains('atmosphere-warm'),
+    );
+    expect(
+      store.project?.sharedStyle.family,
+      SharedStyleFamily.atmosphericColor,
+    );
+    expect(
+      store.project?.adaptiveCompensations['photo-1']?.source,
+      AdaptiveCompensationSource.safeFallbackV1,
+    );
+  });
+
   testWidgets('user adjusts a photo and exports from its original', (
     tester,
   ) async {

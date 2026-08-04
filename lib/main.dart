@@ -15,6 +15,7 @@ import 'package:yingjian/features/project/application/photo_project_session.dart
 import 'package:yingjian/features/project/infrastructure/app_owned_photo_importer.dart';
 import 'package:yingjian/features/project/infrastructure/image_picker_photo_source.dart';
 import 'package:yingjian/features/project/infrastructure/json_photo_project_store.dart';
+import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
 import 'package:yingjian/observability/app_observability.dart';
 import 'package:yingjian/observability/firebase_observability_backend.dart';
 import 'package:yingjian/review/review_manager.dart';
@@ -33,6 +34,7 @@ Future<void> _startApplication() async {
   late PhotoProjectStore photoProjectStore;
   late PhotoExporter photoExporter;
   late PhotoPreviewRenderer photoPreviewRenderer;
+  late PhotoAnalyzer photoAnalyzer;
 
   final startup = StartupCoordinator(
     prepareApp: () async {
@@ -60,6 +62,7 @@ Future<void> _startApplication() async {
       );
       photoExporter = MethodChannelPhotoExporter();
       photoPreviewRenderer = MethodChannelPhotoPreviewRenderer();
+      photoAnalyzer = const MetadataSafePhotoAnalyzer();
     },
     showApp: () {
       runApp(
@@ -74,6 +77,7 @@ Future<void> _startApplication() async {
             Provider<PhotoProjectStore>.value(value: photoProjectStore),
             Provider<PhotoExporter>.value(value: photoExporter),
             Provider<PhotoPreviewRenderer>.value(value: photoPreviewRenderer),
+            Provider<PhotoAnalyzer>.value(value: photoAnalyzer),
           ],
           child: const YingjianApp(),
         ),

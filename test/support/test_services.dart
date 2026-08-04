@@ -8,6 +8,7 @@ import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
+import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
 import 'package:yingjian/observability/analytics_event.dart';
 import 'package:yingjian/observability/app_observability.dart';
 import 'package:yingjian/observability/observability_backend.dart';
@@ -19,6 +20,7 @@ Widget buildTestApp(
   PhotoProjectStore? photoProjectStore,
   PhotoExporter? photoExporter,
   PhotoPreviewRenderer? photoPreviewRenderer,
+  PhotoAnalyzer? photoAnalyzer,
 }) {
   final observability = AppObservability(FakeObservabilityBackend());
   return MultiProvider(
@@ -37,6 +39,9 @@ Widget buildTestApp(
       ),
       Provider<PhotoPreviewRenderer>.value(
         value: photoPreviewRenderer ?? FakePhotoPreviewRenderer.unsupported(),
+      ),
+      Provider<PhotoAnalyzer>.value(
+        value: photoAnalyzer ?? const MetadataSafePhotoAnalyzer(),
       ),
     ],
     child: const YingjianApp(),

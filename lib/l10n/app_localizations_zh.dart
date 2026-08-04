@@ -242,4 +242,31 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get legalDocumentLoadFailed => '暂时无法加载此文档';
+
+  @override
+  String get analysisPreparing => '正在本地准备三套效果…';
+
+  @override
+  String get recommendationsTitle => '先选一个整体方向';
+
+  @override
+  String get recommendationsSubtitle => '三套效果都在本机生成，不上传照片。选中后可继续细调。';
+
+  @override
+  String get safeFallbackNotice => '当前使用克制的安全配方；像素级分析能力完成质量验证后再启用。';
+
+  @override
+  String get localEffect => '本地效果';
+
+  @override
+  String get useThisLook => '使用这套效果';
+
+  @override
+  String get recommendationNaturalClean => '自然干净';
+
+  @override
+  String get recommendationAtmosphericColor => '氛围色彩';
+
+  @override
+  String get recommendationTexturedStyle => '质感风格';
 }

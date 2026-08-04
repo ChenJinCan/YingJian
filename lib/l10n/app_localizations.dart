@@ -535,6 +535,60 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'暂时无法加载此文档'**
   String get legalDocumentLoadFailed;
+
+  /// No description provided for @analysisPreparing.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在本地准备三套效果…'**
+  String get analysisPreparing;
+
+  /// No description provided for @recommendationsTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'先选一个整体方向'**
+  String get recommendationsTitle;
+
+  /// No description provided for @recommendationsSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'三套效果都在本机生成，不上传照片。选中后可继续细调。'**
+  String get recommendationsSubtitle;
+
+  /// No description provided for @safeFallbackNotice.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前使用克制的安全配方；像素级分析能力完成质量验证后再启用。'**
+  String get safeFallbackNotice;
+
+  /// No description provided for @localEffect.
+  ///
+  /// In zh, this message translates to:
+  /// **'本地效果'**
+  String get localEffect;
+
+  /// No description provided for @useThisLook.
+  ///
+  /// In zh, this message translates to:
+  /// **'使用这套效果'**
+  String get useThisLook;
+
+  /// No description provided for @recommendationNaturalClean.
+  ///
+  /// In zh, this message translates to:
+  /// **'自然干净'**
+  String get recommendationNaturalClean;
+
+  /// No description provided for @recommendationAtmosphericColor.
+  ///
+  /// In zh, this message translates to:
+  /// **'氛围色彩'**
+  String get recommendationAtmosphericColor;
+
+  /// No description provided for @recommendationTexturedStyle.
+  ///
+  /// In zh, this message translates to:
+  /// **'质感风格'**
+  String get recommendationTexturedStyle;
 }
 
 class _AppLocalizationsDelegate

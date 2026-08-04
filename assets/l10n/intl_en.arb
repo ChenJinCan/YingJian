@@ -80,5 +80,14 @@
   "rateAppDescription": "Open the app store review page",
   "storeListingUnavailable": "The app store listing is not configured",
   "openSourceLicenses": "Open-source licenses",
-  "legalDocumentLoadFailed": "This document cannot be loaded right now"
+  "legalDocumentLoadFailed": "This document cannot be loaded right now",
+  "analysisPreparing": "Preparing three local looks…",
+  "recommendationsTitle": "Choose an overall direction",
+  "recommendationsSubtitle": "All three looks are created on device. Choose one, then fine-tune it.",
+  "safeFallbackNotice": "Using restrained safe recipes until pixel analysis passes its quality gate.",
+  "localEffect": "On-device effect",
+  "useThisLook": "Use this look",
+  "recommendationNaturalClean": "Natural clean",
+  "recommendationAtmosphericColor": "Atmospheric color",
+  "recommendationTexturedStyle": "Textured style"
 }

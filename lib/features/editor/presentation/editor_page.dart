@@ -11,6 +11,9 @@ import 'package:yingjian/features/editor/domain/image_pipeline_for_platform.dart
 import 'package:yingjian/features/editor/presentation/native_photo_preview.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
+import 'package:yingjian/features/recommendations/application/local_recommendation_coordinator.dart';
+import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
+import 'package:yingjian/features/recommendations/domain/recipe_catalog.dart';
 import 'package:yingjian/l10n/l10n.dart';
 
 class EditorPage extends StatefulWidget {
@@ -26,6 +29,9 @@ class _EditorPageState extends State<EditorPage> {
   int _selectedIndex = 0;
   bool _busy = false;
   bool _exporting = false;
+  bool _preparingRecommendations = false;
+  RecommendationPreparation? _recommendationPreparation;
+  int _previewRecommendationIndex = -1;
 
   @override
   void didChangeDependencies() {
@@ -52,6 +58,66 @@ class _EditorPageState extends State<EditorPage> {
       );
       if (focusIndex >= 0) {
         _selectedIndex = focusIndex;
+      }
+    }
+    if (project != null &&
+        (project.flowState == PhotoProjectFlowState.analyzing ||
+            project.flowState ==
+                PhotoProjectFlowState.choosingRecommendation)) {
+      await _prepareRecommendations(
+        persistAnalysisStates:
+            project.flowState == PhotoProjectFlowState.analyzing,
+      );
+    }
+  }
+
+  Future<void> _prepareRecommendations({
+    required bool persistAnalysisStates,
+  }) async {
+    final session = _session!;
+    if (_preparingRecommendations || session.photos.isEmpty) return;
+    if (mounted) setState(() => _preparingRecommendations = true);
+    try {
+      final preparation =
+          await LocalRecommendationCoordinator(
+            analyzer: context.read<PhotoAnalyzer>(),
+          ).prepare(
+            photos: session.photos,
+            onStateChanged: persistAnalysisStates
+                ? session.setPhotoAnalysisState
+                : null,
+          );
+      if (persistAnalysisStates &&
+          session.project?.flowState == PhotoProjectFlowState.analyzing) {
+        await session.transitionTo(
+          PhotoProjectFlowState.choosingRecommendation,
+        );
+      }
+      if (mounted) {
+        setState(() {
+          _recommendationPreparation = preparation;
+          _previewRecommendationIndex = -1;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _preparingRecommendations = false);
+    }
+  }
+
+  Future<void> _selectRecommendation(LocalRecommendation recommendation) async {
+    try {
+      await _session!.selectRecommendation(
+        recommendationId: recommendation.id,
+        sharedStyle: recommendation.sharedStyle,
+        adaptiveCompensations: recommendation.adaptiveCompensations,
+      );
+      _editorSession.load(_session!.editableRecipe);
+      if (mounted) setState(() => _recommendationPreparation = null);
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
       }
     }
   }
@@ -264,6 +330,7 @@ class _EditorPageState extends State<EditorPage> {
       }
       if (result == PhotoImportResult.imported) {
         _editorSession.load(_session!.editableRecipe);
+        await _prepareRecommendations(persistAnalysisStates: true);
       }
     } on Object {
       if (mounted) {
@@ -288,6 +355,27 @@ class _EditorPageState extends State<EditorPage> {
         if (_selectedIndex >= photos.length && photos.isNotEmpty) {
           _selectedIndex = photos.length - 1;
         }
+        final recommendations = _recommendationPreparation?.recommendations;
+        final previewRecommendation =
+            recommendations == null || _previewRecommendationIndex < 0
+            ? null
+            : recommendations[_previewRecommendationIndex
+                  .clamp(0, recommendations.length - 1)
+                  .toInt()];
+        final previewRecipe = photos.isEmpty
+            ? EditRecipe.neutral
+            : previewRecommendation == null
+            ? session.previewRecipeFor(
+                photos[_selectedIndex].id,
+                _editorSession.recipe,
+              )
+            : session.project!
+                  .copyWith(
+                    sharedStyle: previewRecommendation.sharedStyle,
+                    adaptiveCompensations:
+                        previewRecommendation.adaptiveCompensations,
+                  )
+                  .effectiveRecipeFor(photos[_selectedIndex].id);
         return Scaffold(
           appBar: AppBar(
             title: Text(context.l10n.editorTitle),
@@ -321,10 +409,11 @@ class _EditorPageState extends State<EditorPage> {
                     busy: _busy,
                     exporting: _exporting,
                     editingEnabled: session.canEdit,
-                    previewRecipe: session.previewRecipeFor(
-                      photos[_selectedIndex].id,
-                      _editorSession.recipe,
-                    ),
+                    previewRecipe: previewRecipe,
+                    flowState: session.flowState,
+                    preparingRecommendations: _preparingRecommendations,
+                    recommendations: recommendations ?? const [],
+                    selectedRecommendationIndex: _previewRecommendationIndex,
                     editorSession: _editorSession,
                     canUndo: session.canUndo,
                     canRedo: session.canRedo,
@@ -338,6 +427,10 @@ class _EditorPageState extends State<EditorPage> {
                     onUndo: () => unawaited(_undoEdit()),
                     onRedo: () => unawaited(_redoEdit()),
                     onReset: () => unawaited(_resetEdit()),
+                    onRecommendationPreviewed: (index) =>
+                        setState(() => _previewRecommendationIndex = index),
+                    onRecommendationSelected: (recommendation) =>
+                        unawaited(_selectRecommendation(recommendation)),
                   ),
           ),
         );
@@ -445,6 +538,10 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.exporting,
     required this.editingEnabled,
     required this.previewRecipe,
+    required this.flowState,
+    required this.preparingRecommendations,
+    required this.recommendations,
+    required this.selectedRecommendationIndex,
     required this.editorSession,
     required this.canUndo,
     required this.canRedo,
@@ -457,6 +554,8 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.onUndo,
     required this.onRedo,
     required this.onReset,
+    required this.onRecommendationPreviewed,
+    required this.onRecommendationSelected,
   });
 
   final List<ProjectPhoto> photos;
@@ -466,6 +565,10 @@ class _PhotoWorkspace extends StatelessWidget {
   final bool exporting;
   final bool editingEnabled;
   final EditRecipe previewRecipe;
+  final PhotoProjectFlowState flowState;
+  final bool preparingRecommendations;
+  final List<LocalRecommendation> recommendations;
+  final int selectedRecommendationIndex;
   final EditorSession editorSession;
   final bool canUndo;
   final bool canRedo;
@@ -478,6 +581,8 @@ class _PhotoWorkspace extends StatelessWidget {
   final VoidCallback onUndo;
   final VoidCallback onRedo;
   final VoidCallback onReset;
+  final ValueChanged<int> onRecommendationPreviewed;
+  final ValueChanged<LocalRecommendation> onRecommendationSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -584,6 +689,17 @@ class _PhotoWorkspace extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 20),
+        if (flowState == PhotoProjectFlowState.analyzing ||
+            flowState == PhotoProjectFlowState.choosingRecommendation) ...[
+          _RecommendationPanel(
+            preparing: preparingRecommendations,
+            recommendations: recommendations,
+            selectedIndex: selectedRecommendationIndex,
+            onPreviewed: onRecommendationPreviewed,
+            onSelected: onRecommendationSelected,
+          ),
+          const SizedBox(height: 20),
+        ],
         _AdjustmentToolStrip(
           enabled: editingEnabled,
           extended: supportsImagePipelineV2,
@@ -651,6 +767,165 @@ class _PhotoWorkspace extends StatelessWidget {
       ],
     );
   }
+}
+
+class _RecommendationPanel extends StatelessWidget {
+  const _RecommendationPanel({
+    required this.preparing,
+    required this.recommendations,
+    required this.selectedIndex,
+    required this.onPreviewed,
+    required this.onSelected,
+  });
+
+  final bool preparing;
+  final List<LocalRecommendation> recommendations;
+  final int selectedIndex;
+  final ValueChanged<int> onPreviewed;
+  final ValueChanged<LocalRecommendation> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    if (preparing || recommendations.isEmpty) {
+      return Semantics(
+        liveRegion: true,
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              children: [
+                const SizedBox.square(
+                  dimension: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 14),
+                Expanded(child: Text(context.l10n.analysisPreparing)),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    final safeIndex = selectedIndex
+        .clamp(0, recommendations.length - 1)
+        .toInt();
+    final selected = recommendations[safeIndex];
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              context.l10n.recommendationsTitle,
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 6),
+            Text(context.l10n.recommendationsSubtitle),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 108,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: recommendations.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 10),
+                itemBuilder: (context, index) {
+                  final recommendation = recommendations[index];
+                  final isSelected = index == safeIndex;
+                  return Semantics(
+                    selected: isSelected,
+                    button: true,
+                    child: InkWell(
+                      onTap: () => onPreviewed(index),
+                      borderRadius: BorderRadius.circular(16),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 160),
+                        width: 148,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          color: isSelected
+                              ? Theme.of(context).colorScheme.primaryContainer
+                              : Theme.of(
+                                  context,
+                                ).colorScheme.surfaceContainerHigh,
+                          border: Border.all(
+                            color: isSelected
+                                ? Theme.of(context).colorScheme.primary
+                                : Colors.transparent,
+                            width: 2,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Icon(_recommendationIcon(recommendation.family)),
+                            Text(
+                              _recommendationLabel(
+                                context,
+                                recommendation.family,
+                              ),
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                            Text(
+                              context.l10n.localEffect,
+                              style: Theme.of(context).textTheme.labelSmall,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.shield_outlined, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    context.l10n.safeFallbackNotice,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () => onSelected(selected),
+                child: Text(context.l10n.useThisLook),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static IconData _recommendationIcon(SharedStyleFamily family) =>
+      switch (family) {
+        SharedStyleFamily.naturalClean => Icons.wb_sunny_outlined,
+        SharedStyleFamily.atmosphericColor => Icons.palette_outlined,
+        SharedStyleFamily.texturedStyle => Icons.grain,
+        SharedStyleFamily.manual => Icons.tune,
+      };
+
+  static String _recommendationLabel(
+    BuildContext context,
+    SharedStyleFamily family,
+  ) => switch (family) {
+    SharedStyleFamily.naturalClean => context.l10n.recommendationNaturalClean,
+    SharedStyleFamily.atmosphericColor =>
+      context.l10n.recommendationAtmosphericColor,
+    SharedStyleFamily.texturedStyle => context.l10n.recommendationTexturedStyle,
+    SharedStyleFamily.manual => context.l10n.recommendationNaturalClean,
+  };
 }
 
 class _ImportFailures extends StatelessWidget {
