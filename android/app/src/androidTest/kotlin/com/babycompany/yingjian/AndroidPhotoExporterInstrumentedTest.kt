@@ -354,6 +354,28 @@ class AndroidPhotoExporterInstrumentedTest {
         }
     }
 
+    @Test
+    fun localAnalyzerDecodesARealFileIntoStableBoundedCategories() {
+        val source = File(context.cacheDir, "analysis-dark-cool.jpg")
+        Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).also { bitmap ->
+            bitmap.eraseColor(Color.rgb(10, 20, 80))
+            source.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 100, it) }
+            bitmap.recycle()
+        }
+        try {
+            val result = AndroidPhotoAnalyzer.analyze(source.absolutePath)
+
+            assertEquals(AndroidPhotoAnalyzer.ANALYSIS_VERSION, result["analysisVersion"])
+            assertEquals(AndroidPhotoAnalyzer.CAPABILITY_VERSION, result["capabilityVersion"])
+            assertEquals("underexposed", result["exposure"])
+            assertEquals("coolCast", result["whiteBalance"])
+            assertEquals("blurred", result["clarity"])
+            assertEquals("unavailable", result["portrait"])
+        } finally {
+            source.delete()
+        }
+    }
+
     private fun createJpeg(file: File, width: Int, height: Int) {
         Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
             for (y in 0 until height) {

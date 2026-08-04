@@ -8,6 +8,7 @@ enum RecommendationReason {
   warmLocalFallback,
   texturedLocalFallback,
   protectsUncertainInput,
+  protectsTexture,
   correctsExposure,
   correctsWhiteBalance,
 }
@@ -316,7 +317,15 @@ final class LocalRecommendationEngine {
   }
 
   RecommendationReason _reason(SharedStyleFamily family, bool fallback) {
-    if (!fallback) return RecommendationReason.correctsExposure;
+    if (!fallback) {
+      return switch (family) {
+        SharedStyleFamily.naturalClean => RecommendationReason.correctsExposure,
+        SharedStyleFamily.atmosphericColor =>
+          RecommendationReason.correctsWhiteBalance,
+        SharedStyleFamily.texturedStyle => RecommendationReason.protectsTexture,
+        SharedStyleFamily.manual => RecommendationReason.protectsUncertainInput,
+      };
+    }
     return switch (family) {
       SharedStyleFamily.naturalClean =>
         RecommendationReason.balancedLocalFallback,

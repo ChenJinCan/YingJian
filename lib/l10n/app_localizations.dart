@@ -116,6 +116,42 @@ abstract class AppLocalizations {
   /// **'开始修图'**
   String get startEditing;
 
+  /// No description provided for @unfinishedProject.
+  ///
+  /// In zh, this message translates to:
+  /// **'未完成项目'**
+  String get unfinishedProject;
+
+  /// No description provided for @continueLastEditing.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续上次编辑'**
+  String get continueLastEditing;
+
+  /// No description provided for @startNewProject.
+  ///
+  /// In zh, this message translates to:
+  /// **'开始新项目'**
+  String get startNewProject;
+
+  /// No description provided for @deleteAndStartNew.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除并新建'**
+  String get deleteAndStartNew;
+
+  /// No description provided for @projectDeleteFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法删除本地项目，现有内容未改变。'**
+  String get projectDeleteFailed;
+
+  /// No description provided for @lastProjectSummary.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count} 张照片 · 最后编辑于 {date} {time}'**
+  String lastProjectSummary(int count, String date, String time);
+
   /// No description provided for @editorTitle.
   ///
   /// In zh, this message translates to:
@@ -590,6 +626,12 @@ abstract class AppLocalizations {
   /// **'当前使用克制的安全配方；像素级分析能力完成质量验证后再启用。'**
   String get safeFallbackNotice;
 
+  /// No description provided for @localAnalysisNotice.
+  ///
+  /// In zh, this message translates to:
+  /// **'本机像素分析已为每张照片准备有边界的自适应调整。'**
+  String get localAnalysisNotice;
+
   /// No description provided for @localEffect.
   ///
   /// In zh, this message translates to:
@@ -619,6 +661,48 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'质感风格'**
   String get recommendationTexturedStyle;
+
+  /// No description provided for @recommendationReasonBalancedFallback.
+  ///
+  /// In zh, this message translates to:
+  /// **'均衡克制的安全回退'**
+  String get recommendationReasonBalancedFallback;
+
+  /// No description provided for @recommendationReasonWarmFallback.
+  ///
+  /// In zh, this message translates to:
+  /// **'安全增加轻微暖意'**
+  String get recommendationReasonWarmFallback;
+
+  /// No description provided for @recommendationReasonTexturedFallback.
+  ///
+  /// In zh, this message translates to:
+  /// **'克制增强质感，不激进锐化'**
+  String get recommendationReasonTexturedFallback;
+
+  /// No description provided for @recommendationReasonProtectsUncertain.
+  ///
+  /// In zh, this message translates to:
+  /// **'保守保护不确定输入'**
+  String get recommendationReasonProtectsUncertain;
+
+  /// No description provided for @recommendationReasonProtectsTexture.
+  ///
+  /// In zh, this message translates to:
+  /// **'保留细节与局部反差'**
+  String get recommendationReasonProtectsTexture;
+
+  /// No description provided for @recommendationReasonCorrectsExposure.
+  ///
+  /// In zh, this message translates to:
+  /// **'平衡检测到的曝光'**
+  String get recommendationReasonCorrectsExposure;
+
+  /// No description provided for @recommendationReasonCorrectsWhiteBalance.
+  ///
+  /// In zh, this message translates to:
+  /// **'修正检测到的偏色'**
+  String get recommendationReasonCorrectsWhiteBalance;
 
   /// No description provided for @editWholeGroup.
   ///

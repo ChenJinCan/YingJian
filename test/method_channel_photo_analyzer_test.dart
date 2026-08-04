@@ -123,4 +123,31 @@ void main() {
       expect(analyzer.identityFor(photo).capabilityVersion, 'metadata-only');
     },
   );
+
+  test('accepts the declared Android local pixel capability', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (_) async {
+          return <String, Object>{
+            'analysisVersion': 'local-pixels-v1',
+            'capabilityVersion': 'android-bitmap-face-v1',
+            'confidence': 'medium',
+            'exposure': 'balanced',
+            'whiteBalance': 'warmCast',
+            'clarity': 'soft',
+            'portrait': 'unavailable',
+            'scene': 'unknown',
+          };
+        });
+    const analyzer = MethodChannelPhotoAnalyzer(
+      channel: channel,
+      nativeAnalysisAvailable: true,
+      nativeCapabilityVersion: 'android-bitmap-face-v1',
+    );
+
+    final result = await analyzer.analyze(photo);
+
+    expect(result.usesSafeFallback, isFalse);
+    expect(result.capabilityVersion, 'android-bitmap-face-v1');
+    expect(analyzer.identityFor(photo).matches(result), isTrue);
+  });
 }

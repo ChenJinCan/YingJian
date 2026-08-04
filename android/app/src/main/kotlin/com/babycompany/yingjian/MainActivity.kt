@@ -68,6 +68,32 @@ class MainActivity : FlutterActivity() {
                 }
                 exportPhoto(call, result)
             }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PHOTO_ANALYSIS_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                if (call.method != "analyzePhoto") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                val sourcePath = call.argument<String>("sourcePath")
+                if (sourcePath == null) {
+                    result.error("invalidArguments", "Photo path is required", null)
+                    return@setMethodCallHandler
+                }
+                exportExecutor.execute {
+                    try {
+                        val analysis = AndroidPhotoAnalyzer.analyze(sourcePath)
+                        mainHandler.post { result.success(analysis) }
+                    } catch (_: Throwable) {
+                        mainHandler.post {
+                            result.error(
+                                "analysisUnavailable",
+                                "Local photo analysis is unavailable",
+                                null,
+                            )
+                        }
+                    }
+                }
+            }
     }
 
     override fun onRequestPermissionsResult(
@@ -154,6 +180,7 @@ class MainActivity : FlutterActivity() {
     private companion object {
         const val PHOTO_EXPORT_CHANNEL = "yingjian/photo_export"
         const val PHOTO_INPUT_CHANNEL = "yingjian/photo_input"
+        const val PHOTO_ANALYSIS_CHANNEL = "yingjian/photo_analysis"
         const val WRITE_REQUEST = 8021
     }
 }

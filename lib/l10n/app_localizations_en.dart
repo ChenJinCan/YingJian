@@ -18,6 +18,33 @@ class AppLocalizationsEn extends AppLocalizations {
   String get startEditing => 'Start editing';
 
   @override
+  String get unfinishedProject => 'Unfinished project';
+
+  @override
+  String get continueLastEditing => 'Continue last editing';
+
+  @override
+  String get startNewProject => 'Start a new project';
+
+  @override
+  String get deleteAndStartNew => 'Delete and start new';
+
+  @override
+  String get projectDeleteFailed =>
+      'The local project could not be deleted. Nothing was changed.';
+
+  @override
+  String lastProjectSummary(int count, String date, String time) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count photos',
+      one: '1 photo',
+    );
+    return '$_temp0 · Last edited $date $time';
+  }
+
+  @override
   String get editorTitle => 'Fine-tuning workspace';
 
   @override
@@ -288,6 +315,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Using restrained safe recipes until pixel analysis passes its quality gate.';
 
   @override
+  String get localAnalysisNotice =>
+      'On-device pixel analysis prepared a bounded adjustment for each photo.';
+
+  @override
   String get localEffect => 'On-device effect';
 
   @override
@@ -301,6 +332,34 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get recommendationTexturedStyle => 'Textured style';
+
+  @override
+  String get recommendationReasonBalancedFallback =>
+      'Balanced, restrained fallback';
+
+  @override
+  String get recommendationReasonWarmFallback =>
+      'Gentle warmth, safely bounded';
+
+  @override
+  String get recommendationReasonTexturedFallback =>
+      'Subtle texture, no hard sharpening';
+
+  @override
+  String get recommendationReasonProtectsUncertain =>
+      'Conservative for uncertain input';
+
+  @override
+  String get recommendationReasonProtectsTexture =>
+      'Preserves detail and local contrast';
+
+  @override
+  String get recommendationReasonCorrectsExposure =>
+      'Balances detected exposure';
+
+  @override
+  String get recommendationReasonCorrectsWhiteBalance =>
+      'Corrects the detected color cast';
 
   @override
   String get editWholeGroup => 'Edit whole group';

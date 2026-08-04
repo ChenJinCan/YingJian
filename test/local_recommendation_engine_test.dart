@@ -111,6 +111,11 @@ void main() {
       recommendations.every((item) => item.sharedStyle.intensity == 0.72),
       isTrue,
     );
+    expect(recommendations.map((item) => item.reason), [
+      RecommendationReason.balancedLocalFallback,
+      RecommendationReason.warmLocalFallback,
+      RecommendationReason.texturedLocalFallback,
+    ]);
     expect(
       recommendations.every(
         (item) =>
@@ -152,6 +157,11 @@ void main() {
 
       expect(first.map((item) => item.id), second.map((item) => item.id));
       expect(first.map((item) => item.family).toSet(), hasLength(3));
+      expect(first.map((item) => item.reason), [
+        RecommendationReason.correctsExposure,
+        RecommendationReason.correctsWhiteBalance,
+        RecommendationReason.protectsTexture,
+      ]);
       expect(
         first.first.adaptiveCompensations['photo-1']!.recipe.exposure,
         0.15,

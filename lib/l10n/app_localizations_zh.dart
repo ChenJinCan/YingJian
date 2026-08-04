@@ -18,6 +18,26 @@ class AppLocalizationsZh extends AppLocalizations {
   String get startEditing => '开始修图';
 
   @override
+  String get unfinishedProject => '未完成项目';
+
+  @override
+  String get continueLastEditing => '继续上次编辑';
+
+  @override
+  String get startNewProject => '开始新项目';
+
+  @override
+  String get deleteAndStartNew => '删除并新建';
+
+  @override
+  String get projectDeleteFailed => '无法删除本地项目，现有内容未改变。';
+
+  @override
+  String lastProjectSummary(int count, String date, String time) {
+    return '$count 张照片 · 最后编辑于 $date $time';
+  }
+
+  @override
   String get editorTitle => '精修工作台';
 
   @override
@@ -271,6 +291,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get safeFallbackNotice => '当前使用克制的安全配方；像素级分析能力完成质量验证后再启用。';
 
   @override
+  String get localAnalysisNotice => '本机像素分析已为每张照片准备有边界的自适应调整。';
+
+  @override
   String get localEffect => '本地效果';
 
   @override
@@ -284,6 +307,27 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get recommendationTexturedStyle => '质感风格';
+
+  @override
+  String get recommendationReasonBalancedFallback => '均衡克制的安全回退';
+
+  @override
+  String get recommendationReasonWarmFallback => '安全增加轻微暖意';
+
+  @override
+  String get recommendationReasonTexturedFallback => '克制增强质感，不激进锐化';
+
+  @override
+  String get recommendationReasonProtectsUncertain => '保守保护不确定输入';
+
+  @override
+  String get recommendationReasonProtectsTexture => '保留细节与局部反差';
+
+  @override
+  String get recommendationReasonCorrectsExposure => '平衡检测到的曝光';
+
+  @override
+  String get recommendationReasonCorrectsWhiteBalance => '修正检测到的偏色';
 
   @override
   String get editWholeGroup => '编辑整组';

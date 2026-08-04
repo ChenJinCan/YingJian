@@ -9,13 +9,22 @@ final class MethodChannelPhotoAnalyzer implements PhotoAnalyzer {
     this.channel = const MethodChannel('yingjian/photo_analysis'),
     this.fallback = const MetadataSafePhotoAnalyzer(),
     this.nativeAnalysisAvailable,
+    this.nativeCapabilityVersion,
   });
 
   final MethodChannel channel;
   final PhotoAnalyzer fallback;
   final bool? nativeAnalysisAvailable;
+  final String? nativeCapabilityVersion;
 
-  bool get _canUseNativeAnalysis => nativeAnalysisAvailable ?? Platform.isIOS;
+  bool get _canUseNativeAnalysis =>
+      nativeAnalysisAvailable ?? (Platform.isIOS || Platform.isAndroid);
+
+  String get _nativeCapabilityVersion =>
+      nativeCapabilityVersion ??
+      (Platform.isAndroid
+          ? 'android-bitmap-face-v1'
+          : 'ios-core-image-vision-v1');
 
   @override
   PhotoAnalysisEngineIdentity identityFor(ProjectPhoto photo) {
@@ -24,9 +33,9 @@ final class MethodChannelPhotoAnalyzer implements PhotoAnalyzer {
         !RegExp(r'^[a-f0-9]{64}$').hasMatch(photo.contentSha256)) {
       return fallback.identityFor(photo);
     }
-    return const PhotoAnalysisEngineIdentity(
+    return PhotoAnalysisEngineIdentity(
       analysisVersion: 'local-pixels-v1',
-      capabilityVersion: 'ios-core-image-vision-v1',
+      capabilityVersion: _nativeCapabilityVersion,
     );
   }
 

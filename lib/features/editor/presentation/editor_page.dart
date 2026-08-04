@@ -1560,7 +1560,7 @@ class _RecommendationPanel extends StatelessWidget {
             Text(context.l10n.recommendationsSubtitle),
             const SizedBox(height: 12),
             SizedBox(
-              height: 108,
+              height: 166,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: recommendations.length,
@@ -1610,6 +1610,15 @@ class _RecommendationPanel extends StatelessWidget {
                               context.l10n.localEffect,
                               style: Theme.of(context).textTheme.labelSmall,
                             ),
+                            Text(
+                              _recommendationReason(
+                                context,
+                                recommendation.reason,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
                           ],
                         ),
                       ),
@@ -1626,7 +1635,9 @@ class _RecommendationPanel extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    context.l10n.safeFallbackNotice,
+                    _usesSafeFallback(selected.reason)
+                        ? context.l10n.safeFallbackNotice
+                        : context.l10n.localAnalysisNotice,
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),
@@ -1663,6 +1674,35 @@ class _RecommendationPanel extends StatelessWidget {
       context.l10n.recommendationAtmosphericColor,
     SharedStyleFamily.texturedStyle => context.l10n.recommendationTexturedStyle,
     SharedStyleFamily.manual => context.l10n.recommendationNaturalClean,
+  };
+
+  static bool _usesSafeFallback(RecommendationReason reason) =>
+      switch (reason) {
+        RecommendationReason.balancedLocalFallback ||
+        RecommendationReason.warmLocalFallback ||
+        RecommendationReason.texturedLocalFallback ||
+        RecommendationReason.protectsUncertainInput => true,
+        _ => false,
+      };
+
+  static String _recommendationReason(
+    BuildContext context,
+    RecommendationReason reason,
+  ) => switch (reason) {
+    RecommendationReason.balancedLocalFallback =>
+      context.l10n.recommendationReasonBalancedFallback,
+    RecommendationReason.warmLocalFallback =>
+      context.l10n.recommendationReasonWarmFallback,
+    RecommendationReason.texturedLocalFallback =>
+      context.l10n.recommendationReasonTexturedFallback,
+    RecommendationReason.protectsUncertainInput =>
+      context.l10n.recommendationReasonProtectsUncertain,
+    RecommendationReason.protectsTexture =>
+      context.l10n.recommendationReasonProtectsTexture,
+    RecommendationReason.correctsExposure =>
+      context.l10n.recommendationReasonCorrectsExposure,
+    RecommendationReason.correctsWhiteBalance =>
+      context.l10n.recommendationReasonCorrectsWhiteBalance,
   };
 }
 

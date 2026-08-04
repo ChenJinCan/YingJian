@@ -44,6 +44,97 @@ void main() {
     expect(find.text('Start editing'), findsOneWidget);
   });
 
+  testWidgets('English unfinished-project count uses singular grammar', (
+    tester,
+  ) async {
+    final store = MemoryPhotoProjectStore(
+      PhotoProject(
+        id: 'project-1',
+        createdAt: DateTime(2026, 8, 4),
+        updatedAt: DateTime(2026, 8, 5),
+        photos: const [
+          ProjectPhoto(
+            id: 'photo-1',
+            localPath: '/private/project/photo.jpg',
+            originalName: 'photo.jpg',
+          ),
+        ],
+        flowState: PhotoProjectFlowState.analyzing,
+      ),
+    );
+    SharedPreferences.setMockInitialValues({'app.locale': 'en'});
+    final settings = await AppSettings.load();
+
+    await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('1 photo ·'), findsOneWidget);
+    expect(find.textContaining('1 photos'), findsNothing);
+  });
+
+  testWidgets('home exposes an unfinished project and its last edit time', (
+    tester,
+  ) async {
+    final store = MemoryPhotoProjectStore(
+      PhotoProject(
+        id: 'project-1',
+        createdAt: DateTime(2026, 8, 4, 9),
+        updatedAt: DateTime(2026, 8, 5, 14, 30),
+        photos: const [
+          ProjectPhoto(
+            id: 'photo-1',
+            localPath: '/private/project/photo.jpg',
+            originalName: 'photo.jpg',
+          ),
+        ],
+        flowState: PhotoProjectFlowState.analyzing,
+      ),
+    );
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+
+    await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
+    await tester.pumpAndSettle();
+
+    expect(find.text('未完成项目'), findsOneWidget);
+    expect(find.text('继续上次编辑'), findsOneWidget);
+    expect(find.text('开始新项目'), findsOneWidget);
+    expect(find.textContaining('1 张照片'), findsOneWidget);
+    expect(find.textContaining('14:30'), findsOneWidget);
+  });
+
+  testWidgets('starting over requires confirmation before deleting copies', (
+    tester,
+  ) async {
+    final project = PhotoProject(
+      id: 'project-1',
+      createdAt: DateTime(2026, 8, 4),
+      updatedAt: DateTime(2026, 8, 5),
+      photos: const [
+        ProjectPhoto(
+          id: 'photo-1',
+          localPath: '/private/project/photo.jpg',
+          originalName: 'photo.jpg',
+        ),
+      ],
+      flowState: PhotoProjectFlowState.analyzing,
+    );
+    final store = MemoryPhotoProjectStore(project);
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('开始新项目'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('系统相册原图不会被删除'), findsOneWidget);
+    expect(store.project, project);
+
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(store.project, project);
+  });
+
   testWidgets('user imports photos and sees an app-owned preview', (
     tester,
   ) async {
@@ -229,6 +320,9 @@ void main() {
     expect(find.text('氛围色彩'), findsOneWidget);
     expect(find.text('质感风格'), findsOneWidget);
     expect(find.textContaining('不上传照片'), findsOneWidget);
+    expect(find.text('均衡克制的安全回退'), findsOneWidget);
+    expect(find.text('安全增加轻微暖意'), findsOneWidget);
+    expect(find.text('克制增强质感，不激进锐化'), findsOneWidget);
     expect(
       store.project?.flowState,
       PhotoProjectFlowState.choosingRecommendation,
@@ -325,6 +419,10 @@ void main() {
     expect(find.text('自然干净'), findsOneWidget);
     expect(find.text('氛围色彩'), findsOneWidget);
     expect(find.text('质感风格'), findsOneWidget);
+    expect(find.textContaining('本机像素分析'), findsOneWidget);
+    expect(find.text('平衡检测到的曝光'), findsOneWidget);
+    expect(find.text('修正检测到的偏色'), findsOneWidget);
+    expect(find.text('保留细节与局部反差'), findsOneWidget);
   });
 
   testWidgets('backgrounding analysis discards a late native result', (
