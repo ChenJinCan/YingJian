@@ -1,0 +1,22 @@
+schema: 1
+status: blocked_missing_assets
+corpus_root: .quality/corpus
+minimum_assets: 48
+minimum_group_sets: 6
+minimum_members_per_group: 4
+minimum_tag_counts:
+  portrait_single: 8
+  portrait_multi: 4
+  no_face: 8
+  low_light: 4
+  backlit: 4
+  mixed_light: 4
+  group_member: 24
+  exif_rotated: 4
+  jpeg: 12
+  png: 4
+  heic: 4
+  srgb: 12
+  display_p3: 4
+  high_resolution: 4
+assets: []

@@ -38,6 +38,9 @@ ruby scripts/check_legal_setup.rb
 [`docs/product/product-context.md`](docs/product/product-context.md)、
 [`docs/product/competitor-baseline.md`](docs/product/competitor-baseline.md) 和
 [`docs/product/mvp-spec.md`](docs/product/mvp-spec.md)。
+MVP 图像输入输出、样片、盲评、设备与性能门见
+[`docs/quality/mvp-quality-baseline.md`](docs/quality/mvp-quality-baseline.md) 和
+[`docs/adr/0001-mvp-image-io-contract.md`](docs/adr/0001-mvp-image-io-contract.md)。
 Firebase 配置与验收见
 [`docs/operations/firebase-observability.md`](docs/operations/firebase-observability.md)，
 隐私与商店阻断项见

@@ -37,6 +37,10 @@
 - `docs/`：产品、架构、质量和发布契约。
 - `docs/architecture/flutter-foundation.md`：Flutter 分层、依赖方向和 Module seam 的基准说明。
 - `docs/architecture/cross-app-foundation-audit.md`：与三款现有应用逐项对照后的采用/拒绝决定。
+- `docs/product/`：竞品基线、产品上下文和当前 MVP 交付合同。
+- `docs/quality/mvp-quality-baseline.md`：图像样片、盲评、物理设备和性能门禁。
+- `quality/corpus-manifest.yaml`：本地、被忽略样片的可校验清单；未补齐时完整质量检查必须失败。
+- `CONTEXT.md`：跨产品、设计和工程使用的规范领域词汇。
 - `release/release-policy.yaml`：非密钥的发布规则，必须保持 schema 2。
 - `scripts/check_release_contract.rb`：发布规则、环境、候选和源码身份校验器。
 - Flutter stable 基线：Flutter 3.44.8、Dart 3.12.2；变更基线前先验证依赖兼容性。

@@ -400,6 +400,8 @@ Target users complete the primary journey without coaching. Observe whether they
 
 ## Further Notes
 
+图像格式、样片配额、评分量表、设备矩阵和性能预算以《MVP 图像质量与工程基线》及其图像输入输出 ADR 为规范性门禁。若本 Spec 与质量基线冲突，必须先显式修改两份文档并记录原因，不能由实现代码暗中选择。
+
 ### Required execution order
 
 1. Freeze the quality corpus, supported image contract, device matrix and measurable budgets.
