@@ -308,6 +308,18 @@ abstract class AppLocalizations {
   /// **'曝光'**
   String get exposure;
 
+  /// No description provided for @highlights.
+  ///
+  /// In zh, this message translates to:
+  /// **'高光'**
+  String get highlights;
+
+  /// No description provided for @shadows.
+  ///
+  /// In zh, this message translates to:
+  /// **'阴影'**
+  String get shadows;
+
   /// No description provided for @contrast.
   ///
   /// In zh, this message translates to:
@@ -319,6 +331,90 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'色温'**
   String get warmth;
+
+  /// No description provided for @tint.
+  ///
+  /// In zh, this message translates to:
+  /// **'色调'**
+  String get tint;
+
+  /// No description provided for @saturation.
+  ///
+  /// In zh, this message translates to:
+  /// **'饱和度'**
+  String get saturation;
+
+  /// No description provided for @clarity.
+  ///
+  /// In zh, this message translates to:
+  /// **'清晰度'**
+  String get clarity;
+
+  /// No description provided for @composition.
+  ///
+  /// In zh, this message translates to:
+  /// **'构图'**
+  String get composition;
+
+  /// No description provided for @straighten.
+  ///
+  /// In zh, this message translates to:
+  /// **'水平校正'**
+  String get straighten;
+
+  /// No description provided for @rotateLeft.
+  ///
+  /// In zh, this message translates to:
+  /// **'向左旋转'**
+  String get rotateLeft;
+
+  /// No description provided for @rotateRight.
+  ///
+  /// In zh, this message translates to:
+  /// **'向右旋转'**
+  String get rotateRight;
+
+  /// No description provided for @originalCrop.
+  ///
+  /// In zh, this message translates to:
+  /// **'原始'**
+  String get originalCrop;
+
+  /// No description provided for @cropSquare.
+  ///
+  /// In zh, this message translates to:
+  /// **'1:1'**
+  String get cropSquare;
+
+  /// No description provided for @cropFourThree.
+  ///
+  /// In zh, this message translates to:
+  /// **'4:3'**
+  String get cropFourThree;
+
+  /// No description provided for @cropSixteenNine.
+  ///
+  /// In zh, this message translates to:
+  /// **'16:9'**
+  String get cropSixteenNine;
+
+  /// No description provided for @resetComposition.
+  ///
+  /// In zh, this message translates to:
+  /// **'恢复原始构图'**
+  String get resetComposition;
+
+  /// No description provided for @compareOriginal.
+  ///
+  /// In zh, this message translates to:
+  /// **'查看原图'**
+  String get compareOriginal;
+
+  /// No description provided for @compareEdited.
+  ///
+  /// In zh, this message translates to:
+  /// **'返回效果'**
+  String get compareEdited;
 
   /// No description provided for @exportOriginalQuality.
   ///

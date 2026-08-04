@@ -7,6 +7,84 @@ void main() {
     test('rejects values outside the normalized adjustment range', () {
       expect(() => EditRecipe(exposure: 1.1), throwsRangeError);
       expect(() => EditRecipe(warmth: double.nan), throwsRangeError);
+      expect(
+        () => CropGeometry(left: 0.8, top: 0, right: 0.2, bottom: 1),
+        throwsRangeError,
+      );
+    });
+
+    test('round trips the complete single-photo recipe', () {
+      final recipe = EditRecipe(
+        exposure: 0.1,
+        highlights: -0.2,
+        shadows: 0.3,
+        contrast: 0.4,
+        warmth: -0.5,
+        tint: 0.6,
+        saturation: -0.7,
+        clarity: 0.8,
+        crop: CropGeometry(
+          left: 0.1,
+          top: 0.2,
+          right: 0.9,
+          bottom: 0.8,
+          quarterTurns: 1,
+          straightenDegrees: 2.5,
+        ),
+      );
+
+      expect(EditRecipe.fromJson(recipe.toJson()), recipe);
+    });
+
+    test(
+      'migrates a legacy three-adjustment recipe with neutral additions',
+      () {
+        final recipe = EditRecipe.fromJson(<String, Object?>{
+          'exposure': 0.2,
+          'contrast': -0.3,
+          'warmth': 0.4,
+        });
+
+        expect(recipe.exposure, 0.2);
+        expect(recipe.contrast, -0.3);
+        expect(recipe.warmth, 0.4);
+        expect(recipe.highlights, 0);
+        expect(recipe.shadows, 0);
+        expect(recipe.crop, CropGeometry.original);
+      },
+    );
+
+    test('distinguishes geometry changes that resize a preview texture', () {
+      const original = CropGeometry.original;
+
+      expect(
+        original.hasSameOutputDimensions(
+          original.copyWith(straightenDegrees: 4),
+        ),
+        isTrue,
+      );
+      expect(
+        original.hasSameOutputDimensions(original.copyWith(left: 0.1)),
+        isFalse,
+      );
+      expect(
+        original.hasSameOutputDimensions(original.copyWith(quarterTurns: 1)),
+        isFalse,
+      );
+    });
+
+    test('crop presets use the post-rotation image axes', () {
+      final rotated = CropGeometry.original.copyWith(quarterTurns: 1);
+
+      final crop = rotated.centeredForAspect(
+        sourceWidth: 4000,
+        sourceHeight: 3000,
+        targetAspectRatio: 16 / 9,
+      );
+
+      final outputWidth = 3000 * (crop.bottom - crop.top);
+      final outputHeight = 4000 * (crop.right - crop.left);
+      expect(outputWidth / outputHeight, closeTo(16 / 9, 1e-12));
     });
   });
 

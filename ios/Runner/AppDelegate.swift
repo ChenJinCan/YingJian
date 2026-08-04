@@ -209,7 +209,7 @@ private enum PhotoInputInspectionError: Error {
     guard
       let values = arguments as? [String: Any],
       let sourcePath = values["sourcePath"] as? String,
-      let pipeline = ImagePipelineV1(arguments: values["pipeline"])
+      let pipeline = IOSImagePipeline(arguments: values["pipeline"])
     else {
       result(FlutterError(code: "invalidArguments", message: "Invalid export request", details: nil))
       return
@@ -234,7 +234,7 @@ private enum PhotoInputInspectionError: Error {
 
   private func renderAndSave(
     sourcePath: String,
-    pipeline: ImagePipelineV1,
+    pipeline: IOSImagePipeline,
     result: @escaping FlutterResult
   ) {
     guard let input = CIImage(
@@ -244,11 +244,14 @@ private enum PhotoInputInspectionError: Error {
       finishWithError(code: "decodeFailed", message: "Photo could not be decoded", result: result)
       return
     }
-    let extent = input.extent.integral
+    let normalizedInput = input.transformed(
+      by: CGAffineTransform(translationX: -input.extent.minX, y: -input.extent.minY)
+    )
     let metadata = ImageExportMetadata.sanitize(input.properties)
     let output = pipeline
-      .applying(to: input, extent: extent)
+      .applying(to: normalizedInput, extent: normalizedInput.extent.integral)
       .settingProperties(metadata)
+    let outputExtent = output.extent.integral
     guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
       finishWithError(code: "renderFailed", message: "sRGB is unavailable", result: result)
       return
@@ -286,8 +289,8 @@ private enum PhotoInputInspectionError: Error {
         }
         result([
           "assetId": assetId,
-          "width": Int(extent.width),
-          "height": Int(extent.height),
+          "width": Int(outputExtent.width),
+          "height": Int(outputExtent.height),
         ])
       }
     }
@@ -364,15 +367,24 @@ enum ImageExportMetadata {
   }
 }
 
-private struct ImagePipelineV1 {
+private struct IOSImagePipeline {
   let exposureEV: Double
+  let highlights: Double
+  let shadows: Double
   let contrast: Double
   let warmth: Double
+  let tint: Double
+  let saturation: Double
+  let clarity: Double
+  let crop: CGRect
+  let quarterTurns: Int
+  let straightenDegrees: Double
 
   init?(arguments: Any?) {
     guard
       let pipeline = arguments as? [String: Any],
-      (pipeline["schemaVersion"] as? NSNumber)?.intValue == 1,
+      let schemaVersion = (pipeline["schemaVersion"] as? NSNumber)?.intValue,
+      schemaVersion == 1 || schemaVersion == 2,
       pipeline["workingColorSpace"] as? String == "srgb",
       let adjustments = pipeline["adjustments"] as? [String: Any],
       let exposureEV = (adjustments["exposureEv"] as? NSNumber)?.doubleValue,
@@ -390,6 +402,67 @@ private struct ImagePipelineV1 {
     self.exposureEV = exposureEV
     self.contrast = contrast
     self.warmth = warmth
+    if schemaVersion == 1 {
+      highlights = 0
+      shadows = 0
+      tint = 0
+      saturation = 0
+      clarity = 0
+      crop = CGRect(x: 0, y: 0, width: 1, height: 1)
+      quarterTurns = 0
+      straightenDegrees = 0
+      return
+    }
+    guard
+      let highlights = Self.normalized(adjustments["highlights"]),
+      let shadows = Self.normalized(adjustments["shadows"]),
+      let tint = Self.normalized(adjustments["tint"]),
+      let saturation = Self.normalized(adjustments["saturation"]),
+      let clarity = Self.normalized(adjustments["clarity"]),
+      let geometry = pipeline["geometry"] as? [String: Any],
+      let normalizedCrop = geometry["normalizedCrop"] as? [NSNumber],
+      normalizedCrop.count == 4,
+      let quarterTurns = (geometry["quarterTurns"] as? NSNumber)?.intValue,
+      (0...3).contains(quarterTurns),
+      let straightenDegrees = (geometry["straightenDegrees"] as? NSNumber)?.doubleValue,
+      straightenDegrees.isFinite,
+      (-45.0...45.0).contains(straightenDegrees),
+      let portrait = pipeline["portrait"] as? [String: Any],
+      (portrait["recipeVersion"] as? NSNumber)?.intValue == 1,
+      let portraitStrength = (portrait["strength"] as? NSNumber)?.doubleValue,
+      portraitStrength == 0
+    else {
+      return nil
+    }
+    let values = normalizedCrop.map(\.doubleValue)
+    guard
+      values.allSatisfy({ $0.isFinite && (0.0...1.0).contains($0) }),
+      values[2] > values[0],
+      values[3] > values[1]
+    else {
+      return nil
+    }
+    self.highlights = highlights
+    self.shadows = shadows
+    self.tint = tint
+    self.saturation = saturation
+    self.clarity = clarity
+    crop = CGRect(
+      x: values[0],
+      y: values[1],
+      width: values[2] - values[0],
+      height: values[3] - values[1]
+    )
+    self.quarterTurns = quarterTurns
+    self.straightenDegrees = straightenDegrees
+  }
+
+  private static func normalized(_ value: Any?) -> Double? {
+    guard let result = (value as? NSNumber)?.doubleValue,
+          result.isFinite,
+          (-1.0...1.0).contains(result)
+    else { return nil }
+    return result
   }
 
   var colorTransform: ColorTransform {
@@ -413,7 +486,7 @@ private struct ImagePipelineV1 {
       .cropped(to: extent)
     let opaqueInput = input.composited(over: white)
     let transform = colorTransform
-    return opaqueInput.applyingFilter(
+    var output = opaqueInput.applyingFilter(
       "CIColorMatrix",
       parameters: [
         "inputRVector": CIVector(x: transform.redScale, y: 0, z: 0, w: 0),
@@ -428,6 +501,73 @@ private struct ImagePipelineV1 {
         ),
       ]
     ).cropped(to: extent)
+
+    if highlights != 0 || shadows != 0 {
+      output = output.applyingFilter(
+        "CIHighlightShadowAdjust",
+        parameters: [
+          "inputHighlightAmount": 1 + highlights * 0.65,
+          "inputShadowAmount": shadows * 0.65,
+        ]
+      ).cropped(to: extent)
+    }
+    if saturation != 0 {
+      output = output.applyingFilter(
+        "CIColorControls",
+        parameters: [kCIInputSaturationKey: 1 + saturation]
+      ).cropped(to: extent)
+    }
+    if tint != 0 {
+      output = output.applyingFilter(
+        "CIColorMatrix",
+        parameters: [
+          "inputRVector": CIVector(x: 1, y: 0, z: 0, w: 0),
+          "inputGVector": CIVector(x: 0, y: 1, z: 0, w: 0),
+          "inputBVector": CIVector(x: 0, y: 0, z: 1, w: 0),
+          "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+          "inputBiasVector": CIVector(x: tint * 0.04, y: -tint * 0.025, z: tint * 0.04, w: 0),
+        ]
+      ).cropped(to: extent)
+    }
+    if clarity != 0 {
+      output = output.applyingFilter(
+        "CISharpenLuminance",
+        parameters: [kCIInputSharpnessKey: clarity * 0.8]
+      ).cropped(to: extent)
+    }
+    return applyingGeometry(to: output, sourceExtent: extent)
+  }
+
+  private func applyingGeometry(to input: CIImage, sourceExtent: CGRect) -> CIImage {
+    let cropRect = CGRect(
+      x: sourceExtent.minX + crop.minX * sourceExtent.width,
+      y: sourceExtent.minY + (1 - crop.maxY) * sourceExtent.height,
+      width: crop.width * sourceExtent.width,
+      height: crop.height * sourceExtent.height
+    ).integral.intersection(sourceExtent)
+    var output = input.cropped(to: cropRect)
+    if straightenDegrees != 0 {
+      let radians = CGFloat(-straightenDegrees * .pi / 180)
+      let center = CGPoint(x: cropRect.midX, y: cropRect.midY)
+      let transform = CGAffineTransform(translationX: center.x, y: center.y)
+        .rotated(by: radians)
+        .translatedBy(x: -center.x, y: -center.y)
+      output = output.clampedToExtent().transformed(by: transform).cropped(to: cropRect)
+    }
+    if quarterTurns != 0 {
+      let center = CGPoint(x: output.extent.midX, y: output.extent.midY)
+      let transform = CGAffineTransform(translationX: center.x, y: center.y)
+        .rotated(by: CGFloat(-quarterTurns) * .pi / 2)
+        .translatedBy(x: -center.x, y: -center.y)
+      output = output.transformed(by: transform)
+    }
+    let transformedExtent = output.extent.integral
+    return output.transformed(
+      by: CGAffineTransform(
+        translationX: -transformedExtent.minX,
+        y: -transformedExtent.minY
+      )
+    ).cropped(to: CGRect(origin: .zero, size: transformedExtent.size))
   }
 }
 
@@ -488,7 +628,7 @@ private final class IOSPhotoPreviewRenderer {
       let sourcePath = values["sourcePath"] as? String,
       let maxEdge = (values["maxEdge"] as? NSNumber)?.intValue,
       (1...2_048).contains(maxEdge),
-      let pipeline = ImagePipelineV1(arguments: values["pipeline"])
+      let pipeline = IOSImagePipeline(arguments: values["pipeline"])
     else {
       result(FlutterError(
         code: "invalidArguments",
@@ -543,7 +683,7 @@ private final class IOSPhotoPreviewRenderer {
     guard
       let values = arguments as? [String: Any],
       let textureId = (values["textureId"] as? NSNumber)?.int64Value,
-      let pipeline = ImagePipelineV1(arguments: values["pipeline"])
+      let pipeline = IOSImagePipeline(arguments: values["pipeline"])
     else {
       result(FlutterError(
         code: "invalidArguments",
@@ -625,7 +765,7 @@ private final class IOSPhotoPreviewSession: NSObject, FlutterTexture {
   private var pixelBuffer: CVPixelBuffer?
   private var isClosed = false
 
-  init(sourcePath: String, maxEdge: Int, pipeline: ImagePipelineV1) throws {
+  init(sourcePath: String, maxEdge: Int, pipeline: IOSImagePipeline) throws {
     guard let input = CIImage(
       contentsOf: URL(fileURLWithPath: sourcePath),
       options: [.applyOrientationProperty: true]
@@ -644,22 +784,26 @@ private final class IOSPhotoPreviewSession: NSObject, FlutterTexture {
     let normalizedScaled = scaled.transformed(
       by: CGAffineTransform(translationX: -scaled.extent.minX, y: -scaled.extent.minY)
     )
-    let outputExtent = CGRect(
+    let sourceExtent = CGRect(
       x: 0,
       y: 0,
       width: max(1, floor(normalizedScaled.extent.width)),
       height: max(1, floor(normalizedScaled.extent.height))
     )
-    source = normalizedScaled.cropped(to: outputExtent)
-    extent = outputExtent
-    width = Int(outputExtent.width)
-    height = Int(outputExtent.height)
+    source = normalizedScaled.cropped(to: sourceExtent)
+    let initialOutput = pipeline.applying(to: source, extent: sourceExtent)
+    extent = initialOutput.extent.integral
+    width = Int(extent.width)
+    height = Int(extent.height)
     super.init()
     try render(pipeline: pipeline)
   }
 
-  func render(pipeline: ImagePipelineV1) throws {
-    let output = pipeline.applying(to: source, extent: extent)
+  func render(pipeline: IOSImagePipeline) throws {
+    let output = pipeline.applying(to: source, extent: source.extent.integral)
+    guard output.extent.integral.size == extent.size else {
+      throw IOSPhotoPreviewError.dimensionsChanged
+    }
     var newBuffer: CVPixelBuffer?
     let attributes: CFDictionary = [
       kCVPixelBufferCGImageCompatibilityKey: true,
@@ -712,6 +856,7 @@ private enum IOSPhotoPreviewError: Error {
   case decodeFailed
   case renderFailed
   case closed
+  case dimensionsChanged
 }
 
 #if DEBUG

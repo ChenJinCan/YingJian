@@ -133,10 +133,58 @@ class AppLocalizationsEn extends AppLocalizations {
   String get exposure => 'Exposure';
 
   @override
+  String get highlights => 'Highlights';
+
+  @override
+  String get shadows => 'Shadows';
+
+  @override
   String get contrast => 'Contrast';
 
   @override
   String get warmth => 'Warmth';
+
+  @override
+  String get tint => 'Tint';
+
+  @override
+  String get saturation => 'Saturation';
+
+  @override
+  String get clarity => 'Clarity';
+
+  @override
+  String get composition => 'Composition';
+
+  @override
+  String get straighten => 'Straighten';
+
+  @override
+  String get rotateLeft => 'Rotate left';
+
+  @override
+  String get rotateRight => 'Rotate right';
+
+  @override
+  String get originalCrop => 'Original';
+
+  @override
+  String get cropSquare => '1:1';
+
+  @override
+  String get cropFourThree => '4:3';
+
+  @override
+  String get cropSixteenNine => '16:9';
+
+  @override
+  String get resetComposition => 'Reset composition';
+
+  @override
+  String get compareOriginal => 'View original';
+
+  @override
+  String get compareEdited => 'Back to edit';
 
   @override
   String get exportOriginalQuality => 'Export at original quality';

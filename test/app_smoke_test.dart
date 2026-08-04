@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
@@ -116,6 +117,8 @@ void main() {
   testWidgets('user adjusts a photo and exports from its original', (
     tester,
   ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final photoFile = File(
       'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
       'Icon-App-1024x1024@1x.png',
@@ -152,6 +155,9 @@ void main() {
       const Offset(0, -200),
     );
     await tester.pumpAndSettle();
+    expect(find.text('高光'), findsOneWidget);
+    expect(find.text('阴影'), findsOneWidget);
+    expect(find.text('构图'), findsOneWidget);
     await tester.drag(find.byType(Slider).first, const Offset(120, 0));
     await tester.pumpAndSettle();
     expect(exporter.exportedRecipe, isNull);
@@ -172,6 +178,7 @@ void main() {
     expect(exporter.exportedPhoto, photo);
     expect(exporter.exportedRecipe?.exposure, greaterThan(0));
     expect(find.text('已保存到系统相册（4032 × 3024）'), findsOneWidget);
+    debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets('project restore failure has a visible retry state', (

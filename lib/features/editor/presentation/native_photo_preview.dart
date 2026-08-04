@@ -4,7 +4,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
-import 'package:yingjian/features/editor/domain/image_pipeline_v1.dart';
+import 'package:yingjian/features/editor/domain/image_pipeline_for_platform.dart';
+import 'package:yingjian/features/editor/domain/photo_color_transform.dart';
 
 class NativePhotoPreview extends StatefulWidget {
   const NativePhotoPreview({
@@ -45,6 +46,10 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview> {
       unawaited(_replacePreview());
       return;
     }
+    if (!oldWidget.recipe.crop.hasSameOutputDimensions(widget.recipe.crop)) {
+      unawaited(_replacePreview());
+      return;
+    }
     if (oldWidget.recipe != widget.recipe && !_useFallback) {
       _pendingRecipe = widget.recipe;
       unawaited(_drainUpdates());
@@ -72,7 +77,7 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview> {
     try {
       final handle = await widget.renderer.create(
         sourcePath: widget.sourcePath,
-        pipeline: ImagePipelineV1.fromRecipe(initialRecipe),
+        pipeline: imagePipelineForCurrentPlatform(initialRecipe),
       );
       if (!mounted || generation != _generation) {
         await _safeDispose(handle);
@@ -108,7 +113,7 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview> {
         _pendingRecipe = null;
         await widget.renderer.update(
           handle: handle,
-          pipeline: ImagePipelineV1.fromRecipe(recipe),
+          pipeline: imagePipelineForCurrentPlatform(recipe),
         );
       }
     } on Object {
@@ -148,9 +153,12 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview> {
   Widget build(BuildContext context) {
     final handle = _handle;
     if (_useFallback) {
-      final matrix = ImagePipelineV1.fromRecipe(
+      if (!widget.recipe.isLegacyColorOnly) {
+        return widget.errorBuilder(context);
+      }
+      final matrix = PhotoColorTransform.fromRecipe(
         widget.recipe,
-      ).compatibilityTransform.flutterMatrix;
+      ).flutterMatrix;
       return ColorFiltered(
         colorFilter: ColorFilter.matrix(matrix),
         child: Image.file(

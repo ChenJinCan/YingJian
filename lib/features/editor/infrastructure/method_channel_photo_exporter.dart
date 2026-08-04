@@ -1,7 +1,7 @@
 import 'package:flutter/services.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
-import 'package:yingjian/features/editor/domain/image_pipeline_v1.dart';
+import 'package:yingjian/features/editor/domain/image_pipeline_for_platform.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 
 final class MethodChannelPhotoExporter implements PhotoExporter {
@@ -16,7 +16,7 @@ final class MethodChannelPhotoExporter implements PhotoExporter {
     required ProjectPhoto photo,
     required EditRecipe recipe,
   }) async {
-    final pipeline = ImagePipelineV1.fromRecipe(recipe);
+    final pipeline = imagePipelineForCurrentPlatform(recipe);
     final response = await channel.invokeMapMethod<String, Object?>(
       'exportPhoto',
       <String, Object?>{

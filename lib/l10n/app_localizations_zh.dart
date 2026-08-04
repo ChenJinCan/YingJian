@@ -128,10 +128,58 @@ class AppLocalizationsZh extends AppLocalizations {
   String get exposure => '曝光';
 
   @override
+  String get highlights => '高光';
+
+  @override
+  String get shadows => '阴影';
+
+  @override
   String get contrast => '对比度';
 
   @override
   String get warmth => '色温';
+
+  @override
+  String get tint => '色调';
+
+  @override
+  String get saturation => '饱和度';
+
+  @override
+  String get clarity => '清晰度';
+
+  @override
+  String get composition => '构图';
+
+  @override
+  String get straighten => '水平校正';
+
+  @override
+  String get rotateLeft => '向左旋转';
+
+  @override
+  String get rotateRight => '向右旋转';
+
+  @override
+  String get originalCrop => '原始';
+
+  @override
+  String get cropSquare => '1:1';
+
+  @override
+  String get cropFourThree => '4:3';
+
+  @override
+  String get cropSixteenNine => '16:9';
+
+  @override
+  String get resetComposition => '恢复原始构图';
+
+  @override
+  String get compareOriginal => '查看原图';
+
+  @override
+  String get compareEdited => '返回效果';
 
   @override
   String get exportOriginalQuality => '原画质导出';

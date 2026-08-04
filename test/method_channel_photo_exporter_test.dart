@@ -1,4 +1,5 @@
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/infrastructure/method_channel_photo_exporter.dart';
@@ -14,6 +15,8 @@ void main() {
   });
 
   test('exports from the original path without sending image bytes', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
     MethodCall? receivedCall;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
@@ -41,7 +44,7 @@ void main() {
     expect(arguments['sourcePath'], photo.localPath);
     expect(arguments.containsKey('imageBytes'), isFalse);
     final pipeline = arguments['pipeline']! as Map<Object?, Object?>;
-    expect(pipeline['schemaVersion'], 1);
+    expect(pipeline['schemaVersion'], 2);
     expect(pipeline['workingColorSpace'], 'srgb');
     final adjustments = pipeline['adjustments']! as Map<Object?, Object?>;
     expect(adjustments['exposureEv'], 0.5);

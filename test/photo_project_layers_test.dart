@@ -39,6 +39,52 @@ void main() {
     expect(project.effectiveRecipeFor(second.id), EditRecipe(exposure: 0.2));
   });
 
+  test('effective recipe preserves every V2 adjustment and photo geometry', () {
+    final photoCrop = CropGeometry(
+      left: 0.1,
+      top: 0.2,
+      right: 0.9,
+      bottom: 0.8,
+      quarterTurns: 1,
+    );
+    final project = PhotoProject(
+      id: 'project-v2',
+      createdAt: DateTime.utc(2026, 8, 4),
+      updatedAt: DateTime.utc(2026, 8, 4),
+      photos: const [first],
+      sharedStyle: SharedStyle(
+        intensity: 0.5,
+        recipe: EditRecipe(
+          highlights: 0.4,
+          shadows: 0.2,
+          tint: -0.2,
+          saturation: 0.6,
+          clarity: 0.4,
+        ),
+      ),
+      photoOverrides: {
+        first.id: PhotoOverride(
+          recipe: EditRecipe(
+            highlights: 0.1,
+            shadows: -0.2,
+            tint: 0.1,
+            saturation: -0.1,
+            clarity: 0.2,
+            crop: photoCrop,
+          ),
+        ),
+      },
+    );
+
+    final effective = project.effectiveRecipeFor(first.id);
+    expect(effective.highlights, closeTo(0.3, 1e-12));
+    expect(effective.shadows, closeTo(-0.1, 1e-12));
+    expect(effective.tint, 0);
+    expect(effective.saturation, closeTo(0.2, 1e-12));
+    expect(effective.clarity, closeTo(0.4, 1e-12));
+    expect(effective.crop, photoCrop);
+  });
+
   test('per-photo safety caps shared intensity with declared provenance', () {
     final project = PhotoProject(
       id: 'project-1',

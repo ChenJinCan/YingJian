@@ -7,6 +7,7 @@ import 'package:yingjian/features/editor/application/editor_session.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/image_pipeline_for_platform.dart';
 import 'package:yingjian/features/editor/presentation/native_photo_preview.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
@@ -499,13 +500,11 @@ class _PhotoWorkspace extends StatelessWidget {
                 borderRadius: BorderRadius.circular(24),
                 child: ColoredBox(
                   color: Theme.of(context).colorScheme.surfaceContainerHigh,
-                  child: NativePhotoPreview(
+                  child: _BeforeAfterPreview(
                     key: ValueKey('photo-preview-${selected.id}'),
                     sourcePath: selected.localPath,
                     recipe: previewRecipe,
                     renderer: previewRenderer,
-                    errorBuilder: (context) =>
-                        Center(child: Text(context.l10n.photoLoadFailed)),
                   ),
                 ),
               ),
@@ -585,45 +584,22 @@ class _PhotoWorkspace extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 20),
-        _AdjustmentSlider(
+        _AdjustmentToolStrip(
           enabled: editingEnabled,
-          label: context.l10n.exposure,
-          value: recipe.exposure,
-          onStart: editorSession.beginAdjustment,
-          onChanged: (value) {
-            editorSession.preview(recipe.copyWith(exposure: value));
-          },
-          onEnd: () {
-            editorSession.commitAdjustment();
-            onRecipeCommitted();
-          },
+          extended: supportsImagePipelineV2,
+          recipe: recipe,
+          editorSession: editorSession,
+          onRecipeCommitted: onRecipeCommitted,
         ),
-        _AdjustmentSlider(
-          enabled: editingEnabled,
-          label: context.l10n.contrast,
-          value: recipe.contrast,
-          onStart: editorSession.beginAdjustment,
-          onChanged: (value) {
-            editorSession.preview(recipe.copyWith(contrast: value));
-          },
-          onEnd: () {
-            editorSession.commitAdjustment();
-            onRecipeCommitted();
-          },
-        ),
-        _AdjustmentSlider(
-          enabled: editingEnabled,
-          label: context.l10n.warmth,
-          value: recipe.warmth,
-          onStart: editorSession.beginAdjustment,
-          onChanged: (value) {
-            editorSession.preview(recipe.copyWith(warmth: value));
-          },
-          onEnd: () {
-            editorSession.commitAdjustment();
-            onRecipeCommitted();
-          },
-        ),
+        const SizedBox(height: 8),
+        if (supportsImagePipelineV2 && photos.length == 1)
+          _CompositionTools(
+            enabled: editingEnabled,
+            photo: selected,
+            recipe: recipe,
+            editorSession: editorSession,
+            onRecipeCommitted: onRecipeCommitted,
+          ),
         Row(
           children: [
             Expanded(
@@ -747,6 +723,297 @@ String _photoImportFailureMessage(
   };
 }
 
+class _BeforeAfterPreview extends StatefulWidget {
+  const _BeforeAfterPreview({
+    required this.sourcePath,
+    required this.recipe,
+    required this.renderer,
+    super.key,
+  });
+
+  final String sourcePath;
+  final EditRecipe recipe;
+  final PhotoPreviewRenderer renderer;
+
+  @override
+  State<_BeforeAfterPreview> createState() => _BeforeAfterPreviewState();
+}
+
+class _BeforeAfterPreviewState extends State<_BeforeAfterPreview> {
+  bool _showOriginal = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final recipe = _showOriginal
+        ? EditRecipe(crop: widget.recipe.crop)
+        : widget.recipe;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        NativePhotoPreview(
+          sourcePath: widget.sourcePath,
+          recipe: recipe,
+          renderer: widget.renderer,
+          errorBuilder: (context) =>
+              Center(child: Text(context.l10n.photoLoadFailed)),
+        ),
+        Positioned(
+          top: 12,
+          right: 12,
+          child: FilledButton.tonalIcon(
+            onPressed: () => setState(() => _showOriginal = !_showOriginal),
+            icon: Icon(
+              _showOriginal ? Icons.auto_fix_high : Icons.compare_outlined,
+            ),
+            label: Text(
+              _showOriginal
+                  ? context.l10n.compareEdited
+                  : context.l10n.compareOriginal,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+enum _AdjustmentParameter {
+  exposure,
+  highlights,
+  shadows,
+  contrast,
+  warmth,
+  tint,
+  saturation,
+  clarity,
+}
+
+class _AdjustmentToolStrip extends StatefulWidget {
+  const _AdjustmentToolStrip({
+    required this.enabled,
+    required this.extended,
+    required this.recipe,
+    required this.editorSession,
+    required this.onRecipeCommitted,
+  });
+
+  final bool enabled;
+  final bool extended;
+  final EditRecipe recipe;
+  final EditorSession editorSession;
+  final VoidCallback onRecipeCommitted;
+
+  @override
+  State<_AdjustmentToolStrip> createState() => _AdjustmentToolStripState();
+}
+
+class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
+  _AdjustmentParameter _selected = _AdjustmentParameter.exposure;
+
+  @override
+  Widget build(BuildContext context) {
+    final parameters = widget.extended
+        ? _AdjustmentParameter.values
+        : const <_AdjustmentParameter>[
+            _AdjustmentParameter.exposure,
+            _AdjustmentParameter.contrast,
+            _AdjustmentParameter.warmth,
+          ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: 42,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: parameters.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (context, index) {
+              final parameter = parameters[index];
+              return ChoiceChip(
+                label: Text(_label(context, parameter)),
+                selected: parameter == _selected,
+                onSelected: widget.enabled
+                    ? (_) => setState(() => _selected = parameter)
+                    : null,
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 8),
+        _AdjustmentSlider(
+          enabled: widget.enabled,
+          label: '',
+          value: _value(widget.recipe, _selected),
+          onStart: widget.editorSession.beginAdjustment,
+          onChanged: (value) => widget.editorSession.preview(
+            _copyWith(widget.recipe, _selected, value),
+          ),
+          onEnd: () {
+            widget.editorSession.commitAdjustment();
+            widget.onRecipeCommitted();
+          },
+        ),
+      ],
+    );
+  }
+
+  String _label(BuildContext context, _AdjustmentParameter parameter) =>
+      switch (parameter) {
+        _AdjustmentParameter.exposure => context.l10n.exposure,
+        _AdjustmentParameter.highlights => context.l10n.highlights,
+        _AdjustmentParameter.shadows => context.l10n.shadows,
+        _AdjustmentParameter.contrast => context.l10n.contrast,
+        _AdjustmentParameter.warmth => context.l10n.warmth,
+        _AdjustmentParameter.tint => context.l10n.tint,
+        _AdjustmentParameter.saturation => context.l10n.saturation,
+        _AdjustmentParameter.clarity => context.l10n.clarity,
+      };
+
+  double _value(EditRecipe recipe, _AdjustmentParameter parameter) =>
+      switch (parameter) {
+        _AdjustmentParameter.exposure => recipe.exposure,
+        _AdjustmentParameter.highlights => recipe.highlights,
+        _AdjustmentParameter.shadows => recipe.shadows,
+        _AdjustmentParameter.contrast => recipe.contrast,
+        _AdjustmentParameter.warmth => recipe.warmth,
+        _AdjustmentParameter.tint => recipe.tint,
+        _AdjustmentParameter.saturation => recipe.saturation,
+        _AdjustmentParameter.clarity => recipe.clarity,
+      };
+
+  EditRecipe _copyWith(
+    EditRecipe recipe,
+    _AdjustmentParameter parameter,
+    double value,
+  ) => switch (parameter) {
+    _AdjustmentParameter.exposure => recipe.copyWith(exposure: value),
+    _AdjustmentParameter.highlights => recipe.copyWith(highlights: value),
+    _AdjustmentParameter.shadows => recipe.copyWith(shadows: value),
+    _AdjustmentParameter.contrast => recipe.copyWith(contrast: value),
+    _AdjustmentParameter.warmth => recipe.copyWith(warmth: value),
+    _AdjustmentParameter.tint => recipe.copyWith(tint: value),
+    _AdjustmentParameter.saturation => recipe.copyWith(saturation: value),
+    _AdjustmentParameter.clarity => recipe.copyWith(clarity: value),
+  };
+}
+
+class _CompositionTools extends StatelessWidget {
+  const _CompositionTools({
+    required this.enabled,
+    required this.photo,
+    required this.recipe,
+    required this.editorSession,
+    required this.onRecipeCommitted,
+  });
+
+  final bool enabled;
+  final ProjectPhoto photo;
+  final EditRecipe recipe;
+  final EditorSession editorSession;
+  final VoidCallback onRecipeCommitted;
+
+  @override
+  Widget build(BuildContext context) {
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: const EdgeInsets.only(bottom: 8),
+      leading: const Icon(Icons.crop_rotate),
+      title: Text(context.l10n.composition),
+      children: [
+        Row(
+          children: [
+            IconButton.filledTonal(
+              tooltip: context.l10n.rotateLeft,
+              onPressed: enabled ? () => _rotate(-1) : null,
+              icon: const Icon(Icons.rotate_left),
+            ),
+            const SizedBox(width: 8),
+            IconButton.filledTonal(
+              tooltip: context.l10n.rotateRight,
+              onPressed: enabled ? () => _rotate(1) : null,
+              icon: const Icon(Icons.rotate_right),
+            ),
+            const Spacer(),
+            TextButton(
+              onPressed: enabled && !recipe.crop.isOriginal
+                  ? () => _commit(recipe.copyWith(crop: CropGeometry.original))
+                  : null,
+              child: Text(context.l10n.resetComposition),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _cropChip(context.l10n.originalCrop, null),
+              const SizedBox(width: 8),
+              _cropChip(context.l10n.cropSquare, 1),
+              const SizedBox(width: 8),
+              _cropChip(context.l10n.cropFourThree, 4 / 3),
+              const SizedBox(width: 8),
+              _cropChip(context.l10n.cropSixteenNine, 16 / 9),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        _AdjustmentSlider(
+          enabled: enabled,
+          label: context.l10n.straighten,
+          value: recipe.crop.straightenDegrees / 45,
+          onStart: editorSession.beginAdjustment,
+          onChanged: (value) => editorSession.preview(
+            recipe.copyWith(
+              crop: recipe.crop.copyWith(straightenDegrees: value * 45),
+            ),
+          ),
+          onEnd: () {
+            editorSession.commitAdjustment();
+            onRecipeCommitted();
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _cropChip(String label, double? targetAspectRatio) {
+    return ActionChip(
+      label: Text(label),
+      onPressed: enabled
+          ? () {
+              final crop = targetAspectRatio == null
+                  ? recipe.crop.copyWith(left: 0, top: 0, right: 1, bottom: 1)
+                  : _centeredCrop(targetAspectRatio);
+              _commit(recipe.copyWith(crop: crop));
+            }
+          : null,
+    );
+  }
+
+  CropGeometry _centeredCrop(double targetAspectRatio) {
+    final swapsAxes = photo.orientation >= 5;
+    final width = swapsAxes ? photo.pixelHeight : photo.pixelWidth;
+    final height = swapsAxes ? photo.pixelWidth : photo.pixelHeight;
+    return recipe.crop.centeredForAspect(
+      sourceWidth: width > 0 ? width : 4,
+      sourceHeight: height > 0 ? height : 3,
+      targetAspectRatio: targetAspectRatio,
+    );
+  }
+
+  void _rotate(int delta) {
+    final turns = (recipe.crop.quarterTurns + delta) % 4;
+    _commit(recipe.copyWith(crop: recipe.crop.copyWith(quarterTurns: turns)));
+  }
+
+  void _commit(EditRecipe next) {
+    editorSession.apply(next);
+    onRecipeCommitted();
+  }
+}
+
 class _AdjustmentSlider extends StatelessWidget {
   const _AdjustmentSlider({
     required this.enabled,
@@ -768,7 +1035,7 @@ class _AdjustmentSlider extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        SizedBox(width: 64, child: Text(label)),
+        if (label.isNotEmpty) SizedBox(width: 88, child: Text(label)),
         Expanded(
           child: Slider(
             value: value,

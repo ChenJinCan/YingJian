@@ -655,6 +655,16 @@ class PhotoProject {
         adaptive?.exposure,
         override?.exposure,
       ),
+      highlights: _sumAndClamp(
+        shared.highlights * sharedIntensity,
+        adaptive?.highlights,
+        override?.highlights,
+      ),
+      shadows: _sumAndClamp(
+        shared.shadows * sharedIntensity,
+        adaptive?.shadows,
+        override?.shadows,
+      ),
       contrast: _sumAndClamp(
         shared.contrast * sharedIntensity,
         adaptive?.contrast,
@@ -665,6 +675,24 @@ class PhotoProject {
         adaptive?.warmth,
         override?.warmth,
       ),
+      tint: _sumAndClamp(
+        shared.tint * sharedIntensity,
+        adaptive?.tint,
+        override?.tint,
+      ),
+      saturation: _sumAndClamp(
+        shared.saturation * sharedIntensity,
+        adaptive?.saturation,
+        override?.saturation,
+      ),
+      clarity: _sumAndClamp(
+        shared.clarity * sharedIntensity,
+        adaptive?.clarity,
+        override?.clarity,
+      ),
+      crop: photoOverride != null || photoOverrides.containsKey(photoId)
+          ? override!.crop
+          : shared.crop,
     );
   }
 

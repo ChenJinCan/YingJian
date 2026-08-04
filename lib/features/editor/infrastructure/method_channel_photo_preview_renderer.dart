@@ -1,6 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
-import 'package:yingjian/features/editor/domain/image_pipeline_v1.dart';
+import 'package:yingjian/features/editor/domain/image_pipeline.dart';
 
 final class MethodChannelPhotoPreviewRenderer implements PhotoPreviewRenderer {
   MethodChannelPhotoPreviewRenderer({
@@ -12,7 +12,7 @@ final class MethodChannelPhotoPreviewRenderer implements PhotoPreviewRenderer {
   @override
   Future<PhotoPreviewHandle> create({
     required String sourcePath,
-    required ImagePipelineV1 pipeline,
+    required ImagePipeline pipeline,
     int maxEdge = 2048,
   }) async {
     if (maxEdge < 1 || maxEdge > 2048) {
@@ -51,7 +51,7 @@ final class MethodChannelPhotoPreviewRenderer implements PhotoPreviewRenderer {
   @override
   Future<void> update({
     required PhotoPreviewHandle handle,
-    required ImagePipelineV1 pipeline,
+    required ImagePipeline pipeline,
   }) {
     return channel.invokeMethod<void>('updatePreview', <String, Object?>{
       'textureId': handle.textureId,

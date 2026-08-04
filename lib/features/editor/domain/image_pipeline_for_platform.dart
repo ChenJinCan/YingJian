@@ -1,0 +1,13 @@
+import 'package:flutter/foundation.dart';
+import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/image_pipeline.dart';
+import 'package:yingjian/features/editor/domain/image_pipeline_v1.dart';
+import 'package:yingjian/features/editor/domain/image_pipeline_v2.dart';
+
+bool get supportsImagePipelineV2 => defaultTargetPlatform == TargetPlatform.iOS;
+
+ImagePipeline imagePipelineForCurrentPlatform(EditRecipe recipe) {
+  return supportsImagePipelineV2
+      ? ImagePipelineV2.fromRecipe(recipe)
+      : ImagePipelineV1.fromRecipe(recipe);
+}

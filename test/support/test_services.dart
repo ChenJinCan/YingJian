@@ -5,7 +5,7 @@ import 'package:yingjian/app/settings/app_settings.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
-import 'package:yingjian/features/editor/domain/image_pipeline_v1.dart';
+import 'package:yingjian/features/editor/domain/image_pipeline.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/observability/analytics_event.dart';
@@ -49,13 +49,13 @@ final class FakePhotoPreviewRenderer implements PhotoPreviewRenderer {
   FakePhotoPreviewRenderer.supported() : unsupported = false;
 
   final bool unsupported;
-  final List<ImagePipelineV1> updates = [];
+  final List<ImagePipeline> updates = [];
   int disposeCount = 0;
 
   @override
   Future<PhotoPreviewHandle> create({
     required String sourcePath,
-    required ImagePipelineV1 pipeline,
+    required ImagePipeline pipeline,
     int maxEdge = 2048,
   }) async {
     if (unsupported) {
@@ -72,7 +72,7 @@ final class FakePhotoPreviewRenderer implements PhotoPreviewRenderer {
   @override
   Future<void> update({
     required PhotoPreviewHandle handle,
-    required ImagePipelineV1 pipeline,
+    required ImagePipeline pipeline,
   }) async {
     updates.add(pipeline);
   }
