@@ -221,6 +221,16 @@ class EditRecipe {
       clarity == 0 &&
       crop.isOriginal;
 
+  bool get hasColorAdjustments =>
+      exposure != 0 ||
+      highlights != 0 ||
+      shadows != 0 ||
+      contrast != 0 ||
+      warmth != 0 ||
+      tint != 0 ||
+      saturation != 0 ||
+      clarity != 0;
+
   Map<String, Object> toJson() => <String, Object>{
     'exposure': exposure,
     'highlights': highlights,

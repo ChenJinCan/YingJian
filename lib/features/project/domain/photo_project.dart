@@ -164,26 +164,35 @@ extension PhotoExportStateTransitions on PhotoExportState {
 
 enum ProjectEditingScope { group, currentPhoto }
 
+enum ProjectEditOperationKind { scopedEdit, syncCurrentPhotoToGroup }
+
 @immutable
 class ProjectEditOperation {
   const ProjectEditOperation({
+    this.kind = ProjectEditOperationKind.scopedEdit,
     required this.scope,
     required this.beforeRecipe,
     required this.afterRecipe,
     this.beforeSharedIntensity = 1,
     this.afterSharedIntensity = 1,
     this.photoId,
+    this.beforePhotoOverrideRecipe,
+    this.afterPhotoOverrideRecipe,
   });
 
+  final ProjectEditOperationKind kind;
   final ProjectEditingScope scope;
   final String? photoId;
   final EditRecipe beforeRecipe;
   final EditRecipe afterRecipe;
   final double beforeSharedIntensity;
   final double afterSharedIntensity;
+  final EditRecipe? beforePhotoOverrideRecipe;
+  final EditRecipe? afterPhotoOverrideRecipe;
 
   Map<String, Object> toJson() {
     final value = <String, Object>{
+      'kind': kind.name,
       'scope': scope.name,
       'beforeRecipe': beforeRecipe.toJson(),
       'afterRecipe': afterRecipe.toJson(),
@@ -191,6 +200,12 @@ class ProjectEditOperation {
       'afterSharedIntensity': afterSharedIntensity,
     };
     if (photoId != null) value['photoId'] = photoId!;
+    if (beforePhotoOverrideRecipe != null) {
+      value['beforePhotoOverrideRecipe'] = beforePhotoOverrideRecipe!.toJson();
+    }
+    if (afterPhotoOverrideRecipe != null) {
+      value['afterPhotoOverrideRecipe'] = afterPhotoOverrideRecipe!.toJson();
+    }
     return value;
   }
 
@@ -201,6 +216,13 @@ class ProjectEditOperation {
       'edit operation scope',
     );
     return ProjectEditOperation(
+      kind: json['kind'] == null
+          ? ProjectEditOperationKind.scopedEdit
+          : PhotoProject._enumValue(
+              json['kind'],
+              ProjectEditOperationKind.values,
+              'edit operation kind',
+            ),
       scope: scope,
       photoId: json['photoId'] as String?,
       beforeRecipe: EditRecipe.fromJson(
@@ -213,27 +235,45 @@ class ProjectEditOperation {
           (json['beforeSharedIntensity'] as num?)?.toDouble() ?? 1,
       afterSharedIntensity:
           (json['afterSharedIntensity'] as num?)?.toDouble() ?? 1,
+      beforePhotoOverrideRecipe:
+          json['beforePhotoOverrideRecipe'] is Map<String, Object?>
+          ? EditRecipe.fromJson(
+              json['beforePhotoOverrideRecipe']! as Map<String, Object?>,
+            )
+          : null,
+      afterPhotoOverrideRecipe:
+          json['afterPhotoOverrideRecipe'] is Map<String, Object?>
+          ? EditRecipe.fromJson(
+              json['afterPhotoOverrideRecipe']! as Map<String, Object?>,
+            )
+          : null,
     );
   }
 
   @override
   bool operator ==(Object other) =>
       other is ProjectEditOperation &&
+      other.kind == kind &&
       other.scope == scope &&
       other.photoId == photoId &&
       other.beforeRecipe == beforeRecipe &&
       other.afterRecipe == afterRecipe &&
       other.beforeSharedIntensity == beforeSharedIntensity &&
-      other.afterSharedIntensity == afterSharedIntensity;
+      other.afterSharedIntensity == afterSharedIntensity &&
+      other.beforePhotoOverrideRecipe == beforePhotoOverrideRecipe &&
+      other.afterPhotoOverrideRecipe == afterPhotoOverrideRecipe;
 
   @override
   int get hashCode => Object.hash(
+    kind,
     scope,
     photoId,
     beforeRecipe,
     afterRecipe,
     beforeSharedIntensity,
     afterSharedIntensity,
+    beforePhotoOverrideRecipe,
+    afterPhotoOverrideRecipe,
   );
 }
 
@@ -412,6 +452,17 @@ class PhotoOverride {
 }
 
 @immutable
+class PhotoGroupSyncPlan {
+  const PhotoGroupSyncPlan({
+    required this.sharedStyle,
+    required this.remainingPhotoOverride,
+  });
+
+  final SharedStyle sharedStyle;
+  final EditRecipe remainingPhotoOverride;
+}
+
+@immutable
 class PhotoProject {
   PhotoProject({
     required this.id,
@@ -430,6 +481,7 @@ class PhotoProject {
     this.flowState = PhotoProjectFlowState.editing,
     this.focusPhotoId,
     this.selectedRecommendationId,
+    this.groupScrollOffset = 0,
   }) : photos = List.unmodifiable(photos),
        sharedStyle =
            sharedStyle ?? SharedStyle(recipe: recipe ?? EditRecipe.neutral),
@@ -458,6 +510,13 @@ class PhotoProject {
         flowState,
         'flowState',
         'Empty is a session state and cannot contain project photos',
+      );
+    }
+    if (!groupScrollOffset.isFinite || groupScrollOffset < 0) {
+      throw ArgumentError.value(
+        groupScrollOffset,
+        'groupScrollOffset',
+        'Group scroll offset must be finite and non-negative',
       );
     }
     final photoIds = photos.map((photo) => photo.id).toSet();
@@ -514,18 +573,40 @@ class PhotoProject {
     }
     for (final operation in [...undoHistory, ...redoHistory]) {
       final photoId = operation.photoId;
-      if ((operation.beforeRecipe == operation.afterRecipe &&
+      final isValidVariant = switch (operation.kind) {
+        ProjectEditOperationKind.scopedEdit =>
+          operation.beforePhotoOverrideRecipe == null &&
+              operation.afterPhotoOverrideRecipe == null &&
+              ((operation.scope == ProjectEditingScope.group &&
+                      photoId == null &&
+                      (operation.beforeRecipe != operation.afterRecipe ||
+                          operation.beforeSharedIntensity !=
+                              operation.afterSharedIntensity)) ||
+                  (operation.scope == ProjectEditingScope.currentPhoto &&
+                      photoId != null &&
+                      photoIds.contains(photoId) &&
+                      operation.beforeRecipe != operation.afterRecipe &&
+                      operation.beforeSharedIntensity ==
+                          operation.afterSharedIntensity)),
+        ProjectEditOperationKind.syncCurrentPhotoToGroup =>
+          operation.scope == ProjectEditingScope.group &&
+              photoId != null &&
+              photoIds.contains(photoId) &&
+              operation.beforePhotoOverrideRecipe != null &&
+              operation.afterPhotoOverrideRecipe != null &&
               operation.beforeSharedIntensity ==
-                  operation.afterSharedIntensity) ||
-          !operation.beforeSharedIntensity.isFinite ||
+                  operation.afterSharedIntensity &&
+              (operation.beforeRecipe != operation.afterRecipe ||
+                  operation.beforePhotoOverrideRecipe !=
+                      operation.afterPhotoOverrideRecipe),
+      };
+      if (!operation.beforeSharedIntensity.isFinite ||
           operation.beforeSharedIntensity < 0 ||
           operation.beforeSharedIntensity > 1 ||
           !operation.afterSharedIntensity.isFinite ||
           operation.afterSharedIntensity < 0 ||
           operation.afterSharedIntensity > 1 ||
-          (operation.scope == ProjectEditingScope.group && photoId != null) ||
-          (operation.scope == ProjectEditingScope.currentPhoto &&
-              (photoId == null || !photoIds.contains(photoId)))) {
+          !isValidVariant) {
         throw ArgumentError.value(
           operation,
           'editHistory',
@@ -536,7 +617,7 @@ class PhotoProject {
   }
 
   static const maxPhotoCount = 6;
-  static const schemaVersion = 4;
+  static const schemaVersion = 5;
 
   final String id;
   final DateTime createdAt;
@@ -553,6 +634,7 @@ class PhotoProject {
   final PhotoProjectFlowState flowState;
   final String? focusPhotoId;
   final String? selectedRecommendationId;
+  final double groupScrollOffset;
 
   /// Compatibility view for the current editor while it migrates from one
   /// global recipe to explicit group/current-photo scopes.
@@ -614,6 +696,72 @@ class PhotoProject {
   }
 
   bool get canMutateInputs => flowState != PhotoProjectFlowState.exporting;
+
+  PhotoGroupSyncPlan? planPhotoAdjustmentsToGroup(String photoId) {
+    if (!photos.any((photo) => photo.id == photoId)) {
+      throw ArgumentError.value(photoId, 'photoId', 'Photo is not in project');
+    }
+    final override = photoOverrides[photoId]?.recipe;
+    if (override == null || !override.hasColorAdjustments) return null;
+
+    final safeSharedIntensity = sharedStyle.intensity
+        .clamp(0.0, adaptiveCompensations[photoId]?.safeSharedIntensity ?? 1.0)
+        .toDouble();
+    if (safeSharedIntensity <= 0) return null;
+
+    double? promote(double sharedValue, double overrideValue) {
+      final value = sharedValue + overrideValue / safeSharedIntensity;
+      return value.isFinite && value >= -1 && value <= 1 ? value : null;
+    }
+
+    final exposure = promote(sharedStyle.recipe.exposure, override.exposure);
+    final highlights = promote(
+      sharedStyle.recipe.highlights,
+      override.highlights,
+    );
+    final shadows = promote(sharedStyle.recipe.shadows, override.shadows);
+    final contrast = promote(sharedStyle.recipe.contrast, override.contrast);
+    final warmth = promote(sharedStyle.recipe.warmth, override.warmth);
+    final tint = promote(sharedStyle.recipe.tint, override.tint);
+    final saturation = promote(
+      sharedStyle.recipe.saturation,
+      override.saturation,
+    );
+    final clarity = promote(sharedStyle.recipe.clarity, override.clarity);
+    if ([
+      exposure,
+      highlights,
+      shadows,
+      contrast,
+      warmth,
+      tint,
+      saturation,
+      clarity,
+    ].any((value) => value == null)) {
+      return null;
+    }
+
+    return PhotoGroupSyncPlan(
+      sharedStyle: SharedStyle(
+        family: sharedStyle.family,
+        intensity: sharedStyle.intensity,
+        recipe: EditRecipe(
+          exposure: exposure!,
+          highlights: highlights!,
+          shadows: shadows!,
+          contrast: contrast!,
+          warmth: warmth!,
+          tint: tint!,
+          saturation: saturation!,
+          clarity: clarity!,
+          crop: sharedStyle.recipe.crop,
+        ),
+      ),
+      remainingPhotoOverride: override.crop.isOriginal
+          ? EditRecipe.neutral
+          : EditRecipe(crop: override.crop),
+    );
+  }
 
   PhotoProject replacePhotosAndInvalidateDerivedState({
     required List<ProjectPhoto> photos,
@@ -711,6 +859,7 @@ class PhotoProject {
     PhotoProjectFlowState? flowState,
     Object? focusPhotoId = _notProvided,
     Object? selectedRecommendationId = _notProvided,
+    double? groupScrollOffset,
   }) {
     return PhotoProject(
       id: id,
@@ -741,6 +890,7 @@ class PhotoProject {
       selectedRecommendationId: selectedRecommendationId == _notProvided
           ? this.selectedRecommendationId
           : selectedRecommendationId as String?,
+      groupScrollOffset: groupScrollOffset ?? this.groupScrollOffset,
     );
   }
 
@@ -766,6 +916,7 @@ class PhotoProject {
         (photoId, state) => MapEntry(photoId, state.name),
       ),
       'editingScope': editingScope.name,
+      'groupScrollOffset': groupScrollOffset,
       'undoHistory': undoHistory
           .map((operation) => operation.toJson())
           .toList(),
@@ -847,6 +998,9 @@ class PhotoProject {
       redoHistory: storedVersion < 4
           ? const []
           : _operationList(json['redoHistory']),
+      groupScrollOffset: storedVersion < 5
+          ? 0
+          : (json['groupScrollOffset'] as num?)?.toDouble() ?? 0,
     );
   }
 
@@ -867,6 +1021,7 @@ class PhotoProject {
         other.flowState == flowState &&
         other.focusPhotoId == focusPhotoId &&
         other.selectedRecommendationId == selectedRecommendationId &&
+        other.groupScrollOffset == groupScrollOffset &&
         listEquals(other.photos, photos);
   }
 
@@ -886,6 +1041,7 @@ class PhotoProject {
     flowState,
     focusPhotoId,
     selectedRecommendationId,
+    groupScrollOffset,
     Object.hashAll(photos),
   );
 

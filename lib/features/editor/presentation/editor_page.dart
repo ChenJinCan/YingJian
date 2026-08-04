@@ -27,6 +27,7 @@ class EditorPage extends StatefulWidget {
 class _EditorPageState extends State<EditorPage> {
   PhotoProjectSession? _session;
   final EditorSession _editorSession = EditorSession();
+  ScrollController? _photoStripController;
   int _selectedIndex = 0;
   bool _busy = false;
   bool _exporting = false;
@@ -35,6 +36,8 @@ class _EditorPageState extends State<EditorPage> {
   bool _preparingRecommendations = false;
   RecommendationPreparation? _recommendationPreparation;
   int _previewRecommendationIndex = -1;
+  double? _pendingPhotoStripOffset;
+  bool _savingPhotoStripPosition = false;
 
   @override
   void didChangeDependencies() {
@@ -56,6 +59,10 @@ class _EditorPageState extends State<EditorPage> {
       session,
     );
     final project = session.project;
+    _photoStripController?.dispose();
+    _photoStripController = ScrollController(
+      initialScrollOffset: project?.groupScrollOffset ?? 0,
+    );
     if (mounted && recoveredSummary != null) {
       setState(() => _exportSummary = recoveredSummary);
     }
@@ -178,6 +185,40 @@ class _EditorPageState extends State<EditorPage> {
     await _persistRecipe();
   }
 
+  Future<void> _syncCurrentPhotoAdjustmentsToGroup() async {
+    final confirmed =
+        await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(context.l10n.syncGroupConfirmationTitle),
+            content: Text(context.l10n.syncGroupConfirmationMessage),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text(context.l10n.cancel),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(context.l10n.syncGroupAction),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed || !mounted) return;
+    try {
+      await _session!.syncCurrentPhotoAdjustmentsToGroup();
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
+      }
+    } finally {
+      _editorSession.load(_session?.editableRecipe ?? EditRecipe.neutral);
+    }
+  }
+
   Future<void> _selectPhoto(int index) async {
     final photo = _session!.photos[index];
     try {
@@ -191,6 +232,34 @@ class _EditorPageState extends State<EditorPage> {
         ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
       }
     }
+  }
+
+  void _savePhotoStripPosition() {
+    final controller = _photoStripController;
+    if (controller == null || !controller.hasClients) return;
+    _pendingPhotoStripOffset = controller.offset;
+    if (_savingPhotoStripPosition) return;
+    _savingPhotoStripPosition = true;
+    unawaited(_drainPhotoStripPositionSaves());
+  }
+
+  Future<void> _drainPhotoStripPositionSaves() async {
+    while (mounted && _pendingPhotoStripOffset != null) {
+      final offset = _pendingPhotoStripOffset!;
+      _pendingPhotoStripOffset = null;
+      try {
+        await _session!.setGroupScrollOffset(offset);
+      } on Object {
+        _pendingPhotoStripOffset = null;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(context.l10n.projectSaveFailed)),
+          );
+        }
+        break;
+      }
+    }
+    _savingPhotoStripPosition = false;
   }
 
   Future<void> _setEditingScope(ProjectEditingScope scope) async {
@@ -304,6 +373,7 @@ class _EditorPageState extends State<EditorPage> {
   void dispose() {
     _session?.dispose();
     _editorSession.dispose();
+    _photoStripController?.dispose();
     super.dispose();
   }
 
@@ -493,6 +563,13 @@ class _EditorPageState extends State<EditorPage> {
                     editorSession: _editorSession,
                     canUndo: session.canUndo,
                     canRedo: session.canRedo,
+                    canSyncCurrentPhoto:
+                        session.canSyncCurrentPhotoAdjustmentsToGroup,
+                    photoStripController: _photoStripController ??=
+                        ScrollController(
+                          initialScrollOffset:
+                              session.project!.groupScrollOffset,
+                        ),
                     onSelected: (index) => unawaited(_selectPhoto(index)),
                     onMove: (photo, destination) =>
                         unawaited(_movePhoto(photo, destination)),
@@ -508,6 +585,9 @@ class _EditorPageState extends State<EditorPage> {
                     onUndo: () => unawaited(_undoEdit()),
                     onRedo: () => unawaited(_redoEdit()),
                     onReset: () => unawaited(_resetEdit()),
+                    onSyncCurrentPhotoToGroup: () =>
+                        unawaited(_syncCurrentPhotoAdjustmentsToGroup()),
+                    onPhotoStripScrollEnd: _savePhotoStripPosition,
                     onRecommendationPreviewed: (index) =>
                         setState(() => _previewRecommendationIndex = index),
                     onRecommendationSelected: (recommendation) =>
@@ -630,6 +710,8 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.editorSession,
     required this.canUndo,
     required this.canRedo,
+    required this.canSyncCurrentPhoto,
+    required this.photoStripController,
     required this.onSelected,
     required this.onMove,
     required this.onRemove,
@@ -642,6 +724,8 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.onUndo,
     required this.onRedo,
     required this.onReset,
+    required this.onSyncCurrentPhotoToGroup,
+    required this.onPhotoStripScrollEnd,
     required this.onRecommendationPreviewed,
     required this.onRecommendationSelected,
     required this.onEditingScopeChanged,
@@ -663,6 +747,8 @@ class _PhotoWorkspace extends StatelessWidget {
   final EditorSession editorSession;
   final bool canUndo;
   final bool canRedo;
+  final bool canSyncCurrentPhoto;
+  final ScrollController photoStripController;
   final ValueChanged<int> onSelected;
   final void Function(ProjectPhoto photo, int destination) onMove;
   final ValueChanged<ProjectPhoto> onRemove;
@@ -675,6 +761,8 @@ class _PhotoWorkspace extends StatelessWidget {
   final VoidCallback onUndo;
   final VoidCallback onRedo;
   final VoidCallback onReset;
+  final VoidCallback onSyncCurrentPhotoToGroup;
+  final VoidCallback onPhotoStripScrollEnd;
   final ValueChanged<int> onRecommendationPreviewed;
   final ValueChanged<LocalRecommendation> onRecommendationSelected;
   final ValueChanged<ProjectEditingScope> onEditingScopeChanged;
@@ -688,6 +776,7 @@ class _PhotoWorkspace extends StatelessWidget {
       (state) => state == PhotoExportState.notQueued,
     );
     return ListView(
+      key: const Key('photo-workspace-scroll'),
       padding: const EdgeInsets.all(20),
       children: [
         if (importFailures.isNotEmpty) ...[
@@ -780,68 +869,78 @@ class _PhotoWorkspace extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 16),
-        SizedBox(
-          height: 112,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: photos.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 8),
-            itemBuilder: (context, index) {
-              final photo = photos[index];
-              final status = _photoStatus(context, project, photo.id);
-              return Semantics(
-                selected: index == selectedIndex,
-                button: true,
-                label: '${photo.originalName}, ${status.$2}',
-                child: InkWell(
-                  onTap: () => onSelected(index),
-                  borderRadius: BorderRadius.circular(12),
-                  child: SizedBox(
-                    width: 88,
-                    child: Column(
-                      children: [
-                        Container(
-                          width: 68,
-                          height: 68,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: index == selectedIndex
-                                  ? Theme.of(context).colorScheme.primary
-                                  : Colors.transparent,
-                              width: 3,
-                            ),
-                          ),
-                          clipBehavior: Clip.antiAlias,
-                          child: Image.file(
-                            File(photo.localPath),
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) =>
-                                const Icon(Icons.broken_image_outlined),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(status.$1, size: 13),
-                            const SizedBox(width: 3),
-                            Flexible(
-                              child: Text(
-                                status.$2,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.labelSmall,
+        NotificationListener<ScrollEndNotification>(
+          key: const Key('photo-strip-scroll'),
+          onNotification: (notification) {
+            if (notification.metrics.axis == Axis.horizontal) {
+              onPhotoStripScrollEnd();
+            }
+            return false;
+          },
+          child: SizedBox(
+            height: 112,
+            child: ListView.separated(
+              controller: photoStripController,
+              scrollDirection: Axis.horizontal,
+              itemCount: photos.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                final photo = photos[index];
+                final status = _photoStatus(context, project, photo.id);
+                return Semantics(
+                  selected: index == selectedIndex,
+                  button: true,
+                  label: '${photo.originalName}, ${status.$2}',
+                  child: InkWell(
+                    onTap: () => onSelected(index),
+                    borderRadius: BorderRadius.circular(12),
+                    child: SizedBox(
+                      width: 88,
+                      child: Column(
+                        children: [
+                          Container(
+                            width: 68,
+                            height: 68,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: index == selectedIndex
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Colors.transparent,
+                                width: 3,
                               ),
                             ),
-                          ],
-                        ),
-                      ],
+                            clipBehavior: Clip.antiAlias,
+                            child: Image.file(
+                              File(photo.localPath),
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) =>
+                                  const Icon(Icons.broken_image_outlined),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(status.$1, size: 13),
+                              const SizedBox(width: 3),
+                              Flexible(
+                                child: Text(
+                                  status.$2,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.labelSmall,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
         ),
         const SizedBox(height: 20),
@@ -872,6 +971,14 @@ class _PhotoWorkspace extends StatelessWidget {
             editorSession: editorSession,
             onRecipeCommitted: onRecipeCommitted,
           ),
+        if (canSyncCurrentPhoto) ...[
+          OutlinedButton.icon(
+            onPressed: editingEnabled ? onSyncCurrentPhotoToGroup : null,
+            icon: const Icon(Icons.sync_alt),
+            label: Text(context.l10n.syncCurrentAdjustments),
+          ),
+          const SizedBox(height: 8),
+        ],
         Row(
           children: [
             Expanded(

@@ -325,6 +325,20 @@ class AppLocalizationsEn extends AppLocalizations {
   String get startExport => 'Start export';
 
   @override
+  String get syncCurrentAdjustments => 'Sync current adjustments to group';
+
+  @override
+  String get syncGroupConfirmationTitle =>
+      'Sync current color adjustments to the group?';
+
+  @override
+  String get syncGroupConfirmationMessage =>
+      'Exposure, color, and texture will apply to every photo. Composition stays on the current photo. You can undo this action.';
+
+  @override
+  String get syncGroupAction => 'Sync group';
+
+  @override
   String get exportingPhotos => 'Exporting one photo at a time…';
 
   @override

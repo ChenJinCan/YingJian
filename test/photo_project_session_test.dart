@@ -462,6 +462,94 @@ void main() {
       },
     );
 
+    test(
+      'syncs current color adjustments to the group as one undoable operation',
+      () async {
+        final crop = CropGeometry(left: 0.1, right: 0.9);
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'clean-natural-01',
+          editingScope: ProjectEditingScope.currentPhoto,
+          focusPhotoId: 'photo-2',
+          sharedStyle: SharedStyle(
+            family: SharedStyleFamily.naturalClean,
+            intensity: 0.5,
+            recipe: EditRecipe(exposure: 0.25, warmth: 0.25),
+          ),
+          adaptiveCompensations: {
+            'photo-2': AdaptiveCompensation(
+              recipe: EditRecipe(exposure: 0.05),
+              source: AdaptiveCompensationSource.localAnalysisV1,
+              safeSharedIntensity: 0.25,
+            ),
+          },
+          photoOverrides: {
+            'photo-2': PhotoOverride(
+              recipe: EditRecipe(exposure: 0.125, contrast: 0.25, crop: crop),
+            ),
+          },
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        final beforeCurrent = session.project!.effectiveRecipeFor('photo-2');
+
+        await session.syncCurrentPhotoAdjustmentsToGroup();
+
+        expect(session.project?.undoHistory, hasLength(1));
+        expect(session.project?.editingScope, ProjectEditingScope.currentPhoto);
+        expect(session.project?.sharedStyle.intensity, 0.5);
+        expect(
+          session.project?.sharedStyle.recipe,
+          EditRecipe(exposure: 0.75, warmth: 0.25, contrast: 1),
+        );
+        expect(
+          session.project?.photoOverrides['photo-2']?.recipe,
+          EditRecipe(crop: crop),
+        );
+        expect(session.project?.effectiveRecipeFor('photo-2'), beforeCurrent);
+        expect(
+          session.project?.effectiveRecipeFor('photo-1'),
+          EditRecipe(exposure: 0.375, warmth: 0.125, contrast: 0.5),
+        );
+
+        await session.undoEdit();
+        expect(session.project?.sharedStyle, saved.sharedStyle);
+        expect(session.project?.photoOverrides, saved.photoOverrides);
+        await session.redoEdit();
+        expect(session.project?.sharedStyle.intensity, 0.5);
+        final restored = PhotoProject.fromJson(store.savedProject!.toJson());
+        expect(restored.sharedStyle, session.project?.sharedStyle);
+        expect(restored.photoOverrides, session.project?.photoOverrides);
+        expect(restored.undoHistory, session.project?.undoHistory);
+        expect(restored.redoHistory, session.project?.redoHistory);
+      },
+    );
+
+    test(
+      'persists the group photo-strip position across restoration',
+      () async {
+        final store = _MemoryPhotoProjectStore()
+          ..savedProject = _twoPhotoProject().copyWith(
+            flowState: PhotoProjectFlowState.editing,
+          );
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+
+        await session.setGroupScrollOffset(144);
+
+        expect(session.project?.groupScrollOffset, 144);
+        final restored = PhotoProject.fromJson(store.savedProject!.toJson());
+        expect(restored.groupScrollOffset, 144);
+      },
+    );
+
     test('does not mutate edit history while export is active', () async {
       final operation = ProjectEditOperation(
         scope: ProjectEditingScope.group,

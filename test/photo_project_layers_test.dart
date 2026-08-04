@@ -126,6 +126,49 @@ void main() {
     );
   });
 
+  test(
+    'group sync is unavailable when preserving the photo would overflow',
+    () {
+      final project = PhotoProject(
+        id: 'project-overflow',
+        createdAt: DateTime.utc(2026, 8, 4),
+        updatedAt: DateTime.utc(2026, 8, 4),
+        photos: const [first, second],
+        sharedStyle: SharedStyle(
+          intensity: 0.25,
+          recipe: EditRecipe(exposure: 0.9),
+        ),
+        photoOverrides: {
+          first.id: PhotoOverride(recipe: EditRecipe(exposure: 0.1)),
+        },
+      );
+
+      expect(project.planPhotoAdjustmentsToGroup(first.id), isNull);
+    },
+  );
+
+  test('rejects scoped history that only changes sync-only fields', () {
+    expect(
+      () => PhotoProject(
+        id: 'project-invalid-history',
+        createdAt: DateTime.utc(2026, 8, 4),
+        updatedAt: DateTime.utc(2026, 8, 4),
+        photos: const [first, second],
+        undoHistory: [
+          ProjectEditOperation(
+            scope: ProjectEditingScope.currentPhoto,
+            photoId: first.id,
+            beforeRecipe: EditRecipe.neutral,
+            afterRecipe: EditRecipe.neutral,
+            beforePhotoOverrideRecipe: EditRecipe.neutral,
+            afterPhotoOverrideRecipe: EditRecipe(contrast: 0.2),
+          ),
+        ],
+      ),
+      throwsArgumentError,
+    );
+  });
+
   test('current project keeps per-photo state and explicit editing scope', () {
     final project = PhotoProject(
       id: 'project-1',
@@ -165,7 +208,7 @@ void main() {
     expect(restored.exportStates[first.id], PhotoExportState.queued);
     expect(restored.editingScope, ProjectEditingScope.currentPhoto);
     expect(restored.undoHistory, project.undoHistory);
-    expect(project.toJson()['schemaVersion'], 4);
+    expect(project.toJson()['schemaVersion'], 5);
   });
 
   test('version three project migrates to a safe scope with empty history', () {

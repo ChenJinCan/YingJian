@@ -656,6 +656,30 @@ abstract class AppLocalizations {
   /// **'开始导出'**
   String get startExport;
 
+  /// No description provided for @syncCurrentAdjustments.
+  ///
+  /// In zh, this message translates to:
+  /// **'同步当前调整到整组'**
+  String get syncCurrentAdjustments;
+
+  /// No description provided for @syncGroupConfirmationTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'将当前光色调整同步到整组？'**
+  String get syncGroupConfirmationTitle;
+
+  /// No description provided for @syncGroupConfirmationMessage.
+  ///
+  /// In zh, this message translates to:
+  /// **'曝光、色彩和质感会应用到全部照片；构图仍只保留在当前照片。这个操作可以撤销。'**
+  String get syncGroupConfirmationMessage;
+
+  /// No description provided for @syncGroupAction.
+  ///
+  /// In zh, this message translates to:
+  /// **'同步整组'**
+  String get syncGroupAction;
+
   /// No description provided for @exportingPhotos.
   ///
   /// In zh, this message translates to:

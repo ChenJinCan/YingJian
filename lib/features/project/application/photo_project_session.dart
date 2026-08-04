@@ -96,6 +96,16 @@ class PhotoProjectSession extends ChangeNotifier {
   bool get canUndo => _project?.undoHistory.isNotEmpty ?? false;
   bool get canRedo => _project?.redoHistory.isNotEmpty ?? false;
   bool get canEdit => _project?.flowState == PhotoProjectFlowState.editing;
+  bool get canSyncCurrentPhotoAdjustmentsToGroup {
+    final current = _project;
+    if (current == null ||
+        current.flowState != PhotoProjectFlowState.editing ||
+        current.editingScope != ProjectEditingScope.currentPhoto) {
+      return false;
+    }
+    final photoId = current.focusPhotoId ?? current.photos.first.id;
+    return current.planPhotoAdjustmentsToGroup(photoId) != null;
+  }
 
   EditRecipe get editableRecipe {
     final current = _project;
@@ -366,6 +376,42 @@ class PhotoProjectSession extends ChangeNotifier {
     await _saveAndPublish(next);
   }
 
+  Future<void> syncCurrentPhotoAdjustmentsToGroup() async {
+    final current = _project;
+    if (current == null) {
+      throw StateError('A project is required before syncing an edit');
+    }
+    if (current.flowState != PhotoProjectFlowState.editing ||
+        current.editingScope != ProjectEditingScope.currentPhoto) {
+      throw StateError('Only current-photo adjustments can sync to the group');
+    }
+    final photoId = current.focusPhotoId ?? current.photos.first.id;
+    final plan = current.planPhotoAdjustmentsToGroup(photoId);
+    if (plan == null) return;
+    final override = current.photoOverrides[photoId]!.recipe;
+    final operation = ProjectEditOperation(
+      kind: ProjectEditOperationKind.syncCurrentPhotoToGroup,
+      scope: ProjectEditingScope.group,
+      photoId: photoId,
+      beforeRecipe: current.sharedStyle.recipe,
+      afterRecipe: plan.sharedStyle.recipe,
+      beforeSharedIntensity: current.sharedStyle.intensity,
+      afterSharedIntensity: plan.sharedStyle.intensity,
+      beforePhotoOverrideRecipe: override,
+      afterPhotoOverrideRecipe: plan.remainingPhotoOverride,
+    );
+    final next = _applyOperation(
+      current,
+      operation,
+      plan.sharedStyle.recipe,
+      sharedIntensity: plan.sharedStyle.intensity,
+      syncedPhotoOverride: plan.remainingPhotoOverride,
+      undoHistory: [...current.undoHistory, operation],
+      redoHistory: const [],
+    );
+    await _saveAndPublish(next);
+  }
+
   Future<void> undoEdit() async {
     final current = _project;
     if (current == null || current.undoHistory.isEmpty) return;
@@ -378,6 +424,7 @@ class PhotoProjectSession extends ChangeNotifier {
       operation,
       operation.beforeRecipe,
       sharedIntensity: operation.beforeSharedIntensity,
+      syncedPhotoOverride: operation.beforePhotoOverrideRecipe,
       undoHistory: current.undoHistory.sublist(
         0,
         current.undoHistory.length - 1,
@@ -399,6 +446,7 @@ class PhotoProjectSession extends ChangeNotifier {
       operation,
       operation.afterRecipe,
       sharedIntensity: operation.afterSharedIntensity,
+      syncedPhotoOverride: operation.afterPhotoOverrideRecipe,
       undoHistory: [...current.undoHistory, operation],
       redoHistory: current.redoHistory.sublist(
         0,
@@ -448,6 +496,23 @@ class PhotoProjectSession extends ChangeNotifier {
       return;
     }
     final next = current.copyWith(updatedAt: _now(), focusPhotoId: photoId);
+    await _saveAndPublish(next);
+  }
+
+  Future<void> setGroupScrollOffset(double offset) async {
+    final current = _project;
+    if (current == null) {
+      throw StateError('A project is required before saving group position');
+    }
+    if (!offset.isFinite || offset < 0) {
+      throw ArgumentError.value(
+        offset,
+        'offset',
+        'Group scroll offset must be finite and non-negative',
+      );
+    }
+    if ((current.groupScrollOffset - offset).abs() < 0.5) return;
+    final next = current.copyWith(updatedAt: _now(), groupScrollOffset: offset);
     await _saveAndPublish(next);
   }
 
@@ -546,10 +611,38 @@ class PhotoProjectSession extends ChangeNotifier {
     ProjectEditOperation operation,
     EditRecipe recipe, {
     required double sharedIntensity,
+    EditRecipe? syncedPhotoOverride,
     required List<ProjectEditOperation> undoHistory,
     required List<ProjectEditOperation> redoHistory,
   }) {
     final exportStates = Map.of(current.exportStates);
+    if (operation.kind == ProjectEditOperationKind.syncCurrentPhotoToGroup) {
+      final photoId = operation.photoId!;
+      final overrides = Map.of(current.photoOverrides);
+      if (syncedPhotoOverride == null ||
+          syncedPhotoOverride == EditRecipe.neutral) {
+        overrides.remove(photoId);
+      } else {
+        overrides[photoId] = PhotoOverride(recipe: syncedPhotoOverride);
+      }
+      for (final photo in current.photos) {
+        exportStates[photo.id] = PhotoExportState.notQueued;
+      }
+      return current.copyWith(
+        updatedAt: _now(),
+        editingScope: ProjectEditingScope.currentPhoto,
+        focusPhotoId: photoId,
+        sharedStyle: SharedStyle(
+          recipe: recipe,
+          family: current.sharedStyle.family,
+          intensity: sharedIntensity,
+        ),
+        photoOverrides: overrides,
+        exportStates: exportStates,
+        undoHistory: undoHistory,
+        redoHistory: redoHistory,
+      );
+    }
     if (operation.scope == ProjectEditingScope.group) {
       for (final photo in current.photos) {
         exportStates[photo.id] = PhotoExportState.notQueued;

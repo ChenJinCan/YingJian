@@ -323,6 +323,193 @@ void main() {
     },
   );
 
+  testWidgets('syncing a photo adjustment to the group requires confirmation', (
+    tester,
+  ) async {
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final photos = [
+      ProjectPhoto(
+        id: 'photo-1',
+        localPath: photoFile.path,
+        originalName: 'first.png',
+      ),
+      ProjectPhoto(
+        id: 'photo-2',
+        localPath: photoFile.path,
+        originalName: 'second.png',
+      ),
+    ];
+    final store = MemoryPhotoProjectStore(
+      PhotoProject(
+        id: 'project-1',
+        createdAt: DateTime.utc(2026, 8, 4),
+        updatedAt: DateTime.utc(2026, 8, 4),
+        photos: photos,
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'mvp-catalog-v1:clean-balanced',
+        editingScope: ProjectEditingScope.currentPhoto,
+        focusPhotoId: 'photo-1',
+        sharedStyle: SharedStyle(recipe: EditRecipe(exposure: 0.1)),
+        photoOverrides: {
+          'photo-1': PhotoOverride(recipe: EditRecipe(contrast: 0.2)),
+        },
+      ),
+    );
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
+
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+    await tester.dragUntilVisible(
+      find.text('同步当前调整到整组'),
+      find.byKey(const Key('photo-workspace-scroll')),
+      const Offset(0, -200),
+    );
+    expect(find.text('同步当前调整到整组'), findsOneWidget);
+    await tester.tap(find.text('同步当前调整到整组'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('将当前光色调整同步到整组？'), findsOneWidget);
+    expect(find.textContaining('构图仍只保留在当前照片'), findsOneWidget);
+    expect(store.project?.sharedStyle.recipe, EditRecipe(exposure: 0.1));
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(store.project?.photoOverrides, isNotEmpty);
+
+    await tester.tap(find.text('同步当前调整到整组'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('同步整组'));
+    await tester.pumpAndSettle();
+
+    expect(
+      store.project?.sharedStyle.recipe,
+      EditRecipe(exposure: 0.1, contrast: 0.2),
+    );
+    expect(store.project?.photoOverrides, isEmpty);
+    expect(store.project?.undoHistory, hasLength(1));
+
+    await tester.tap(find.text('撤销'));
+    await tester.pumpAndSettle();
+    expect(store.project?.sharedStyle.recipe, EditRecipe(exposure: 0.1));
+    expect(
+      store.project?.photoOverrides['photo-1']?.recipe,
+      EditRecipe(contrast: 0.2),
+    );
+
+    await tester.tap(find.text('重做'));
+    await tester.pumpAndSettle();
+    expect(
+      store.project?.sharedStyle.recipe,
+      EditRecipe(exposure: 0.1, contrast: 0.2),
+    );
+    expect(store.project?.photoOverrides, isEmpty);
+  });
+
+  testWidgets('restores the saved group photo-strip position', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final photos = List.generate(
+      6,
+      (index) => ProjectPhoto(
+        id: 'photo-${index + 1}',
+        localPath: photoFile.path,
+        originalName: 'photo-${index + 1}.png',
+      ),
+    );
+    final store = MemoryPhotoProjectStore(
+      PhotoProject(
+        id: 'project-1',
+        createdAt: DateTime.utc(2026, 8, 4),
+        updatedAt: DateTime.utc(2026, 8, 4),
+        photos: photos,
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'mvp-catalog-v1:clean-balanced',
+        editingScope: ProjectEditingScope.currentPhoto,
+        focusPhotoId: 'photo-4',
+        exportStates: const {'photo-6': PhotoExportState.queued},
+        groupScrollOffset: 190,
+      ),
+    );
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
+
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('第 4 / 6 张 · 仅当前照片'), findsOneWidget);
+    await tester.tap(find.text('编辑整组'));
+    await tester.pumpAndSettle();
+
+    await tester.drag(
+      find.byKey(const Key('photo-strip-scroll')),
+      const Offset(-100, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(store.project?.groupScrollOffset, greaterThan(190));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('第 4 / 6 张 · 编辑整组'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(RegExp(r'^photo-6\.png, 待导出')).hitTestable(),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('photo-strip save failure is visible and keeps safe state', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final project = PhotoProject(
+      id: 'project-1',
+      createdAt: DateTime.utc(2026, 8, 4),
+      updatedAt: DateTime.utc(2026, 8, 4),
+      photos: List.generate(
+        6,
+        (index) => ProjectPhoto(
+          id: 'photo-${index + 1}',
+          localPath: photoFile.path,
+          originalName: 'photo-${index + 1}.png',
+        ),
+      ),
+      flowState: PhotoProjectFlowState.editing,
+      selectedRecommendationId: 'mvp-catalog-v1:clean-balanced',
+    );
+    final store = _FailingSaveProjectStore(project);
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+
+    await tester.drag(
+      find.byKey(const Key('photo-strip-scroll')),
+      const Offset(-160, 0),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('无法保存本次调整，请重试'), findsOneWidget);
+    expect(store.project.groupScrollOffset, 0);
+  });
+
   testWidgets('project restore failure has a visible retry state', (
     tester,
   ) async {
@@ -554,6 +741,20 @@ final class _FailingProjectStore implements PhotoProjectStore {
 
   @override
   Future<void> save(PhotoProject project) async {}
+}
+
+final class _FailingSaveProjectStore implements PhotoProjectStore {
+  _FailingSaveProjectStore(this.project);
+
+  final PhotoProject project;
+
+  @override
+  Future<PhotoProject?> loadLatest() async => project;
+
+  @override
+  Future<void> save(PhotoProject project) async {
+    throw StateError('fixture save failure');
+  }
 }
 
 final class _FailOncePhotoExporter implements PhotoExporter {
