@@ -127,6 +127,9 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('批量导出 6 张'));
       await tester.pumpAndSettle();
+      expect(find.textContaining('共 6 张'), findsOneWidget);
+      await tester.tap(find.text('开始导出'));
+      await tester.pumpAndSettle();
 
       expect(find.text('已保存 5 张 · 失败 1 张 · 取消 0 张'), findsWidgets);
       expect(exporter.calls, [

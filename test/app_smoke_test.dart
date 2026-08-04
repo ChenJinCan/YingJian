@@ -234,6 +234,9 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('批量导出 1 张'));
     await tester.pumpAndSettle();
+    expect(find.textContaining('JPEG（sRGB，质量 95）'), findsOneWidget);
+    await tester.tap(find.text('开始导出'));
+    await tester.pumpAndSettle();
 
     expect(exporter.exportedPhoto, photo);
     expect(exporter.exportedRecipe?.exposure, greaterThan(0));
@@ -383,6 +386,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('批量导出 2 张'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('开始导出'));
+    await tester.pumpAndSettle();
 
     expect(find.text('已保存 1 张 · 失败 1 张 · 取消 0 张'), findsWidgets);
     expect(store.project?.exportStates['photo-1'], PhotoExportState.saved);
@@ -442,6 +447,8 @@ void main() {
     await tester.drag(find.byType(ListView).first, const Offset(0, -80));
     await tester.pumpAndSettle();
     await tester.tap(find.text('批量导出 2 张'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('开始导出'));
     await tester.pump();
 
     expect(

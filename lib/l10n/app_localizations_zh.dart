@@ -302,6 +302,14 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String exportConfirmationMessage(int count) {
+    return '将从每张只读原图生成 JPEG（sRGB，质量 95），共 $count 张，并保存到系统相册。';
+  }
+
+  @override
+  String get startExport => '开始导出';
+
+  @override
   String get exportingPhotos => '正在逐张导出…';
 
   @override

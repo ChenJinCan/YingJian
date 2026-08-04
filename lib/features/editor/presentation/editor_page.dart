@@ -311,6 +311,12 @@ class _EditorPageState extends State<EditorPage> {
     if (_exporting) {
       return;
     }
+    if (!retryFailuresOnly && !await _confirmBatchExport()) {
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
     setState(() => _exporting = true);
     try {
       final batch = BoundedBatchPhotoExporter(
@@ -348,6 +354,28 @@ class _EditorPageState extends State<EditorPage> {
         });
       }
     }
+  }
+
+  Future<bool> _confirmBatchExport() async {
+    final count = _session?.photos.length ?? 0;
+    return await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(context.l10n.batchExportPhotos(count)),
+            content: Text(context.l10n.exportConfirmationMessage(count)),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text(context.l10n.cancel),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(context.l10n.startExport),
+              ),
+            ],
+          ),
+        ) ??
+        false;
   }
 
   void _cancelBatchExport() => _batchExporter?.cancel();

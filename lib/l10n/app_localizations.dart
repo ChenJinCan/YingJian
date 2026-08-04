@@ -644,6 +644,18 @@ abstract class AppLocalizations {
   /// **'批量导出 {count} 张'**
   String batchExportPhotos(int count);
 
+  /// No description provided for @exportConfirmationMessage.
+  ///
+  /// In zh, this message translates to:
+  /// **'将从每张只读原图生成 JPEG（sRGB，质量 95），共 {count} 张，并保存到系统相册。'**
+  String exportConfirmationMessage(int count);
+
+  /// No description provided for @startExport.
+  ///
+  /// In zh, this message translates to:
+  /// **'开始导出'**
+  String get startExport;
+
   /// No description provided for @exportingPhotos.
   ///
   /// In zh, this message translates to:

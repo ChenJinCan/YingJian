@@ -317,6 +317,14 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String exportConfirmationMessage(int count) {
+    return 'Create JPEG files (sRGB, quality 95) from $count read-only originals and save them to Photos.';
+  }
+
+  @override
+  String get startExport => 'Start export';
+
+  @override
   String get exportingPhotos => 'Exporting one photo at a time…';
 
   @override
