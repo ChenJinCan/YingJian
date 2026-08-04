@@ -30,9 +30,20 @@ final class MethodChannelPhotoExporter implements PhotoExporter {
     final assetId = response['assetId'];
     final width = response['width'];
     final height = response['height'];
+    final sharePath = response['sharePath'];
     if (assetId is! String || width is! int || height is! int) {
       throw const FormatException('Photo export returned an invalid result');
     }
-    return ExportedPhoto(assetId: assetId, width: width, height: height);
+    if (sharePath != null && sharePath is! String) {
+      throw const FormatException(
+        'Photo export returned an invalid share path',
+      );
+    }
+    return ExportedPhoto(
+      assetId: assetId,
+      width: width,
+      height: height,
+      sharePath: sharePath as String?,
+    );
   }
 }

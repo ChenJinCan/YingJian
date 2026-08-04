@@ -9,11 +9,13 @@ class BatchExportSummary {
     required this.savedCount,
     required this.failedCount,
     required this.cancelledCount,
+    this.sharePathsByPhotoId = const {},
   });
 
   final int savedCount;
   final int failedCount;
   final int cancelledCount;
+  final Map<String, String> sharePathsByPhotoId;
 
   factory BatchExportSummary.fromProject(PhotoProject project) =>
       BatchExportSummary(
@@ -30,13 +32,19 @@ class BatchExportSummary {
 
   int get totalCount => savedCount + failedCount + cancelledCount;
   bool get hasRetryableItems => failedCount > 0 || cancelledCount > 0;
+  bool get canShare => sharePathsByPhotoId.isNotEmpty;
 }
 
 final class BoundedBatchPhotoExporter {
-  BoundedBatchPhotoExporter({required this.session, required this.exporter});
+  BoundedBatchPhotoExporter({
+    required this.session,
+    required this.exporter,
+    this.onSharePathCreated,
+  });
 
   final PhotoProjectSession session;
   final PhotoExporter exporter;
+  final void Function(String photoId, String localPath)? onSharePathCreated;
   bool _cancelRequested = false;
   bool _running = false;
 
@@ -91,6 +99,7 @@ final class BoundedBatchPhotoExporter {
 
     _running = true;
     _cancelRequested = false;
+    final sharePathsByPhotoId = <String, String>{};
     try {
       for (final photo in targets) {
         await session.setPhotoExportState(photo.id, PhotoExportState.queued);
@@ -106,17 +115,30 @@ final class BoundedBatchPhotoExporter {
         }
         await session.setPhotoExportState(photo.id, PhotoExportState.running);
         try {
-          await exporter.export(
+          final exported = await exporter.export(
             photo: photo,
             recipe: session.effectiveRecipeFor(photo.id),
           );
+          final sharePath = exported.sharePath;
+          if (sharePath != null && sharePath.isNotEmpty) {
+            onSharePathCreated?.call(photo.id, sharePath);
+          }
           await session.setPhotoExportState(photo.id, PhotoExportState.saved);
+          if (sharePath != null && sharePath.isNotEmpty) {
+            sharePathsByPhotoId[photo.id] = sharePath;
+          }
         } on Object {
           await session.setPhotoExportState(photo.id, PhotoExportState.failed);
         }
       }
       await session.transitionTo(PhotoProjectFlowState.exported);
-      return BatchExportSummary.fromProject(session.project!);
+      final summary = BatchExportSummary.fromProject(session.project!);
+      return BatchExportSummary(
+        savedCount: summary.savedCount,
+        failedCount: summary.failedCount,
+        cancelledCount: summary.cancelledCount,
+        sharePathsByPhotoId: Map.unmodifiable(sharePathsByPhotoId),
+      );
     } finally {
       _running = false;
     }

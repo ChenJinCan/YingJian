@@ -13,10 +13,12 @@ private enum PhotoInputInspectionError: Error {
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var photoExportChannel: FlutterMethodChannel?
+  private var photoShareChannel: FlutterMethodChannel?
   private var photoInputChannel: FlutterMethodChannel?
   private var photoAnalysisChannel: FlutterMethodChannel?
   private var photoPreviewRenderer: IOSPhotoPreviewRenderer?
   private let photoExportContext = CIContext(options: [.cacheIntermediates: false])
+  private var photoShareInProgress = false
 #if DEBUG
   private var portraitMaskSpikeChannel: FlutterMethodChannel?
 #endif
@@ -25,7 +27,24 @@ private enum PhotoInputInspectionError: Error {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    cleanupAbandonedShareFiles()
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  private func cleanupAbandonedShareFiles() {
+    let root = FileManager.default.temporaryDirectory
+    guard let files = try? FileManager.default.contentsOfDirectory(
+      at: root,
+      includingPropertiesForKeys: nil
+    ) else {
+      return
+    }
+    for file in files
+      where file.lastPathComponent.hasPrefix("Yingjian_") &&
+        file.pathExtension.lowercased() == "jpg"
+    {
+      try? FileManager.default.removeItem(at: file)
+    }
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
@@ -47,6 +66,7 @@ private enum PhotoInputInspectionError: Error {
       self?.exportPhoto(arguments: call.arguments, result: result)
     }
     photoExportChannel = channel
+    configurePhotoShare(messenger: registrar.messenger())
     configurePhotoInput(messenger: registrar.messenger())
     configurePhotoAnalysis(messenger: registrar.messenger())
     photoPreviewRenderer = IOSPhotoPreviewRenderer(
@@ -56,6 +76,159 @@ private enum PhotoInputInspectionError: Error {
 #if DEBUG
     configurePortraitMaskSpike(messenger: registrar.messenger())
 #endif
+  }
+
+  private func configurePhotoShare(messenger: FlutterBinaryMessenger) {
+    let channel = FlutterMethodChannel(
+      name: "yingjian/photo_share",
+      binaryMessenger: messenger
+    )
+    channel.setMethodCallHandler { [weak self] call, result in
+      switch call.method {
+      case "sharePhotos":
+        self?.sharePhotos(arguments: call.arguments, result: result)
+      case "discardPhotos":
+        self?.discardPhotos(arguments: call.arguments, result: result)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+    photoShareChannel = channel
+  }
+
+  private func sharePhotos(arguments: Any?, result: @escaping FlutterResult) {
+    guard !photoShareInProgress else {
+      result(FlutterError(code: "shareInProgress", message: "A share sheet is already open", details: nil))
+      return
+    }
+    guard let urls = temporaryShareURLs(arguments: arguments, requireExisting: true) else {
+      result(FlutterError(code: "invalidArguments", message: "Invalid share request", details: nil))
+      return
+    }
+    guard
+      let presenter = topViewController(),
+      presenter.viewIfLoaded?.window != nil
+    else {
+      result(FlutterError(code: "shareUnavailable", message: "Share is unavailable", details: nil))
+      return
+    }
+
+    let controller = UIActivityViewController(
+      activityItems: urls,
+      applicationActivities: nil
+    )
+    if let popover = controller.popoverPresentationController {
+      popover.sourceView = presenter.view
+      popover.sourceRect = CGRect(
+        x: presenter.view.bounds.midX,
+        y: presenter.view.bounds.maxY,
+        width: 1,
+        height: 1
+      )
+    }
+    photoShareInProgress = true
+    controller.completionWithItemsHandler = { [weak self] _, completed, _, error in
+      DispatchQueue.main.async {
+        self?.photoShareInProgress = false
+        if completed {
+          urls.forEach { try? FileManager.default.removeItem(at: $0) }
+          result("completed")
+        } else if error != nil {
+          result(FlutterError(code: "shareFailed", message: "System sharing failed", details: nil))
+        } else {
+          result("canceled")
+        }
+      }
+    }
+    presenter.present(controller, animated: true)
+  }
+
+  private func discardPhotos(arguments: Any?, result: @escaping FlutterResult) {
+    guard !photoShareInProgress else {
+      result(FlutterError(code: "shareInProgress", message: "A share sheet is already open", details: nil))
+      return
+    }
+    guard let urls = temporaryShareURLs(arguments: arguments, requireExisting: false) else {
+      result(FlutterError(code: "invalidArguments", message: "Invalid discard request", details: nil))
+      return
+    }
+    do {
+      for url in urls where FileManager.default.fileExists(atPath: url.path) {
+        try FileManager.default.removeItem(at: url)
+      }
+      result(nil)
+    } catch {
+      result(FlutterError(code: "discardFailed", message: "Temporary photo cleanup failed", details: nil))
+    }
+  }
+
+  private func temporaryShareURLs(
+    arguments: Any?,
+    requireExisting: Bool
+  ) -> [URL]? {
+    guard
+      let values = arguments as? [String: Any],
+      let paths = values["localPaths"] as? [String],
+      !paths.isEmpty,
+      paths.count <= 6
+    else {
+      return nil
+    }
+    let temporaryRoot = FileManager.default.temporaryDirectory
+      .resolvingSymlinksInPath().standardizedFileURL
+    let urls = paths.compactMap { path -> URL? in
+      let url = URL(fileURLWithPath: path)
+        .resolvingSymlinksInPath().standardizedFileURL
+      guard
+        url.deletingLastPathComponent() == temporaryRoot,
+        url.lastPathComponent.hasPrefix("Yingjian_"),
+        url.pathExtension.lowercased() == "jpg"
+      else {
+        return nil
+      }
+      let exists = FileManager.default.fileExists(atPath: url.path)
+      if requireExisting && !exists {
+        return nil
+      }
+      if exists,
+         (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) != true {
+        return nil
+      }
+      return url
+    }
+    return urls.count == paths.count ? urls : nil
+  }
+
+  private func topViewController() -> UIViewController? {
+    let sceneWindow = UIApplication.shared.connectedScenes
+      .compactMap { $0 as? UIWindowScene }
+      .filter { $0.activationState == .foregroundActive }
+      .flatMap(\.windows)
+      .first(where: \.isKeyWindow)
+    let activeLegacyWindow = window.flatMap { candidate in
+      candidate.windowScene?.activationState == .foregroundActive
+        ? candidate
+        : nil
+    }
+    var current = (sceneWindow ?? activeLegacyWindow)?.rootViewController
+    while current != nil {
+      if let presented = current?.presentedViewController {
+        current = presented
+      } else if let navigation = current as? UINavigationController {
+        guard let visible = navigation.visibleViewController else {
+          return navigation
+        }
+        current = visible
+      } else if let tabs = current as? UITabBarController {
+        guard let selected = tabs.selectedViewController else {
+          return tabs
+        }
+        current = selected
+      } else {
+        return current
+      }
+    }
+    return nil
   }
 
   private func configurePhotoInput(messenger: FlutterBinaryMessenger) {
@@ -418,9 +591,9 @@ private enum PhotoInputInspectionError: Error {
       request.addResource(with: .photo, fileURL: temporaryURL, options: options)
       assetId = request.placeholderForCreatedAsset?.localIdentifier
     } completionHandler: { success, _ in
-      try? FileManager.default.removeItem(at: temporaryURL)
       DispatchQueue.main.async {
         guard success, let assetId else {
+          try? FileManager.default.removeItem(at: temporaryURL)
           result(FlutterError(code: "saveFailed", message: "Photo could not be saved", details: nil))
           return
         }
@@ -428,6 +601,7 @@ private enum PhotoInputInspectionError: Error {
           "assetId": assetId,
           "width": Int(outputExtent.width),
           "height": Int(outputExtent.height),
+          "sharePath": temporaryURL.path,
         ])
       }
     }

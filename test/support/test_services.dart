@@ -4,6 +4,7 @@ import 'package:yingjian/app/app.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
+import 'package:yingjian/features/editor/application/photo_sharer.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
@@ -23,6 +24,7 @@ Widget buildTestApp(
   PhotoProjectStore? photoProjectStore,
   PhotoExporter? photoExporter,
   PhotoPreviewRenderer? photoPreviewRenderer,
+  PhotoSharer? photoSharer,
   PhotoAnalyzer? photoAnalyzer,
   PhotoAnalysisCache? photoAnalysisCache,
 }) {
@@ -44,6 +46,7 @@ Widget buildTestApp(
       Provider<PhotoPreviewRenderer>.value(
         value: photoPreviewRenderer ?? FakePhotoPreviewRenderer.unsupported(),
       ),
+      Provider<PhotoSharer>.value(value: photoSharer ?? FakePhotoSharer()),
       Provider<PhotoAnalyzer>.value(
         value: photoAnalyzer ?? const MetadataSafePhotoAnalyzer(),
       ),
@@ -106,7 +109,33 @@ final class FakePhotoExporter implements PhotoExporter {
   }) async {
     exportedPhoto = photo;
     exportedRecipe = recipe;
-    return const ExportedPhoto(assetId: 'asset-42', width: 4032, height: 3024);
+    return const ExportedPhoto(
+      assetId: 'asset-42',
+      width: 4032,
+      height: 3024,
+      sharePath: '/tmp/Yingjian_fixture.jpg',
+    );
+  }
+}
+
+final class FakePhotoSharer implements PhotoSharer {
+  FakePhotoSharer({this.outcome = PhotoShareOutcome.completed, this.error});
+
+  final PhotoShareOutcome outcome;
+  final Object? error;
+  List<String>? sharedPaths;
+  List<String>? discardedPaths;
+
+  @override
+  Future<PhotoShareOutcome> share({required List<String> localPaths}) async {
+    sharedPaths = List.unmodifiable(localPaths);
+    if (error case final error?) throw error;
+    return outcome;
+  }
+
+  @override
+  Future<void> discard({required List<String> localPaths}) async {
+    discardedPaths = List.unmodifiable(localPaths);
   }
 }
 

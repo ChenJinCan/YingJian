@@ -352,5 +352,20 @@ class AppLocalizationsZh extends AppLocalizations {
   String get retryFailedPhotos => '只重试失败与取消项';
 
   @override
+  String get shareSavedPhotos => '分享已保存照片';
+
+  @override
+  String get sharingPhotos => '正在打开系统分享…';
+
+  @override
+  String get photoShareCompleted => '已通过系统分享完成操作';
+
+  @override
+  String get photoShareCanceled => '已取消分享，保存结果不受影响';
+
+  @override
+  String get photoShareFailed => '暂时无法分享，保存结果不受影响';
+
+  @override
   String get continueEditing => '继续编辑';
 }

@@ -118,5 +118,10 @@
   "exportSummary": "Saved {saved} · Failed {failed} · Cancelled {cancelled}",
   "@exportSummary": {"placeholders": {"saved": {"type": "int"}, "failed": {"type": "int"}, "cancelled": {"type": "int"}}},
   "retryFailedPhotos": "Retry failed and cancelled",
+  "shareSavedPhotos": "Share saved photos",
+  "sharingPhotos": "Opening system share…",
+  "photoShareCompleted": "Shared from the system share sheet",
+  "photoShareCanceled": "Sharing canceled. Saved photos are unchanged.",
+  "photoShareFailed": "Sharing is unavailable. Saved photos are unchanged.",
   "continueEditing": "Continue editing"
 }

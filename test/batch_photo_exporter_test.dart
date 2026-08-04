@@ -31,12 +31,14 @@ void main() {
       expect(first.savedCount, 2);
       expect(first.failedCount, 1);
       expect(first.cancelledCount, 0);
+      expect(first.sharePathsByPhotoId.keys, {'photo-1', 'photo-3'});
       expect(exporter.calls, ['photo-1', 'photo-2', 'photo-3']);
       expect(session.project?.flowState, PhotoProjectFlowState.exported);
 
       final second = await batch.export(retryFailuresOnly: true);
       expect(second.savedCount, 3);
       expect(second.failedCount, 0);
+      expect(second.sharePathsByPhotoId.keys, {'photo-2'});
       expect(exporter.calls, ['photo-1', 'photo-2', 'photo-3', 'photo-2']);
     },
   );
@@ -141,7 +143,12 @@ final class _RecordingExporter implements PhotoExporter {
   }) async {
     calls.add(photo.id);
     if (failOnce.remove(photo.id)) throw StateError('fixture failure');
-    return ExportedPhoto(assetId: photo.id, width: 4032, height: 3024);
+    return ExportedPhoto(
+      assetId: photo.id,
+      width: 4032,
+      height: 3024,
+      sharePath: '/tmp/Yingjian_${photo.id}.jpg',
+    );
   }
 }
 
@@ -158,6 +165,11 @@ final class _DeferredFirstExporter implements PhotoExporter {
     calls.add(photo.id);
     started.complete();
     await finish.future;
-    return ExportedPhoto(assetId: photo.id, width: 4032, height: 3024);
+    return ExportedPhoto(
+      assetId: photo.id,
+      width: 4032,
+      height: 3024,
+      sharePath: '/tmp/Yingjian_${photo.id}.jpg',
+    );
   }
 }

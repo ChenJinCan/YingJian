@@ -120,5 +120,10 @@
   "exportSummary": "已保存 {saved} 张 · 失败 {failed} 张 · 取消 {cancelled} 张",
   "@exportSummary": {"placeholders": {"saved": {"type": "int"}, "failed": {"type": "int"}, "cancelled": {"type": "int"}}},
   "retryFailedPhotos": "只重试失败与取消项",
+  "shareSavedPhotos": "分享已保存照片",
+  "sharingPhotos": "正在打开系统分享…",
+  "photoShareCompleted": "已通过系统分享完成操作",
+  "photoShareCanceled": "已取消分享，保存结果不受影响",
+  "photoShareFailed": "暂时无法分享，保存结果不受影响",
   "continueEditing": "继续编辑"
 }

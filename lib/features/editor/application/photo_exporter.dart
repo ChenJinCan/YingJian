@@ -13,9 +13,11 @@ class ExportedPhoto {
     required this.assetId,
     required this.width,
     required this.height,
+    this.sharePath,
   });
 
   final String assetId;
   final int width;
   final int height;
+  final String? sharePath;
 }

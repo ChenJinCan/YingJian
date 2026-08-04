@@ -25,6 +25,7 @@ void main() {
             'assetId': 'asset-42',
             'width': 4032,
             'height': 3024,
+            'sharePath': '/tmp/Yingjian_42.jpg',
           };
         });
     final exporter = MethodChannelPhotoExporter();
@@ -51,5 +52,6 @@ void main() {
     expect(exported.assetId, 'asset-42');
     expect(exported.width, 4032);
     expect(exported.height, 3024);
+    expect(exported.sharePath, '/tmp/Yingjian_42.jpg');
   });
 }

@@ -370,5 +370,22 @@ class AppLocalizationsEn extends AppLocalizations {
   String get retryFailedPhotos => 'Retry failed and cancelled';
 
   @override
+  String get shareSavedPhotos => 'Share saved photos';
+
+  @override
+  String get sharingPhotos => 'Opening system share…';
+
+  @override
+  String get photoShareCompleted => 'Shared from the system share sheet';
+
+  @override
+  String get photoShareCanceled =>
+      'Sharing canceled. Saved photos are unchanged.';
+
+  @override
+  String get photoShareFailed =>
+      'Sharing is unavailable. Saved photos are unchanged.';
+
+  @override
   String get continueEditing => 'Continue editing';
 }

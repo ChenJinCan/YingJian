@@ -734,6 +734,36 @@ abstract class AppLocalizations {
   /// **'只重试失败与取消项'**
   String get retryFailedPhotos;
 
+  /// No description provided for @shareSavedPhotos.
+  ///
+  /// In zh, this message translates to:
+  /// **'分享已保存照片'**
+  String get shareSavedPhotos;
+
+  /// No description provided for @sharingPhotos.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在打开系统分享…'**
+  String get sharingPhotos;
+
+  /// No description provided for @photoShareCompleted.
+  ///
+  /// In zh, this message translates to:
+  /// **'已通过系统分享完成操作'**
+  String get photoShareCompleted;
+
+  /// No description provided for @photoShareCanceled.
+  ///
+  /// In zh, this message translates to:
+  /// **'已取消分享，保存结果不受影响'**
+  String get photoShareCanceled;
+
+  /// No description provided for @photoShareFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂时无法分享，保存结果不受影响'**
+  String get photoShareFailed;
+
   /// No description provided for @continueEditing.
   ///
   /// In zh, this message translates to:

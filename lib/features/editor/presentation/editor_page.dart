@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -7,6 +8,7 @@ import 'package:yingjian/features/editor/application/batch_photo_exporter.dart';
 import 'package:yingjian/features/editor/application/editor_session.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
+import 'package:yingjian/features/editor/application/photo_sharer.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_for_platform.dart';
 import 'package:yingjian/features/editor/presentation/native_photo_preview.dart';
@@ -27,13 +29,19 @@ class EditorPage extends StatefulWidget {
 
 class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   PhotoProjectSession? _session;
+  PhotoSharer? _photoSharer;
   final EditorSession _editorSession = EditorSession();
   ScrollController? _photoStripController;
   int _selectedIndex = 0;
   bool _busy = false;
   bool _exporting = false;
+  bool _sharing = false;
+  Future<void>? _shareCompletion;
   BoundedBatchPhotoExporter? _batchExporter;
+  Future<BatchExportSummary>? _batchCompletion;
   BatchExportSummary? _exportSummary;
+  final Map<String, String> _ownedSharePathsByPhotoId = {};
+  final Set<String> _supersededSharePaths = {};
   bool _preparingRecommendations = false;
   RecommendationPreparation? _recommendationPreparation;
   int _previewRecommendationIndex = -1;
@@ -111,6 +119,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _photoSharer ??= context.read<PhotoSharer>();
     if (_session != null) {
       return;
     }
@@ -246,6 +255,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   }
 
   Future<void> _selectRecommendation(LocalRecommendation recommendation) async {
+    if (_exportSummary != null || _exporting || _sharing) return;
     try {
       await _session!.selectRecommendation(
         recommendationId: recommendation.id,
@@ -264,6 +274,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   }
 
   Future<void> _persistRecipe() async {
+    if (_exportSummary != null || _exporting || _sharing) return;
     try {
       await _session?.commitEdit(_editorSession.recipe);
     } on Object {
@@ -278,6 +289,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   }
 
   Future<void> _undoEdit() async {
+    if (_exportSummary != null || _exporting || _sharing) return;
     try {
       await _session?.undoEdit();
     } on Object {
@@ -292,6 +304,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   }
 
   Future<void> _redoEdit() async {
+    if (_exportSummary != null || _exporting || _sharing) return;
     try {
       await _session?.redoEdit();
     } on Object {
@@ -306,11 +319,13 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   }
 
   Future<void> _resetEdit() async {
+    if (_exportSummary != null || _exporting || _sharing) return;
     _editorSession.load(EditRecipe.neutral);
     await _persistRecipe();
   }
 
   Future<void> _syncCurrentPhotoAdjustmentsToGroup() async {
+    if (_exportSummary != null || _exporting || _sharing) return;
     final confirmed =
         await showDialog<bool>(
           context: context,
@@ -388,6 +403,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   }
 
   Future<void> _setEditingScope(ProjectEditingScope scope) async {
+    if (_exportSummary != null || _exporting || _sharing) return;
     final session = _session!;
     final photo = session.photos[_selectedIndex];
     try {
@@ -430,7 +446,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   }
 
   Future<void> _removePhoto(ProjectPhoto photo) async {
-    if (_exporting) return;
+    if (_exportSummary != null || _exporting || _sharing) return;
     final analysisCache = context.read<PhotoAnalysisCache>();
     final confirmed = await _confirm(
       title: context.l10n.removePhoto,
@@ -464,7 +480,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   }
 
   Future<void> _deleteProject() async {
-    if (_exporting) return;
+    if (_exporting || _sharing) return;
     final analysisCache = context.read<PhotoAnalysisCache>();
     final confirmed = await _confirm(
       title: context.l10n.deleteProject,
@@ -478,6 +494,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       await _cancelAndDrainAnalysis();
       await _session!.deleteProject();
       await analysisCache.clearProject(projectId);
+      await _discardShareFiles();
       _selectedIndex = 0;
       _editorSession.load(EditRecipe.neutral);
     } on Object {
@@ -490,7 +507,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   }
 
   Future<void> _movePhoto(ProjectPhoto photo, int destination) async {
-    if (_exporting) return;
+    if (_exportSummary != null || _exporting || _sharing) return;
     try {
       await _session!.movePhoto(photoId: photo.id, toIndex: destination);
       _selectedIndex = destination;
@@ -507,13 +524,18 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _analysisCancellation?.cancel();
+    _batchExporter?.cancel();
+    final batchCompletion = _batchCompletion;
+    final shareCompletion = _shareCompletion;
     final session = _session;
     final analysisCompletion = _analysisCompletion;
     final lifecycleAnalysisUpdates = _lifecycleAnalysisUpdates;
+    final batchDrain = batchCompletion?.then<void>((_) {}, onError: (_, _) {});
     if (session != null) {
       final pending = <Future<void>>[
         ?analysisCompletion,
         lifecycleAnalysisUpdates,
+        ?batchDrain,
       ];
       if (pending.isEmpty) {
         session.dispose();
@@ -523,11 +545,26 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     }
     _editorSession.dispose();
     _photoStripController?.dispose();
+    final cleanupPrerequisites = <Future<void>>[
+      if (batchCompletion != null)
+        batchCompletion.then<void>((_) {}, onError: (_, _) {}),
+      if (shareCompletion != null)
+        shareCompletion.then<void>((_) {}, onError: (_, _) {}),
+    ];
+    if (cleanupPrerequisites.isEmpty) {
+      unawaited(_discardShareFiles());
+    } else {
+      unawaited(
+        Future.wait(cleanupPrerequisites).whenComplete(_discardShareFiles),
+      );
+    }
     super.dispose();
   }
 
   Future<void> _exportBatch({bool retryFailuresOnly = false}) async {
-    if (_exporting) {
+    if (_exporting ||
+        _sharing ||
+        (!retryFailuresOnly && _exportSummary != null)) {
       return;
     }
     if (!retryFailuresOnly && !await _confirmBatchExport()) {
@@ -537,17 +574,36 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       return;
     }
     setState(() => _exporting = true);
+    final attemptPhotoIds = <String>{};
+    Future<BatchExportSummary>? completion;
     try {
       final batch = BoundedBatchPhotoExporter(
         session: _session!,
         exporter: context.read<PhotoExporter>(),
+        onSharePathCreated: (photoId, localPath) {
+          attemptPhotoIds.add(photoId);
+          _ownSharePath(photoId, localPath);
+        },
       );
       _batchExporter = batch;
-      final summary = await batch.export(retryFailuresOnly: retryFailuresOnly);
+      completion = batch.export(retryFailuresOnly: retryFailuresOnly);
+      _batchCompletion = completion;
+      final summary = await completion;
+      await _discardShareFiles(
+        photoIds: attemptPhotoIds.difference(
+          summary.sharePathsByPhotoId.keys.toSet(),
+        ),
+      );
       if (!mounted) {
         return;
       }
-      setState(() => _exportSummary = summary);
+      final displaySummary = BatchExportSummary(
+        savedCount: summary.savedCount,
+        failedCount: summary.failedCount,
+        cancelledCount: summary.cancelledCount,
+        sharePathsByPhotoId: Map.unmodifiable(_ownedSharePathsByPhotoId),
+      );
+      setState(() => _exportSummary = displaySummary);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -560,12 +616,16 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         ),
       );
     } on Object {
+      await _discardShareFiles(photoIds: attemptPhotoIds);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(context.l10n.photoExportFailed)));
       }
     } finally {
+      if (identical(_batchCompletion, completion)) {
+        _batchCompletion = null;
+      }
       if (mounted) {
         setState(() {
           _exporting = false;
@@ -599,16 +659,130 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
 
   void _cancelBatchExport() => _batchExporter?.cancel();
 
+  Future<void> _shareExportedPhotos() async {
+    final summary = _exportSummary;
+    if (_sharing || _exporting || summary == null || !summary.canShare) return;
+    final paths = <String>[
+      for (final photo in _session!.photos)
+        ?summary.sharePathsByPhotoId[photo.id],
+    ];
+    final sharer = context.read<PhotoSharer>();
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    setState(() => _sharing = true);
+    late final Future<void> completion;
+    completion = _performShare(sharer: sharer, summary: summary, paths: paths);
+    _shareCompletion = completion;
+    try {
+      await completion;
+    } finally {
+      if (identical(_shareCompletion, completion)) {
+        _shareCompletion = null;
+      }
+      if (mounted) setState(() => _sharing = false);
+    }
+  }
+
+  Future<void> _performShare({
+    required PhotoSharer sharer,
+    required BatchExportSummary summary,
+    required List<String> paths,
+  }) async {
+    try {
+      final outcome = await sharer.share(localPaths: paths);
+      if (outcome == PhotoShareOutcome.completed) {
+        final transferredPaths = paths.toSet();
+        _ownedSharePathsByPhotoId.removeWhere(
+          (_, path) => transferredPaths.contains(path),
+        );
+        if (mounted) {
+          setState(
+            () => _exportSummary = BatchExportSummary(
+              savedCount: summary.savedCount,
+              failedCount: summary.failedCount,
+              cancelledCount: summary.cancelledCount,
+              sharePathsByPhotoId: Map.unmodifiable(_ownedSharePathsByPhotoId),
+            ),
+          );
+        }
+      }
+      if (!mounted) return;
+      final message = switch (outcome) {
+        PhotoShareOutcome.completed => context.l10n.photoShareCompleted,
+        PhotoShareOutcome.canceled => context.l10n.photoShareCanceled,
+      };
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.photoShareFailed)));
+      }
+    }
+  }
+
   Future<void> _continueEditing() async {
+    if (_exporting || _sharing) return;
     final session = _session!;
     if (session.project?.flowState == PhotoProjectFlowState.exported) {
       await session.transitionTo(PhotoProjectFlowState.editing);
     }
+    await _discardShareFiles();
     if (mounted) setState(() => _exportSummary = null);
   }
 
+  void _ownSharePath(String photoId, String localPath) {
+    final previous = _ownedSharePathsByPhotoId[photoId];
+    _ownedSharePathsByPhotoId[photoId] = localPath;
+    if (previous != null && previous != localPath) {
+      _supersededSharePaths.add(previous);
+      unawaited(_discardSupersededSharePaths([previous]));
+    }
+  }
+
+  Future<void> _discardSupersededSharePaths(List<String> paths) async {
+    if (!await _discardLocalPaths(paths)) return;
+    _supersededSharePaths.removeAll(paths);
+  }
+
+  Future<void> _discardShareFiles({Set<String>? photoIds}) async {
+    final entries = _ownedSharePathsByPhotoId.entries
+        .where((entry) => photoIds == null || photoIds.contains(entry.key))
+        .toList();
+    final superseded = photoIds == null
+        ? _supersededSharePaths.toList()
+        : const <String>[];
+    final paths = {
+      ...entries.map((entry) => entry.value),
+      ...superseded,
+    }.toList();
+    if (paths.isEmpty) return;
+    final discarded = await _discardLocalPaths(paths);
+    if (!discarded) return;
+    for (final entry in entries) {
+      if (_ownedSharePathsByPhotoId[entry.key] == entry.value) {
+        _ownedSharePathsByPhotoId.remove(entry.key);
+      }
+    }
+    _supersededSharePaths.removeAll(superseded);
+  }
+
+  Future<bool> _discardLocalPaths(List<String> paths) async {
+    try {
+      for (var start = 0; start < paths.length; start += 6) {
+        final end = min(start + 6, paths.length);
+        await _photoSharer?.discard(localPaths: paths.sublist(start, end));
+      }
+      return true;
+    } on Object {
+      // Temporary-file cleanup is best effort; iOS also cleans on next launch.
+      return false;
+    }
+  }
+
   Future<void> _importPhotos() async {
-    if (_busy || _exporting) {
+    if (_busy || _exportSummary != null || _exporting || _sharing) {
       return;
     }
     setState(() => _busy = true);
@@ -683,7 +857,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                 : [
                     IconButton(
                       tooltip: context.l10n.deleteProject,
-                      onPressed: _exporting
+                      onPressed: _exporting || _sharing
                           ? null
                           : () => unawaited(_deleteProject()),
                       icon: const Icon(Icons.delete_outline),
@@ -712,7 +886,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                     selectedIndex: _selectedIndex,
                     busy: _busy,
                     exporting: _exporting,
-                    editingEnabled: session.canEdit,
+                    editingEnabled:
+                        session.canEdit && !_sharing && _exportSummary == null,
                     previewRecipe: previewRecipe,
                     flowState: session.flowState,
                     preparingRecommendations: _preparingRecommendations,
@@ -738,6 +913,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                     onCancelExport: _cancelBatchExport,
                     onRetryExport: () =>
                         unawaited(_exportBatch(retryFailuresOnly: true)),
+                    sharing: _sharing,
+                    onShareExport: () => unawaited(_shareExportedPhotos()),
                     onContinueEditing: () => unawaited(_continueEditing()),
                     onRecipeCommitted: () => unawaited(_persistRecipe()),
                     onUndo: () => unawaited(_undoEdit()),
@@ -888,6 +1065,8 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.onExport,
     required this.onCancelExport,
     required this.onRetryExport,
+    required this.sharing,
+    required this.onShareExport,
     required this.onContinueEditing,
     required this.onRecipeCommitted,
     required this.onUndo,
@@ -925,6 +1104,8 @@ class _PhotoWorkspace extends StatelessWidget {
   final VoidCallback onExport;
   final VoidCallback onCancelExport;
   final VoidCallback onRetryExport;
+  final bool sharing;
+  final VoidCallback onShareExport;
   final VoidCallback onContinueEditing;
   final VoidCallback onRecipeCommitted;
   final VoidCallback onUndo;
@@ -944,6 +1125,7 @@ class _PhotoWorkspace extends StatelessWidget {
     final hasPhotosReadyToExport = project.exportStates.values.any(
       (state) => state == PhotoExportState.notQueued,
     );
+    final interactionsBlocked = exporting || sharing || exportSummary != null;
     return ListView(
       key: const Key('photo-workspace-scroll'),
       padding: const EdgeInsets.all(20),
@@ -985,21 +1167,22 @@ class _PhotoWorkspace extends StatelessWidget {
             Text(context.l10n.photoCount(photos.length)),
             IconButton(
               tooltip: context.l10n.movePhotoEarlier,
-              onPressed: selectedIndex == 0 || exporting
+              onPressed: selectedIndex == 0 || interactionsBlocked
                   ? null
                   : () => onMove(selected, selectedIndex - 1),
               icon: const Icon(Icons.arrow_back),
             ),
             IconButton(
               tooltip: context.l10n.movePhotoLater,
-              onPressed: selectedIndex == photos.length - 1 || exporting
+              onPressed:
+                  selectedIndex == photos.length - 1 || interactionsBlocked
                   ? null
                   : () => onMove(selected, selectedIndex + 1),
               icon: const Icon(Icons.arrow_forward),
             ),
             IconButton(
               tooltip: context.l10n.removePhoto,
-              onPressed: exporting ? null : () => onRemove(selected),
+              onPressed: interactionsBlocked ? null : () => onRemove(selected),
               icon: const Icon(Icons.remove_circle_outline),
             ),
           ],
@@ -1179,7 +1362,9 @@ class _PhotoWorkspace extends StatelessWidget {
           _ExportSummaryCard(
             summary: exportSummary!,
             exporting: exporting,
+            sharing: sharing,
             onRetry: onRetryExport,
+            onShare: onShareExport,
             onContinueEditing: onContinueEditing,
           ),
           const SizedBox(height: 12),
@@ -1189,7 +1374,10 @@ class _PhotoWorkspace extends StatelessWidget {
           liveRegion: exporting,
           label: exporting ? context.l10n.exportingPhotos : null,
           child: FilledButton.icon(
-            onPressed: exporting || !editingEnabled || !hasPhotosReadyToExport
+            onPressed:
+                interactionsBlocked ||
+                    !editingEnabled ||
+                    !hasPhotosReadyToExport
                 ? null
                 : onExport,
             icon: exporting
@@ -1216,7 +1404,9 @@ class _PhotoWorkspace extends StatelessWidget {
         const SizedBox(height: 12),
         OutlinedButton.icon(
           onPressed:
-              busy || exporting || photos.length >= PhotoProject.maxPhotoCount
+              busy ||
+                  interactionsBlocked ||
+                  photos.length >= PhotoProject.maxPhotoCount
               ? null
               : onImport,
           icon: const Icon(Icons.add_photo_alternate_outlined),
@@ -1231,13 +1421,17 @@ class _ExportSummaryCard extends StatelessWidget {
   const _ExportSummaryCard({
     required this.summary,
     required this.exporting,
+    required this.sharing,
     required this.onRetry,
+    required this.onShare,
     required this.onContinueEditing,
   });
 
   final BatchExportSummary summary;
   final bool exporting;
+  final bool sharing;
   final VoidCallback onRetry;
+  final VoidCallback onShare;
   final VoidCallback onContinueEditing;
 
   @override
@@ -1261,11 +1455,26 @@ class _ExportSummaryCard extends StatelessWidget {
               const SizedBox(height: 12),
               if (summary.hasRetryableItems)
                 FilledButton.tonal(
-                  onPressed: exporting ? null : onRetry,
+                  onPressed: exporting || sharing ? null : onRetry,
                   child: Text(context.l10n.retryFailedPhotos),
                 ),
+              if (summary.canShare)
+                FilledButton.icon(
+                  onPressed: exporting || sharing ? null : onShare,
+                  icon: sharing
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.ios_share_outlined),
+                  label: Text(
+                    sharing
+                        ? context.l10n.sharingPhotos
+                        : context.l10n.shareSavedPhotos,
+                  ),
+                ),
               TextButton(
-                onPressed: exporting ? null : onContinueEditing,
+                onPressed: exporting || sharing ? null : onContinueEditing,
                 child: Text(context.l10n.continueEditing),
               ),
             ],

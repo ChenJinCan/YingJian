@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
+import 'package:yingjian/features/editor/application/photo_sharer.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
@@ -750,6 +751,7 @@ void main() {
       originalName: '周末人像.png',
     );
     final exporter = FakePhotoExporter();
+    final sharer = FakePhotoSharer();
     final store = MemoryPhotoProjectStore(
       PhotoProject(
         id: 'project-1',
@@ -763,7 +765,12 @@ void main() {
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
     final settings = await AppSettings.load();
     await tester.pumpWidget(
-      buildTestApp(settings, photoProjectStore: store, photoExporter: exporter),
+      buildTestApp(
+        settings,
+        photoProjectStore: store,
+        photoExporter: exporter,
+        photoSharer: sharer,
+      ),
     );
 
     await tester.tap(find.text('开始修图'));
@@ -802,7 +809,151 @@ void main() {
     expect(exporter.exportedPhoto, photo);
     expect(exporter.exportedRecipe?.exposure, greaterThan(0));
     expect(find.text('已保存 1 张 · 失败 0 张 · 取消 0 张'), findsWidgets);
+    final exportStatesBeforeShare = Map.of(store.project!.exportStates);
+    await tester.ensureVisible(find.text('分享已保存照片'));
+    await tester.tap(find.text('分享已保存照片'));
+    await _pumpUntilText(tester, '已通过系统分享完成操作');
+    expect(sharer.sharedPaths, ['/tmp/Yingjian_fixture.jpg']);
+    expect(find.text('已通过系统分享完成操作'), findsOneWidget);
+    expect(find.text('分享已保存照片'), findsNothing);
+    expect(store.project?.exportStates, exportStatesBeforeShare);
     debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('system share cancellation preserves the saved result', (
+    tester,
+  ) async {
+    final sharer = FakePhotoSharer(outcome: PhotoShareOutcome.canceled);
+    final store = await _pumpSinglePhotoExport(tester, sharer);
+    final exportStatesBeforeShare = Map.of(store.project!.exportStates);
+
+    await tester.ensureVisible(find.text('分享已保存照片'));
+    await tester.tap(find.text('分享已保存照片'));
+    await _pumpUntilText(tester, '已取消分享，保存结果不受影响');
+
+    expect(find.text('已取消分享，保存结果不受影响'), findsOneWidget);
+    expect(find.text('已保存 1 张 · 失败 0 张 · 取消 0 张'), findsWidgets);
+    expect(find.text('分享已保存照片'), findsOneWidget);
+    expect(store.project?.exportStates, exportStatesBeforeShare);
+    await tester.ensureVisible(find.text('继续编辑'));
+    await tester.tap(find.text('继续编辑'));
+    await tester.pumpAndSettle();
+    expect(sharer.discardedPaths, ['/tmp/Yingjian_fixture.jpg']);
+  });
+
+  testWidgets('saved export locks photo inputs until continuing editing', (
+    tester,
+  ) async {
+    await _pumpSinglePhotoExport(tester, FakePhotoSharer());
+
+    await tester.drag(find.byType(ListView).first, const Offset(0, 600));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<IconButton>(
+            find.widgetWithIcon(IconButton, Icons.remove_circle_outline),
+          )
+          .onPressed,
+      isNull,
+    );
+    await tester.dragUntilVisible(
+      find.text('继续添加照片'),
+      find.byType(ListView).first,
+      const Offset(0, -300),
+    );
+    expect(
+      tester
+          .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '继续添加照片'))
+          .onPressed,
+      isNull,
+    );
+
+    await tester.ensureVisible(find.text('继续编辑'));
+    await tester.tap(find.text('继续编辑'));
+    await tester.pumpAndSettle();
+
+    await tester.drag(find.byType(ListView).first, const Offset(0, 600));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<IconButton>(
+            find.widgetWithIcon(IconButton, Icons.remove_circle_outline),
+          )
+          .onPressed,
+      isNotNull,
+    );
+  });
+
+  testWidgets('system share failure preserves the saved result', (
+    tester,
+  ) async {
+    final sharer = FakePhotoSharer(error: StateError('fixture share failure'));
+    final store = await _pumpSinglePhotoExport(tester, sharer);
+    final exportStatesBeforeShare = Map.of(store.project!.exportStates);
+
+    await tester.ensureVisible(find.text('分享已保存照片'));
+    await tester.tap(find.text('分享已保存照片'));
+    await _pumpUntilText(tester, '暂时无法分享，保存结果不受影响');
+
+    expect(find.text('暂时无法分享，保存结果不受影响'), findsOneWidget);
+    expect(find.text('已保存 1 张 · 失败 0 张 · 取消 0 张'), findsWidgets);
+    expect(find.text('分享已保存照片'), findsOneWidget);
+    expect(store.project?.exportStates, exportStatesBeforeShare);
+  });
+
+  testWidgets('project actions stay disabled while system share is opening', (
+    tester,
+  ) async {
+    final sharer = _DeferredPhotoSharer();
+    await _pumpSinglePhotoExport(tester, sharer);
+
+    await tester.ensureVisible(find.text('分享已保存照片'));
+    await tester.tap(find.text('分享已保存照片'));
+    await tester.pump();
+    await sharer.started.future;
+
+    expect(find.text('正在打开系统分享…'), findsOneWidget);
+    expect(
+      tester
+          .widget<TextButton>(find.widgetWithText(TextButton, '继续编辑'))
+          .onPressed,
+      isNull,
+    );
+    expect(
+      tester
+          .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '继续添加照片'))
+          .onPressed,
+      isNull,
+    );
+
+    sharer.complete(PhotoShareOutcome.canceled);
+    await _pumpUntilText(tester, '已取消分享，保存结果不受影响');
+    expect(find.text('分享已保存照片'), findsOneWidget);
+  });
+
+  testWidgets('leaving during a canceled share drains its temporary photo', (
+    tester,
+  ) async {
+    final sharer = _DeferredPhotoSharer();
+    await _pumpSinglePhotoExport(tester, sharer);
+
+    await tester.ensureVisible(find.text('分享已保存照片'));
+    await tester.tap(find.text('分享已保存照片'));
+    await tester.pump();
+    await sharer.started.future;
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+
+    sharer.complete(PhotoShareOutcome.canceled);
+    for (
+      var attempt = 0;
+      attempt < 10 && sharer.discardedPaths == null;
+      attempt += 1
+    ) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    expect(sharer.discardedPaths, ['/tmp/Yingjian_fixture.jpg']);
   });
 
   testWidgets(
@@ -1233,10 +1384,16 @@ void main() {
       ),
     );
     final exporter = _FailOncePhotoExporter('photo-2');
+    final sharer = FakePhotoSharer();
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
     final settings = await AppSettings.load();
     await tester.pumpWidget(
-      buildTestApp(settings, photoProjectStore: store, photoExporter: exporter),
+      buildTestApp(
+        settings,
+        photoProjectStore: store,
+        photoExporter: exporter,
+        photoSharer: sharer,
+      ),
     );
 
     await tester.tap(find.text('开始修图'));
@@ -1264,6 +1421,13 @@ void main() {
       everyElement(PhotoExportState.saved),
     );
     expect(exporter.calls, ['photo-1', 'photo-2', 'photo-2']);
+    await tester.ensureVisible(find.text('分享已保存照片'));
+    await tester.tap(find.text('分享已保存照片'));
+    await _pumpUntilText(tester, '已通过系统分享完成操作');
+    expect(sharer.sharedPaths, [
+      '/tmp/Yingjian_photo-1.jpg',
+      '/tmp/Yingjian_photo-2.jpg',
+    ]);
   });
 
   testWidgets('a complete export failure remains retryable', (tester) async {
@@ -1423,6 +1587,68 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets('leaving during export drains a late share file', (tester) async {
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final project = PhotoProject(
+      id: 'late-share-project',
+      createdAt: DateTime.utc(2026, 8, 5),
+      updatedAt: DateTime.utc(2026, 8, 5),
+      photos: [
+        ProjectPhoto(
+          id: 'late-share-photo',
+          localPath: photoFile.path,
+          originalName: '迟到分享样片.png',
+        ),
+      ],
+      flowState: PhotoProjectFlowState.editing,
+      selectedRecommendationId: 'clean-natural-01',
+    );
+    final exporter = _DeferredPhotoExporter();
+    final sharer = FakePhotoSharer();
+    final store = MemoryPhotoProjectStore(project);
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoProjectStore: store,
+        photoExporter: exporter,
+        photoSharer: sharer,
+      ),
+    );
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+    await tester.dragUntilVisible(
+      find.text('批量导出 1 张'),
+      find.byType(ListView).first,
+      const Offset(0, -300),
+    );
+    await tester.tap(find.text('批量导出 1 张'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('开始导出'));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    exporter.complete();
+    for (
+      var attempt = 0;
+      attempt < 10 && sharer.discardedPaths == null;
+      attempt += 1
+    ) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    expect(sharer.discardedPaths, ['/tmp/Yingjian_deferred.jpg']);
+    expect(
+      store.project?.exportStates['late-share-photo'],
+      PhotoExportState.saved,
+    );
+  });
+
   testWidgets('user confirms project deletion without touching originals', (
     tester,
   ) async {
@@ -1481,6 +1707,64 @@ void main() {
 
     expect(find.text('映见隐私政策'), findsOneWidget);
   });
+}
+
+Future<MemoryPhotoProjectStore> _pumpSinglePhotoExport(
+  WidgetTester tester,
+  PhotoSharer sharer,
+) async {
+  final photoFile = File(
+    'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+    'Icon-App-1024x1024@1x.png',
+  );
+  final project = PhotoProject(
+    id: 'share-project',
+    createdAt: DateTime.utc(2026, 8, 5),
+    updatedAt: DateTime.utc(2026, 8, 5),
+    photos: [
+      ProjectPhoto(
+        id: 'share-photo',
+        localPath: photoFile.path,
+        originalName: '分享样片.png',
+      ),
+    ],
+    flowState: PhotoProjectFlowState.editing,
+    selectedRecommendationId: 'clean-natural-01',
+  );
+  SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+  final settings = await AppSettings.load();
+  final store = MemoryPhotoProjectStore(project);
+  await tester.pumpWidget(
+    buildTestApp(
+      settings,
+      photoProjectStore: store,
+      photoExporter: FakePhotoExporter(),
+      photoSharer: sharer,
+    ),
+  );
+  await tester.tap(find.text('开始修图'));
+  await tester.pumpAndSettle();
+  await tester.dragUntilVisible(
+    find.text('批量导出 1 张'),
+    find.byType(ListView).first,
+    const Offset(0, -300),
+  );
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('批量导出 1 张'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('开始导出'));
+  await tester.pumpAndSettle();
+  return store;
+}
+
+Future<void> _pumpUntilText(WidgetTester tester, String text) async {
+  for (
+    var attempt = 0;
+    attempt < 10 && find.text(text).evaluate().isEmpty;
+    attempt += 1
+  ) {
+    await tester.pump(const Duration(milliseconds: 100));
+  }
 }
 
 final class _FailingProjectStore implements PhotoProjectStore {
@@ -1681,7 +1965,12 @@ final class _FailOncePhotoExporter implements PhotoExporter {
       _failed = true;
       throw StateError('fixture failure');
     }
-    return ExportedPhoto(assetId: photo.id, width: 4032, height: 3024);
+    return ExportedPhoto(
+      assetId: photo.id,
+      width: 4032,
+      height: 3024,
+      sharePath: '/tmp/Yingjian_${photo.id}.jpg',
+    );
   }
 }
 
@@ -1705,6 +1994,26 @@ final class _DeferredPhotoImporter implements PhotoImporter {
   void cancel() => _completion.complete(const PhotoImportBatch());
 }
 
+final class _DeferredPhotoSharer implements PhotoSharer {
+  final Completer<void> started = Completer<void>();
+  final Completer<PhotoShareOutcome> _completion =
+      Completer<PhotoShareOutcome>();
+  List<String>? discardedPaths;
+
+  @override
+  Future<PhotoShareOutcome> share({required List<String> localPaths}) {
+    started.complete();
+    return _completion.future;
+  }
+
+  @override
+  Future<void> discard({required List<String> localPaths}) async {
+    discardedPaths = List.unmodifiable(localPaths);
+  }
+
+  void complete(PhotoShareOutcome outcome) => _completion.complete(outcome);
+}
+
 final class _DeferredPhotoExporter implements PhotoExporter {
   final Completer<ExportedPhoto> _completion = Completer<ExportedPhoto>();
 
@@ -1716,7 +2025,12 @@ final class _DeferredPhotoExporter implements PhotoExporter {
 
   void complete() {
     _completion.complete(
-      const ExportedPhoto(assetId: 'asset-42', width: 4032, height: 3024),
+      const ExportedPhoto(
+        assetId: 'asset-42',
+        width: 4032,
+        height: 3024,
+        sharePath: '/tmp/Yingjian_deferred.jpg',
+      ),
     );
   }
 }
