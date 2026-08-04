@@ -53,6 +53,21 @@ class AppLocalizationsZh extends AppLocalizations {
   String get photoLoadFailed => '无法读取这张照片';
 
   @override
+  String get compositionPreviewUnavailable => '构图预览暂不可用。可恢复原始构图或稍后重试；原图不受影响。';
+
+  @override
+  String get effectPreviewUnavailable => '当前效果预览暂不可用。可重置本次调整或稍后重试；原图不受影响。';
+
+  @override
+  String get photoImportCanceled => '未添加任何照片';
+
+  @override
+  String get importingPhotos => '正在本地导入照片…';
+
+  @override
+  String get restoringProject => '正在恢复本地项目…';
+
+  @override
   String get photoImportFailed => '照片导入失败，请重试';
 
   @override

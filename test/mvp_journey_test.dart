@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' show SemanticsAction;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -220,6 +221,38 @@ void main() {
     expect(find.bySemanticsLabel(RegExp(r'^photo-1\.png')), findsWidgets);
 
     await tester.dragUntilVisible(
+      find.text('曝光'),
+      find.byType(ListView).first,
+      const Offset(0, -240),
+    );
+    await tester.pumpAndSettle();
+    final exposureSlider = find.semantics.byPredicate(
+      (node) => node.label.startsWith('曝光') && node.flagsCollection.isSlider,
+    );
+    expect(exposureSlider, findsOne);
+    final exposureData = exposureSlider.evaluate().single.getSemanticsData();
+    expect(exposureData.value, '10');
+    expect(exposureData.hasAction(SemanticsAction.increase), isTrue);
+    expect(exposureData.hasAction(SemanticsAction.decrease), isTrue);
+    tester.semantics.increase(exposureSlider);
+    await tester.pump();
+    expect(
+      find.semantics.byPredicate(
+        (node) => node.label.startsWith('曝光') && node.value == '12',
+      ),
+      findsOne,
+    );
+    for (var step = 0; step < 44; step += 1) {
+      tester.semantics.increase(exposureSlider);
+      await tester.pump();
+    }
+    final maximumExposure = exposureSlider.evaluate().single.getSemanticsData();
+    expect(maximumExposure.value, '100');
+    expect(maximumExposure.hasAction(SemanticsAction.increase), isFalse);
+    expect(maximumExposure.hasAction(SemanticsAction.decrease), isTrue);
+    _expectCurrentTapSemanticsAtLeast(tester, 48);
+
+    await tester.dragUntilVisible(
       find.text('批量导出 6 张'),
       find.byType(ListView).first,
       const Offset(0, -300),
@@ -228,8 +261,26 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('批量导出 6 张'), findsOneWidget);
     expect(tester.getSize(find.text('批量导出 6 张')).height, greaterThan(20));
+    _expectCurrentTapSemanticsAtLeast(tester, 48);
     semantics.dispose();
   });
+}
+
+void _expectCurrentTapSemanticsAtLeast(WidgetTester tester, double minimum) {
+  final targets = find.semantics.byAction(SemanticsAction.tap);
+  expect(targets, findsWidgets);
+  for (final node in targets.evaluate()) {
+    expect(
+      node.rect.width,
+      greaterThanOrEqualTo(minimum),
+      reason: 'Tap target "${node.label}" is too narrow.',
+    );
+    expect(
+      node.rect.height,
+      greaterThanOrEqualTo(minimum),
+      reason: 'Tap target "${node.label}" is too short.',
+    );
+  }
 }
 
 final class _JourneyExporter implements PhotoExporter {

@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show SemanticsFlag, Tristate;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
@@ -116,27 +118,102 @@ void main() {
     expect(find.textContaining('暂不支持动态图片'), findsOneWidget);
   });
 
-  testWidgets('user chooses one of three local recommendation directions', (
-    tester,
-  ) async {
-    final photoFile = File(
-      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
-      'Icon-App-1024x1024@1x.png',
-    );
-    final store = MemoryPhotoProjectStore();
+  testWidgets('a fully rejected import remains recoverable', (tester) async {
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
     final settings = await AppSettings.load();
     await tester.pumpWidget(
       buildTestApp(
         settings,
-        photoProjectStore: store,
-        photoImporter: FakePhotoImporter([
-          ProjectPhoto(
-            id: 'photo-1',
-            localPath: photoFile.path,
-            originalName: '推荐样片.png',
+        photoImporter: FakePhotoImporter(const [], const [
+          PhotoImportFailure(
+            photoName: '损坏照片.jpg',
+            reason: PhotoImportFailureReason.unreadable,
           ),
         ]),
+      ),
+    );
+
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('选择照片'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('损坏照片.jpg'), findsOneWidget);
+    expect(find.textContaining('无法读取'), findsOneWidget);
+    expect(find.text('选择照片'), findsOneWidget);
+    expect(find.semantics.byFlag(SemanticsFlag.isLiveRegion), findsWidgets);
+  });
+
+  testWidgets('cancelled import is explicit and remains retryable', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(settings, photoImporter: FakePhotoImporter()),
+    );
+
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('选择照片'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('未添加任何照片'), findsOneWidget);
+    expect(find.text('选择照片'), findsOneWidget);
+  });
+
+  testWidgets('import progress is announced while local copying is active', (
+    tester,
+  ) async {
+    final importer = _DeferredPhotoImporter();
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(buildTestApp(settings, photoImporter: importer));
+
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('选择照片'));
+    await tester.pump();
+
+    final progress = find.semantics.byPredicate(
+      (node) =>
+          node.label.contains('正在本地导入照片') && node.flagsCollection.isLiveRegion,
+    );
+    expect(progress, findsOne);
+    expect(progress.evaluate().single.flagsCollection.isLiveRegion, isTrue);
+
+    importer.cancel();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('user chooses one of three local recommendation directions', (
+    tester,
+  ) async {
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final store = MemoryPhotoProjectStore();
+    const frameKey = ValueKey('reduced-motion-frame');
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: frameKey,
+        child: buildTestApp(
+          settings,
+          photoProjectStore: store,
+          photoImporter: FakePhotoImporter([
+            ProjectPhoto(
+              id: 'photo-1',
+              localPath: photoFile.path,
+              originalName: '推荐样片.png',
+            ),
+          ]),
+        ),
       ),
     );
 
@@ -156,7 +233,23 @@ void main() {
       PhotoProjectFlowState.choosingRecommendation,
     );
 
-    await tester.tap(find.text('氛围色彩'));
+    final atmosphereOption = find.semantics.byLabel(RegExp('氛围色彩'));
+    expect(atmosphereOption, findsOne);
+    tester.semantics.tap(atmosphereOption);
+    await tester.pump();
+    expect(
+      atmosphereOption.evaluate().single.flagsCollection.isSelected,
+      Tristate.isTrue,
+    );
+    final frame = tester.firstRenderObject<RenderRepaintBoundary>(
+      find.byKey(frameKey),
+    );
+    final immediateFrame = await frame.toImage();
+    addTearDown(immediateFrame.dispose);
+    await tester.pump(const Duration(milliseconds: 80));
+    final laterFrame = await frame.toImage();
+    addTearDown(laterFrame.dispose);
+    await expectLater(laterFrame, matchesReferenceImage(immediateFrame));
     await tester.pumpAndSettle();
     await tester.tap(find.text('使用这套效果'));
     await tester.pumpAndSettle();
@@ -713,6 +806,121 @@ void main() {
   });
 
   testWidgets(
+    'an unavailable composition preview is explicit and recoverable',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final photoFile = File(
+        'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+        'Icon-App-1024x1024@1x.png',
+      );
+      final project = PhotoProject(
+        id: 'project-1',
+        createdAt: DateTime.utc(2026, 8, 4),
+        updatedAt: DateTime.utc(2026, 8, 4),
+        photos: [
+          ProjectPhoto(
+            id: 'photo-1',
+            localPath: photoFile.path,
+            originalName: '构图预览.png',
+          ),
+        ],
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'clean-natural-01',
+      );
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoProjectStore: MemoryPhotoProjectStore(project),
+          photoPreviewRenderer: FakePhotoPreviewRenderer.unsupported(),
+        ),
+      );
+      await tester.tap(find.text('开始修图'));
+      await tester.pumpAndSettle();
+      expect(find.text('精修工作台'), findsOneWidget);
+      expect(find.byKey(const Key('photo-workspace-scroll')), findsOneWidget);
+      for (
+        var attempt = 0;
+        attempt < 8 && find.text('构图').evaluate().isEmpty;
+        attempt += 1
+      ) {
+        await tester.drag(
+          find.byKey(const Key('photo-workspace-scroll')),
+          const Offset(0, -260),
+        );
+        await tester.pumpAndSettle();
+      }
+      expect(find.text('构图'), findsOneWidget);
+      await tester.tap(find.text('构图'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byTooltip('向左旋转'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('向左旋转'));
+      await tester.pumpAndSettle();
+      for (var attempt = 0; attempt < 6; attempt += 1) {
+        await tester.drag(
+          find.byKey(const Key('photo-workspace-scroll')),
+          const Offset(0, 320),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      expect(find.textContaining('构图预览暂不可用'), findsOneWidget);
+      expect(find.textContaining('原图不受影响'), findsOneWidget);
+      expect(find.text('构图预览.png'), findsOneWidget);
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
+
+  testWidgets('a non-composition V2 preview failure is not misclassified', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final project = PhotoProject(
+      id: 'project-v2-color',
+      createdAt: DateTime.utc(2026, 8, 5),
+      updatedAt: DateTime.utc(2026, 8, 5),
+      photos: [
+        ProjectPhoto(
+          id: 'photo-1',
+          localPath: photoFile.path,
+          originalName: '清晰度预览.png',
+        ),
+      ],
+      flowState: PhotoProjectFlowState.editing,
+      selectedRecommendationId: 'clean-natural-01',
+      sharedStyle: SharedStyle(
+        family: SharedStyleFamily.naturalClean,
+        recipe: EditRecipe(clarity: 0.2),
+      ),
+    );
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoProjectStore: MemoryPhotoProjectStore(project),
+        photoPreviewRenderer: FakePhotoPreviewRenderer.unsupported(),
+      ),
+    );
+
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('当前效果预览暂不可用'), findsOneWidget);
+    expect(find.textContaining('原图不受影响'), findsOneWidget);
+    expect(find.textContaining('构图预览暂不可用'), findsNothing);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets(
     'multi-photo editing makes group and current-photo scope explicit',
     (tester) async {
       final photoFile = File(
@@ -992,6 +1200,7 @@ void main() {
 
     expect(find.text('无法恢复上次项目'), findsOneWidget);
     expect(find.text('重试'), findsOneWidget);
+    expect(find.semantics.byFlag(SemanticsFlag.isLiveRegion), findsWidgets);
   });
 
   testWidgets('batch export keeps successes and retries only failed photos', (
@@ -1057,9 +1266,56 @@ void main() {
     expect(exporter.calls, ['photo-1', 'photo-2', 'photo-2']);
   });
 
+  testWidgets('a complete export failure remains retryable', (tester) async {
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final project = PhotoProject(
+      id: 'project-1',
+      createdAt: DateTime.utc(2026, 8, 4),
+      updatedAt: DateTime.utc(2026, 8, 4),
+      photos: [
+        ProjectPhoto(
+          id: 'photo-1',
+          localPath: photoFile.path,
+          originalName: '导出失败.png',
+        ),
+      ],
+      flowState: PhotoProjectFlowState.editing,
+      selectedRecommendationId: 'clean-natural-01',
+    );
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoProjectStore: MemoryPhotoProjectStore(project),
+        photoExporter: _AlwaysFailPhotoExporter(),
+      ),
+    );
+    await tester.tap(find.text('开始修图'));
+    await tester.pumpAndSettle();
+    await tester.dragUntilVisible(
+      find.text('批量导出 1 张'),
+      find.byType(ListView).first,
+      const Offset(0, -300),
+    );
+    await tester.ensureVisible(find.text('批量导出 1 张'));
+    await tester.tap(find.text('批量导出 1 张'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('开始导出'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('已保存 0 张 · 失败 1 张 · 取消 0 张'), findsWidgets);
+    expect(find.text('只重试失败与取消项'), findsOneWidget);
+    expect(find.semantics.byFlag(SemanticsFlag.isLiveRegion), findsWidgets);
+  });
+
   testWidgets('input-destructive actions stay disabled during export', (
     tester,
   ) async {
+    final semantics = tester.ensureSemantics();
     final photoFile = File(
       'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
       'Icon-App-1024x1024@1x.png',
@@ -1104,7 +1360,26 @@ void main() {
     await tester.tap(find.text('批量导出 2 张'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('开始导出'));
+    for (
+      var attempt = 0;
+      attempt < 6 && find.text('开始导出').evaluate().isNotEmpty;
+      attempt += 1
+    ) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.text('开始导出'), findsNothing);
+
+    await tester.ensureVisible(find.text('正在逐张导出…'));
     await tester.pump();
+    final exportProgress = find.semantics.byPredicate(
+      (node) =>
+          node.label.contains('正在逐张导出') && node.flagsCollection.isLiveRegion,
+    );
+    expect(exportProgress, findsOne);
+    expect(
+      exportProgress.evaluate().single.flagsCollection.isLiveRegion,
+      isTrue,
+    );
 
     expect(
       tester
@@ -1137,8 +1412,15 @@ void main() {
       isNull,
     );
 
+    await tester.tap(find.text('取消未开始项'));
     exporter.complete();
     await tester.pumpAndSettle();
+
+    expect(find.text('已保存 1 张 · 失败 0 张 · 取消 1 张'), findsWidgets);
+    expect(find.semantics.byFlag(SemanticsFlag.isLiveRegion), findsWidgets);
+    expect(store.project?.exportStates['photo-1'], PhotoExportState.saved);
+    expect(store.project?.exportStates['photo-2'], PhotoExportState.cancelled);
+    semantics.dispose();
   });
 
   testWidgets('user confirms project deletion without touching originals', (
@@ -1401,6 +1683,26 @@ final class _FailOncePhotoExporter implements PhotoExporter {
     }
     return ExportedPhoto(assetId: photo.id, width: 4032, height: 3024);
   }
+}
+
+final class _AlwaysFailPhotoExporter implements PhotoExporter {
+  @override
+  Future<ExportedPhoto> export({
+    required ProjectPhoto photo,
+    required EditRecipe recipe,
+  }) {
+    throw StateError('fixture export failure');
+  }
+}
+
+final class _DeferredPhotoImporter implements PhotoImporter {
+  final Completer<PhotoImportBatch> _completion = Completer<PhotoImportBatch>();
+
+  @override
+  Future<PhotoImportBatch> importPhotos({required int limit}) =>
+      _completion.future;
+
+  void cancel() => _completion.complete(const PhotoImportBatch());
 }
 
 final class _DeferredPhotoExporter implements PhotoExporter {

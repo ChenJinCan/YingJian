@@ -54,6 +54,23 @@ class AppLocalizationsEn extends AppLocalizations {
   String get photoLoadFailed => 'This photo cannot be opened';
 
   @override
+  String get compositionPreviewUnavailable =>
+      'Composition preview is temporarily unavailable. Reset composition or try again; your original is safe.';
+
+  @override
+  String get effectPreviewUnavailable =>
+      'This effect preview is temporarily unavailable. Reset the adjustment or try again; your original is safe.';
+
+  @override
+  String get photoImportCanceled => 'No photos were added';
+
+  @override
+  String get importingPhotos => 'Importing photos locally…';
+
+  @override
+  String get restoringProject => 'Restoring your local project…';
+
+  @override
   String get photoImportFailed => 'Photo import failed. Try again.';
 
   @override

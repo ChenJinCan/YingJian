@@ -182,6 +182,36 @@ abstract class AppLocalizations {
   /// **'无法读取这张照片'**
   String get photoLoadFailed;
 
+  /// No description provided for @compositionPreviewUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'构图预览暂不可用。可恢复原始构图或稍后重试；原图不受影响。'**
+  String get compositionPreviewUnavailable;
+
+  /// No description provided for @effectPreviewUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前效果预览暂不可用。可重置本次调整或稍后重试；原图不受影响。'**
+  String get effectPreviewUnavailable;
+
+  /// No description provided for @photoImportCanceled.
+  ///
+  /// In zh, this message translates to:
+  /// **'未添加任何照片'**
+  String get photoImportCanceled;
+
+  /// No description provided for @importingPhotos.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在本地导入照片…'**
+  String get importingPhotos;
+
+  /// No description provided for @restoringProject.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在恢复本地项目…'**
+  String get restoringProject;
+
   /// No description provided for @photoImportFailed.
   ///
   /// In zh, this message translates to:

@@ -622,6 +622,11 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           context,
         ).showSnackBar(SnackBar(content: Text(context.l10n.photoLimitReached)));
       }
+      if (result == PhotoImportResult.canceled) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.photoImportCanceled)),
+        );
+      }
       if (result == PhotoImportResult.imported) {
         _editorSession.load(_session!.editableRecipe);
         await _prepareRecommendations(persistAnalysisStates: true);
@@ -687,7 +692,11 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           ),
           body: SafeArea(
             child: session.isRestoring
-                ? const Center(child: CircularProgressIndicator())
+                ? Semantics(
+                    liveRegion: true,
+                    label: context.l10n.restoringProject,
+                    child: const Center(child: CircularProgressIndicator()),
+                  )
                 : session.restoreError != null
                 ? _RestoreError(onRetry: session.restore)
                 : photos.isEmpty
@@ -758,25 +767,28 @@ class _RestoreError extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.error_outline, size: 48),
-            const SizedBox(height: 16),
-            Text(
-              context.l10n.projectRestoreFailed,
-              style: Theme.of(context).textTheme.titleMedium,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            OutlinedButton(
-              onPressed: () => unawaited(onRetry()),
-              child: Text(context.l10n.retry),
-            ),
-          ],
+    return Semantics(
+      liveRegion: true,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, size: 48),
+              const SizedBox(height: 16),
+              Text(
+                context.l10n.projectRestoreFailed,
+                style: Theme.of(context).textTheme.titleMedium,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              OutlinedButton(
+                onPressed: () => unawaited(onRetry()),
+                child: Text(context.l10n.retry),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -824,15 +836,23 @@ class _EmptyProject extends StatelessWidget {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 28),
-            FilledButton.icon(
-              onPressed: busy ? null : onImport,
-              icon: busy
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.add_photo_alternate_outlined),
-              label: Text(context.l10n.selectPhotos),
+            Semantics(
+              liveRegion: busy,
+              label: busy ? context.l10n.importingPhotos : null,
+              child: FilledButton.icon(
+                onPressed: busy ? null : onImport,
+                icon: busy
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.add_photo_alternate_outlined),
+                label: Text(
+                  busy
+                      ? context.l10n.importingPhotos
+                      : context.l10n.selectPhotos,
+                ),
+              ),
             ),
           ],
         ),
@@ -1164,20 +1184,25 @@ class _PhotoWorkspace extends StatelessWidget {
           ),
           const SizedBox(height: 12),
         ],
-        FilledButton.icon(
-          onPressed: exporting || !editingEnabled || !hasPhotosReadyToExport
-              ? null
-              : onExport,
-          icon: exporting
-              ? const SizedBox.square(
-                  dimension: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.file_download_outlined),
-          label: Text(
-            exporting
-                ? context.l10n.exportingPhotos
-                : context.l10n.batchExportPhotos(photos.length),
+        Semantics(
+          container: exporting,
+          liveRegion: exporting,
+          label: exporting ? context.l10n.exportingPhotos : null,
+          child: FilledButton.icon(
+            onPressed: exporting || !editingEnabled || !hasPhotosReadyToExport
+                ? null
+                : onExport,
+            icon: exporting
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.file_download_outlined),
+            label: Text(
+              exporting
+                  ? context.l10n.exportingPhotos
+                  : context.l10n.batchExportPhotos(photos.length),
+            ),
           ),
         ),
         if (exporting) ...[
@@ -1217,31 +1242,34 @@ class _ExportSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              context.l10n.exportSummary(
-                summary.savedCount,
-                summary.failedCount,
-                summary.cancelledCount,
+    return Semantics(
+      liveRegion: true,
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                context.l10n.exportSummary(
+                  summary.savedCount,
+                  summary.failedCount,
+                  summary.cancelledCount,
+                ),
+                style: Theme.of(context).textTheme.titleSmall,
               ),
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
-            const SizedBox(height: 12),
-            if (summary.hasRetryableItems)
-              FilledButton.tonal(
-                onPressed: exporting ? null : onRetry,
-                child: Text(context.l10n.retryFailedPhotos),
+              const SizedBox(height: 12),
+              if (summary.hasRetryableItems)
+                FilledButton.tonal(
+                  onPressed: exporting ? null : onRetry,
+                  child: Text(context.l10n.retryFailedPhotos),
+                ),
+              TextButton(
+                onPressed: exporting ? null : onContinueEditing,
+                child: Text(context.l10n.continueEditing),
               ),
-            TextButton(
-              onPressed: exporting ? null : onContinueEditing,
-              child: Text(context.l10n.continueEditing),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1338,7 +1366,9 @@ class _RecommendationPanel extends StatelessWidget {
                       onTap: () => onPreviewed(index),
                       borderRadius: BorderRadius.circular(16),
                       child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 160),
+                        duration: MediaQuery.disableAnimationsOf(context)
+                            ? Duration.zero
+                            : const Duration(milliseconds: 160),
                         width: 148,
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
@@ -1435,37 +1465,40 @@ class _ImportFailures extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Card(
-      color: colors.errorContainer,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.info_outline, color: colors.onErrorContainer),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    context.l10n.photoImportIssuesTitle,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: colors.onErrorContainer,
+    return Semantics(
+      liveRegion: true,
+      child: Card(
+        color: colors.errorContainer,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.info_outline, color: colors.onErrorContainer),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      context.l10n.photoImportIssuesTitle,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: colors.onErrorContainer,
+                      ),
                     ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            for (final failure in failures)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  _photoImportFailureMessage(context, failure),
-                  style: TextStyle(color: colors.onErrorContainer),
-                ),
+                ],
               ),
-          ],
+              const SizedBox(height: 8),
+              for (final failure in failures)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    _photoImportFailureMessage(context, failure),
+                    style: TextStyle(color: colors.onErrorContainer),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -1528,8 +1561,16 @@ class _BeforeAfterPreviewState extends State<_BeforeAfterPreview> {
           sourcePath: widget.sourcePath,
           recipe: recipe,
           renderer: widget.renderer,
-          errorBuilder: (context) =>
-              Center(child: Text(context.l10n.photoLoadFailed)),
+          errorBuilder: (context) => Center(
+            child: Text(
+              !widget.recipe.crop.isOriginal
+                  ? context.l10n.compositionPreviewUnavailable
+                  : !widget.recipe.isLegacyColorOnly
+                  ? context.l10n.effectPreviewUnavailable
+                  : context.l10n.photoLoadFailed,
+              textAlign: TextAlign.center,
+            ),
+          ),
         ),
         Positioned(
           top: 12,
@@ -1597,7 +1638,7 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SizedBox(
-          height: 42,
+          height: 48,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: parameters.length,
@@ -1618,6 +1659,7 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
         _AdjustmentSlider(
           enabled: widget.enabled,
           label: '',
+          semanticLabel: _label(context, _selected),
           value: _value(widget.recipe, _selected),
           onStart: widget.editorSession.beginAdjustment,
           onChanged: (value) => widget.editorSession.preview(
@@ -1736,6 +1778,7 @@ class _CompositionTools extends StatelessWidget {
         _AdjustmentSlider(
           enabled: enabled,
           label: context.l10n.straighten,
+          semanticLabel: context.l10n.straighten,
           value: recipe.crop.straightenDegrees / 45,
           onStart: editorSession.beginAdjustment,
           onChanged: (value) => editorSession.preview(
@@ -1792,6 +1835,7 @@ class _AdjustmentSlider extends StatelessWidget {
   const _AdjustmentSlider({
     required this.enabled,
     required this.label,
+    required this.semanticLabel,
     required this.value,
     required this.onStart,
     required this.onChanged,
@@ -1800,6 +1844,7 @@ class _AdjustmentSlider extends StatelessWidget {
 
   final bool enabled;
   final String label;
+  final String semanticLabel;
   final double value;
   final VoidCallback onStart;
   final ValueChanged<double> onChanged;
@@ -1811,15 +1856,37 @@ class _AdjustmentSlider extends StatelessWidget {
       children: [
         if (label.isNotEmpty) SizedBox(width: 88, child: Text(label)),
         Expanded(
-          child: Slider(
-            value: value,
-            min: -1,
-            max: 1,
-            divisions: 100,
-            label: '${(value * 100).round()}',
-            onChangeStart: enabled ? (_) => onStart() : null,
-            onChanged: enabled ? onChanged : null,
-            onChangeEnd: enabled ? (_) => onEnd() : null,
+          child: Semantics(
+            slider: true,
+            enabled: enabled,
+            label: semanticLabel,
+            value: '${(value * 100).round()}',
+            increasedValue: value < 1
+                ? '${(_semanticValue(0.02) * 100).round()}'
+                : null,
+            decreasedValue: value > -1
+                ? '${(_semanticValue(-0.02) * 100).round()}'
+                : null,
+            onIncrease: enabled && value < 1
+                ? () => _adjustFromSemantics(0.02)
+                : null,
+            onDecrease: enabled && value > -1
+                ? () => _adjustFromSemantics(-0.02)
+                : null,
+            child: ExcludeSemantics(
+              child: Slider(
+                value: value,
+                min: -1,
+                max: 1,
+                divisions: 100,
+                label: '${(value * 100).round()}',
+                semanticFormatterCallback: (value) =>
+                    '${(value * 100).round()}',
+                onChangeStart: enabled ? (_) => onStart() : null,
+                onChanged: enabled ? onChanged : null,
+                onChangeEnd: enabled ? (_) => onEnd() : null,
+              ),
+            ),
           ),
         ),
         SizedBox(
@@ -1828,5 +1895,13 @@ class _AdjustmentSlider extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  double _semanticValue(double delta) => (value + delta).clamp(-1.0, 1.0);
+
+  void _adjustFromSemantics(double delta) {
+    onStart();
+    onChanged(_semanticValue(delta));
+    onEnd();
   }
 }
