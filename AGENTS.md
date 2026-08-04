@@ -6,6 +6,20 @@
 
 产品能力优先级固定为：本地修图质量、单张精修、整组一致性、智能配方、可选生成式 AI。默认三套推荐只计算参数配方，不创建云端图片生成任务。
 
+## Agent skills
+
+### Issue tracker
+
+需求、Spec 和 tickets 使用 `.scratch/<feature-slug>/` 下的本地 Markdown；不创建远程 issue。详见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+使用默认角色：`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`。详见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+使用单一上下文：根目录 `CONTEXT.md` 维护领域词汇，难以逆转的重要决策记录在 `docs/adr/`。详见 `docs/agents/domain.md`。
+
 ## 仓库与工具链
 
 - `lib/`：Flutter UI、交互、编辑状态、配方和任务编排。

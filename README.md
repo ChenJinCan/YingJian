@@ -34,6 +34,10 @@ ruby scripts/check_legal_setup.rb
 [`docs/architecture/flutter-foundation.md`](docs/architecture/flutter-foundation.md)，
 三款现有应用的采用/拒绝依据见
 [`docs/architecture/cross-app-foundation-audit.md`](docs/architecture/cross-app-foundation-audit.md)。
+产品定位、竞品基线和当前 MVP 交付合同见
+[`docs/product/product-context.md`](docs/product/product-context.md)、
+[`docs/product/competitor-baseline.md`](docs/product/competitor-baseline.md) 和
+[`docs/product/mvp-spec.md`](docs/product/mvp-spec.md)。
 Firebase 配置与验收见
 [`docs/operations/firebase-observability.md`](docs/operations/firebase-observability.md)，
 隐私与商店阻断项见
