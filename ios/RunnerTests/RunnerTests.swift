@@ -791,23 +791,31 @@ class RunnerTests: XCTestCase {
     XCTAssertGreaterThan(defaultDifference, 0.1)
     XCTAssertGreaterThan(highSafeDifference, defaultDifference)
     XCTAssertGreaterThan(meanAbsoluteDifference(defaultBytes, highSafeBytes), 0.1)
+    var largestBoundaryDifference = 0
     var largestOutsideDifference = 0
     for y in 0..<60 {
       for x in 40..<80 {
         let offset = (y * 80 + x) * 4
         for channel in 0..<3 {
-          largestOutsideDifference = max(
-            largestOutsideDifference,
-            max(
-              abs(Int(defaultBytes[offset + channel]) - Int(sourceBytes[offset + channel])),
-              abs(Int(highSafeBytes[offset + channel]) - Int(sourceBytes[offset + channel]))
-            )
+          let difference = max(
+            abs(Int(defaultBytes[offset + channel]) - Int(sourceBytes[offset + channel])),
+            abs(Int(highSafeBytes[offset + channel]) - Int(sourceBytes[offset + channel]))
           )
+          if x == 40 {
+            largestBoundaryDifference = max(largestBoundaryDifference, difference)
+          } else {
+            largestOutsideDifference = max(largestOutsideDifference, difference)
+          }
         }
         XCTAssertEqual(defaultBytes[offset + 3], sourceBytes[offset + 3])
         XCTAssertEqual(highSafeBytes[offset + 3], sourceBytes[offset + 3])
       }
     }
+    XCTAssertLessThanOrEqual(
+      largestBoundaryDifference,
+      4,
+      "The one-pixel scaled-mask boundary may differ only by byte-level interpolation"
+    )
     XCTAssertLessThanOrEqual(largestOutsideDifference, 3)
   }
 
@@ -946,6 +954,43 @@ class RunnerTests: XCTestCase {
     let highTexture = neighborDifference(highBytes, width: 96, height: 96)
     XCTAssertLessThan(defaultTexture, sourceTexture * 0.9)
     XCTAssertLessThan(highTexture, defaultTexture)
+  }
+
+  func testProductionPortraitCandidatePreservesPermanentHighContrastEdges() throws {
+    let extent = CGRect(x: 0, y: 0, width: 96, height: 96)
+    let skin = CIImage(
+      color: CIColor(red: 0.68, green: 0.48, blue: 0.38, alpha: 1)
+    ).cropped(to: extent)
+    let permanentEdge = CIImage(
+      color: CIColor(red: 0.12, green: 0.08, blue: 0.06, alpha: 1)
+    ).cropped(to: CGRect(x: 48, y: 0, width: 1, height: 96))
+    let source = permanentEdge.composited(over: skin).cropped(to: extent)
+    let mask = CIImage(color: .white).cropped(to: extent)
+
+    let defaultImage = IOSPortraitRetoucher.candidate(
+      source: source,
+      mask: mask,
+      strength: 0.35,
+      extent: extent
+    )
+    let sourceEdge = strongestHorizontalEdge(
+      try rgbaBytes(source),
+      width: 96,
+      height: 96
+    )
+    let defaultEdge = strongestHorizontalEdge(
+      try rgbaBytes(defaultImage),
+      width: 96,
+      height: 96
+    )
+
+    XCTAssertGreaterThan(sourceEdge, 100)
+    XCTAssertGreaterThanOrEqual(
+      defaultEdge,
+      sourceEdge * 0.9,
+      "Natural retouch must not erase hair, beard, eye, lip, or permanent-feature edges; "
+        + "source=\(sourceEdge), default=\(defaultEdge)"
+    )
   }
 
   func testProductionPortraitRetoucherSafelyPreservesImageWithoutFace() throws {
@@ -1154,6 +1199,26 @@ class RunnerTests: XCTestCase {
       }
     }
     return Double(total) / Double(comparisons)
+  }
+
+  private func strongestHorizontalEdge(
+    _ bytes: [UInt8],
+    width: Int,
+    height: Int
+  ) -> Double {
+    var strongest = 0.0
+    for y in 0..<height {
+      for x in 0..<(width - 1) {
+        let left = (y * width + x) * 4
+        let right = left + 4
+        var difference = 0
+        for channel in 0..<3 {
+          difference += abs(Int(bytes[left + channel]) - Int(bytes[right + channel]))
+        }
+        strongest = max(strongest, Double(difference) / 3.0)
+      }
+    }
+    return strongest
   }
 
   private func render(sourceURL: URL, outputURL: URL) throws -> IOSPhotoRenderedFile {

@@ -135,12 +135,13 @@ ruby scripts/run_portrait_engineering_corpus.rb \
   .quality/portrait-engineering-<candidate-id>
 ```
 
-本机 `candidate-engineering-v8` 报告绑定候选
-`ios-geometry-retouch-candidate-v3`、manifest 与 retoucher SHA-256，结果为 48 个资产、
+本机 `candidate-engineering-v9` 报告绑定候选
+`ios-geometry-retouch-candidate-v4`、manifest 与 retoucher SHA-256，结果为 48 个资产、
 36 个单人应用、12 个多人/无人脸安全保持、0 个意外结果。对成人年龄纹理、胡须、
-眼镜、侧脸和清晰肤质代表样片的局部放大工程观察中，默认档仅作克制的低频整理，
-高安全档变化更明显；五官、发丝、胡须、永久斑点和背景边缘仍可辨认，未观察到明显
-光晕。该结论只允许把候选带入正式盲评，不能把 `productionEligible` 改为 true。
+眼镜、侧脸和清晰肤质代表样片的关闭/默认/高安全局部放大工程观察中，默认档仅作
+克制的低频整理，高安全档变化更明显；五官、发丝、胡须、嘴唇、深皱纹、永久斑点
+和背景边缘仍可辨认，未观察到明显黑边、光晕或轮廓过锐。该结论只允许把候选带入
+正式盲评，不能把 `productionEligible` 改为 true。
 
 下列项目任一失败即阻断对应图像链路：
 
@@ -320,7 +321,7 @@ ruby scripts/check_ios_color_detail_semantics.rb \
 
 ### 6.2 自然人像
 
-当前 iOS 工程候选为 `ios-geometry-retouch-candidate-v3`。自动化冻结默认效果相对原图可测、高安全强度变化更大、细碎肤色纹理能量下降、36 张单人输入应用以及 12 张多人/无人脸输入安全保持。现有本地人像清单已达到 36 张单人成人工程样片，但公共许可、非匿名人工观察和机器合同仍不等于真实用户授权、竞品同路径结果或五人盲评；因此不得把工程 corpus 通过写成自然人像质量通过。
+当前 iOS 工程候选为 `ios-geometry-retouch-candidate-v4`。自动化冻结默认效果相对原图可测、高安全强度变化更大、细碎肤色纹理能量下降、高对比永久边缘至少保持合成源边缘的 90%、36 张单人输入应用以及 12 张多人/无人脸输入安全保持。现有本地人像清单已达到 36 张单人成人工程样片，但公共许可、非匿名人工观察和机器合同仍不等于真实用户授权、竞品同路径结果或五人盲评；因此不得把工程 corpus 通过写成自然人像质量通过。
 
 | 维度 | 观察内容 | 通过门 |
 |---|---|---|

@@ -91,7 +91,7 @@ struct IOSPortraitMasks {
 /// is frozen; Vision geometry never leaves this native boundary.
 enum IOSPortraitRetoucher {
   static let candidateKind = "vision-landmarks-geometry-roi"
-  static let effectVersion = "ios-geometry-retouch-candidate-v3"
+  static let effectVersion = "ios-geometry-retouch-candidate-v4"
   private static let analysisMaxEdge: CGFloat = 1_600
   private static let context = CIContext(options: [.cacheIntermediates: false])
 
@@ -354,7 +354,40 @@ enum IOSPortraitRetoucher {
         kCIInputSaturationKey: 1 - bounded * 0.025,
       ]
     ).cropped(to: extent)
-    return balanced.applyingFilter(
+    let permanentEdgeMask = opaqueSource
+      .applyingFilter(
+        "CIColorControls",
+        parameters: [kCIInputSaturationKey: 0]
+      )
+      .applyingFilter(
+        "CIEdges",
+        parameters: [kCIInputIntensityKey: 4]
+      )
+      .applyingFilter(
+        "CIColorMatrix",
+        parameters: [
+          "inputRVector": CIVector(x: 8, y: 0, z: 0, w: 0),
+          "inputGVector": CIVector(x: 0, y: 8, z: 0, w: 0),
+          "inputBVector": CIVector(x: 0, y: 0, z: 8, w: 0),
+          "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+          "inputBiasVector": CIVector(x: -0.25, y: -0.25, z: -0.25, w: 0),
+        ]
+      )
+      .applyingFilter("CIMorphologyMaximum", parameters: [kCIInputRadiusKey: 1])
+      .clampedToExtent()
+      .applyingFilter(
+        "CIGaussianBlur",
+        parameters: [kCIInputRadiusKey: 0.35]
+      )
+      .cropped(to: extent)
+    let detailProtected = opaqueSource.applyingFilter(
+      "CIBlendWithMask",
+      parameters: [
+        kCIInputBackgroundImageKey: balanced,
+        kCIInputMaskImageKey: permanentEdgeMask,
+      ]
+    ).cropped(to: extent)
+    return detailProtected.applyingFilter(
       "CIBlendWithMask",
       parameters: [
         kCIInputBackgroundImageKey: opaqueSource,
