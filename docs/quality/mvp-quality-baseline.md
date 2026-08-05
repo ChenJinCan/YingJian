@@ -32,7 +32,7 @@
 - MVP 输出为 sRGB JPEG，质量 95。
 - 导出从只读原始输入重新渲染，不能连续重编码。
 - 默认移除 GPS、MakerNote、人脸区域和应用内部信息，保留可用拍摄时间。
-- iOS Display P3 输入已通过固定样片到 sRGB JPEG 的生产文件渲染回归；Android 与跨端容差仍未冻结，因此不得宣传广色域保真。
+- iOS 与 Android 的 Display P3 输入均已通过固定样片到 sRGB JPEG 的生产文件渲染回归；跨端感知容差仍未冻结，因此不得宣传广色域保真。
 
 “原画质导出”在产品文案中的可验证含义是“原像素尺寸高质量导出”，不是有损 JPEG 与源文件逐字节相同。
 
@@ -86,7 +86,9 @@
 报告同时绑定清单、生产渲染源码、人像源码和探针源码哈希，并标记
 `engineering_only=true`。本机首轮 48/48 通过，覆盖 38 JPEG、6 PNG、4 HEIC、
 37 sRGB、11 Display P3、4 个真实 EXIF 旋转和 20 个高分辨率资产；canonical 空清单仍 fail closed。
-该结果证明 iOS 生产文件渲染的格式与隐私合同，但不证明预览帧率、峰值内存、物理设备耗时、跨端像素容差或主观质量。
+`scripts/run_android_file_render_corpus.rb` 会构建本地 Debug app/test APK，把同一批只读源图挂载到应用私有缓存，并由专用 instrumentation 逐张调用生产 `AndroidPhotoExporter`。最终 MediaStore JPEG 会先回拷到应用私有证据目录、回查后删除，再由宿主拉取到 `.quality`；报告绑定语料、生产 Kotlin 源码、instrumentation、宿主运行器、源码提交和模拟器 build fingerprint。本机 API 35 arm64 模拟器首轮同为 48/48 通过，且 canonical 空清单 fail closed。
+
+两端结果证明当前生产文件渲染的格式、尺寸、源只读和隐私合同，但不证明预览帧率、峰值内存、物理设备耗时、跨端感知容差或主观质量。Android 模拟器报告也不能计入六档物理设备矩阵。
 
 本机完整门命令为：
 
@@ -95,6 +97,9 @@ ruby scripts/check_image_quality_corpus.rb .quality/corpus-manifest.local.yaml
 ruby scripts/run_ios_file_render_corpus.rb \
   .quality/corpus-manifest.local.yaml \
   .quality/ios-file-render-<source-id>
+ruby scripts/run_android_file_render_corpus.rb \
+  .quality/corpus-manifest.local.yaml \
+  .quality/android-file-render-<source-id>
 ```
 
 清单条目使用以下结构；`evidence_ref` 指向本机被忽略的许可或同意证据，不提交个人资料：
@@ -257,6 +262,7 @@ ruby scripts/check_image_quality_corpus.rb --allow-incomplete
 ruby scripts/check_image_quality_corpus.rb
 ruby scripts/test_image_quality_corpus.rb
 ruby scripts/test_ios_file_render_corpus.rb
+ruby scripts/test_android_file_render_corpus.rb
 ruby scripts/test_portrait_engineering_corpus.rb
 ruby scripts/test_portrait_review_plan_tools.rb
 ruby scripts/test_blind_review_tools.rb
