@@ -24,8 +24,14 @@ if [ "${1:-}" = "--list" ]; then
   exit 0
 fi
 
+automatic_only=false
+if [ "${1:-}" = "--automatic" ]; then
+  automatic_only=true
+  shift
+fi
+
 if [ "$#" -ne 1 ]; then
-  echo "usage: IOS_SIMULATOR_ID=<booted simulator> scripts/run_ios_mvp_engineering_gate.sh \"\$IOS_SIMULATOR_ID\"" >&2
+  echo "usage: scripts/run_ios_mvp_engineering_gate.sh [--automatic] IOS_SIMULATOR_ID" >&2
   exit 64
 fi
 
@@ -43,17 +49,24 @@ require_file() {
 
 require_file "$image_manifest"
 require_file "$portrait_manifest"
-require_file "$device_manifest"
+if [ "$automatic_only" = false ]; then
+  require_file "$device_manifest"
+fi
 
 if ! xcrun simctl list devices booted | grep -F "($simulator_id) (Booted)" >/dev/null; then
   echo "iOS Simulator $simulator_id must already be booted" >&2
   exit 65
 fi
 
-portrait_output=$(mktemp -d "$repo_root/.quality/ios-mvp-portrait-gate.XXXXXX")
+portrait_workspace=$(mktemp -d "$repo_root/.quality/ios-mvp-portrait-gate.XXXXXX")
+portrait_output="$portrait_workspace/output"
+flutter_config_root=$(mktemp -d "${TMPDIR:-/tmp}/yingjian-ios-flutter-config.XXXXXX")
 cleanup() {
-  if [ -d "$portrait_output" ]; then
-    rm -rf -- "$portrait_output"
+  if [ -d "$portrait_workspace" ]; then
+    find "$portrait_workspace" -depth -delete
+  fi
+  if [ -d "$flutter_config_root" ]; then
+    find "$flutter_config_root" -depth -delete
   fi
 }
 trap cleanup EXIT HUP INT TERM
@@ -66,6 +79,9 @@ run_gate() {
 }
 
 cd "$repo_root"
+export XDG_CONFIG_HOME="$flutter_config_root"
+flutter config --no-enable-android --enable-ios >/dev/null
+flutter config --no-enable-swift-package-manager >/dev/null
 
 run_gate "source hygiene: format" \
   dart format -o none --set-exit-if-changed lib test integration_test
@@ -75,13 +91,17 @@ run_gate "Flutter static analysis" flutter analyze
 run_gate "Flutter unit and widget tests" flutter test
 
 run_gate "iOS native tests" \
-  xcodebuild test \
+  xcodebuild test -quiet \
     -workspace ios/Runner.xcworkspace \
     -scheme Runner \
     -destination "platform=iOS Simulator,id=$simulator_id" \
     CODE_SIGNING_ALLOWED=NO
 
-run_gate "iOS runtime journey" scripts/test_ios_mvp_integration.sh "$simulator_id"
+xcrun simctl boot "$simulator_id" 2>/dev/null || true
+xcrun simctl bootstatus "$simulator_id" -b
+
+runtime_runner=${YINGJIAN_IOS_RUNTIME_RUNNER:-scripts/test_ios_mvp_integration.sh}
+run_gate "iOS runtime journey" "$runtime_runner" "$simulator_id"
 
 run_gate "image corpus checker tests" ruby scripts/test_image_quality_corpus.rb
 run_gate "image corpus contracts" \
@@ -98,10 +118,19 @@ run_gate "portrait review plan tools" ruby scripts/test_portrait_review_plan_too
 run_gate "portrait review structure" ruby scripts/test_blind_review_tools.rb
 
 run_gate "iOS device evidence checker tests" ruby scripts/test_device_evidence.rb
-run_gate "iOS device evidence contract" \
-  ruby scripts/check_device_evidence.rb "$device_manifest"
+if [ "$automatic_only" = true ]; then
+  run_gate "iOS device evidence status (non-closing)" \
+    ruby scripts/check_device_evidence.rb "$device_manifest" --allow-incomplete
+else
+  run_gate "iOS device evidence contract" \
+    ruby scripts/check_device_evidence.rb "$device_manifest"
+fi
 
 run_gate "release contract tests" bash scripts/test_release_contract.sh
 run_gate "release contract" ruby scripts/check_release_contract.rb validate-config
 
-printf '\niOS MVP engineering gate passed. Human review and delivery remain separate gates.\n'
+if [ "$automatic_only" = true ]; then
+  printf '\niOS MVP automatic engineering gate passed. Physical-device, human-review, and delivery gates remain open.\n'
+else
+  printf '\niOS MVP engineering gate passed. Human review and delivery remain separate gates.\n'
+fi
