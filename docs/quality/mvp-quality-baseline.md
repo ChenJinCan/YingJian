@@ -32,7 +32,7 @@
 - MVP 输出为 sRGB JPEG，质量 95。
 - 导出从只读原始输入重新渲染，不能连续重编码。
 - 默认移除 GPS、MakerNote、人脸区域和应用内部信息，保留可用拍摄时间。
-- Display P3 输入转换仍需固定样片验证；未通过前不得宣传广色域保真。
+- iOS Display P3 输入已通过固定样片到 sRGB JPEG 的生产文件渲染回归；Android 与跨端容差仍未冻结，因此不得宣传广色域保真。
 
 “原画质导出”在产品文案中的可验证含义是“原像素尺寸高质量导出”，不是有损 JPEG 与源文件逐字节相同。
 
@@ -79,10 +79,22 @@
 
 `quality/corpus-manifest.yaml` 保留可提交的空清单合同，干净 checkout 的完整检查仍应失败。本机忽略的 `.quality/corpus-manifest.local.yaml` 已于 2026-08-05 固定 48 个有许可证据和 SHA-256 的资产，并通过完整检查：24 个单图、6 组各 4 个组图，覆盖 JPEG/PNG/HEIC、sRGB/Display P3、EXIF 非 1 方向和 24–32 MP。工程语料包含格式与光色变体以及明确标注的多人技术合成，只用于图像合同、回退和候选工程筛查；不能代替竞品同路径输出、至少 5 人盲评、真实拍摄组图或物理设备性能证据。
 
+`scripts/run_ios_file_render_corpus.rb` 会直接编译应用生产使用的
+`IOSPhotoFileRenderer.swift`、`IOSImagePipeline` 和人像依赖，而不是复制一套测试算法。
+它把清单内全部 48 个只读源文件以中性 V2 配方重新渲染为最终 JPEG，并逐张检查：
+源 SHA-256 前后不变、EXIF 方向归一后的原像素尺寸、JPEG、sRGB、Orientation=1、无 GPS/设备身份元数据。
+报告同时绑定清单、生产渲染源码、人像源码和探针源码哈希，并标记
+`engineering_only=true`。本机首轮 48/48 通过，覆盖 38 JPEG、6 PNG、4 HEIC、
+37 sRGB、11 Display P3、4 个真实 EXIF 旋转和 20 个高分辨率资产；canonical 空清单仍 fail closed。
+该结果证明 iOS 生产文件渲染的格式与隐私合同，但不证明预览帧率、峰值内存、物理设备耗时、跨端像素容差或主观质量。
+
 本机完整门命令为：
 
 ```sh
 ruby scripts/check_image_quality_corpus.rb .quality/corpus-manifest.local.yaml
+ruby scripts/run_ios_file_render_corpus.rb \
+  .quality/corpus-manifest.local.yaml \
+  .quality/ios-file-render-<source-id>
 ```
 
 清单条目使用以下结构；`evidence_ref` 指向本机被忽略的许可或同意证据，不提交个人资料：
@@ -244,6 +256,7 @@ ruby scripts/run_portrait_engineering_corpus.rb \
 ruby scripts/check_image_quality_corpus.rb --allow-incomplete
 ruby scripts/check_image_quality_corpus.rb
 ruby scripts/test_image_quality_corpus.rb
+ruby scripts/test_ios_file_render_corpus.rb
 ruby scripts/test_portrait_engineering_corpus.rb
 ruby scripts/test_portrait_review_plan_tools.rb
 ruby scripts/test_blind_review_tools.rb
