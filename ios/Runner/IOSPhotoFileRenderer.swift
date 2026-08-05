@@ -240,17 +240,12 @@ struct IOSImagePipeline {
 
   private var colorTransform: ColorTransform {
     let exposureScale = pow(2, exposureEV)
-    let contrastScale = 1 + contrast * 0.75
     let redWarmthScale = 1 + warmth * 0.15
     let blueWarmthScale = 1 - warmth * 0.15
-    let contrastBias = 0.5 * (1 - contrastScale)
     return ColorTransform(
-      redScale: exposureScale * contrastScale * redWarmthScale,
-      greenScale: exposureScale * contrastScale,
-      blueScale: exposureScale * contrastScale * blueWarmthScale,
-      redBias: contrastBias * redWarmthScale,
-      greenBias: contrastBias,
-      blueBias: contrastBias * blueWarmthScale
+      redScale: exposureScale * redWarmthScale,
+      greenScale: exposureScale,
+      blueScale: exposureScale * blueWarmthScale
     )
   }
 
@@ -266,14 +261,26 @@ struct IOSImagePipeline {
         "inputGVector": CIVector(x: 0, y: transform.greenScale, z: 0, w: 0),
         "inputBVector": CIVector(x: 0, y: 0, z: transform.blueScale, w: 0),
         "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
-        "inputBiasVector": CIVector(
-          x: transform.redBias,
-          y: transform.greenBias,
-          z: transform.blueBias,
-          w: 0
-        ),
+        "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 0),
       ]
     ).cropped(to: extent)
+
+    if contrast != 0 {
+      let dimension = 32
+      if let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) {
+        output = output.applyingFilter(
+          "CIColorCubeWithColorSpace",
+          parameters: [
+            "inputCubeDimension": dimension,
+            "inputCubeData": Self.contrastCubeData(
+              dimension: dimension,
+              contrast: contrast
+            ),
+            "inputColorSpace": colorSpace,
+          ]
+        ).cropped(to: extent)
+      }
+    }
 
     if highlights != 0 || shadows != 0 {
       output = output.applyingFilter(
@@ -323,6 +330,30 @@ struct IOSImagePipeline {
     return geometricallyAdjusted
       .composited(over: geometryBackground)
       .cropped(to: geometryExtent)
+  }
+
+  private static func contrastCubeData(dimension: Int, contrast: Double) -> Data {
+    var cube = [Float]()
+    cube.reserveCapacity(dimension * dimension * dimension * 4)
+    let denominator = Double(dimension - 1)
+    func adjusted(_ value: Double) -> Float {
+      let shaped = value + contrast * 2.5 * value * (1 - value) * (value - 0.5)
+      return Float(min(max(shaped, 0), 1))
+    }
+    for blueIndex in 0..<dimension {
+      let blue = Double(blueIndex) / denominator
+      for greenIndex in 0..<dimension {
+        let green = Double(greenIndex) / denominator
+        for redIndex in 0..<dimension {
+          let red = Double(redIndex) / denominator
+          cube.append(adjusted(red))
+          cube.append(adjusted(green))
+          cube.append(adjusted(blue))
+          cube.append(1)
+        }
+      }
+    }
+    return cube.withUnsafeBytes { Data($0) }
   }
 
   private func applyingGeometry(to input: CIImage, sourceExtent: CGRect) -> CIImage {
@@ -392,7 +423,4 @@ private struct ColorTransform {
   let redScale: Double
   let greenScale: Double
   let blueScale: Double
-  let redBias: Double
-  let greenBias: Double
-  let blueBias: Double
 }

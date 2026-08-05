@@ -79,6 +79,8 @@ end
 
 analyzer_source = File.join(repo_root, "scripts/support/measure_render_semantics.swift")
 fail_contract("semantic analyzer source is missing") unless File.file?(analyzer_source)
+comparator_source = File.join(repo_root, "scripts/support/compare_cross_platform_renders.swift")
+fail_contract("render comparator source is missing") unless File.file?(comparator_source)
 quality_root = File.join(repo_root, ".quality")
 report_assets = []
 Dir.mktmpdir(".render-semantic-trend-", quality_root) do |temporary_root|
@@ -87,6 +89,11 @@ Dir.mktmpdir(".render-semantic-trend-", quality_root) do |temporary_root|
     "/usr/bin/xcrun", "swiftc", "-parse-as-library", analyzer_source, "-o", analyzer,
   )
   fail_contract("semantic analyzer compilation failed: #{stderr.lines.first&.strip || stdout.lines.first&.strip}") unless status.success?
+  comparator = File.join(temporary_root, "render-comparator")
+  stdout, stderr, status = Open3.capture3(
+    "/usr/bin/xcrun", "swiftc", "-parse-as-library", comparator_source, "-o", comparator,
+  )
+  fail_contract("render comparator compilation failed: #{stderr.lines.first&.strip || stdout.lines.first&.strip}") unless status.success?
 
   asset_ids.each do |asset_id|
     measurements = directories.zip(indexed_reports, profile_ids).map do |directory, indexed, profile_id|
@@ -114,12 +121,27 @@ Dir.mktmpdir(".render-semantic-trend-", quality_root) do |temporary_root|
     unless measurements.map(&:first).uniq.length == 1
       fail_contract("#{asset_id} trend does not bind the same source")
     end
+    comparisons = [[0, 1, "negative_to_neutral"], [1, 2, "neutral_to_positive"]].to_h do |first, second, step|
+      stdout, stderr, status = Open3.capture3(
+        comparator,
+        File.join(directories[first], "#{asset_id}.jpg"),
+        File.join(directories[second], "#{asset_id}.jpg"),
+        "512",
+      )
+      fail_contract("#{asset_id} #{step} comparison failed: #{stderr.lines.first&.strip}") unless status.success?
+      begin
+        [step, JSON.parse(stdout)]
+      rescue JSON::ParserError
+        fail_contract("#{asset_id} #{step} comparison is not JSON")
+      end
+    end
     report_assets << {
       "id" => asset_id,
       "source_sha256" => measurements.first.first,
       "negative" => measurements[0].last,
       "neutral" => measurements[1].last,
       "positive" => measurements[2].last,
+      "comparison" => comparisons,
     }
   end
 
@@ -153,6 +175,7 @@ Dir.mktmpdir(".render-semantic-trend-", quality_root) do |temporary_root|
     "sample_max_edge" => 512,
     "manifest_sha256" => reports.first.last.fetch("manifest_sha256"),
     "analyzer_source_sha256" => Digest::SHA256.file(analyzer_source).hexdigest,
+    "comparator_source_sha256" => Digest::SHA256.file(comparator_source).hexdigest,
     "runner_source_sha256" => Digest::SHA256.file(__FILE__).hexdigest,
     "input_report_sha256" => reports.map { |path, _| Digest::SHA256.file(path).hexdigest },
     "asset_count" => report_assets.length,

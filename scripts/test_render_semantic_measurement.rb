@@ -17,9 +17,10 @@ class RenderSemanticMeasurementTest < Minitest::Test
       fixture = compile(fixture_source, File.join(root, "fixture"))
       analyzer = compile(source, File.join(root, "analyzer"))
       {
-        "black" => [0.0, 1.0, 0.0],
-        "white" => [1.0, 0.0, 1.0],
-        "red" => [0.2126, 0.0, 0.0],
+        "black" => [0.0, 1.0, 0.0, 0.5],
+        "white" => [1.0, 0.0, 1.0, 0.5],
+        "red" => [0.2126, 0.0, 0.0, 0.5],
+        "middle" => [128.0 / 255.0, 0.0, 0.0, 0.5 / 255.0],
       }.each do |name, expected|
         image = File.join(root, "#{name}.png")
         system(fixture, name, image) || flunk("fixture generation failed")
@@ -29,6 +30,7 @@ class RenderSemanticMeasurementTest < Minitest::Test
         assert_in_delta expected[0], result.fetch("mean_luma"), 1e-6
         assert_in_delta expected[1], result.fetch("black_clip_ratio"), 1e-6
         assert_in_delta expected[2], result.fetch("white_clip_ratio"), 1e-6
+        assert_in_delta expected[3], result.fetch("mean_rgb_midpoint_distance"), 1e-6
         assert_equal 1, result.fetch("sample_pixels")
       end
     end
@@ -58,6 +60,7 @@ class RenderSemanticMeasurementTest < Minitest::Test
             "black": [0, 0, 0, 255],
             "white": [255, 255, 255, 255],
             "red": [255, 0, 0, 255],
+            "middle": [128, 128, 128, 255],
           ]
           let bytes = colors[CommandLine.arguments[1]]!
           let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!

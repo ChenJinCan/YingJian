@@ -195,6 +195,31 @@ ruby scripts/check_exposure_semantic_alignment.rb \
   .quality/android-render-semantic-<source>/observation-report.json
 ```
 
+### 5.3 iOS 对比度语义门
+
+`ios-contrast-semantic-v1` 使用 iOS 生产文件渲染器对同一 48 张语料执行
+`-0.35 / 0 / +0.35`。实现必须使用端点固定、中灰锚定的软曲线，不允许用线性光域
+`0.5` 作为硬矩阵轴心而大面积压黑。自动合同由两类互补证据组成：
+
+- 原生灰阶 ramp 经公开 `IOSImagePipeline` 验证：正对比度使暗部下降、亮部上升，负对比度方向相反，中灰保持在 2 个码值内，正档纯黑不得超过 10%；
+- 48 张最终 sRGB JPEG 的负/正档相对中性档，逐张 RGB 平均绝对差均不得低于 `3/255`；
+- 任一负/正档相对中性档的新增纯黑比例不得超过 `1.5%`，新增纯白比例不得超过 `5%`。白色上限覆盖明确的高键白背景工程样片，不代表主体高光自然度已经通过；主体观感仍由盲评阻断。
+
+全局亮度标准差、边缘能量或“各通道距 0.5 的均值”受照片内容分布影响，不能作为每张
+彩色照片都必须严格单调的对比度真值。报告仍保留这些观测量，但冻结门只使用灰阶响应、
+可见差异和新增 clipping。执行：
+
+```sh
+ruby scripts/run_render_semantic_trend.rb ios contrast \
+  .quality/ios-file-render-contrast-negative \
+  .quality/ios-file-render-neutral \
+  .quality/ios-file-render-contrast-positive \
+  .quality/ios-render-semantic-contrast
+
+ruby scripts/check_ios_contrast_semantics.rb \
+  .quality/ios-render-semantic-contrast/observation-report.json
+```
+
 ## 6. 人工盲评量表
 
 每张候选结果由至少 3 名评审在校准显示环境下匿名评分。使用 1–5 分：

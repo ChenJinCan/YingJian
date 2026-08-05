@@ -88,6 +88,48 @@ class RunnerTests: XCTestCase {
     XCTAssertGreaterThan(adjustedPixel[0], adjustedPixel[2])
   }
 
+  func testImagePipelineV2SafeContrastHasOrderedToneResponseWithoutCrushing() throws {
+    let positivePipeline = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV2(contrast: 0.35))
+    )
+    let negativePipeline = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV2(contrast: -0.35))
+    )
+    let pixels = (0...255).flatMap { value -> [UInt8] in
+      let channel = UInt8(value)
+      return [channel, channel, channel, 255]
+    }
+    let source = CIImage(
+      bitmapData: Data(pixels),
+      bytesPerRow: 256 * 4,
+      size: CGSize(width: 256, height: 1),
+      format: .RGBA8,
+      colorSpace: sRGB
+    )
+
+    let positive = try rgbaBytes(
+      positivePipeline.applying(to: source, extent: source.extent)
+    )
+    let negative = try rgbaBytes(
+      negativePipeline.applying(to: source, extent: source.extent)
+    )
+    let crushedBlackPixels = stride(from: 0, to: positive.count, by: 4).count { offset in
+      positive[offset] <= 1 && positive[offset + 1] <= 1 && positive[offset + 2] <= 1
+    }
+
+    XCTAssertLessThan(positive[64 * 4], 64)
+    XCTAssertGreaterThan(positive[192 * 4], 192)
+    XCTAssertGreaterThan(negative[64 * 4], 64)
+    XCTAssertLessThan(negative[192 * 4], 192)
+    XCTAssertEqual(positive[128 * 4], 128, accuracy: 2)
+    XCTAssertEqual(negative[128 * 4], 128, accuracy: 2)
+    XCTAssertLessThanOrEqual(
+      crushedBlackPixels,
+      26,
+      "A safe positive contrast step must not crush more than 10% of the sRGB tone scale"
+    )
+  }
+
   func testImagePipelineV2StraightenUsesWhiteOutsideTheSource() throws {
     let pipeline = try XCTUnwrap(
       IOSImagePipeline(arguments: pipelineV2(straightenDegrees: 45))
@@ -808,6 +850,7 @@ class RunnerTests: XCTestCase {
   private func pipelineV2(
     schemaVersion: NSNumber = 2,
     exposureEV: Double = 0,
+    contrast: Double = 0,
     warmth: Double = 0,
     crop: [Double] = [0, 0, 1, 1],
     quarterTurns: NSNumber = 0,
@@ -822,7 +865,7 @@ class RunnerTests: XCTestCase {
         "exposureEv": exposureEV,
         "highlights": 0.0,
         "shadows": 0.0,
-        "contrast": 0.0,
+        "contrast": contrast,
         "warmth": warmth,
         "tint": 0.0,
         "saturation": 0.0,

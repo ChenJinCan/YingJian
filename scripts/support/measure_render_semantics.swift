@@ -65,6 +65,7 @@ private enum RenderSemanticMeasurement {
     var greenSum = 0.0
     var blueSum = 0.0
     var chromaSum = 0.0
+    var rgbMidpointDistanceSum = 0.0
     var blackClips = 0
     var whiteClips = 0
     var luma = [Double](repeating: 0, count: pixels)
@@ -81,6 +82,9 @@ private enum RenderSemanticMeasurement {
       greenSum += green
       blueSum += blue
       chromaSum += max(red, green, blue) - min(red, green, blue)
+      rgbMidpointDistanceSum += (
+        abs(red - 0.5) + abs(green - 0.5) + abs(blue - 0.5)
+      ) / 3
       blackClips += max(red, green, blue) <= 1.0 / 255 ? 1 : 0
       whiteClips += min(red, green, blue) >= 254.0 / 255 ? 1 : 0
     }
@@ -112,6 +116,7 @@ private enum RenderSemanticMeasurement {
       "luma_standard_deviation": sqrt(variance),
       "mean_rgb": [redSum / count, greenSum / count, blueSum / count],
       "mean_chroma": chromaSum / count,
+      "mean_rgb_midpoint_distance": rgbMidpointDistanceSum / count,
       "mean_edge_energy": edgeCount == 0 ? 0 : edgeSum / Double(edgeCount),
       "black_clip_ratio": Double(blackClips) / count,
       "white_clip_ratio": Double(whiteClips) / count,
