@@ -109,6 +109,14 @@ ruby scripts/check_image_quality_corpus.rb .quality/corpus-manifest.local.yaml
 
 ## 5. 自动质量门
 
+本地授权语料补齐后，以下命令直接编译生产 `IOSPortraitRetoucher` 源码，重新生成关闭、默认和高安全档，并验证单人输入确实应用候选、无人脸/多人负例严格安全保持、三档不存在半生效状态、所有输出保持方向规范化后的原像素尺寸且为 sRGB JPEG。报告绑定语料 manifest、候选身份和 retoucher 源码 SHA-256，只是工程安全回归，不替代竞品同路径结果、五人盲评或物理设备证据：
+
+```sh
+ruby scripts/run_portrait_engineering_corpus.rb \
+  .quality/corpus-manifest.local.yaml \
+  .quality/portrait-engineering-<candidate-id>
+```
+
 下列项目任一失败即阻断对应图像链路：
 
 1. **中性恒等性**：中性配方不得产生可见色偏、尺寸变化或重复压缩。
@@ -236,6 +244,7 @@ ruby scripts/check_image_quality_corpus.rb .quality/corpus-manifest.local.yaml
 ruby scripts/check_image_quality_corpus.rb --allow-incomplete
 ruby scripts/check_image_quality_corpus.rb
 ruby scripts/test_image_quality_corpus.rb
+ruby scripts/test_portrait_engineering_corpus.rb
 ruby scripts/test_portrait_review_plan_tools.rb
 ruby scripts/test_blind_review_tools.rb
 ruby scripts/check_device_evidence.rb --allow-incomplete
