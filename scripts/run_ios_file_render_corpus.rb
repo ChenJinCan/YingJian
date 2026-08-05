@@ -7,6 +7,7 @@ require "open3"
 require "tmpdir"
 require "yaml"
 require_relative "support/ios_file_render_corpus"
+require_relative "support/file_render_recipe_profile"
 
 def fail_contract(message)
   warn "iOS file-render corpus failed: #{message}"
@@ -16,8 +17,14 @@ end
 repo_root = File.expand_path("..", __dir__)
 manifest_argument = ARGV.shift
 output_argument = ARGV.shift
+profile_id = ARGV.shift || "neutral"
 if manifest_argument.nil? || output_argument.nil? || !ARGV.empty?
-  fail_contract("usage: run_ios_file_render_corpus.rb MANIFEST OUTPUT_DIRECTORY")
+  fail_contract("usage: run_ios_file_render_corpus.rb MANIFEST OUTPUT_DIRECTORY [RECIPE_PROFILE]")
+end
+begin
+  recipe = FileRenderRecipeProfile.fetch(profile_id)
+rescue FileRenderRecipeProfile::ContractError => error
+  fail_contract(error.message)
 end
 
 manifest_path = File.expand_path(manifest_argument, repo_root)
@@ -68,6 +75,8 @@ report_assets = []
 Dir.mktmpdir(".ios-file-render-", quality_root) do |temporary_root|
   renderer = File.join(temporary_root, "ios-file-renderer")
   staged_output_root = File.join(temporary_root, "outputs")
+  recipe_path = File.join(temporary_root, "recipe.json")
+  File.write(recipe_path, JSON.generate(recipe))
   stdout, stderr, status = Open3.capture3(
     "/usr/bin/xcrun",
     "swiftc",
@@ -107,6 +116,7 @@ Dir.mktmpdir(".ios-file-render-", quality_root) do |temporary_root|
       renderer,
       source_path,
       destination,
+      recipe_path,
     )
     unless render_status.success?
       detail = render_stderr.lines.first&.strip || render_stdout.lines.first&.strip
@@ -153,6 +163,9 @@ Dir.mktmpdir(".ios-file-render-", quality_root) do |temporary_root|
     "portrait_source_sha256" => Digest::SHA256.file(portrait_source).hexdigest,
     "probe_source_sha256" => Digest::SHA256.file(probe_source).hexdigest,
     "renderer" => renderer_identity,
+    "recipe_profile" => profile_id,
+    "recipe" => recipe,
+    "recipe_sha256" => Digest::SHA256.hexdigest(JSON.generate(recipe)),
     "asset_count" => report_assets.length,
     "tag_counts" => tag_counts,
     "assets" => report_assets,

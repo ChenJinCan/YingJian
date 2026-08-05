@@ -1,6 +1,7 @@
 package com.babycompany.yingjian
 
 import android.graphics.Bitmap
+import kotlin.math.pow
 import kotlin.math.roundToInt
 
 object ArgbPixelTransformer {
@@ -9,17 +10,11 @@ object ArgbPixelTransformer {
         val red = pixel ushr 16 and 0xFF
         val green = pixel ushr 8 and 0xFF
         val blue = pixel and 0xFF
-        val inverseAlpha = 255 - alpha
-
-        fun channel(value: Int, scale: Double, bias: Double): Int {
-            val onWhite = (value * alpha + 255 * inverseAlpha) / (255.0 * 255.0)
-            return ((onWhite * scale + bias).coerceIn(0.0, 1.0) * 255.0).roundToInt()
-        }
 
         return (0xFF shl 24) or
-            (channel(red, transform.redScale, transform.redBias) shl 16) or
-            (channel(green, transform.greenScale, transform.greenBias) shl 8) or
-            channel(blue, transform.blueScale, transform.blueBias)
+            (channel(red, alpha, transform.redScale, transform.redBias) shl 16) or
+            (channel(green, alpha, transform.greenScale, transform.greenBias) shl 8) or
+            channel(blue, alpha, transform.blueScale, transform.blueBias)
     }
 
     fun transformInPlace(
@@ -29,6 +24,7 @@ object ArgbPixelTransformer {
     ) {
         require(bitmap.isMutable) { "Export bitmap must be mutable" }
         require(rowsPerChunk > 0) { "Rows per chunk must be positive" }
+        val lookup = ChannelLookup.create(transform)
         val pixels = IntArray(bitmap.width * minOf(rowsPerChunk, bitmap.height))
         var top = 0
         while (top < bitmap.height) {
@@ -36,7 +32,7 @@ object ArgbPixelTransformer {
             val count = bitmap.width * rowCount
             bitmap.getPixels(pixels, 0, bitmap.width, 0, top, bitmap.width, rowCount)
             for (index in 0 until count) {
-                pixels[index] = transform(pixels[index], transform)
+                pixels[index] = transform(pixels[index], transform, lookup)
             }
             bitmap.setPixels(pixels, 0, bitmap.width, 0, top, bitmap.width, rowCount)
             top += rowCount
@@ -51,6 +47,7 @@ object ArgbPixelTransformer {
         require(bitmap.isMutable) { "Export bitmap must be mutable" }
         require(rowsPerChunk > 0) { "Rows per chunk must be positive" }
         val transform = pipeline.colorTransform()
+        val lookup = ChannelLookup.create(transform)
         val pixels = IntArray(bitmap.width * minOf(rowsPerChunk, bitmap.height))
         var top = 0
         while (top < bitmap.height) {
@@ -58,7 +55,8 @@ object ArgbPixelTransformer {
             val count = bitmap.width * rowCount
             bitmap.getPixels(pixels, 0, bitmap.width, 0, top, bitmap.width, rowCount)
             for (index in 0 until count) {
-                pixels[index] = transformAdjustments(pixels[index], transform, pipeline)
+                val base = transform(pixels[index], transform, lookup)
+                pixels[index] = applySecondaryAdjustments(base, pipeline)
             }
             bitmap.setPixels(pixels, 0, bitmap.width, 0, top, bitmap.width, rowCount)
             top += rowCount
@@ -74,6 +72,10 @@ object ArgbPixelTransformer {
         pipeline: AndroidImagePipeline,
     ): Int {
         val base = transform(pixel, transform)
+        return applySecondaryAdjustments(base, pipeline)
+    }
+
+    private fun applySecondaryAdjustments(base: Int, pipeline: AndroidImagePipeline): Int {
         var red = (base ushr 16 and 0xFF) / 255.0
         var green = (base ushr 8 and 0xFF) / 255.0
         var blue = (base and 0xFF) / 255.0
@@ -93,6 +95,40 @@ object ArgbPixelTransformer {
         blue = (luminance + (blue - luminance) * saturationScale + pipeline.tint * 0.04)
             .coerceIn(0.0, 1.0)
         return opaque(red, green, blue)
+    }
+
+    private fun transform(pixel: Int, transform: ColorTransform, lookup: ChannelLookup): Int {
+        val alpha = pixel ushr 24 and 0xFF
+        if (alpha != 255) return transform(pixel, transform)
+        return (0xFF shl 24) or
+            (lookup.red[pixel ushr 16 and 0xFF] shl 16) or
+            (lookup.green[pixel ushr 8 and 0xFF] shl 8) or
+            lookup.blue[pixel and 0xFF]
+    }
+
+    private fun channel(value: Int, alpha: Int, scale: Double, bias: Double): Int {
+        val inverseAlpha = 255 - alpha
+        val onWhite = (value * alpha + 255 * inverseAlpha) / (255.0 * 255.0)
+        val linear = srgbToLinear(onWhite)
+        val adjusted = (linear * scale + bias).coerceIn(0.0, 1.0)
+        return (linearToSrgb(adjusted) * 255.0).roundToInt()
+    }
+
+    private data class ChannelLookup(
+        val red: IntArray,
+        val green: IntArray,
+        val blue: IntArray,
+    ) {
+        companion object {
+            fun create(transform: ColorTransform) = ChannelLookup(
+                red = channelLookup(transform.redScale, transform.redBias),
+                green = channelLookup(transform.greenScale, transform.greenBias),
+                blue = channelLookup(transform.blueScale, transform.blueBias),
+            )
+
+            private fun channelLookup(scale: Double, bias: Double) =
+                IntArray(256) { value -> channel(value, 255, scale, bias) }
+        }
     }
 
     private fun applyClarityInPlace(bitmap: Bitmap, clarity: Double) {
@@ -145,6 +181,12 @@ object ArgbPixelTransformer {
 
     private fun luminance(red: Double, green: Double, blue: Double): Double =
         red * 0.2126 + green * 0.7152 + blue * 0.0722
+
+    private fun srgbToLinear(value: Double): Double =
+        if (value <= 0.04045) value / 12.92 else ((value + 0.055) / 1.055).pow(2.4)
+
+    private fun linearToSrgb(value: Double): Double =
+        if (value <= 0.0031308) value * 12.92 else 1.055 * value.pow(1.0 / 2.4) - 0.055
 
     private fun opaque(red: Double, green: Double, blue: Double): Int =
         (0xFF shl 24) or

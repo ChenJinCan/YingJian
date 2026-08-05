@@ -21,13 +21,16 @@ private enum IOSFilePipelineProbe {
       ])
       return
     }
-    guard CommandLine.arguments.count == 3 else {
+    guard CommandLine.arguments.count == 4 else {
       throw FilePipelineProbeError.invalidArguments
     }
 
     let sourcePath = CommandLine.arguments[1]
     let destinationURL = URL(fileURLWithPath: CommandLine.arguments[2])
-    guard let pipeline = IOSImagePipeline(arguments: neutralRecipe) else {
+    let recipeURL = URL(fileURLWithPath: CommandLine.arguments[3])
+    let recipeData = try Data(contentsOf: recipeURL)
+    let recipe = try JSONSerialization.jsonObject(with: recipeData)
+    guard let pipeline = IOSImagePipeline(arguments: recipe) else {
       throw FilePipelineProbeError.invalidPipeline
     }
     let artifact = try IOSPhotoFileRenderer(
@@ -56,30 +59,6 @@ private enum IOSFilePipelineProbe {
       "has_device_identity": containsDeviceIdentity(properties),
     ])
   }
-
-  private static let neutralRecipe: [String: Any] = [
-    "schemaVersion": 2,
-    "workingColorSpace": "srgb",
-    "adjustments": [
-      "exposureEv": 0.0,
-      "highlights": 0.0,
-      "shadows": 0.0,
-      "contrast": 0.0,
-      "warmth": 0.0,
-      "tint": 0.0,
-      "saturation": 0.0,
-      "clarity": 0.0,
-    ],
-    "geometry": [
-      "normalizedCrop": [0.0, 0.0, 1.0, 1.0],
-      "quarterTurns": 0,
-      "straightenDegrees": 0.0,
-    ],
-    "portrait": [
-      "recipeVersion": 1,
-      "strength": 0.0,
-    ],
-  ]
 
   private static func containsDeviceIdentity(_ properties: [String: Any]) -> Bool {
     let tiff = properties[kCGImagePropertyTIFFDictionary as String] as? [String: Any] ?? [:]

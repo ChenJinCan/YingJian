@@ -22,7 +22,7 @@ class ArgbPixelTransformerTest {
     }
 
     @Test
-    fun `transform applies scale bias and clamps each opaque channel`() {
+    fun `transform applies scale and bias to linear light channels`() {
         val transform = ColorTransform(
             redScale = 2.0,
             greenScale = 0.5,
@@ -34,7 +34,22 @@ class ArgbPixelTransformerTest {
 
         val output = ArgbPixelTransformer.transform(0xFF804020.toInt(), transform)
 
-        assertEquals(0xFFFF2006.toInt(), output)
+        assertEquals(0xFFC12C00.toInt(), output)
+    }
+
+    @Test
+    fun `positive exposure is applied in linear light without clipping encoded mid highlights`() {
+        val pipeline = AndroidImagePipeline(
+            exposureEv = 0.5,
+            contrast = 0.0,
+            warmth = 0.0,
+        )
+
+        val output = ArgbPixelTransformer.transform(0xFFCCCCCC.toInt(), pipeline.colorTransform())
+
+        assertTrue(red(output) in 235..240)
+        assertEquals(red(output), green(output))
+        assertEquals(green(output), blue(output))
     }
 
     @Test

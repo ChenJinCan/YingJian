@@ -8,6 +8,7 @@ require "securerandom"
 require "tmpdir"
 require "yaml"
 require_relative "support/android_file_render_corpus"
+require_relative "support/file_render_recipe_profile"
 
 def fail_contract(message)
   warn "Android file-render corpus failed: #{message}"
@@ -26,8 +27,14 @@ end
 repo_root = File.expand_path("..", __dir__)
 manifest_argument = ARGV.shift
 output_argument = ARGV.shift
+profile_id = ARGV.shift || "neutral"
 if manifest_argument.nil? || output_argument.nil? || !ARGV.empty?
-  fail_contract("usage: run_android_file_render_corpus.rb MANIFEST OUTPUT_DIRECTORY")
+  fail_contract("usage: run_android_file_render_corpus.rb MANIFEST OUTPUT_DIRECTORY [RECIPE_PROFILE]")
+end
+begin
+  recipe = FileRenderRecipeProfile.fetch(profile_id)
+rescue FileRenderRecipeProfile::ContractError => error
+  fail_contract(error.message)
 end
 
 manifest_path = File.expand_path(manifest_argument, repo_root)
@@ -142,7 +149,14 @@ begin
       { "id" => asset_id, "file" => device_name }
     end
     index_path = File.join(temporary_root, "corpus-index.json")
-    File.write(index_path, JSON.generate("assets" => index_assets))
+    File.write(
+      index_path,
+      JSON.generate(
+        "recipe_profile" => profile_id,
+        "pipeline" => recipe,
+        "assets" => index_assets,
+      ),
+    )
     capture!(adb, "-s", serial, "push", index_path, "#{remote_root}/corpus-index.json")
 
     capture!(
@@ -212,6 +226,8 @@ begin
     end
 
     final_report = device_report.merge(
+      "recipe" => recipe,
+      "recipe_sha256" => Digest::SHA256.hexdigest(JSON.generate(recipe)),
       "manifest_sha256" => Digest::SHA256.file(manifest_path).hexdigest,
       "production_source_sha256" => production_sources,
       "instrumentation_source_sha256" => Digest::SHA256.file(test_source).hexdigest,

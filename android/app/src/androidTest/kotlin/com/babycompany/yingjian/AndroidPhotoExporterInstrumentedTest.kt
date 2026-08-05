@@ -182,7 +182,7 @@ class AndroidPhotoExporterInstrumentedTest {
         }
         val exporter = AndroidPhotoExporter(context.contentResolver)
         val neutral = exporter.export(source.absolutePath, ImagePipelineV1(0.0, 0.0, 0.0))
-        val adjusted = exporter.export(source.absolutePath, ImagePipelineV1(0.5, 0.2, 0.6))
+        val adjusted = exporter.export(source.absolutePath, ImagePipelineV1(0.5, 0.0, 0.6))
         val neutralUri = Uri.parse(neutral.assetId)
         val adjustedUri = Uri.parse(adjusted.assetId)
         try {

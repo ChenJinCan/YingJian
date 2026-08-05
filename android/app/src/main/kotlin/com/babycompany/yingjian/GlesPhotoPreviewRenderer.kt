@@ -599,6 +599,20 @@ class GlesPhotoPreviewRenderer(
                     return uCrop.xy + local * uCrop.zw;
                 }
 
+                vec3 srgbToLinear(vec3 color) {
+                    bvec3 cutoff = lessThanEqual(color, vec3(0.04045));
+                    vec3 lower = color / 12.92;
+                    vec3 higher = pow((color + 0.055) / 1.055, vec3(2.4));
+                    return mix(higher, lower, cutoff);
+                }
+
+                vec3 linearToSrgb(vec3 color) {
+                    bvec3 cutoff = lessThanEqual(color, vec3(0.0031308));
+                    vec3 lower = color * 12.92;
+                    vec3 higher = 1.055 * pow(color, vec3(1.0 / 2.4)) - 0.055;
+                    return mix(higher, lower, cutoff);
+                }
+
                 vec3 adjustedPixel(ivec2 coordinate) {
                     ivec2 size = textureSize(uTexture, 0);
                     if (any(lessThan(coordinate, ivec2(0)))
@@ -607,7 +621,9 @@ class GlesPhotoPreviewRenderer(
                     }
                     vec4 sampled = texelFetch(uTexture, coordinate, 0);
                     vec3 color = sampled.rgb * sampled.a + vec3(1.0) * (1.0 - sampled.a);
+                    color = srgbToLinear(color);
                     color = clamp(color * uScale + uBias, 0.0, 1.0);
+                    color = linearToSrgb(color);
                     float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
                     float tonalDelta = uSecondaryAdjustments.y * (1.0 - luminance) * 0.25
                         + uSecondaryAdjustments.x * luminance * 0.15;

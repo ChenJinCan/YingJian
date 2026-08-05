@@ -36,7 +36,11 @@ class AndroidFileRenderCorpusInstrumentedTest {
         }
         check(outputRoot.mkdirs()) { "Corpus output directory could not be created" }
 
-        val index = JSONObject(indexFile.readText()).getJSONArray("assets")
+        val contract = JSONObject(indexFile.readText())
+        val profileId = contract.getString("recipe_profile")
+        require(profileId.matches(Regex("[a-z-]+"))) { "Unsafe recipe profile id" }
+        val pipeline = AndroidImagePipeline.parse(contract.getJSONObject("pipeline").toMap())
+        val index = contract.getJSONArray("assets")
         val results = JSONArray()
         for (position in 0 until index.length()) {
             val asset = index.getJSONObject(position)
@@ -46,7 +50,7 @@ class AndroidFileRenderCorpusInstrumentedTest {
             require(source.isFile && source.canonicalPath.startsWith(inputRoot.canonicalPath + File.separator)) {
                 "$assetId source is unavailable"
             }
-            results.put(renderAsset(assetId, source, outputRoot))
+            results.put(renderAsset(assetId, source, outputRoot, pipeline))
         }
 
         File(context.filesDir, REPORT_FILE).writeText(
@@ -56,17 +60,23 @@ class AndroidFileRenderCorpusInstrumentedTest {
                 .put("sdk", Build.VERSION.SDK_INT)
                 .put("device", Build.MODEL)
                 .put("pipeline_schema", 2)
+                .put("recipe_profile", profileId)
                 .put("assets", results)
                 .toString(2) + "\n",
         )
     }
 
-    private fun renderAsset(assetId: String, source: File, outputRoot: File): JSONObject {
+    private fun renderAsset(
+        assetId: String,
+        source: File,
+        outputRoot: File,
+        pipeline: AndroidImagePipeline,
+    ): JSONObject {
         val sourceHashBefore = sha256(source)
         val result = AndroidPhotoExporter(
             context.contentResolver,
             temporaryDirectory = context.cacheDir,
-        ).export(source.absolutePath, neutralPipeline())
+        ).export(source.absolutePath, pipeline)
         val outputUri = Uri.parse(result.assetId)
         val output = File(outputRoot, "$assetId.jpg")
         try {
@@ -105,25 +115,25 @@ class AndroidFileRenderCorpusInstrumentedTest {
         }
     }
 
-    private fun neutralPipeline() = AndroidImagePipeline(
-        exposureEv = 0.0,
-        contrast = 0.0,
-        warmth = 0.0,
-        highlights = 0.0,
-        shadows = 0.0,
-        tint = 0.0,
-        saturation = 0.0,
-        clarity = 0.0,
-        geometry = ImageGeometry(
-            left = 0.0,
-            top = 0.0,
-            right = 1.0,
-            bottom = 1.0,
-            quarterTurns = 0,
-            straightenDegrees = 0.0,
-        ),
-        schemaVersion = 2,
-    )
+    private fun JSONObject.toMap(): Map<String, Any?> {
+        val result = mutableMapOf<String, Any?>()
+        val names = keys()
+        while (names.hasNext()) {
+            val name = names.next()
+            result[name] = jsonValue(get(name))
+        }
+        return result
+    }
+
+    private fun JSONArray.toList(): List<Any?> =
+        (0 until length()).map { index -> jsonValue(get(index)) }
+
+    private fun jsonValue(value: Any?): Any? = when (value) {
+        is JSONObject -> value.toMap()
+        is JSONArray -> value.toList()
+        JSONObject.NULL -> null
+        else -> value
+    }
 
     private fun hasGps(exif: ExifInterface): Boolean =
         exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE) != null ||

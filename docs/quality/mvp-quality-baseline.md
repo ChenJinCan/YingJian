@@ -180,6 +180,22 @@ ruby scripts/check_cross_platform_render_tolerance.rb \
 
 非中性 V2 配方另行验证：曝光、对比度和色温等可比较数值强度；高光、阴影、饱和度、色调、清晰度因平台算法不同，至少锁定方向、单调性、安全范围和视觉盲评，不能套用中性逐像素容差后宣称画质等价。
 
+### 5.2 双端曝光语义门
+
+`exposure-semantic-v1` 使用同一 48 张语料分别执行 `-0.5 EV / 0 EV / +0.5 EV`，对两端生产最终 JPEG 在 sRGB、最长边 512 px 上测量平均亮度和黑白 clipping。每张照片必须满足：
+
+- 两个相邻档位的平均亮度增量均不小于 `4/255`；
+- iOS 与 Android 对应亮度增量的绝对差不超过 `1/255`；
+- 三个档位的黑、白 clipping 比例跨端绝对差均不超过 `1%`。
+
+该门锁定“曝光方向可见且双端强度一致”，不评价某张照片应自动选择多少曝光，也不允许用 `+0.5 EV` 工程探针替代推荐配方盲评。Android CPU 导出与 GLES 预览的曝光/对比度/色温基础矩阵必须在显式线性光域计算；CPU 可使用按配方预计算的通道查找表，但查找表结果必须与同一线性公式一致。
+
+```sh
+ruby scripts/check_exposure_semantic_alignment.rb \
+  .quality/ios-render-semantic-<source>/observation-report.json \
+  .quality/android-render-semantic-<source>/observation-report.json
+```
+
 ## 6. 人工盲评量表
 
 每张候选结果由至少 3 名评审在校准显示环境下匿名评分。使用 1–5 分：
