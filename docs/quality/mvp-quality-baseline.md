@@ -220,6 +220,24 @@ ruby scripts/check_ios_contrast_semantics.rb \
   .quality/ios-render-semantic-contrast/observation-report.json
 ```
 
+### 5.4 iOS 色温语义门
+
+`ios-warmth-semantic-v1` 使用 iOS 生产文件渲染器对同一 48 张语料执行
+`-0.4 / 0 / +0.4`。每张最终 sRGB JPEG 必须满足：
+
+- 以 `mean(red) - mean(blue)` 定义的有限色温方向，冷→中性和中性→暖两个步长均不小于 `3/255`；
+- 两个相邻档位的 RGB 平均绝对差均不小于 `1/255`；
+- 负/正档相对中性档的平均亮度漂移均不超过 `2/255`；
+- 新增纯黑和新增纯白比例均不超过 `0.5%`。
+
+该门只锁定色温方向、可见强度和基础安全，不证明肤色偏好、混合光修复或自动白平衡推荐正确；
+这些仍需要自然人像与混合光盲评。执行：
+
+```sh
+ruby scripts/check_ios_warmth_semantics.rb \
+  .quality/ios-render-semantic-warmth/observation-report.json
+```
+
 ## 6. 人工盲评量表
 
 每张候选结果由至少 3 名评审在校准显示环境下匿名评分。使用 1–5 分：

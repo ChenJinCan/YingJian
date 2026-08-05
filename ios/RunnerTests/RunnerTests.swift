@@ -88,6 +88,25 @@ class RunnerTests: XCTestCase {
     XCTAssertGreaterThan(adjustedPixel[0], adjustedPixel[2])
   }
 
+  func testImagePipelineV2WarmthHasOrderedRedBlueResponse() throws {
+    let cool = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV2(warmth: -0.4)))
+    let neutral = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV2()))
+    let warm = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV2(warmth: 0.4)))
+    let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
+    let source = CIImage(color: CIColor(red: 0.3, green: 0.3, blue: 0.3))
+      .cropped(to: extent)
+
+    let coolPixel = try firstPixel(cool.applying(to: source, extent: extent))
+    let neutralPixel = try firstPixel(neutral.applying(to: source, extent: extent))
+    let warmPixel = try firstPixel(warm.applying(to: source, extent: extent))
+    let coolIndex = Int(coolPixel[0]) - Int(coolPixel[2])
+    let neutralIndex = Int(neutralPixel[0]) - Int(neutralPixel[2])
+    let warmIndex = Int(warmPixel[0]) - Int(warmPixel[2])
+
+    XCTAssertLessThan(coolIndex, neutralIndex)
+    XCTAssertLessThan(neutralIndex, warmIndex)
+  }
+
   func testImagePipelineV2SafeContrastHasOrderedToneResponseWithoutCrushing() throws {
     let positivePipeline = try XCTUnwrap(
       IOSImagePipeline(arguments: pipelineV2(contrast: 0.35))
