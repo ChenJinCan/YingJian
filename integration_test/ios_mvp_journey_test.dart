@@ -12,7 +12,10 @@ import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline.dart';
 import 'package:yingjian/features/editor/infrastructure/method_channel_photo_exporter.dart';
 import 'package:yingjian/features/editor/infrastructure/method_channel_photo_preview_renderer.dart';
+import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
+import 'package:yingjian/features/project/infrastructure/app_owned_photo_importer.dart';
+import 'package:yingjian/features/project/infrastructure/json_photo_project_store.dart';
 
 import '../test/support/test_services.dart';
 
@@ -32,12 +35,17 @@ void main() {
       '////Z2BgAABOCAf03sBqAAAAAElFTkSuQmCC',
     );
     await source.writeAsBytes(sourceBytes, flush: true);
-    final photo = ProjectPhoto(
-      id: 'ios-runtime-photo',
-      localPath: source.path,
-      originalName: 'portrait.png',
+    final projectRoot = Directory('${fixtureDirectory.path}/project');
+    final PhotoProjectStore store = JsonPhotoProjectStore(
+      directory: () async => projectRoot,
     );
-    final store = MemoryPhotoProjectStore();
+    final importer = AppOwnedPhotoImporter(
+      source: _SelectedPhotoSource([
+        SelectedPhoto(path: source.path, name: 'portrait.png'),
+      ]),
+      mediaDirectory: () async => Directory('${projectRoot.path}/media'),
+      createId: () => 'ios-runtime-photo',
+    );
     final previewRenderer = _NativePreviewProbe(
       delegate: MethodChannelPhotoPreviewRenderer(),
     );
@@ -48,7 +56,7 @@ void main() {
     await tester.pumpWidget(
       buildTestApp(
         settings,
-        photoImporter: FakePhotoImporter([photo]),
+        photoImporter: importer,
         photoProjectStore: store,
         photoExporter: exporter,
         photoPreviewRenderer: previewRenderer,
@@ -62,7 +70,32 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('editor-select-photos')));
     await tester.pumpAndSettle();
-    expect(store.project?.photos.map((item) => item.id), ['ios-runtime-photo']);
+    final importedProject = await store.loadLatest();
+    final importedPhoto = importedProject!.photos.single;
+    expect(importedPhoto.localPath, isNot(source.path));
+    expect(importedPhoto.localPath, startsWith('${projectRoot.path}/media/'));
+    expect(
+      importedPhoto.contentSha256,
+      '8af516495891dfa905d910262db1f9e4517a83fe2a14a499e4e16480fdeaf751',
+    );
+    expect(importedPhoto.pixelWidth, 2);
+    expect(importedPhoto.pixelHeight, 2);
+    expect(importedPhoto.orientation, 1);
+    expect(importedPhoto.colorSpace, PhotoColorSpace.srgb);
+    expect(importedPhoto.inputFormat, PhotoInputFormat.png);
+    expect(await File(importedPhoto.localPath).readAsBytes(), sourceBytes);
+    final snapshot =
+        jsonDecode(
+              await File(
+                '${projectRoot.path}/projects/latest.json',
+              ).readAsString(),
+            )
+            as Map<String, Object?>;
+    final snapshotPhotos = snapshot['photos']! as List<Object?>;
+    expect(
+      (snapshotPhotos.single! as Map<String, Object?>)['localPath'],
+      'media/ios-runtime-photo.png',
+    );
     expect(find.text('自然干净'), findsOneWidget);
 
     final useRecommendation = find.byKey(const ValueKey('recommendation-use'));
@@ -70,7 +103,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(useRecommendation);
     await tester.pumpAndSettle();
-    expect(store.project?.flowState, PhotoProjectFlowState.editing);
+    expect(
+      (await store.loadLatest())?.flowState,
+      PhotoProjectFlowState.editing,
+    );
 
     final workspace = find.byKey(const ValueKey('photo-workspace-scroll'));
     final exposureSlider = find.byKey(
@@ -83,7 +119,7 @@ void main() {
     );
     await tester.drag(exposureSlider, const Offset(70, 0));
     await tester.pumpAndSettle();
-    expect(store.project?.sharedStyle.recipe.exposure, isNot(0));
+    expect((await store.loadLatest())?.sharedStyle.recipe.exposure, isNot(0));
 
     await tester.dragUntilVisible(
       find.byKey(const ValueKey('editor-batch-export')),
@@ -114,6 +150,31 @@ void main() {
     if (await shareFile.exists()) {
       await shareFile.delete();
     }
+
+    final restoredPreviewRenderer = _NativePreviewProbe(
+      delegate: MethodChannelPhotoPreviewRenderer(),
+    );
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoProjectStore: JsonPhotoProjectStore(
+          directory: () async => projectRoot,
+        ),
+        photoPreviewRenderer: restoredPreviewRenderer,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('home-resume-project')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
+    expect(find.text('portrait.png'), findsOneWidget);
+    expect(
+      find.byKey(ValueKey('photo-preview-${importedPhoto.id}')),
+      findsOneWidget,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    expect(restoredPreviewRenderer.disposeCount, greaterThan(0));
   });
 
   testWidgets(
@@ -320,6 +381,17 @@ final class _NativePreviewProbe implements PhotoPreviewRenderer {
   Future<void> dispose(PhotoPreviewHandle handle) async {
     await delegate.dispose(handle);
     disposeCount += 1;
+  }
+}
+
+final class _SelectedPhotoSource implements PhotoSource {
+  _SelectedPhotoSource(this.photos);
+
+  final List<SelectedPhoto> photos;
+
+  @override
+  Future<List<SelectedPhoto>> pickPhotos({required int limit}) async {
+    return photos.take(limit).toList(growable: false);
   }
 }
 

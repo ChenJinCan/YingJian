@@ -184,6 +184,7 @@ class _ProjectResumeCard extends StatelessWidget {
             Text(summary),
             const SizedBox(height: 16),
             FilledButton(
+              key: const ValueKey('home-resume-project'),
               onPressed: onContinue,
               child: Text(context.l10n.continueLastEditing),
             ),
