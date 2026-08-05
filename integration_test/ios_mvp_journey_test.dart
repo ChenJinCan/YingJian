@@ -16,6 +16,7 @@ import 'package:yingjian/features/project/application/photo_project_session.dart
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/project/infrastructure/app_owned_photo_importer.dart';
 import 'package:yingjian/features/project/infrastructure/json_photo_project_store.dart';
+import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
 
 import '../test/support/test_services.dart';
 
@@ -97,6 +98,7 @@ void main() {
       delegate: MethodChannelPhotoPreviewRenderer(),
     );
     final exporter = _NativeExportProbe(delegate: MethodChannelPhotoExporter());
+    final analyzer = _ApplicablePortraitAnalyzer();
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
     final settings = await AppSettings.load();
 
@@ -107,6 +109,7 @@ void main() {
         photoProjectStore: store,
         photoExporter: exporter,
         photoPreviewRenderer: previewRenderer,
+        photoAnalyzer: analyzer,
       ),
     );
     await tester.pumpAndSettle();
@@ -119,6 +122,11 @@ void main() {
     await tester.pumpAndSettle();
     final importedProject = await store.loadLatest();
     final importedPhoto = importedProject!.photos.single;
+    expect(analyzer.photoIds, ['ios-runtime-photo']);
+    expect(
+      importedProject.analysisStates[importedPhoto.id],
+      PhotoAnalysisState.ready,
+    );
     expect(importedPhoto.localPath, isNot(source.path));
     expect(importedPhoto.localPath, startsWith('${projectRoot.path}/media/'));
     expect(
@@ -177,9 +185,46 @@ void main() {
       workspace,
       const Offset(0, -260),
     );
-    await tester.drag(exposureSlider, const Offset(70, 0));
+    final exposureControl = find.descendant(
+      of: exposureSlider,
+      matching: find.byType(Slider),
+    );
+    expect(exposureControl, findsOneWidget);
+    await tester.drag(exposureControl, const Offset(70, 0));
     await tester.pumpAndSettle();
-    expect((await store.loadLatest())?.sharedStyle.recipe.exposure, isNot(0));
+    expect(
+      (await store.loadLatest())?.effectiveRecipeFor(importedPhoto.id).exposure,
+      isNot(0),
+    );
+
+    final portraitTab = find.byKey(
+      const ValueKey('editor-adjustment-tab-portraitRetouch'),
+    );
+    await tester.drag(
+      find.byKey(const ValueKey('editor-adjustment-tabs')),
+      const Offset(-800, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(portraitTab, findsOneWidget);
+    await tester.tap(portraitTab);
+    await tester.pumpAndSettle();
+    final portraitSlider = find.byKey(
+      const ValueKey('editor-adjustment-portraitRetouch'),
+    );
+    expect(portraitSlider, findsOneWidget);
+    final portraitControl = find.descendant(
+      of: portraitSlider,
+      matching: find.byType(Slider),
+    );
+    expect(portraitControl, findsOneWidget);
+    await tester.drag(portraitControl, const Offset(90, 0));
+    await tester.pumpAndSettle();
+    expect(
+      (await store.loadLatest())
+          ?.effectiveRecipeFor(importedPhoto.id)
+          .portraitStrength,
+      greaterThan(0),
+    );
 
     await tester.dragUntilVisible(
       find.byKey(const ValueKey('editor-batch-export')),
@@ -192,6 +237,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(exporter.photoIds, ['ios-runtime-photo']);
+    expect(exporter.recipes.single.portraitStrength, greaterThan(0));
     expect(previewRenderer.backends, contains('ios-core-image'));
     expect(previewRenderer.updateCount, greaterThan(0));
     final exported = exporter.results.single;
@@ -460,6 +506,7 @@ final class _NativeExportProbe implements PhotoExporter {
 
   final PhotoExporter delegate;
   final List<String> photoIds = [];
+  final List<EditRecipe> recipes = [];
   final List<ExportedPhoto> results = [];
 
   @override
@@ -468,9 +515,46 @@ final class _NativeExportProbe implements PhotoExporter {
     required EditRecipe recipe,
   }) async {
     photoIds.add(photo.id);
+    recipes.add(recipe);
     final exported = await delegate.export(photo: photo, recipe: recipe);
     results.add(exported);
     return exported;
+  }
+}
+
+final class _ApplicablePortraitAnalyzer implements PhotoAnalyzer {
+  static const _analysisVersion = 'ios-runtime-fixture-v1';
+  static const _capabilityVersion = 'ios-core-image-vision-v4-local-portrait';
+  final List<String> photoIds = [];
+
+  @override
+  PhotoAnalysisEngineIdentity identityFor(ProjectPhoto photo) =>
+      const PhotoAnalysisEngineIdentity(
+        analysisVersion: _analysisVersion,
+        capabilityVersion: _capabilityVersion,
+      );
+
+  @override
+  Future<LocalPhotoAnalysis> analyze(ProjectPhoto photo) async {
+    photoIds.add(photo.id);
+    return LocalPhotoAnalysis(
+      analysisVersion: _analysisVersion,
+      capabilityVersion: _capabilityVersion,
+      contentSha256: photo.contentSha256,
+      orientation: photo.orientation,
+      pixelWidth: photo.pixelWidth,
+      pixelHeight: photo.pixelHeight,
+      colorSpace: photo.colorSpace,
+      disposition: PhotoAnalysisDisposition.ready,
+      fallbackReason: AnalysisFallbackReason.none,
+      confidence: AnalysisConfidence.high,
+      exposure: ExposureCondition.balanced,
+      whiteBalance: WhiteBalanceCondition.balanced,
+      clarity: ClarityCondition.clear,
+      portrait: PortraitApplicability.applicable,
+      portraitReason: PortraitDegradationReason.none,
+      scene: SceneKind.people,
+    );
   }
 }
 

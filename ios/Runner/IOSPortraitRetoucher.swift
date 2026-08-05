@@ -86,9 +86,16 @@ struct IOSPortraitMasks {
   let effective: CIImage
 }
 
-/// Deterministic, on-device portrait candidate reserved for corpus evaluation.
-/// The production pipeline rejects nonzero strength until the eligibility gate
-/// is frozen; Vision geometry never leaves this native boundary.
+/// Reusable, native-only portrait geometry for one decoded source image.
+/// A missing mask is an intentional safe no-op for ineligible or failed analysis.
+struct IOSPortraitRetouchContext {
+  let effectiveMask: CIImage?
+
+  static let unavailable = IOSPortraitRetouchContext(effectiveMask: nil)
+}
+
+/// Deterministic, on-device portrait retouching. Vision geometry and masks
+/// remain inside this native boundary and never cross the Flutter channel.
 enum IOSPortraitRetoucher {
   static let candidateKind = "vision-landmarks-geometry-roi"
   static let effectVersion = "ios-geometry-retouch-candidate-v4"
@@ -104,8 +111,31 @@ enum IOSPortraitRetoucher {
     let input = source.cropped(to: extent)
     guard bounded > 0 else { return input }
 
+    return applying(
+      to: input,
+      strength: bounded,
+      extent: extent,
+      context: prepare(source: input, extent: extent)
+    )
+  }
+
+  static func applying(
+    to source: CIImage,
+    strength: Double,
+    extent: CGRect,
+    context: IOSPortraitRetouchContext
+  ) -> CIImage {
+    let bounded = max(0, min(1, strength))
+    let input = source.cropped(to: extent)
+    guard bounded > 0, let mask = context.effectiveMask else { return input }
+    return candidate(source: input, mask: mask, strength: bounded, extent: extent)
+  }
+
+  static func prepare(source: CIImage, extent: CGRect) -> IOSPortraitRetouchContext {
+    let input = source.cropped(to: extent)
+
     let longestEdge = max(extent.width, extent.height)
-    guard longestEdge > 0 else { return input }
+    guard longestEdge > 0 else { return .unavailable }
     let scale = min(1, analysisMaxEdge / longestEdge)
     let proxy = input.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
     let proxyExtent = proxy.extent.integral
@@ -114,7 +144,7 @@ enum IOSPortraitRetoucher {
       proxyExtent.height >= 1,
       let proxyImage = context.createCGImage(proxy, from: proxyExtent)
     else {
-      return input
+      return .unavailable
     }
 
     let request = VNDetectFaceLandmarksRequest()
@@ -131,7 +161,7 @@ enum IOSPortraitRetoucher {
         extent: proxyExtent
       )
     else {
-      return input
+      return .unavailable
     }
 
     let mask = proxyMasks.effective
@@ -142,7 +172,7 @@ enum IOSPortraitRetoucher {
         )
       )
       .cropped(to: extent)
-    return candidate(source: input, mask: mask, strength: bounded, extent: extent)
+    return IOSPortraitRetouchContext(effectiveMask: mask)
   }
 
   static func masks(

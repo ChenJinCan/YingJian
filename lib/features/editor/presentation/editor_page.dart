@@ -2134,6 +2134,7 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
         SizedBox(
           height: 48,
           child: ListView.separated(
+            key: const ValueKey('editor-adjustment-tabs'),
             scrollDirection: Axis.horizontal,
             itemCount: parameters.length,
             separatorBuilder: (_, _) => const SizedBox(width: 4),

@@ -10,15 +10,15 @@ private enum PhotoInputInspectionError: Error {
   case unreadable
 }
 
-/// Production eligibility remains closed until the portrait candidate passes
-/// the frozen corpus, competitor comparison, and blind-review gates in ADR 0002.
+/// Reports whether the deterministic local portrait implementation can be used
+/// for this input. Quality acceptance remains a separate release gate.
 struct IOSPortraitCapabilityStatus: Equatable {
   let applicability: String
   let reason: String
 }
 
 enum IOSPortraitCapabilityPolicy {
-  static let productionEligible = false
+  static let productionEligible = true
 
   static func classify(_ decision: IOSPortraitSafetyDecision) -> IOSPortraitCapabilityStatus {
     guard decision.applicable else {
@@ -26,12 +26,6 @@ enum IOSPortraitCapabilityPolicy {
       return IOSPortraitCapabilityStatus(
         applicability: applicability,
         reason: reasonName(decision.reason)
-      )
-    }
-    guard productionEligible else {
-      return IOSPortraitCapabilityStatus(
-        applicability: "unsafe",
-        reason: "capabilityLocked"
       )
     }
     return IOSPortraitCapabilityStatus(applicability: "applicable", reason: "none")
@@ -607,7 +601,7 @@ enum IOSPortraitCapabilityPolicy {
     }
     return [
       "analysisVersion": "local-pixels-v1",
-      "capabilityVersion": "ios-core-image-vision-v3-portrait-locked",
+      "capabilityVersion": "ios-core-image-vision-v4-local-portrait",
       "confidence": "medium",
       "exposure": exposure,
       "whiteBalance": whiteBalance,
@@ -941,6 +935,7 @@ final class IOSPhotoPreviewSession: NSObject, FlutterTexture {
 
   private let source: CIImage
   private let extent: CGRect
+  private let portraitContext: IOSPortraitRetouchContext
   private let bufferLock = NSLock()
   private var pixelBuffer: CVPixelBuffer?
   private var isClosed = false
@@ -971,7 +966,15 @@ final class IOSPhotoPreviewSession: NSObject, FlutterTexture {
       height: max(1, floor(normalizedScaled.extent.height))
     )
     source = normalizedScaled.cropped(to: sourceExtent)
-    let initialOutput = pipeline.applying(to: source, extent: sourceExtent)
+    portraitContext = IOSPortraitRetoucher.prepare(
+      source: source,
+      extent: sourceExtent
+    )
+    let initialOutput = pipeline.applying(
+      to: source,
+      extent: sourceExtent,
+      portraitContext: portraitContext
+    )
     extent = initialOutput.extent.integral
     width = Int(extent.width)
     height = Int(extent.height)
@@ -980,7 +983,11 @@ final class IOSPhotoPreviewSession: NSObject, FlutterTexture {
   }
 
   func render(pipeline: IOSImagePipeline) throws {
-    let output = pipeline.applying(to: source, extent: source.extent.integral)
+    let output = pipeline.applying(
+      to: source,
+      extent: source.extent.integral,
+      portraitContext: portraitContext
+    )
     guard output.extent.integral.size == extent.size else {
       throw IOSPhotoPreviewError.dimensionsChanged
     }

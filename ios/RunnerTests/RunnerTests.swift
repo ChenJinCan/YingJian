@@ -351,11 +351,11 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(corner, [255, 255, 255, 255])
   }
 
-  func testImagePipelineRejectsUnknownOrUnsafeV2Contracts() {
+  func testImagePipelineAcceptsBoundedPortraitStrengthAndRejectsUnsafeV2Contracts() {
     XCTAssertNil(IOSImagePipeline(arguments: pipelineV2(schemaVersion: 3)))
-    XCTAssertNil(
-      IOSImagePipeline(arguments: pipelineV2(portraitStrength: 0.1)),
-      "An unfrozen portrait candidate must not enter the production pipeline"
+    XCTAssertEqual(
+      IOSImagePipeline(arguments: pipelineV2(portraitStrength: 0.1))?.portraitStrength,
+      0.1
     )
     XCTAssertNil(IOSImagePipeline(arguments: pipelineV2(portraitStrength: -0.01)))
     XCTAssertNil(IOSImagePipeline(arguments: pipelineV2(portraitStrength: 1.01)))
@@ -424,8 +424,8 @@ class RunnerTests: XCTestCase {
     )
   }
 
-  func testUnfrozenPortraitCandidateIsNeverReportedAsProductionApplicable() {
-    XCTAssertFalse(IOSPortraitCapabilityPolicy.productionEligible)
+  func testSelfBuiltPortraitCandidateIsReportedApplicableOnlyForSafeSingleFaces() {
+    XCTAssertTrue(IOSPortraitCapabilityPolicy.productionEligible)
     XCTAssertEqual(
       IOSPortraitCapabilityPolicy.classify(
         IOSPortraitSafetyDecision(applicable: false, reason: .noFace)
@@ -442,7 +442,35 @@ class RunnerTests: XCTestCase {
       IOSPortraitCapabilityPolicy.classify(
         IOSPortraitSafetyDecision(applicable: true, reason: .none)
       ),
-      IOSPortraitCapabilityStatus(applicability: "unsafe", reason: "capabilityLocked")
+      IOSPortraitCapabilityStatus(applicability: "applicable", reason: "none")
+    )
+  }
+
+  func testProductionPipelineAppliesInjectedLocalPortraitContextAndKeepsZeroExact() throws {
+    let extent = CGRect(x: 0, y: 0, width: 64, height: 64)
+    let source = CIImage(color: CIColor(red: 0.36, green: 0.24, blue: 0.18))
+      .cropped(to: extent)
+    let fullFaceMask = CIImage(color: CIColor(red: 1, green: 1, blue: 1))
+      .cropped(to: extent)
+    let context = IOSPortraitRetouchContext(effectiveMask: fullFaceMask)
+    let neutral = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV2()))
+    let portrait = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV2(portraitStrength: 0.35))
+    )
+
+    let sourceBytes = try rgbaBytes(source)
+    let zeroBytes = try rgbaBytes(
+      neutral.applying(to: source, extent: extent, portraitContext: context)
+    )
+    let portraitBytes = try rgbaBytes(
+      portrait.applying(to: source, extent: extent, portraitContext: context)
+    )
+
+    XCTAssertEqual(zeroBytes, sourceBytes, "strength zero must remain exact")
+    XCTAssertGreaterThan(
+      meanAbsoluteDifference(sourceBytes, portraitBytes),
+      0.25,
+      "a safe local portrait context must visibly affect the production pipeline"
     )
   }
 

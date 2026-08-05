@@ -36,8 +36,16 @@ struct IOSPhotoFileRenderer {
       by: CGAffineTransform(translationX: -input.extent.minX, y: -input.extent.minY)
     )
     let metadata = ImageExportMetadata.sanitize(input.properties)
+    let sourceExtent = normalizedInput.extent.integral
+    let portraitContext = pipeline.portraitStrength > 0
+      ? IOSPortraitRetoucher.prepare(source: normalizedInput, extent: sourceExtent)
+      : .unavailable
     let output = pipeline
-      .applying(to: normalizedInput, extent: normalizedInput.extent.integral)
+      .applying(
+        to: normalizedInput,
+        extent: sourceExtent,
+        portraitContext: portraitContext
+      )
       .settingProperties(metadata)
     let outputExtent = output.extent.integral
     guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
@@ -188,7 +196,7 @@ struct IOSImagePipeline {
       let portrait = pipeline["portrait"] as? [String: Any],
       Self.exactInteger(portrait["recipeVersion"]) == 1,
       let portraitStrength = Self.finiteNumber(portrait["strength"]),
-      portraitStrength == 0
+      (0.0...1.0).contains(portraitStrength)
     else {
       return nil
     }
@@ -249,7 +257,11 @@ struct IOSImagePipeline {
     )
   }
 
-  func applying(to input: CIImage, extent: CGRect) -> CIImage {
+  func applying(
+    to input: CIImage,
+    extent: CGRect,
+    portraitContext: IOSPortraitRetouchContext? = nil
+  ) -> CIImage {
     let white = CIImage(color: CIColor(red: 1, green: 1, blue: 1, alpha: 1))
       .cropped(to: extent)
     let opaqueInput = input.composited(over: white)
@@ -339,11 +351,20 @@ struct IOSImagePipeline {
       ).cropped(to: extent)
     }
     if portraitStrength > 0 {
-      output = IOSPortraitRetoucher.applying(
-        to: output,
-        strength: portraitStrength,
-        extent: extent
-      )
+      if let portraitContext {
+        output = IOSPortraitRetoucher.applying(
+          to: output,
+          strength: portraitStrength,
+          extent: extent,
+          context: portraitContext
+        )
+      } else {
+        output = IOSPortraitRetoucher.applying(
+          to: output,
+          strength: portraitStrength,
+          extent: extent
+        )
+      }
     }
     let geometricallyAdjusted = applyingGeometry(to: output, sourceExtent: extent)
     let geometryExtent = geometricallyAdjusted.extent.integral
