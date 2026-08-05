@@ -26,3 +26,16 @@ aesthetic-review evidence, or bundled into the application target.
 - Source retrieved: 2026-08-06
 - Source license: <https://creativecommons.org/licenses/by-sa/4.0/>
 - Derivative SHA-256: `2dad73182ac2febcfd46d73d502bc87cbb7ad25737b0347a7cab9ae784330d6e`
+
+`body-standing-unoccluded-pd.jpg` is a 500 x 752 sRGB derivative of
+[`Man-standing.jpg`](https://commons.wikimedia.org/wiki/File:Man-standing.jpg),
+self-published by Wikimedia Commons user CharlieCLC into the public domain.
+The unobstructed shoulder-to-hip silhouette is used with the production iOS
+file renderer to prove that the maximum-safe body control narrows the final
+JPEG torso contour by the MVP-required `2%...6%`. It is engineering evidence,
+not a claim of physical-device quality or formal reviewer preference, and is
+not bundled into the application target.
+
+- Source retrieved: 2026-08-06
+- Source license: public domain (`PD-self`)
+- Derivative SHA-256: `8e1e4933ea09c54316a8326816f723a03377ac020045f5a85f134d4f7e9c5469`

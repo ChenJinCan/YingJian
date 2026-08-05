@@ -19,6 +19,7 @@ expected = [
   "source hygiene",
   "Flutter static and unit tests",
   "iOS native tests",
+  "iOS real-fixture reshape contours",
   "iOS runtime journey",
   "image corpus contracts",
   "portrait engineering corpus",

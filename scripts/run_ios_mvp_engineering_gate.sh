@@ -9,13 +9,14 @@ list_gates() {
 1. source hygiene
 2. Flutter static and unit tests
 3. iOS native tests
-4. iOS runtime journey
-5. image corpus contracts
-6. portrait engineering corpus
-7. portrait engineering diagnostic tools
-8. portrait review structure
-9. iOS device evidence contract
-10. release contract
+4. iOS real-fixture reshape contours
+5. iOS runtime journey
+6. image corpus contracts
+7. portrait engineering corpus
+8. portrait engineering diagnostic tools
+9. portrait review structure
+10. iOS device evidence contract
+11. release contract
 EOF
 }
 
@@ -96,6 +97,9 @@ run_gate "iOS native tests" \
     -scheme Runner \
     -destination "platform=iOS Simulator,id=$simulator_id" \
     CODE_SIGNING_ALLOWED=NO
+
+run_gate "iOS real-fixture reshape contours" \
+  ruby scripts/check_ios_reshape_fixtures.rb
 
 xcrun simctl boot "$simulator_id" 2>/dev/null || true
 xcrun simctl bootstatus "$simulator_id" -b
