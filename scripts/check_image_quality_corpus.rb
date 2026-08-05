@@ -241,7 +241,22 @@ assets.each_with_index do |asset, index|
   actual_format = probed["format"] == "heif" ? "heic" : probed["format"]
   actual_width = Integer(probed["pixelWidth"], exception: false)
   actual_height = Integer(probed["pixelHeight"], exception: false)
-  actual_orientation = probed["orientation"] == "<nil>" ? 1 : Integer(probed["orientation"], exception: false)
+  actual_orientation = Integer(probed["orientation"], exception: false)
+  if actual_orientation.nil?
+    orientation_probe = File.join(repo_root, "scripts/support/probe_image_orientation.swift")
+    orientation_stdout, orientation_stderr, orientation_status = Open3.capture3(
+      "/usr/bin/xcrun",
+      "swift",
+      orientation_probe,
+      full_path,
+    )
+    if orientation_status.success?
+      actual_orientation = Integer(orientation_stdout.strip, exception: false)
+    else
+      detail = orientation_stderr.lines.first&.strip || "unknown error"
+      errors << "#{prefix}.file ImageIO orientation probe failed: #{detail}"
+    end
+  end
   actual_color_space = if probed["profile"]&.match?(/display\s*p3|\bp3\b/i)
                          "display_p3"
                        elsif probed["profile"]&.match?(/srgb/i)

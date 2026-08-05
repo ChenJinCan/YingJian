@@ -87,6 +87,71 @@ begin
     stdout, stderr, status = run_checker(checker, repo_root, manifest_path)
     assert(status.success?, "valid media manifest failed: #{stdout}#{stderr}")
 
+    oriented_image = File.join(corpus, "fixture-oriented.jpg")
+    oriented_source = File.join(directory, "write-oriented.swift")
+    File.write(
+      oriented_source,
+      <<~SWIFT,
+        import Foundation
+        import ImageIO
+        import UniformTypeIdentifiers
+
+        let sourceURL = URL(fileURLWithPath: CommandLine.arguments[1]) as CFURL
+        let outputURL = URL(fileURLWithPath: CommandLine.arguments[2]) as CFURL
+        let source = CGImageSourceCreateWithURL(sourceURL, nil)!
+        let image = CGImageSourceCreateImageAtIndex(source, 0, nil)!
+        let destination = CGImageDestinationCreateWithURL(
+          outputURL,
+          UTType.jpeg.identifier as CFString,
+          1,
+          nil
+        )!
+        CGImageDestinationAddImage(
+          destination,
+          image,
+          [kCGImagePropertyOrientation: 6] as CFDictionary
+        )
+        precondition(CGImageDestinationFinalize(destination))
+      SWIFT
+    )
+    oriented_binary = File.join(directory, "write-oriented")
+    _stdout, stderr, status = Open3.capture3(
+      "/usr/bin/xcrun", "swiftc", oriented_source, "-o", oriented_binary
+    )
+    assert(status.success?, "oriented fixture helper failed to compile: #{stderr}")
+    _stdout, stderr, status = Open3.capture3(oriented_binary, image, oriented_image)
+    assert(status.success?, "oriented fixture helper failed: #{stderr}")
+    oriented_asset = Marshal.load(Marshal.dump(manifest["assets"][0]))
+    oriented_asset["file"] = "fixture-oriented.jpg"
+    oriented_asset["sha256"] = Digest::SHA256.file(oriented_image).hexdigest
+    oriented_asset["tags"] = [
+      "no_face", "group_member", "jpeg", "srgb", "exif_rotated",
+    ]
+    oriented_asset["media"]["orientation"] = 6
+    manifest["assets"] = [oriented_asset]
+    manifest["minimum_tag_counts"] = {
+      "no_face" => 1,
+      "group_member" => 1,
+      "jpeg" => 1,
+      "srgb" => 1,
+      "exif_rotated" => 1,
+    }
+    File.write(manifest_path, YAML.dump(manifest))
+    stdout, stderr, status = run_checker(checker, repo_root, manifest_path)
+    assert(status.success?, "ImageIO orientation was not accepted: #{stdout}#{stderr}")
+
+    manifest["assets"] = [Marshal.load(Marshal.dump(oriented_asset))]
+    manifest["assets"][0]["file"] = "fixture.jpg"
+    manifest["assets"][0]["sha256"] = Digest::SHA256.file(image).hexdigest
+    manifest["assets"][0]["tags"] = ["no_face", "group_member", "jpeg", "srgb"]
+    manifest["assets"][0]["media"]["orientation"] = 1
+    manifest["minimum_tag_counts"] = {
+      "no_face" => 1,
+      "group_member" => 1,
+      "jpeg" => 1,
+      "srgb" => 1,
+    }
+
     manifest["required_single_assets"] = 1
     File.write(manifest_path, YAML.dump(manifest))
     _stdout, stderr, status = run_checker(checker, repo_root, manifest_path)
