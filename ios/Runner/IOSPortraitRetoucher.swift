@@ -1,5 +1,5 @@
 import CoreImage
-import UIKit
+import CoreGraphics
 import Vision
 
 /// Deterministic, on-device portrait candidate reserved for corpus evaluation.
