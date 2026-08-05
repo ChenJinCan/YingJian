@@ -149,6 +149,37 @@ ruby scripts/run_portrait_engineering_corpus.rb \
 
 确定性光色操作使用数值或感知容差；人像自然度和审美推荐不能只用像素 Golden 判定。
 
+### 5.1 双端中性导出容差
+
+`neutral-export-v1` 只验证同一原图经 iOS 与 Android 生产文件渲染器执行中性配方后，解码、方向归一、sRGB 转换和 JPEG 95 导出的差异受控。它不验证非中性参数强度、人像自然度、推荐审美、预览帧率或设备性能，也不得用于替代盲评。
+
+比较器将两端最终 JPEG 按方向归一并在显式 sRGB 中缩至最长边 512 px。48 张资产逐张满足以下硬门：
+
+| 指标 | `neutral-export-v1` 上限/下限 |
+|---|---:|
+| RGB 平均绝对误差 | ≤ 1/255 |
+| RGB 均方根误差 | ≤ 2/255 |
+| 单通道最大绝对误差 | ≤ 32/255 |
+| 亮度平均绝对误差 | ≤ 1/255 |
+| 任一通道平均偏差绝对值 | ≤ 1/255 |
+| 每像素最大通道误差 p95 / p99 | ≤ 3/255 / 4/255 |
+| 最大通道误差超过 4 / 8 码值的像素比例 | ≤ 1% / 0.5% |
+| PSNR | ≥ 42 dB；完全相同时允许为空 |
+
+阈值以 8-bit 码值和稀疏异常比例冻结，不以一次观测的精确最大值回填；完全相同像素比例只记录，不作为 JPEG 跨实现门禁。执行：
+
+```sh
+ruby scripts/run_cross_platform_render_comparison.rb \
+  .quality/ios-file-render-<source-commit> \
+  .quality/android-file-render-<source-commit> \
+  .quality/cross-platform-neutral-<source-commit>
+
+ruby scripts/check_cross_platform_render_tolerance.rb \
+  .quality/cross-platform-neutral-<source-commit>/observation-report.json
+```
+
+非中性 V2 配方另行验证：曝光、对比度和色温等可比较数值强度；高光、阴影、饱和度、色调、清晰度因平台算法不同，至少锁定方向、单调性、安全范围和视觉盲评，不能套用中性逐像素容差后宣称画质等价。
+
 ## 6. 人工盲评量表
 
 每张候选结果由至少 3 名评审在校准显示环境下匿名评分。使用 1–5 分：

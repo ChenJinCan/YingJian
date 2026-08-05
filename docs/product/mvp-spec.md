@@ -327,6 +327,7 @@ Existing editor session, photo project session, importer, store and method-chann
 - Use licensed fixed samples with a manifest and hashes.
 - Automatically verify orientation, dimensions, crop coordinates, deterministic output, preview/export trend and unacceptable compression regressions.
 - Use numeric or perceptual tolerances for deterministic light/color operations.
+- Apply the frozen `neutral-export-v1` cross-platform profile only to neutral decode, orientation, sRGB conversion and JPEG export. Non-neutral adjustments require parameter-specific direction and strength contracts plus blinded review; neutral pixel tolerance is not evidence of retouch quality.
 - Use blinded human review in addition to automation for skin naturalness, texture preservation, recommendation quality and group coherence.
 - Compare candidate engines using identical inputs, parameter levels, devices and scoring rubrics.
 - Do not claim quality parity based only on screenshots or one favorable sample.
