@@ -56,6 +56,8 @@ renderer_source = File.join(
   "scripts/support/render_portrait_engineering_candidate.swift",
 )
 retoucher_source = File.join(repo_root, "ios/Runner/IOSPortraitRetoucher.swift")
+runner_source = File.expand_path(__FILE__)
+contract_source = File.join(repo_root, "scripts/support/portrait_engineering_corpus.rb")
 report_assets = []
 quality_root = File.join(repo_root, ".quality")
 FileUtils.mkdir_p(quality_root)
@@ -106,8 +108,14 @@ Dir.mktmpdir(".portrait-engineering-", quality_root) do |temporary_root|
       detail = render_stderr.lines.first&.strip || render_stdout.lines.first&.strip
       fail_contract("#{asset_id} render failed: #{detail}")
     end
+    begin
+      effect_metrics = JSON.parse(render_stdout)
+    rescue JSON::ParserError
+      fail_contract("#{asset_id} effect metrics were not JSON")
+    end
 
     output_files = {
+      "baseline" => File.join(destination, "baseline.jpg"),
       "off" => File.join(destination, "off.jpg"),
       "default" => File.join(destination, "default.jpg"),
       "high_safe" => File.join(destination, "high-safe.jpg"),
@@ -122,6 +130,11 @@ Dir.mktmpdir(".portrait-engineering-", quality_root) do |temporary_root|
         asset_id: asset_id,
         tags: tags,
         classification: classification,
+      )
+      PortraitEngineeringCorpus.validate_effect_metrics!(
+        asset_id: asset_id,
+        classification: classification,
+        metrics: effect_metrics,
       )
     rescue PortraitEngineeringCorpus::ContractError => error
       fail_contract(error.message)
@@ -158,17 +171,20 @@ Dir.mktmpdir(".portrait-engineering-", quality_root) do |temporary_root|
       "source_sha256" => asset.fetch("sha256"),
       "classification" => classification,
       "output_sha256" => output_hashes,
+      "effect_metrics" => effect_metrics,
     }
   end
 
   counts = report_assets.group_by { |asset| asset.fetch("classification") }
     .transform_values(&:length)
   report = {
-    "schema" => 1,
+    "schema" => 3,
     "engineering_only" => true,
     "manifest_sha256" => Digest::SHA256.file(manifest_path).hexdigest,
     "retoucher_source_sha256" => Digest::SHA256.file(retoucher_source).hexdigest,
     "renderer_source_sha256" => Digest::SHA256.file(renderer_source).hexdigest,
+    "runner_source_sha256" => Digest::SHA256.file(runner_source).hexdigest,
+    "contract_source_sha256" => Digest::SHA256.file(contract_source).hexdigest,
     "candidate" => candidate_identity,
     "asset_count" => report_assets.length,
     "counts" => {
