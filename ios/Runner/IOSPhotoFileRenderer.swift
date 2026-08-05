@@ -282,14 +282,37 @@ struct IOSImagePipeline {
       }
     }
 
-    if highlights != 0 || shadows != 0 {
-      output = output.applyingFilter(
-        "CIHighlightShadowAdjust",
-        parameters: [
-          "inputHighlightAmount": 1 + highlights * 0.65,
-          "inputShadowAmount": shadows * 0.65,
-        ]
-      ).cropped(to: extent)
+    if highlights != 0 {
+      let dimension = 32
+      if let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) {
+        output = output.applyingFilter(
+          "CIColorCubeWithColorSpace",
+          parameters: [
+            "inputCubeDimension": dimension,
+            "inputCubeData": Self.highlightCubeData(
+              dimension: dimension,
+              highlights: highlights
+            ),
+            "inputColorSpace": colorSpace,
+          ]
+        ).cropped(to: extent)
+      }
+    }
+    if shadows != 0 {
+      let dimension = 32
+      if let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) {
+        output = output.applyingFilter(
+          "CIColorCubeWithColorSpace",
+          parameters: [
+            "inputCubeDimension": dimension,
+            "inputCubeData": Self.shadowCubeData(
+              dimension: dimension,
+              shadows: shadows
+            ),
+            "inputColorSpace": colorSpace,
+          ]
+        ).cropped(to: extent)
+      }
     }
     if saturation != 0 {
       output = output.applyingFilter(
@@ -349,6 +372,56 @@ struct IOSImagePipeline {
           cube.append(adjusted(red))
           cube.append(adjusted(green))
           cube.append(adjusted(blue))
+          cube.append(1)
+        }
+      }
+    }
+    return cube.withUnsafeBytes { Data($0) }
+  }
+
+  private static func highlightCubeData(dimension: Int, highlights: Double) -> Data {
+    var cube = [Float]()
+    cube.reserveCapacity(dimension * dimension * dimension * 4)
+    let denominator = Double(dimension - 1)
+    func clamped(_ value: Double) -> Float {
+      Float(min(max(value, 0), 1))
+    }
+    for blueIndex in 0..<dimension {
+      let blue = Double(blueIndex) / denominator
+      for greenIndex in 0..<dimension {
+        let green = Double(greenIndex) / denominator
+        for redIndex in 0..<dimension {
+          let red = Double(redIndex) / denominator
+          let luma = red * 0.2126 + green * 0.7152 + blue * 0.0722
+          let delta = highlights * pow(luma, 3) * (1 - luma)
+          cube.append(clamped(red + delta))
+          cube.append(clamped(green + delta))
+          cube.append(clamped(blue + delta))
+          cube.append(1)
+        }
+      }
+    }
+    return cube.withUnsafeBytes { Data($0) }
+  }
+
+  private static func shadowCubeData(dimension: Int, shadows: Double) -> Data {
+    var cube = [Float]()
+    cube.reserveCapacity(dimension * dimension * dimension * 4)
+    let denominator = Double(dimension - 1)
+    func clamped(_ value: Double) -> Float {
+      Float(min(max(value, 0), 1))
+    }
+    for blueIndex in 0..<dimension {
+      let blue = Double(blueIndex) / denominator
+      for greenIndex in 0..<dimension {
+        let green = Double(greenIndex) / denominator
+        for redIndex in 0..<dimension {
+          let red = Double(redIndex) / denominator
+          let luma = red * 0.2126 + green * 0.7152 + blue * 0.0722
+          let delta = shadows * pow(1 - luma, 3) * luma
+          cube.append(clamped(red + delta))
+          cube.append(clamped(green + delta))
+          cube.append(clamped(blue + delta))
           cube.append(1)
         }
       }

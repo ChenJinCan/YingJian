@@ -238,6 +238,44 @@ ruby scripts/check_ios_warmth_semantics.rb \
   .quality/ios-render-semantic-warmth/observation-report.json
 ```
 
+### 5.5 iOS 高光与阴影语义门
+
+`ios-selective-tone-semantic-v1` 使用 iOS 生产文件渲染器分别执行高光和阴影的
+`-0.4 / 0 / +0.4`。两项都使用 sRGB 32³ color-cube 的亮度选择性软曲线：高光在亮部权重更高，
+阴影在暗部权重更高，纯黑与纯白端点固定。原生灰阶回归必须证明双向变化以及目标亮度区域的
+选择性；48 张最终 JPEG 每项还必须满足：
+
+- 负档→中性和中性→正档的平均亮度步长均不小于 `1/255`；
+- 两个相邻档位的 RGB 平均绝对差均不小于 `1/255`；
+- 高光新增纯黑 ≤ `0.5%`、新增纯白 ≤ `1%`；
+- 阴影新增纯黑 ≤ `1.5%`、新增纯白 ≤ `0.5%`。
+
+旧实现把正高光传入系统滤镜的无效区间，48/48 正档均与中性完全相同；旧阴影滤镜还会让
+高键样片新增纯白约 `5%`。这两种行为都被当前合同拒绝。执行：
+
+```sh
+ruby scripts/check_ios_selective_tone_semantics.rb \
+  .quality/ios-render-semantic-highlights/observation-report.json \
+  .quality/ios-render-semantic-shadows/observation-report.json
+```
+
+### 5.6 iOS 饱和度、色调与清晰度语义门
+
+`ios-color-detail-semantic-v1` 按参数使用不同指标：
+
+- 饱和度 `-0.35 / 0 / +0.35`：有色样片的平均色度相邻步长 ≥ `3/255`、RGB 平均绝对差 ≥ `1/255`；中性色度低于 `1/255` 的样片允许安全不变，但不得凭空染色；平均亮度漂移 ≤ `5/255`，新增黑白 clipping 均 ≤ `0.5%`。
+- 色调 `-0.4 / 0 / +0.4`：以 `(mean(red)+mean(blue))/2-mean(green)` 定义洋红–绿色对手轴，相邻步长 ≥ `4/255`、RGB 平均绝对差 ≥ `2/255`；平均亮度漂移 ≤ `5/255`，新增黑白 clipping 均 ≤ `1%`。
+- 清晰度 `-0.25 / 0 / +0.25`：平均边缘能量必须严格递增，两个相邻档位的逐像素最大通道差 p95 均 ≥ `1/255`；平均亮度漂移 ≤ `1/255`，新增黑白 clipping 均 ≤ `0.5%`。
+
+这些机器门锁定方向、最低可见强度和安全范围；辉光、过锐、噪声放大、肤质损害仍由盲评判断。
+
+```sh
+ruby scripts/check_ios_color_detail_semantics.rb \
+  .quality/ios-render-semantic-saturation/observation-report.json \
+  .quality/ios-render-semantic-tint/observation-report.json \
+  .quality/ios-render-semantic-clarity/observation-report.json
+```
+
 ## 6. 人工盲评量表
 
 每张候选结果由至少 3 名评审在校准显示环境下匿名评分。使用 1–5 分：

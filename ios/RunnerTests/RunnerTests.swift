@@ -107,6 +107,78 @@ class RunnerTests: XCTestCase {
     XCTAssertLessThan(neutralIndex, warmIndex)
   }
 
+  func testImagePipelineV2HighlightsMoveBrightTonesInBothDirections() throws {
+    let negative = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV2(highlights: -0.4))
+    )
+    let neutral = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV2()))
+    let positive = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV2(highlights: 0.4))
+    )
+    let pixels: [UInt8] = [38, 38, 38, 255, 204, 204, 204, 255]
+    let source = CIImage(
+      bitmapData: Data(pixels),
+      bytesPerRow: 2 * 4,
+      size: CGSize(width: 2, height: 1),
+      format: .RGBA8,
+      colorSpace: sRGB
+    )
+
+    let negativePixels = try rgbaBytes(
+      negative.applying(to: source, extent: source.extent)
+    )
+    let neutralPixels = try rgbaBytes(
+      neutral.applying(to: source, extent: source.extent)
+    )
+    let positivePixels = try rgbaBytes(
+      positive.applying(to: source, extent: source.extent)
+    )
+    let brightOffset = 4
+
+    XCTAssertLessThan(negativePixels[brightOffset], neutralPixels[brightOffset])
+    XCTAssertGreaterThan(positivePixels[brightOffset], neutralPixels[brightOffset])
+    XCTAssertLessThan(
+      Int(positivePixels[0]) - Int(neutralPixels[0]),
+      Int(positivePixels[brightOffset]) - Int(neutralPixels[brightOffset])
+    )
+  }
+
+  func testImagePipelineV2ShadowsMoveDarkTonesWithoutMovingBrightTones() throws {
+    let negative = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV2(shadows: -0.4))
+    )
+    let neutral = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV2()))
+    let positive = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV2(shadows: 0.4))
+    )
+    let pixels: [UInt8] = [51, 51, 51, 255, 204, 204, 204, 255]
+    let source = CIImage(
+      bitmapData: Data(pixels),
+      bytesPerRow: 2 * 4,
+      size: CGSize(width: 2, height: 1),
+      format: .RGBA8,
+      colorSpace: sRGB
+    )
+
+    let negativePixels = try rgbaBytes(
+      negative.applying(to: source, extent: source.extent)
+    )
+    let neutralPixels = try rgbaBytes(
+      neutral.applying(to: source, extent: source.extent)
+    )
+    let positivePixels = try rgbaBytes(
+      positive.applying(to: source, extent: source.extent)
+    )
+    let brightOffset = 4
+
+    XCTAssertLessThan(negativePixels[0], neutralPixels[0])
+    XCTAssertGreaterThan(positivePixels[0], neutralPixels[0])
+    XCTAssertLessThanOrEqual(
+      abs(Int(positivePixels[brightOffset]) - Int(neutralPixels[brightOffset])),
+      2
+    )
+  }
+
   func testImagePipelineV2SafeContrastHasOrderedToneResponseWithoutCrushing() throws {
     let positivePipeline = try XCTUnwrap(
       IOSImagePipeline(arguments: pipelineV2(contrast: 0.35))
@@ -869,6 +941,8 @@ class RunnerTests: XCTestCase {
   private func pipelineV2(
     schemaVersion: NSNumber = 2,
     exposureEV: Double = 0,
+    highlights: Double = 0,
+    shadows: Double = 0,
     contrast: Double = 0,
     warmth: Double = 0,
     crop: [Double] = [0, 0, 1, 1],
@@ -882,8 +956,8 @@ class RunnerTests: XCTestCase {
       "workingColorSpace": "srgb",
       "adjustments": [
         "exposureEv": exposureEV,
-        "highlights": 0.0,
-        "shadows": 0.0,
+        "highlights": highlights,
+        "shadows": shadows,
         "contrast": contrast,
         "warmth": warmth,
         "tint": 0.0,

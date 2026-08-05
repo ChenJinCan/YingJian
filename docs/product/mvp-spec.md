@@ -334,7 +334,7 @@ Existing editor session, photo project session, importer, store and method-chann
 - Automatically verify orientation, dimensions, crop coordinates, deterministic output, preview/export trend and unacceptable compression regressions.
 - Use numeric or perceptual tolerances for deterministic light/color operations.
 - Treat the frozen cross-platform `neutral-export-v1` and `exposure-semantic-v1` reports as retained engineering evidence, not as current iOS MVP gates.
-- On iOS, every non-neutral adjustment requires a parameter-specific direction, visible-strength and clipping contract over the frozen corpus plus blinded review; `ios-contrast-semantic-v1` and `ios-warmth-semantic-v1` are frozen, and neutral pixel tolerance is not evidence of retouch quality.
+- On iOS, every non-neutral adjustment requires a parameter-specific direction, visible-strength and clipping contract over the frozen corpus plus blinded review; contrast, warmth, selective tone, saturation, tint, and clarity contracts are frozen, and neutral pixel tolerance is not evidence of retouch quality.
 - Use blinded human review in addition to automation for skin naturalness, texture preservation, recommendation quality and group coherence.
 - Compare candidate engines using identical inputs, parameter levels, devices and scoring rubrics.
 - Do not claim quality parity based only on screenshots or one favorable sample.
