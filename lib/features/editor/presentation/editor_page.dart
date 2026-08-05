@@ -1258,12 +1258,18 @@ class _PhotoWorkspace extends StatelessWidget {
                 ButtonSegment(
                   value: ProjectEditingScope.group,
                   icon: const Icon(Icons.collections_outlined),
-                  label: Text(context.l10n.editWholeGroup),
+                  label: Text(
+                    context.l10n.editWholeGroup,
+                    key: const ValueKey('editor-scope-group'),
+                  ),
                 ),
                 ButtonSegment(
                   value: ProjectEditingScope.currentPhoto,
                   icon: const Icon(Icons.photo_outlined),
-                  label: Text(context.l10n.editCurrentPhoto),
+                  label: Text(
+                    context.l10n.editCurrentPhoto,
+                    key: const ValueKey('editor-scope-currentPhoto'),
+                  ),
                 ),
               ],
               selected: {project.editingScope},
@@ -1296,6 +1302,7 @@ class _PhotoWorkspace extends StatelessWidget {
                   button: true,
                   label: '${photo.originalName}, ${status.$2}',
                   child: InkWell(
+                    key: ValueKey('editor-photo-${photo.id}'),
                     onTap: () => onSelected(index),
                     borderRadius: BorderRadius.circular(12),
                     child: SizedBox(
@@ -1509,6 +1516,7 @@ class _ExportSummaryCard extends StatelessWidget {
               const SizedBox(height: 12),
               if (summary.hasRetryableItems)
                 FilledButton.tonal(
+                  key: const ValueKey('export-retry-failed'),
                   onPressed: exporting || sharing ? null : onRetry,
                   child: Text(context.l10n.retryFailedPhotos),
                 ),
@@ -1626,6 +1634,9 @@ class _RecommendationPanel extends StatelessWidget {
                     selected: isSelected,
                     button: true,
                     child: InkWell(
+                      key: ValueKey(
+                        'recommendation-${recommendation.family.name}',
+                      ),
                       onTap: () => onPreviewed(index),
                       borderRadius: BorderRadius.circular(16),
                       child: AnimatedContainer(
@@ -1991,6 +2002,7 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
               final isSelected = parameter == selected;
               void select() => setState(() => _selected = parameter);
               return Semantics(
+                key: ValueKey('editor-adjustment-tab-${parameter.name}'),
                 container: true,
                 excludeSemantics: true,
                 button: true,
@@ -2012,6 +2024,7 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
         ),
         const SizedBox(height: 8),
         _AdjustmentSlider(
+          key: ValueKey('editor-adjustment-${selected.name}'),
           enabled: widget.enabled,
           label: '',
           semanticLabel: _label(context, selected),
@@ -2195,6 +2208,7 @@ class _CompositionTools extends StatelessWidget {
 
 class _AdjustmentSlider extends StatelessWidget {
   const _AdjustmentSlider({
+    super.key,
     required this.enabled,
     required this.label,
     required this.semanticLabel,
