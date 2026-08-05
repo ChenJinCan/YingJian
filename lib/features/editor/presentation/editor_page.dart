@@ -44,6 +44,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   final Set<String> _supersededSharePaths = {};
   bool _preparingRecommendations = false;
   RecommendationPreparation? _recommendationPreparation;
+  final Map<String, PortraitApplicability> _portraitApplicabilityByPhotoId = {};
   int _previewRecommendationIndex = -1;
   double? _pendingPhotoStripOffset;
   bool _savingPhotoStripPosition = false;
@@ -137,6 +138,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       session,
     );
     final project = session.project;
+    await _restoreCachedPortraitApplicability(session);
     _photoStripController?.dispose();
     _photoStripController = ScrollController(
       initialScrollOffset: project?.groupScrollOffset ?? 0,
@@ -163,6 +165,34 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
             project.flowState == PhotoProjectFlowState.analyzing,
       );
     }
+  }
+
+  Future<void> _restoreCachedPortraitApplicability(
+    PhotoProjectSession session,
+  ) async {
+    final project = session.project;
+    if (project == null) return;
+    final analyzer = context.read<PhotoAnalyzer>();
+    final cache = context.read<PhotoAnalysisCache>();
+    final restored = <String, PortraitApplicability>{};
+    for (final photo in project.photos) {
+      try {
+        final analysis = await cache.read(
+          projectId: project.id,
+          photo: photo,
+          engineIdentity: analyzer.identityFor(photo),
+        );
+        if (analysis != null) restored[photo.id] = analysis.portrait;
+      } on Object {
+        // Analysis cache is advisory; editing and export remain available.
+      }
+    }
+    if (!mounted || session.project?.id != project.id) return;
+    setState(() {
+      _portraitApplicabilityByPhotoId
+        ..clear()
+        ..addAll(restored);
+    });
   }
 
   Future<void> _prepareRecommendations({
@@ -211,6 +241,10 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       if (_isCurrentAnalysisRun(cancellation, projectId)) {
         setState(() {
           _recommendationPreparation = preparation;
+          _portraitApplicabilityByPhotoId.addAll({
+            for (final entry in preparation.analyses.entries)
+              entry.key: entry.value.portrait,
+          });
           _previewRecommendationIndex = preparation.recommendations.isEmpty
               ? -1
               : 0;
@@ -462,6 +496,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       await _cancelAndDrainAnalysis();
       await _session!.removePhoto(photo.id);
       await analysisCache.clearPhoto(projectId: projectId, photoId: photo.id);
+      _portraitApplicabilityByPhotoId.remove(photo.id);
       final focusPhotoId = _session!.project?.focusPhotoId;
       if (focusPhotoId != null) {
         _selectedIndex = _session!.photos.indexWhere(
@@ -496,6 +531,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       await _cancelAndDrainAnalysis();
       await _session!.deleteProject();
       await analysisCache.clearProject(projectId);
+      _portraitApplicabilityByPhotoId.clear();
       await _discardShareFiles();
       _selectedIndex = 0;
       _editorSession.load(EditRecipe.neutral);
@@ -896,6 +932,12 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                     recommendations: recommendations ?? const [],
                     selectedRecommendationIndex: _previewRecommendationIndex,
                     editorSession: _editorSession,
+                    portraitApplicable:
+                        _portraitApplicabilityByPhotoId[photos[_selectedIndex]
+                                .id] ==
+                            PortraitApplicability.applicable &&
+                        session.project!.editingScope ==
+                            ProjectEditingScope.currentPhoto,
                     canUndo: session.canUndo,
                     canRedo: session.canRedo,
                     canSyncCurrentPhoto:
@@ -1056,6 +1098,7 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.recommendations,
     required this.selectedRecommendationIndex,
     required this.editorSession,
+    required this.portraitApplicable,
     required this.canUndo,
     required this.canRedo,
     required this.canSyncCurrentPhoto,
@@ -1095,6 +1138,7 @@ class _PhotoWorkspace extends StatelessWidget {
   final List<LocalRecommendation> recommendations;
   final int selectedRecommendationIndex;
   final EditorSession editorSession;
+  final bool portraitApplicable;
   final bool canUndo;
   final bool canRedo;
   final bool canSyncCurrentPhoto;
@@ -1315,6 +1359,7 @@ class _PhotoWorkspace extends StatelessWidget {
         _AdjustmentToolStrip(
           enabled: editingEnabled,
           extended: supportsImagePipelineV2,
+          portraitAvailable: portraitApplicable,
           recipe: recipe,
           editorSession: editorSession,
           onRecipeCommitted: onRecipeCommitted,
@@ -1882,12 +1927,14 @@ enum _AdjustmentParameter {
   tint,
   saturation,
   clarity,
+  portraitRetouch,
 }
 
 class _AdjustmentToolStrip extends StatefulWidget {
   const _AdjustmentToolStrip({
     required this.enabled,
     required this.extended,
+    required this.portraitAvailable,
     required this.recipe,
     required this.editorSession,
     required this.onRecipeCommitted,
@@ -1895,6 +1942,7 @@ class _AdjustmentToolStrip extends StatefulWidget {
 
   final bool enabled;
   final bool extended;
+  final bool portraitAvailable;
   final EditRecipe recipe;
   final EditorSession editorSession;
   final VoidCallback onRecipeCommitted;
@@ -1909,12 +1957,20 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
   @override
   Widget build(BuildContext context) {
     final parameters = widget.extended
-        ? _AdjustmentParameter.values
+        ? <_AdjustmentParameter>[
+            ..._AdjustmentParameter.values.where(
+              (parameter) => parameter != _AdjustmentParameter.portraitRetouch,
+            ),
+            if (widget.portraitAvailable) _AdjustmentParameter.portraitRetouch,
+          ]
         : const <_AdjustmentParameter>[
             _AdjustmentParameter.exposure,
             _AdjustmentParameter.contrast,
             _AdjustmentParameter.warmth,
           ];
+    final selected = parameters.contains(_selected)
+        ? _selected
+        : parameters.first;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1927,21 +1983,21 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
             itemBuilder: (context, index) {
               final parameter = parameters[index];
               final label = _label(context, parameter);
-              final selected = parameter == _selected;
+              final isSelected = parameter == selected;
               void select() => setState(() => _selected = parameter);
               return Semantics(
                 container: true,
                 excludeSemantics: true,
                 button: true,
                 enabled: widget.enabled,
-                selected: selected,
+                selected: isSelected,
                 label: label,
                 onTap: widget.enabled ? select : null,
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(minWidth: 48),
                   child: ChoiceChip(
                     label: Text(label),
-                    selected: selected,
+                    selected: isSelected,
                     onSelected: widget.enabled ? (_) => select() : null,
                   ),
                 ),
@@ -1953,11 +2009,12 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
         _AdjustmentSlider(
           enabled: widget.enabled,
           label: '',
-          semanticLabel: _label(context, _selected),
-          value: _value(widget.recipe, _selected),
+          semanticLabel: _label(context, selected),
+          value: _value(widget.recipe, selected),
+          minimum: selected == _AdjustmentParameter.portraitRetouch ? 0 : -1,
           onStart: widget.editorSession.beginAdjustment,
           onChanged: (value) => widget.editorSession.preview(
-            _copyWith(widget.recipe, _selected, value),
+            _copyWith(widget.recipe, selected, value),
           ),
           onEnd: () {
             widget.editorSession.commitAdjustment();
@@ -1978,6 +2035,8 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
         _AdjustmentParameter.tint => context.l10n.tint,
         _AdjustmentParameter.saturation => context.l10n.saturation,
         _AdjustmentParameter.clarity => context.l10n.clarity,
+        _AdjustmentParameter.portraitRetouch =>
+          context.l10n.naturalPortraitRetouch,
       };
 
   double _value(EditRecipe recipe, _AdjustmentParameter parameter) =>
@@ -1990,6 +2049,7 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
         _AdjustmentParameter.tint => recipe.tint,
         _AdjustmentParameter.saturation => recipe.saturation,
         _AdjustmentParameter.clarity => recipe.clarity,
+        _AdjustmentParameter.portraitRetouch => recipe.portraitStrength,
       };
 
   EditRecipe _copyWith(
@@ -2005,6 +2065,9 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
     _AdjustmentParameter.tint => recipe.copyWith(tint: value),
     _AdjustmentParameter.saturation => recipe.copyWith(saturation: value),
     _AdjustmentParameter.clarity => recipe.copyWith(clarity: value),
+    _AdjustmentParameter.portraitRetouch => recipe.copyWith(
+      portraitStrength: value,
+    ),
   };
 }
 
@@ -2134,6 +2197,7 @@ class _AdjustmentSlider extends StatelessWidget {
     required this.onStart,
     required this.onChanged,
     required this.onEnd,
+    this.minimum = -1,
   });
 
   final bool enabled;
@@ -2143,6 +2207,8 @@ class _AdjustmentSlider extends StatelessWidget {
   final VoidCallback onStart;
   final ValueChanged<double> onChanged;
   final VoidCallback onEnd;
+  final double minimum;
+  static const double maximum = 1;
 
   @override
   Widget build(BuildContext context) {
@@ -2155,23 +2221,23 @@ class _AdjustmentSlider extends StatelessWidget {
             enabled: enabled,
             label: semanticLabel,
             value: '${(value * 100).round()}',
-            increasedValue: value < 1
+            increasedValue: value < maximum
                 ? '${(_semanticValue(0.02) * 100).round()}'
                 : null,
-            decreasedValue: value > -1
+            decreasedValue: value > minimum
                 ? '${(_semanticValue(-0.02) * 100).round()}'
                 : null,
-            onIncrease: enabled && value < 1
+            onIncrease: enabled && value < maximum
                 ? () => _adjustFromSemantics(0.02)
                 : null,
-            onDecrease: enabled && value > -1
+            onDecrease: enabled && value > minimum
                 ? () => _adjustFromSemantics(-0.02)
                 : null,
             child: ExcludeSemantics(
               child: Slider(
                 value: value,
-                min: -1,
-                max: 1,
+                min: minimum,
+                max: maximum,
                 divisions: 100,
                 label: '${(value * 100).round()}',
                 semanticFormatterCallback: (value) =>
@@ -2191,7 +2257,8 @@ class _AdjustmentSlider extends StatelessWidget {
     );
   }
 
-  double _semanticValue(double delta) => (value + delta).clamp(-1.0, 1.0);
+  double _semanticValue(double delta) =>
+      (value + delta).clamp(minimum, maximum);
 
   void _adjustFromSemantics(double delta) {
     onStart();

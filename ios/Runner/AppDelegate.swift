@@ -10,6 +10,17 @@ private enum PhotoInputInspectionError: Error {
   case unreadable
 }
 
+/// Production eligibility remains closed until the portrait candidate passes
+/// the frozen corpus, competitor comparison, and blind-review gates in ADR 0002.
+enum IOSPortraitCapabilityPolicy {
+  static let productionEligible = false
+
+  static func applicability(hasFace: Bool) -> String {
+    guard hasFace else { return "unavailable" }
+    return productionEligible ? "applicable" : "unsafe"
+  }
+}
+
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var photoExportChannel: FlutterMethodChannel?
@@ -461,12 +472,12 @@ private enum PhotoInputInspectionError: Error {
     let hasFace = !(faceRequest.results ?? []).isEmpty
     return [
       "analysisVersion": "local-pixels-v1",
-      "capabilityVersion": "ios-core-image-vision-v1",
+      "capabilityVersion": "ios-core-image-vision-v2-portrait-locked",
       "confidence": "medium",
       "exposure": exposure,
       "whiteBalance": whiteBalance,
       "clarity": clarity,
-      "portrait": "unavailable",
+      "portrait": IOSPortraitCapabilityPolicy.applicability(hasFace: hasFace),
       "scene": hasFace ? "people" : "unknown",
     ]
   }
@@ -743,6 +754,7 @@ struct IOSImagePipeline {
   let tint: Double
   let saturation: Double
   let clarity: Double
+  let portraitStrength: Double
   let crop: CGRect
   let quarterTurns: Int
   let straightenDegrees: Double
@@ -775,6 +787,7 @@ struct IOSImagePipeline {
       tint = 0
       saturation = 0
       clarity = 0
+      portraitStrength = 0
       crop = CGRect(x: 0, y: 0, width: 1, height: 1)
       quarterTurns = 0
       straightenDegrees = 0
@@ -814,6 +827,7 @@ struct IOSImagePipeline {
     self.tint = tint
     self.saturation = saturation
     self.clarity = clarity
+    self.portraitStrength = portraitStrength
     crop = CGRect(
       x: values[0],
       y: values[1],
@@ -914,6 +928,13 @@ struct IOSImagePipeline {
         "CISharpenLuminance",
         parameters: [kCIInputSharpnessKey: clarity * 0.8]
       ).cropped(to: extent)
+    }
+    if portraitStrength > 0 {
+      output = IOSPortraitRetoucher.applying(
+        to: output,
+        strength: portraitStrength,
+        extent: extent
+      )
     }
     let geometricallyAdjusted = applyingGeometry(to: output, sourceExtent: extent)
     let geometryExtent = geometricallyAdjusted.extent.integral

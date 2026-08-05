@@ -103,7 +103,12 @@ class RunnerTests: XCTestCase {
 
   func testImagePipelineRejectsUnknownOrUnsafeV2Contracts() {
     XCTAssertNil(IOSImagePipeline(arguments: pipelineV2(schemaVersion: 3)))
-    XCTAssertNil(IOSImagePipeline(arguments: pipelineV2(portraitStrength: 0.1)))
+    XCTAssertNil(
+      IOSImagePipeline(arguments: pipelineV2(portraitStrength: 0.1)),
+      "An unfrozen portrait candidate must not enter the production pipeline"
+    )
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV2(portraitStrength: -0.01)))
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV2(portraitStrength: 1.01)))
     XCTAssertNil(IOSImagePipeline(arguments: pipelineV2(crop: [0.8, 0, 0.2, 1])))
     XCTAssertNil(IOSImagePipeline(arguments: pipelineV2(straightenDegrees: 46)))
     XCTAssertNil(IOSImagePipeline(arguments: pipelineV2(schemaVersion: 1.9)))
@@ -162,6 +167,18 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(result["clarity"] as? String, "blurred")
     XCTAssertEqual(result["scene"] as? String, "unknown")
     XCTAssertEqual(result["portrait"] as? String, "unavailable")
+  }
+
+  func testUnfrozenPortraitCandidateIsNeverReportedAsProductionApplicable() {
+    XCTAssertFalse(IOSPortraitCapabilityPolicy.productionEligible)
+    XCTAssertEqual(
+      IOSPortraitCapabilityPolicy.applicability(hasFace: false),
+      "unavailable"
+    )
+    XCTAssertEqual(
+      IOSPortraitCapabilityPolicy.applicability(hasFace: true),
+      "unsafe"
+    )
   }
 
   func testExportMetadataPreservesCaptureTimeAndRemovesSensitiveFields() throws {
@@ -568,6 +585,77 @@ class RunnerTests: XCTestCase {
       }
     }
     XCTAssertLessThanOrEqual(largestOutsideDifference, 3)
+  }
+
+  func testProductionPortraitCandidateUsesMaskAndMonotonicStrengths() throws {
+    let extent = CGRect(x: 0, y: 0, width: 80, height: 60)
+    let source = CIImage(color: CIColor(red: 0.42, green: 0.31, blue: 0.24, alpha: 1))
+      .cropped(to: extent)
+    let whiteHalf = CIImage(color: .white)
+      .cropped(to: CGRect(x: 0, y: 0, width: 40, height: 60))
+    let mask = whiteHalf.composited(
+      over: CIImage(color: .black).cropped(to: extent)
+    ).cropped(to: extent)
+
+    let neutral = IOSPortraitRetoucher.candidate(
+      source: source,
+      mask: mask,
+      strength: 0,
+      extent: extent
+    )
+    let defaultImage = IOSPortraitRetoucher.candidate(
+      source: source,
+      mask: mask,
+      strength: 0.35,
+      extent: extent
+    )
+    let highImage = IOSPortraitRetoucher.candidate(
+      source: source,
+      mask: mask,
+      strength: 0.55,
+      extent: extent
+    )
+    let sourceBytes = try rgbaBytes(source)
+    let neutralBytes = try rgbaBytes(neutral)
+    let defaultBytes = try rgbaBytes(defaultImage)
+    let highBytes = try rgbaBytes(highImage)
+
+    XCTAssertEqual(neutralBytes, sourceBytes)
+    let defaultDifference = meanAbsoluteDifference(sourceBytes, defaultBytes)
+    let highDifference = meanAbsoluteDifference(sourceBytes, highBytes)
+    XCTAssertGreaterThan(defaultDifference, 0.1)
+    XCTAssertGreaterThan(highDifference, defaultDifference)
+
+    var largestOutsideDifference = 0
+    for y in 0..<60 {
+      for x in 40..<80 {
+        let offset = (y * 80 + x) * 4
+        for channel in 0..<3 {
+          largestOutsideDifference = max(
+            largestOutsideDifference,
+            max(
+              abs(Int(defaultBytes[offset + channel]) - Int(sourceBytes[offset + channel])),
+              abs(Int(highBytes[offset + channel]) - Int(sourceBytes[offset + channel]))
+            )
+          )
+        }
+      }
+    }
+    XCTAssertLessThanOrEqual(largestOutsideDifference, 3)
+  }
+
+  func testProductionPortraitRetoucherSafelyPreservesImageWithoutFace() throws {
+    let extent = CGRect(x: 0, y: 0, width: 48, height: 32)
+    let source = CIImage(color: CIColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 1))
+      .cropped(to: extent)
+
+    let output = IOSPortraitRetoucher.applying(
+      to: source,
+      strength: 0.55,
+      extent: extent
+    )
+
+    XCTAssertEqual(try rgbaBytes(output), try rgbaBytes(source))
   }
 
   private func pipelineV2(

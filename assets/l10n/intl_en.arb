@@ -62,6 +62,7 @@
   "tint": "Tint",
   "saturation": "Saturation",
   "clarity": "Clarity",
+  "naturalPortraitRetouch": "Natural retouch",
   "composition": "Composition",
   "straighten": "Straighten",
   "rotateLeft": "Rotate left",

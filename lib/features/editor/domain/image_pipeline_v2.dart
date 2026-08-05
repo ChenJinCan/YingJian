@@ -41,6 +41,9 @@ final class ImagePipelineV2 implements ImagePipeline {
       'quarterTurns': recipe.crop.quarterTurns,
       'straightenDegrees': recipe.crop.straightenDegrees,
     },
-    'portrait': <String, Object>{'recipeVersion': 1, 'strength': 0.0},
+    'portrait': <String, Object>{
+      'recipeVersion': 1,
+      'strength': recipe.portraitStrength,
+    },
   };
 }

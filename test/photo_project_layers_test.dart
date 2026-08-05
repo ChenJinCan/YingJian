@@ -70,6 +70,7 @@ void main() {
             tint: 0.1,
             saturation: -0.1,
             clarity: 0.2,
+            portraitStrength: 0.35,
             crop: photoCrop,
           ),
         ),
@@ -82,8 +83,32 @@ void main() {
     expect(effective.tint, 0);
     expect(effective.saturation, closeTo(0.2, 1e-12));
     expect(effective.clarity, closeTo(0.4, 1e-12));
+    expect(effective.portraitStrength, closeTo(0.35, 1e-12));
     expect(effective.crop, photoCrop);
   });
+
+  test(
+    'portrait retouch stays with its photo when color edits sync to group',
+    () {
+      final project = PhotoProject(
+        id: 'project-portrait-sync',
+        createdAt: DateTime.utc(2026, 8, 4),
+        updatedAt: DateTime.utc(2026, 8, 4),
+        photos: const [first, second],
+        photoOverrides: {
+          first.id: PhotoOverride(
+            recipe: EditRecipe(exposure: 0.2, portraitStrength: 0.4),
+          ),
+        },
+      );
+
+      final plan = project.planPhotoAdjustmentsToGroup(first.id)!;
+
+      expect(plan.sharedStyle.recipe.exposure, closeTo(0.2, 1e-12));
+      expect(plan.sharedStyle.recipe.portraitStrength, 0);
+      expect(plan.remainingPhotoOverride.portraitStrength, closeTo(0.4, 1e-12));
+    },
+  );
 
   test('per-photo safety caps shared intensity with declared provenance', () {
     final project = PhotoProject(

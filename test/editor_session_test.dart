@@ -7,6 +7,8 @@ void main() {
     test('rejects values outside the normalized adjustment range', () {
       expect(() => EditRecipe(exposure: 1.1), throwsRangeError);
       expect(() => EditRecipe(warmth: double.nan), throwsRangeError);
+      expect(() => EditRecipe(portraitStrength: -0.01), throwsRangeError);
+      expect(() => EditRecipe(portraitStrength: 1.01), throwsRangeError);
       expect(
         () => CropGeometry(left: 0.8, top: 0, right: 0.2, bottom: 1),
         throwsRangeError,
@@ -23,6 +25,7 @@ void main() {
         tint: 0.6,
         saturation: -0.7,
         clarity: 0.8,
+        portraitStrength: 0.35,
         crop: CropGeometry(
           left: 0.1,
           top: 0.2,
@@ -50,6 +53,7 @@ void main() {
         expect(recipe.warmth, 0.4);
         expect(recipe.highlights, 0);
         expect(recipe.shadows, 0);
+        expect(recipe.portraitStrength, 0);
         expect(recipe.crop, CropGeometry.original);
       },
     );
@@ -118,6 +122,19 @@ void main() {
       session.undo();
       expect(session.recipe, EditRecipe.neutral);
       expect(session.canUndo, isFalse);
+    });
+
+    test('records natural portrait retouch as one undoable semantic edit', () {
+      final session = EditorSession();
+
+      session.beginAdjustment();
+      session.preview(session.recipe.copyWith(portraitStrength: 0.2));
+      session.preview(session.recipe.copyWith(portraitStrength: 0.35));
+      session.commitAdjustment();
+
+      expect(session.recipe.portraitStrength, 0.35);
+      session.undo();
+      expect(session.recipe.portraitStrength, 0);
     });
 
     test('requires an explicit adjustment gesture before preview', () {

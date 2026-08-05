@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' show SemanticsFlag, Tristate;
+import 'dart:ui' show SemanticsAction, SemanticsFlag, Tristate;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -1233,6 +1233,116 @@ void main() {
   });
 
   testWidgets(
+    'applicable portrait exposes one undoable natural retouch control',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      final photoFile = File(
+        'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+        'Icon-App-1024x1024@1x.png',
+      );
+      final photo = ProjectPhoto(
+        id: 'portrait-photo',
+        localPath: photoFile.path,
+        originalName: '已有照片人像.png',
+        contentSha256:
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        pixelWidth: 1024,
+        pixelHeight: 1024,
+        colorSpace: PhotoColorSpace.srgb,
+        inputFormat: PhotoInputFormat.png,
+        supportState: PhotoSupportState.supported,
+      );
+      final store = MemoryPhotoProjectStore(
+        PhotoProject(
+          id: 'portrait-project',
+          createdAt: DateTime.utc(2026, 8, 5),
+          updatedAt: DateTime.utc(2026, 8, 5),
+          photos: [photo],
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'clean-natural-01',
+          editingScope: ProjectEditingScope.currentPhoto,
+          focusPhotoId: photo.id,
+        ),
+      );
+      final cache = MemoryPhotoAnalysisCache();
+      final cachedWrite = await cache.stage(
+        projectId: 'portrait-project',
+        photoId: photo.id,
+        analysis: LocalPhotoAnalysis(
+          analysisVersion: 'widget-analysis-v1',
+          capabilityVersion: 'widget-capability-v1',
+          contentSha256: photo.contentSha256,
+          orientation: photo.orientation,
+          pixelWidth: photo.pixelWidth,
+          pixelHeight: photo.pixelHeight,
+          colorSpace: photo.colorSpace,
+          disposition: PhotoAnalysisDisposition.ready,
+          fallbackReason: AnalysisFallbackReason.none,
+          portrait: PortraitApplicability.applicable,
+        ),
+      );
+      await cache.commit(cachedWrite, canCommit: () => true);
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoProjectStore: store,
+          photoAnalyzer: _CountingPhotoAnalyzer(
+            portrait: PortraitApplicability.applicable,
+          ),
+          photoAnalysisCache: cache,
+          photoPreviewRenderer: FakePhotoPreviewRenderer.supported(),
+        ),
+      );
+
+      await tester.tap(find.text('开始修图'));
+      await tester.pumpAndSettle();
+      await tester.dragUntilVisible(
+        find.text('自然精修'),
+        find.byKey(const Key('photo-workspace-scroll')),
+        const Offset(0, -220),
+      );
+      await tester.tap(find.text('自然精修'));
+      await tester.pumpAndSettle();
+
+      final slider = find.byType(Slider).last;
+      await tester.ensureVisible(slider);
+      await tester.pumpAndSettle();
+      expect(tester.widget<Slider>(slider).min, 0);
+      expect(tester.widget<Slider>(slider).onChanged, isNotNull);
+      final portraitSlider = find.semantics.byPredicate(
+        (node) =>
+            node.label.startsWith('自然精修') && node.flagsCollection.isSlider,
+      );
+      expect(portraitSlider, findsOne);
+      expect(
+        portraitSlider.evaluate().single.getSemanticsData().hasAction(
+          SemanticsAction.increase,
+        ),
+        isTrue,
+      );
+      tester.semantics.increase(portraitSlider);
+      await tester.pumpAndSettle();
+      expect(tester.widget<Slider>(slider).value, greaterThan(0));
+
+      final recipe = store.project!.effectiveRecipeFor('portrait-photo');
+      expect(recipe.portraitStrength, greaterThan(0));
+      expect(find.text('选择人像'), findsNothing);
+
+      await tester.tap(find.text('撤销'));
+      await tester.pumpAndSettle();
+      expect(
+        store.project!.effectiveRecipeFor('portrait-photo').portraitStrength,
+        0,
+      );
+      semantics.dispose();
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
+
+  testWidgets(
     'multi-photo editing makes group and current-photo scope explicit',
     (tester) async {
       final photoFile = File(
@@ -2014,6 +2124,9 @@ final class _DeferredAnalysisStateProjectStore
 }
 
 final class _CountingPhotoAnalyzer implements PhotoAnalyzer {
+  _CountingPhotoAnalyzer({this.portrait = PortraitApplicability.unavailable});
+
+  final PortraitApplicability portrait;
   int calls = 0;
 
   @override
@@ -2040,6 +2153,7 @@ final class _CountingPhotoAnalyzer implements PhotoAnalyzer {
       exposure: ExposureCondition.underexposed,
       whiteBalance: WhiteBalanceCondition.warmCast,
       clarity: ClarityCondition.clear,
+      portrait: portrait,
     );
   }
 }

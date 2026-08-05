@@ -422,6 +422,12 @@ abstract class AppLocalizations {
   /// **'清晰度'**
   String get clarity;
 
+  /// No description provided for @naturalPortraitRetouch.
+  ///
+  /// In zh, this message translates to:
+  /// **'自然精修'**
+  String get naturalPortraitRetouch;
+
   /// No description provided for @composition.
   ///
   /// In zh, this message translates to:

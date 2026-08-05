@@ -32,6 +32,7 @@ void main() {
         tint: -0.3,
         saturation: 0.7,
         clarity: 0.2,
+        portraitStrength: 0.35,
         crop: CropGeometry(
           left: 0.1,
           top: 0.2,
@@ -61,7 +62,7 @@ void main() {
         'quarterTurns': 3,
         'straightenDegrees': -1.5,
       },
-      'portrait': <String, Object>{'recipeVersion': 1, 'strength': 0.0},
+      'portrait': <String, Object>{'recipeVersion': 1, 'strength': 0.35},
     });
     expect(pipeline.toPlatformArguments().containsKey('imageBytes'), isFalse);
   });

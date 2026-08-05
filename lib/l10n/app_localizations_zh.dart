@@ -188,6 +188,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get clarity => '清晰度';
 
   @override
+  String get naturalPortraitRetouch => '自然精修';
+
+  @override
   String get composition => '构图';
 
   @override

@@ -162,6 +162,7 @@ class EditRecipe {
     double tint = 0,
     double saturation = 0,
     double clarity = 0,
+    double portraitStrength = 0,
     CropGeometry crop = CropGeometry.original,
   }) {
     for (final entry in <String, double>{
@@ -176,6 +177,7 @@ class EditRecipe {
     }.entries) {
       _validate(entry.value, entry.key);
     }
+    _validate(portraitStrength, 'portraitStrength', minimum: 0);
     return EditRecipe._(
       exposure: exposure,
       highlights: highlights,
@@ -185,6 +187,7 @@ class EditRecipe {
       tint: tint,
       saturation: saturation,
       clarity: clarity,
+      portraitStrength: portraitStrength,
       crop: crop,
     );
   }
@@ -198,6 +201,7 @@ class EditRecipe {
     required this.tint,
     required this.saturation,
     required this.clarity,
+    required this.portraitStrength,
     required this.crop,
   });
 
@@ -211,6 +215,7 @@ class EditRecipe {
   final double tint;
   final double saturation;
   final double clarity;
+  final double portraitStrength;
   final CropGeometry crop;
 
   bool get isLegacyColorOnly =>
@@ -219,6 +224,7 @@ class EditRecipe {
       tint == 0 &&
       saturation == 0 &&
       clarity == 0 &&
+      portraitStrength == 0 &&
       crop.isOriginal;
 
   bool get hasColorAdjustments =>
@@ -240,6 +246,7 @@ class EditRecipe {
     'tint': tint,
     'saturation': saturation,
     'clarity': clarity,
+    'portraitStrength': portraitStrength,
     'crop': crop.toJson(),
   };
 
@@ -252,6 +259,7 @@ class EditRecipe {
     tint: (json['tint'] as num?)?.toDouble() ?? 0,
     saturation: (json['saturation'] as num?)?.toDouble() ?? 0,
     clarity: (json['clarity'] as num?)?.toDouble() ?? 0,
+    portraitStrength: (json['portraitStrength'] as num?)?.toDouble() ?? 0,
     crop: json['crop'] is Map<String, Object?>
         ? CropGeometry.fromJson(json['crop']! as Map<String, Object?>)
         : CropGeometry.original,
@@ -266,6 +274,7 @@ class EditRecipe {
     double? tint,
     double? saturation,
     double? clarity,
+    double? portraitStrength,
     CropGeometry? crop,
   }) => EditRecipe(
     exposure: exposure ?? this.exposure,
@@ -276,6 +285,7 @@ class EditRecipe {
     tint: tint ?? this.tint,
     saturation: saturation ?? this.saturation,
     clarity: clarity ?? this.clarity,
+    portraitStrength: portraitStrength ?? this.portraitStrength,
     crop: crop ?? this.crop,
   );
 
@@ -296,6 +306,7 @@ class EditRecipe {
       other.tint == tint &&
       other.saturation == saturation &&
       other.clarity == clarity &&
+      other.portraitStrength == portraitStrength &&
       other.crop == crop;
 
   @override
@@ -308,6 +319,7 @@ class EditRecipe {
     tint,
     saturation,
     clarity,
+    portraitStrength,
     crop,
   );
 }

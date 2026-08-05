@@ -202,6 +202,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get clarity => 'Clarity';
 
   @override
+  String get naturalPortraitRetouch => 'Natural retouch';
+
+  @override
   String get composition => 'Composition';
 
   @override

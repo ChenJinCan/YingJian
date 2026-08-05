@@ -757,9 +757,10 @@ class PhotoProject {
           crop: sharedStyle.recipe.crop,
         ),
       ),
-      remainingPhotoOverride: override.crop.isOriginal
-          ? EditRecipe.neutral
-          : EditRecipe(crop: override.crop),
+      remainingPhotoOverride: EditRecipe(
+        portraitStrength: override.portraitStrength,
+        crop: override.crop,
+      ),
     );
   }
 
@@ -838,6 +839,9 @@ class PhotoProject {
         adaptive?.clarity,
         override?.clarity,
       ),
+      // Portrait retouch is deliberately a per-photo semantic adjustment. It
+      // must not inherit from or be promoted into the group's shared style.
+      portraitStrength: override?.portraitStrength ?? 0,
       crop: photoOverride != null || photoOverrides.containsKey(photoId)
           ? override!.crop
           : shared.crop,

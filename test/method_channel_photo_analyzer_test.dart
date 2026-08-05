@@ -33,7 +33,7 @@ void main() {
             captured = call;
             return <String, Object>{
               'analysisVersion': 'local-pixels-v1',
-              'capabilityVersion': 'ios-core-image-vision-v1',
+              'capabilityVersion': 'ios-core-image-vision-v2-portrait-locked',
               'confidence': 'medium',
               'exposure': 'underexposed',
               'whiteBalance': 'coolCast',
@@ -52,6 +52,10 @@ void main() {
       expect(captured?.arguments, {'sourcePath': photo.localPath});
       expect(captured?.arguments, isNot(contains('bytes')));
       expect(result.usesSafeFallback, isFalse);
+      expect(
+        result.capabilityVersion,
+        'ios-core-image-vision-v2-portrait-locked',
+      );
       expect(result.exposure.name, 'underexposed');
       expect(result.whiteBalance.name, 'coolCast');
       expect(result.scene.name, 'people');
