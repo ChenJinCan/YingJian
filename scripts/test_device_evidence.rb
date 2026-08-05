@@ -8,6 +8,7 @@ require "open3"
 require "pathname"
 require "tmpdir"
 require "yaml"
+require_relative "test_support/device_evidence_fixture"
 
 repo_root = File.expand_path("..", __dir__)
 quality_root = File.join(repo_root, ".quality")
@@ -39,11 +40,12 @@ Dir.mktmpdir("device-evidence-test-", evidence_root) do |directory|
     ["ios", "mid"] => %w[12mp 24mp display_p3 heic six_photo_group],
     ["ios", "high"] => %w[48mp portrait_multi six_photo_batch],
   }
-  platform_build_files = %w[ios].to_h do |platform|
-    path = File.join(directory, "#{platform}-profile-build.zip")
-    File.binwrite(path, "fixture-build-#{platform}")
-    [platform, path]
-  end
+  platform_build_files = {
+    "ios" => DeviceEvidenceFixture.create_profile_ipa(
+      repo_root: repo_root, directory: directory, source_commit: source_commit,
+      device_udids: 3.times.map { |index| "fixture-udid-#{index}" }
+    ),
+  }
   runs = slots.map.with_index do |(platform, tier), index|
     run_id = "#{platform}-#{tier}-fixture"
     run_directory = File.join(directory, run_id)
@@ -81,8 +83,19 @@ Dir.mktmpdir("device-evidence-test-", evidence_root) do |directory|
     }
 
     build_file = platform_build_files.fetch(platform)
+    device_identifier = "fixture-core-device-#{index}"
+    model = ["iPhone 11", "iPhone 14 Plus", "iPhone 15 Pro"].fetch(index)
+    product_type = ["iPhone12,1", "iPhone14,8", "iPhone16,1"].fetch(index)
+    device_capture_file = File.join(run_directory, "devicectl-device.json")
     metrics_file = File.join(run_directory, "metrics.json")
     probe_file = File.join(run_directory, "final-artifacts.json")
+    File.write(
+      device_capture_file,
+      JSON.pretty_generate(DeviceEvidenceFixture.device_capture_record(
+        repo_root: repo_root, identifier: device_identifier,
+        udid: "fixture-udid-#{index}", model: model, product_type: product_type
+      )),
+    )
     File.write(
       metrics_file,
       JSON.pretty_generate(
@@ -108,6 +121,7 @@ Dir.mktmpdir("device-evidence-test-", evidence_root) do |directory|
     )
     artifacts = [
       ["build_artifact", build_file],
+      ["device_capture", device_capture_file],
       ["metrics_log", metrics_file],
       ["final_artifact_probe", probe_file],
     ].map do |kind, path|
@@ -122,10 +136,10 @@ Dir.mktmpdir("device-evidence-test-", evidence_root) do |directory|
       "platform" => platform,
       "tier" => tier,
       "device" => {
-        "device_id" => Digest::SHA256.hexdigest("fixture-device-#{index}"),
-        "model" => "fixture-device-#{index}",
-        "hardware_class" => "fixture-class-#{index}",
-        "os_version" => "fixture-os-#{index}",
+        "device_id" => Digest::SHA256.hexdigest(device_identifier),
+        "model" => model,
+        "hardware_class" => product_type,
+        "os_version" => "iOS 26.5.2",
         "tier_basis" => "frozen fixture tier #{tier}",
         "physical_memory_mb" => 4_096,
         "physical" => true,
@@ -160,6 +174,66 @@ Dir.mktmpdir("device-evidence-test-", evidence_root) do |directory|
   assert(status.success?, "valid iOS three-tier evidence failed: #{stdout}#{stderr}")
   assert(stdout.include?("3/3 iOS physical runs"), "complete evidence summary is missing")
   assert(stdout.include?("slider_p95_ms"), "computed percentile summary is missing")
+
+  no_device_capture = Marshal.load(Marshal.dump(manifest))
+  no_device_capture["runs"].each do |run|
+    run["artifacts"].reject! { |artifact| artifact["kind"] == "device_capture" }
+  end
+  no_device_capture_path = File.join(directory, "no-device-capture.yaml")
+  File.write(no_device_capture_path, YAML.dump(no_device_capture))
+  _stdout, stderr, status = run("ruby", checker, no_device_capture_path)
+  assert(!status.success? && stderr.include?("device_capture"),
+         "self-asserted physical devices passed without devicectl capture")
+
+  build_file = platform_build_files.fetch("ios")
+  valid_build_bytes = File.binread(build_file)
+  File.binwrite(build_file, "not-an-ios-build")
+  fake_build = Marshal.load(Marshal.dump(manifest))
+  fake_sha = Digest::SHA256.file(build_file).hexdigest
+  fake_build["runs"].each do |run|
+    run["build"]["artifact_sha256"] = fake_sha
+    run["artifacts"].find { |artifact| artifact["kind"] == "build_artifact" }["sha256"] = fake_sha
+  end
+  fake_build_path = File.join(directory, "fake-build.yaml")
+  File.write(fake_build_path, YAML.dump(fake_build))
+  _stdout, stderr, status = run("ruby", checker, fake_build_path)
+  assert(!status.success? && stderr.include?("verified signed iOS device build"),
+         "a hashed text file passed as the physical-device build artifact")
+  File.binwrite(build_file, valid_build_bytes)
+
+  wrong_installed_build = Marshal.load(Marshal.dump(manifest))
+  wrong_capture_artifact = wrong_installed_build["runs"].first["artifacts"].find do |artifact|
+    artifact["kind"] == "device_capture"
+  end
+  wrong_capture_path = File.join(repo_root, wrong_capture_artifact["file"])
+  valid_capture_bytes = File.binread(wrong_capture_path)
+  wrong_capture = JSON.parse(valid_capture_bytes)
+  wrong_capture["installed_apps"]["result"]["apps"].first["bundleVersion"] = "999"
+  File.write(wrong_capture_path, JSON.pretty_generate(wrong_capture))
+  wrong_capture_artifact["sha256"] = Digest::SHA256.file(wrong_capture_path).hexdigest
+  wrong_installed_path = File.join(directory, "wrong-installed-build.yaml")
+  File.write(wrong_installed_path, YAML.dump(wrong_installed_build))
+  _stdout, stderr, status = run("ruby", checker, wrong_installed_path)
+  assert(!status.success? && stderr.include?("frozen app version/build is installed"),
+         "signed IPA was not bound to the build installed on the tested iPhone")
+  File.binwrite(wrong_capture_path, valid_capture_bytes)
+
+  duplicate_udid = Marshal.load(Marshal.dump(manifest))
+  second_capture_artifact = duplicate_udid["runs"][1]["artifacts"].find do |artifact|
+    artifact["kind"] == "device_capture"
+  end
+  second_capture_path = File.join(repo_root, second_capture_artifact["file"])
+  valid_second_capture = File.binread(second_capture_path)
+  second_capture = JSON.parse(valid_second_capture)
+  second_capture["device_list"]["result"]["devices"].first["hardwareProperties"]["udid"] = "fixture-udid-0"
+  File.write(second_capture_path, JSON.pretty_generate(second_capture))
+  second_capture_artifact["sha256"] = Digest::SHA256.file(second_capture_path).hexdigest
+  duplicate_udid_path = File.join(directory, "duplicate-udid.yaml")
+  File.write(duplicate_udid_path, YAML.dump(duplicate_udid))
+  _stdout, stderr, status = run("ruby", checker, duplicate_udid_path)
+  assert(!status.success? && stderr.include?("duplicate captured physical iPhone UDID"),
+         "one physical iPhone was accepted as multiple device tiers")
+  File.binwrite(second_capture_path, valid_second_capture)
 
   incomplete = Marshal.load(Marshal.dump(manifest))
   incomplete["status"] = "blocked_missing_runs"
@@ -198,6 +272,33 @@ Dir.mktmpdir("device-evidence-test-", evidence_root) do |directory|
   _stdout, stderr, status = run("ruby", checker, simulated_path)
   assert(!status.success? && stderr.include?("physical must equal true"),
          "simulator evidence entered the physical matrix")
+
+  non_iphone = Marshal.load(Marshal.dump(manifest))
+  non_iphone["runs"].first["device"]["model"] = "Pixel 9"
+  non_iphone_path = File.join(directory, "non-iphone.yaml")
+  File.write(non_iphone_path, YAML.dump(non_iphone))
+  _stdout, stderr, status = run("ruby", checker, non_iphone_path)
+  assert(!status.success? && stderr.include?("physical iPhone model"),
+         "non-iPhone device entered the iOS physical matrix")
+
+  wrong_tier = Marshal.load(Marshal.dump(manifest))
+  low_run = wrong_tier["runs"].find { |entry| entry["tier"] == "low" }
+  low_capture_artifact = low_run["artifacts"].find { |artifact| artifact["kind"] == "device_capture" }
+  low_capture_path = File.join(repo_root, low_capture_artifact["file"])
+  valid_low_capture = File.binread(low_capture_path)
+  low_capture = JSON.parse(valid_low_capture)
+  low_capture["device_list"]["result"]["devices"].first["hardwareProperties"]["marketingName"] = "iPhone 15 Pro"
+  low_capture["device_list"]["result"]["devices"].first["hardwareProperties"]["productType"] = "iPhone16,1"
+  low_run["device"]["model"] = "iPhone 15 Pro"
+  low_run["device"]["hardware_class"] = "iPhone16,1"
+  File.write(low_capture_path, JSON.pretty_generate(low_capture))
+  low_capture_artifact["sha256"] = Digest::SHA256.file(low_capture_path).hexdigest
+  wrong_tier_path = File.join(directory, "wrong-tier.yaml")
+  File.write(wrong_tier_path, YAML.dump(wrong_tier))
+  _stdout, stderr, status = run("ruby", checker, wrong_tier_path)
+  assert(!status.success? && stderr.include?("frozen low hardware tier"),
+         "a flagship iPhone was accepted as the frozen low tier")
+  File.binwrite(low_capture_path, valid_low_capture)
 
   duplicate_device = Marshal.load(Marshal.dump(manifest))
   duplicate_device["runs"][1]["device"]["device_id"] =

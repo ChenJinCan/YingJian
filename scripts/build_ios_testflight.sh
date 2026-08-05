@@ -48,11 +48,20 @@ echo "LOCAL-ONLY: validating iOS candidate $VERSION_VALUE ($BUILD_VALUE) at $REL
 
 flutter_config_root=$(mktemp -d "${TMPDIR:-/tmp}/yingjian-ios-flutter-config.XXXXXX")
 export XDG_CONFIG_HOME="$flutter_config_root"
+build_identity_path="$ROOT_DIR/assets/build/source-commit.txt"
+if [[ -e "$build_identity_path" ]]; then
+  echo "stale iOS build identity exists: $build_identity_path" >&2
+  exit 69
+fi
+printf '%s\n' "$RELEASE_SOURCE_COMMIT" > "$build_identity_path"
 cleanup_flutter_config() {
   local status=$?
   trap - EXIT HUP INT TERM
   if [[ -d "$flutter_config_root" ]]; then
     find "$flutter_config_root" -depth -delete
+  fi
+  if [[ -f "$build_identity_path" ]]; then
+    unlink "$build_identity_path"
   fi
   exit "$status"
 }

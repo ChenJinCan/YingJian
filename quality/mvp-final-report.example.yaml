@@ -1,0 +1,14 @@
+schema: 1
+source_commit: 0123456789abcdef0123456789abcdef01234567
+decision: pending
+interaction_decision:
+  status: pending
+  winning_variant: pending
+  retained_structures: []
+  rejected_structures: []
+  spec_file: docs/product/mvp-spec.md
+  spec_sha256: replace-with-64-lowercase-hex-digest
+  usability_manifest: .quality/usability/ios-mvp.yaml
+  usability_sha256: replace-with-64-lowercase-hex-digest
+  device_run_id: replace-with-selected-ios-device-run-id
+  session_ids: []

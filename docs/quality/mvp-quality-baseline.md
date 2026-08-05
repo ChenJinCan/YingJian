@@ -464,6 +464,8 @@ ruby scripts/test_ios_file_render_corpus.rb
 ruby scripts/test_portrait_engineering_corpus.rb
 ruby scripts/test_portrait_review_plan_tools.rb
 ruby scripts/test_blind_review_tools.rb
+ruby scripts/test_usability_evidence.rb
+ruby scripts/test_build_usability_evidence.rb
 ruby scripts/check_device_evidence.rb --allow-incomplete
 ruby scripts/test_device_evidence.rb
 scripts/test_ios_mvp_integration.sh <booted-ios-simulator-id>

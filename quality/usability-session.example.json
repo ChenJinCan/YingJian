@@ -1,0 +1,60 @@
+{
+  "schema": 2,
+  "session_id": "replace-with-an-opaque-64-character-sha256",
+  "participant_id": "replace-with-a-different-opaque-64-character-sha256",
+  "source_commit": "0123456789abcdef0123456789abcdef01234567",
+  "platform": "ios",
+  "device_run_id": "ios-mid-001",
+  "device": {
+    "physical": true,
+    "model": "iPhone 14 Plus",
+    "os_version": "iOS 26.5.2"
+  },
+  "build": {
+    "mode": "profile",
+    "bundle_id": "com.babycompany.yingjian",
+    "version": "1.0.0",
+    "build_number": "1",
+    "source_commit": "0123456789abcdef0123456789abcdef01234567",
+    "artifact_sha256": "replace-with-the-installed-profile-or-release-artifact-sha256"
+  },
+  "protocol": {
+    "uncoached": true,
+    "eligibility_attested_by_observer": true,
+    "target_user_eligibility": {
+      "frequently_takes_mobile_photos": true,
+      "publishes_multiple_photos": true,
+      "wants_quality_without_professional_workflow": true,
+      "willing_to_micro_adjust_from_reliable_start": true
+    },
+    "observer_interventions": 0,
+    "experience_variant": "production",
+    "photo_count": 6
+  },
+  "metrics": {
+    "recommendations_ready_ms": 7500
+  },
+  "tasks": [
+    {"id": "import_photos", "completed": true},
+    {"id": "review_three_recommendations", "completed": true},
+    {"id": "select_recommendation", "completed": true},
+    {"id": "adjust_group", "completed": true},
+    {"id": "adjust_current_photo", "completed": true},
+    {"id": "undo_edit", "completed": true},
+    {"id": "redo_edit", "completed": true},
+    {"id": "compare_before_after", "completed": true},
+    {"id": "return_to_group", "completed": true},
+    {"id": "restore_project", "completed": true},
+    {"id": "export_photos", "completed": true}
+  ],
+  "outcomes": {
+    "cloud_image_tasks_created": 0,
+    "export_origin": "app_owned_original"
+  },
+  "responses": {
+    "group_scope": "correct",
+    "current_photo_scope": "correct",
+    "recommendations_saved_effort": true,
+    "recommendations_understood_as_local": true
+  }
+}

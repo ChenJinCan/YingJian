@@ -8,7 +8,7 @@ runs:
     device:
       device_id: replace_with_sha256_of_local_opaque_device_label
       model: iPhone 14 Plus
-      hardware_class: A15 / 6 GB
+      hardware_class: iPhone14,8
       os_version: iOS 26.5.2
       tier_basis: approved mid-tier substitution
       physical_memory_mb: 6144
@@ -56,7 +56,10 @@ runs:
       system_share_failure: false
     artifacts:
       - kind: build_artifact
-        file: .quality/device-evidence/ios-mid-001/profile-build.zip
+        file: .quality/device-evidence/ios-mid-001/profile-build.ipa
+        sha256: replace_with_64_character_lowercase_sha256
+      - kind: device_capture
+        file: .quality/device-evidence/ios-mid-001/devicectl-device.json
         sha256: replace_with_64_character_lowercase_sha256
       - kind: metrics_log
         file: .quality/device-evidence/ios-mid-001/metrics.json

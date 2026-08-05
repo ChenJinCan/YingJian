@@ -63,6 +63,15 @@
 
 这些阈值是首轮验证门，不是已经达到的业务指标。
 
+### 真人交互决策
+
+MVP_INTERACTION_DECISION_STATUS: pending
+MVP_INTERACTION_WINNING_VARIANT: pending
+MVP_INTERACTION_RETAINABLE_STRUCTURES: result_first_recommendations,explicit_group_current_scope,thumb_reachable_bottom_commands,immersive_photo_preview
+MVP_INTERACTION_REJECTABLE_STRUCTURES: web_tool_dashboard,poster_style_mobile,hidden_scope_switching,scroll_bound_primary_commands
+
+五名目标用户完成同一冻结 iOS 候选的无引导任务后，最终验收报告必须从上述冻结 ID 中结构化记录保留与拒绝的交互结构，并把前两行冻结为 `frozen` 与 `production`。当前 `pending` 是显式阻断状态；仅有总结文案、设计偏好或自动化通过不能代替真人交互决策。
+
 ## Scope
 
 ### P0.1 产品与质量基线

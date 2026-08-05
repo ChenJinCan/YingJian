@@ -78,6 +78,9 @@ OptionParser.new do |parser|
   parser.on("--source-commit SHA") { |value| options[:source_commit] = value }
   parser.on("--team-id ID") { |value| options[:team_id] = value }
   parser.on("--firebase-config PATH") { |value| options[:firebase_config] = value }
+  parser.on("--device-evidence-mode MODE", %w[profile release]) { |value| options[:device_evidence_mode] = value }
+  parser.on("--expected-device-udid UDID") { |value| options[:expected_device_udid] = value }
+  parser.on("--test-tool-directory DIRECTORY") { |value| options[:test_tool_directory] = value }
   parser.on("--expected-sha256 SHA256") { |value| options[:expected_sha256] = value }
   parser.on("--output PATH") { |value| options[:output] = value }
 end.parse!
@@ -97,6 +100,14 @@ fail_verification("frozen Firebase config is missing") unless expected_firebase_
 fail_verification("source-commit must be a full 40-character Git SHA") unless
   source_commit.match?(/\A[0-9a-f]{40}\z/)
 fail_verification("build must be a positive integer") unless expected_build.match?(/\A[1-9]\d*\z/)
+test_tool_directory = options[:test_tool_directory]
+if test_tool_directory
+  fail_verification("test tool overrides are disabled") unless ENV["YINGJIAN_ALLOW_TEST_TOOLS"] == "1"
+  test_tool_directory = Pathname.new(test_tool_directory).expand_path
+  fail_verification("test tool directory is invalid") unless test_tool_directory.directory?
+end
+security_tool = test_tool_directory ? test_tool_directory.join("security").to_s : "/usr/bin/security"
+codesign_tool = test_tool_directory ? test_tool_directory.join("codesign").to_s : "/usr/bin/codesign"
 
 sha256 = Digest::SHA256.file(ipa_path).hexdigest
 expected_sha256 = options[:expected_sha256].to_s.strip.downcase
@@ -177,6 +188,10 @@ Dir.mktmpdir("yingjian-ipa-verify-") do |directory|
   required_resources.each do |relative|
     fail_verification("IPA is missing required resource #{relative}") unless File.file?(File.join(app_path, relative))
   end
+  embedded_source_path = File.join(app_path, "Frameworks/App.framework/flutter_assets/assets/build/source-commit.txt")
+  fail_verification("IPA is missing embedded source commit identity") unless File.file?(embedded_source_path)
+  fail_verification("embedded source commit does not match the frozen source") unless
+    File.read(embedded_source_path).strip == source_commit
   fail_verification("Release IPA contains debug kernel_blob.bin") if
     File.exist?(File.join(app_path, "Frameworks/App.framework/flutter_assets/kernel_blob.bin"))
 
@@ -189,7 +204,7 @@ Dir.mktmpdir("yingjian-ipa-verify-") do |directory|
   end
 
   profile_path = File.join(app_path, "embedded.mobileprovision")
-  profile = parse_plist_data(capture!("security", "cms", "-D", "-i", profile_path), directory, "provisioning profile")
+  profile = parse_plist_data(capture!(security_tool, "cms", "-D", "-i", profile_path), directory, "provisioning profile")
   profile_entitlements = profile["Entitlements"]
   fail_verification("provisioning profile entitlements are missing") unless profile_entitlements.is_a?(Hash)
   fail_verification("provisioning profile team does not match") unless Array(profile["TeamIdentifier"]).include?(expected_team_id)
@@ -197,9 +212,25 @@ Dir.mktmpdir("yingjian-ipa-verify-") do |directory|
     profile_entitlements["application-identifier"] == "#{expected_team_id}.#{expected_bundle_id}"
   fail_verification("provisioning team entitlement does not match") unless
     profile_entitlements["com.apple.developer.team-identifier"] == expected_team_id
-  fail_verification("App Store profile must disable get-task-allow") unless profile_entitlements["get-task-allow"] == false
-  fail_verification("App Store profile must enable beta reports") unless profile_entitlements["beta-reports-active"] == true
-  fail_verification("development provisioning profile is not allowed") if profile.key?("ProvisionedDevices")
+  device_evidence_mode = options[:device_evidence_mode]
+  if device_evidence_mode == "profile"
+    fail_verification("Profile device evidence must enable get-task-allow") unless profile_entitlements["get-task-allow"] == true
+    provisioned_devices = profile["ProvisionedDevices"]
+    fail_verification("Profile device evidence must use a device provisioning profile") unless
+      provisioned_devices.is_a?(Array) && !provisioned_devices.empty?
+    expected_udid = options[:expected_device_udid].to_s.strip
+    fail_verification("Profile device evidence must bind the tested device UDID") if
+      expected_udid.empty? || !provisioned_devices.include?(expected_udid)
+  elsif device_evidence_mode == "release"
+    fail_verification("Release device evidence must disable get-task-allow") unless profile_entitlements["get-task-allow"] == false
+    distributable = (profile["ProvisionedDevices"].is_a?(Array) && !profile["ProvisionedDevices"].empty?) ||
+      profile_entitlements["beta-reports-active"] == true
+    fail_verification("Release device evidence profile is not installable or distributable") unless distributable
+  else
+    fail_verification("App Store profile must disable get-task-allow") unless profile_entitlements["get-task-allow"] == false
+    fail_verification("App Store profile must enable beta reports") unless profile_entitlements["beta-reports-active"] == true
+    fail_verification("development provisioning profile is not allowed") if profile.key?("ProvisionedDevices")
+  end
   fail_verification("enterprise provisioning profile is not allowed") if profile["ProvisionsAllDevices"] == true
   expiration = profile["ExpirationDate"]
   expiration = Time.parse(expiration) if expiration.is_a?(String)
@@ -207,14 +238,14 @@ Dir.mktmpdir("yingjian-ipa-verify-") do |directory|
   fail_verification("provisioning profile is expired") unless expiration > Time.now
 
   _output, error, status = Open3.capture3(
-    "codesign",
+    codesign_tool,
     "--verify",
     "--deep",
     "--strict",
     app_path
   )
   fail_verification("codesign verification failed: #{error.strip}") unless status.success?
-  signed_output, signed_error, signed_status = Open3.capture3("codesign", "-d", "--entitlements", ":-", app_path)
+  signed_output, signed_error, signed_status = Open3.capture3(codesign_tool, "-d", "--entitlements", ":-", app_path)
   fail_verification("signed entitlements could not be read") unless signed_status.success?
   signed_data = signed_output.empty? ? signed_error : signed_output
   signed = parse_plist_data(signed_data, directory, "signed entitlements")
@@ -222,7 +253,13 @@ Dir.mktmpdir("yingjian-ipa-verify-") do |directory|
     signed["application-identifier"] == "#{expected_team_id}.#{expected_bundle_id}"
   fail_verification("signed team entitlement does not match") unless
     signed["com.apple.developer.team-identifier"] == expected_team_id
-  fail_verification("signed app must disable get-task-allow") unless signed["get-task-allow"] == false
+  if device_evidence_mode
+    expected_get_task_allow = device_evidence_mode == "profile"
+    fail_verification("signed app get-task-allow does not match the build mode") unless
+      signed["get-task-allow"] == expected_get_task_allow
+  else
+    fail_verification("signed app must disable get-task-allow") unless signed["get-task-allow"] == false
+  end
 
   report = {
     "schema_version" => 1,
@@ -239,6 +276,9 @@ Dir.mktmpdir("yingjian-ipa-verify-") do |directory|
     "distribution_profile_verified" => true,
     "provisioning_profile_present" => true,
     "firebase_configuration_verified" => true,
+    "device_evidence_eligible" => !device_evidence_mode.nil?,
+    "build_mode" => device_evidence_mode,
+    "embedded_source_commit_verified" => true,
     "verified_at" => Time.now.utc.iso8601
   }
   write_report(options[:output], report) if options[:output]

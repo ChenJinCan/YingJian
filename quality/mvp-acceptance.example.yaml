@@ -12,5 +12,5 @@ evidence:
   usability_manifest: .quality/usability/ios-mvp.yaml
   device_matrix_manifest: .quality/device-evidence/ios-mvp.yaml
   final_report:
-    file: .quality/final-report.md
+    file: .quality/final-report.yaml
     sha256: replace-with-64-lowercase-hex-digest

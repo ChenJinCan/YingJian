@@ -51,6 +51,7 @@ signing.properties
 *.aab
 *.ipa
 *.xcarchive
+assets/build/source-commit.txt
 
 # Symbolication related
 app.*.symbols

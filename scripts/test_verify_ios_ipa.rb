@@ -35,7 +35,8 @@ def run_verifier(environment, ipa, firebase_config, bundle: BUNDLE)
   Open3.capture3(environment, "ruby", VERIFIER, ipa, "--bundle-id", bundle,
                  "--version", "1.2.4", "--build", "112", "--team-id", TEAM,
                  "--firebase-config", firebase_config,
-                 "--source-commit", SHA)
+                 "--source-commit", SHA,
+                 "--test-tool-directory", environment.fetch("YINGJIAN_TEST_TOOL_DIRECTORY"))
 end
 
 Dir.mktmpdir("yingjian-ipa-verifier-") do |directory|
@@ -54,11 +55,12 @@ Dir.mktmpdir("yingjian-ipa-verifier-") do |directory|
     "PROJECT_ID" => "yingjian-fixture", "API_KEY" => "fixture-key",
     "GCM_SENDER_ID" => "123456789", "STORAGE_BUCKET" => "yingjian-fixture.appspot.com"
   ))
-  %w[Runner Assets.car Frameworks/App.framework/App Frameworks/App.framework/flutter_assets/AssetManifest.bin Frameworks/App.framework/flutter_assets/NOTICES.Z Frameworks/App.framework/flutter_assets/assets/legal/privacy_en.md Frameworks/App.framework/flutter_assets/assets/legal/privacy_zh.md Frameworks/App.framework/flutter_assets/assets/legal/terms_en.md Frameworks/App.framework/flutter_assets/assets/legal/terms_zh.md].each do |relative|
+  %w[Runner Assets.car Frameworks/App.framework/App Frameworks/App.framework/flutter_assets/AssetManifest.bin Frameworks/App.framework/flutter_assets/NOTICES.Z Frameworks/App.framework/flutter_assets/assets/legal/privacy_en.md Frameworks/App.framework/flutter_assets/assets/legal/privacy_zh.md Frameworks/App.framework/flutter_assets/assets/legal/terms_en.md Frameworks/App.framework/flutter_assets/assets/legal/terms_zh.md Frameworks/App.framework/flutter_assets/assets/build/source-commit.txt].each do |relative|
     path = File.join(app, relative)
     FileUtils.mkdir_p(File.dirname(path))
     File.write(path, "fixture")
   end
+  File.write(File.join(app, "Frameworks/App.framework/flutter_assets/assets/build/source-commit.txt"), "#{SHA}\n")
   File.write(File.join(app, "embedded.mobileprovision"), "fixture")
 
   bin = File.join(directory, "bin")
@@ -80,7 +82,10 @@ Dir.mktmpdir("yingjian-ipa-verifier-") do |directory|
   File.write(File.join(bin, "codesign"), "#!/bin/sh\nif [ \"$1\" = \"-d\" ]; then cat '#{File.join(directory, 'entitlements.plist')}'; fi\nexit 0\n")
   File.write(File.join(directory, "entitlements.plist"), entitlements)
   FileUtils.chmod(0o755, [File.join(bin, "security"), File.join(bin, "codesign")])
-  environment = { "PATH" => "#{bin}:#{ENV.fetch('PATH')}" }
+  environment = {
+    "YINGJIAN_ALLOW_TEST_TOOLS" => "1",
+    "YINGJIAN_TEST_TOOL_DIRECTORY" => bin,
+  }
   firebase_config = File.join(directory, "frozen-firebase.plist")
   FileUtils.cp(File.join(app, "GoogleService-Info.plist"), firebase_config)
 
@@ -93,11 +98,20 @@ Dir.mktmpdir("yingjian-ipa-verifier-") do |directory|
                                     "--bundle-id", BUNDLE, "--version", "1.2.4", "--build", "112",
                                     "--team-id", TEAM, "--source-commit", SHA,
                                     "--firebase-config", firebase_config,
-                                    "--expected-sha256", sha, "--output", report)
+                                    "--expected-sha256", sha, "--output", report,
+                                    "--test-tool-directory", bin)
   assert(status.success?, "valid IPA rejected: #{out}#{err}")
   data = JSON.parse(File.read(report))
   assert(data["distribution_profile_verified"] == true, "distribution profile not recorded")
   assert(data["firebase_configuration_verified"] == true, "Firebase verification not recorded")
+
+  _out, err, status = Open3.capture3(
+    "ruby", VERIFIER, ipa, "--bundle-id", BUNDLE, "--version", "1.2.4",
+    "--build", "112", "--team-id", TEAM, "--source-commit", SHA,
+    "--firebase-config", firebase_config, "--test-tool-directory", bin
+  )
+  assert(!status.success? && err.include?("test tool overrides are disabled"),
+         "production verification accepted injected signing tools")
 
   _out, err, status = run_verifier(environment, ipa, firebase_config, bundle: "com.example.wrong")
   assert(!status.success? && err.include?("bundle identifier"), "wrong bundle accepted")
@@ -115,6 +129,16 @@ Dir.mktmpdir("yingjian-ipa-verifier-") do |directory|
   assert(!status.success? && err.include?("PROJECT_ID does not match"), "wrong Firebase project accepted")
 
   FileUtils.cp(File.join(app, "GoogleService-Info.plist"), firebase_config)
+  source_identity = File.join(app, "Frameworks/App.framework/flutter_assets/assets/build/source-commit.txt")
+  File.write(source_identity, "#{'b' * 40}\n")
+  wrong_source_ipa = File.join(directory, "WrongSource.ipa")
+  _out, err, status = Open3.capture3("zip", "-qry", wrong_source_ipa, "Payload", chdir: directory)
+  assert(status.success?, "wrong-source fixture creation failed: #{err}")
+  _out, err, status = run_verifier(environment, wrong_source_ipa, firebase_config)
+  assert(!status.success? && err.include?("embedded source commit"),
+         "IPA was accepted for a source commit it did not embed")
+  File.write(source_identity, "#{SHA}\n")
+
   FileUtils.rm(File.join(app, "Frameworks/App.framework/flutter_assets/assets/legal/privacy_en.md"))
   missing_legal_ipa = File.join(directory, "MissingLegal.ipa")
   _out, err, status = Open3.capture3("zip", "-qry", missing_legal_ipa, "Payload", chdir: directory)

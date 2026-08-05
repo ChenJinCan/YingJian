@@ -3,8 +3,13 @@
 
 require "digest"
 require "json"
+require "open3"
 require "pathname"
+require "rbconfig"
+require "tempfile"
+require "time"
 require "yaml"
+require_relative "support/device_evidence_contract"
 
 def fail_evidence(message)
   warn "Device evidence check failed: #{message}"
@@ -82,20 +87,7 @@ unless runs.is_a?(Array)
   runs = []
 end
 
-budgets = {
-  "low" => {
-    first_preview: 4_000, recommendations: 12_000, slider: 120,
-    fps: 24, export_12mp: 8_000, batch: 60_000,
-  },
-  "mid" => {
-    first_preview: 2_500, recommendations: 8_000, slider: 100,
-    fps: 30, export_12mp: 5_000, batch: 40_000,
-  },
-  "high" => {
-    first_preview: 1_800, recommendations: 6_000, slider: 80,
-    fps: 45, export_12mp: 3_500, export_48mp: 8_000, batch: 30_000,
-  },
-}.freeze
+budgets = DeviceEvidenceContract::BUDGETS
 required_coverage = {
   ["ios", "low"] => %w[12mp portrait_single six_photo_group],
   ["ios", "mid"] => %w[12mp 24mp display_p3 heic six_photo_group],
@@ -109,6 +101,7 @@ required_outcomes = %w[
 
 run_ids = {}
 device_ids = {}
+device_udids = {}
 slots = {}
 artifact_paths = {}
 artifact_hashes = {}
@@ -154,6 +147,10 @@ runs.each_with_index do |run, index|
   end
   %w[model hardware_class os_version tier_basis].each do |field|
     errors << "#{prefix}.device.#{field} must be concrete" unless concrete_string?(device[field])
+  end
+  if platform == "ios" &&
+      (!device["model"].to_s.match?(/\AiPhone(?:\s|[0-9])/) || device["model"].to_s.match?(/simulator/i))
+    errors << "#{prefix}.device.model must identify a physical iPhone model"
   end
   device_id = device["device_id"]
   if !device_id.is_a?(String) || !device_id.match?(/\A[0-9a-f]{64}\z/)
@@ -218,8 +215,8 @@ runs.each_with_index do |run, index|
     end
   end
 
-  unless artifacts.is_a?(Array) && artifacts.length >= 3
-    errors << "#{prefix}.artifacts must contain build_artifact, metrics_log, and final_artifact_probe"
+  unless artifacts.is_a?(Array) && artifacts.length >= 4
+    errors << "#{prefix}.artifacts must contain build_artifact, device_capture, metrics_log, and final_artifact_probe"
     artifacts = []
   end
   artifact_kinds = {}
@@ -289,8 +286,170 @@ runs.each_with_index do |run, index|
       end
     end
   end
-  %w[build_artifact metrics_log final_artifact_probe].each do |kind|
+  %w[build_artifact device_capture metrics_log final_artifact_probe].each do |kind|
     errors << "#{prefix}.artifacts is missing #{kind}" unless artifact_kinds[kind]
+  end
+
+  captured_device_udid = nil
+  capture_file = artifact_files["device_capture"]
+  if capture_file
+    begin
+      capture = JSON.parse(File.read(capture_file))
+      collector = capture.is_a?(Hash) ? capture["collector"] : nil
+      collector_path = File.join(repo_root, "scripts", "capture_ios_device_evidence.rb")
+      captured_at = capture.is_a?(Hash) ? Time.iso8601(capture["captured_at"].to_s) : nil
+      capture_age = captured_at ? Time.now.utc - captured_at.utc : nil
+      valid_envelope = capture.is_a?(Hash) && capture["schema"] == 1 &&
+        capture["host_id"].to_s.match?(/\A[0-9a-f]{64}\z/) &&
+        capture["selected_device_id"] == device_id && collector.is_a?(Hash) &&
+        collector["file"] == "scripts/capture_ios_device_evidence.rb" &&
+        collector["sha256"] == Digest::SHA256.file(collector_path).hexdigest &&
+        collector["xcrun"] == "/usr/bin/xcrun" && concrete_string?(collector["devicectl_version"]) &&
+        capture_age && capture_age >= -300 && capture_age <= 7 * 24 * 60 * 60
+      errors << "#{prefix} device_capture was not produced by the frozen recent collector" unless valid_envelope
+      device_list = capture.is_a?(Hash) ? capture["device_list"] : nil
+      capture_info = device_list.is_a?(Hash) ? device_list["info"] : nil
+      captured_devices = device_list.is_a?(Hash) && device_list["result"].is_a?(Hash) ? device_list["result"]["devices"] : nil
+      unless capture_info.is_a?(Hash) && capture_info["commandType"] == "devicectl.list.devices" &&
+          capture_info["outcome"] == "success" && capture_info["jsonVersion"].is_a?(Integer) &&
+          captured_devices.is_a?(Array)
+        errors << "#{prefix} device_capture is not a successful devicectl list devices JSON record"
+        captured_devices = []
+      end
+      matches = captured_devices.select do |captured|
+        captured.is_a?(Hash) && concrete_string?(captured["identifier"]) &&
+          Digest::SHA256.hexdigest(captured["identifier"]) == device_id
+      end
+      if matches.length != 1
+        errors << "#{prefix} device_capture must contain exactly one device matching device.device_id"
+      else
+        captured = matches.first
+        captured_hardware = captured["hardwareProperties"]
+        captured_properties = captured["deviceProperties"]
+        captured_connection = captured["connectionProperties"]
+        valid_physical_iphone = captured_hardware.is_a?(Hash) && captured_properties.is_a?(Hash) &&
+          captured_connection.is_a?(Hash) && captured_hardware["platform"] == "iOS" &&
+          captured_hardware["deviceType"] == "iPhone" && captured_hardware["reality"] == "physical" &&
+          captured_hardware["marketingName"] == device["model"] &&
+          captured_hardware["productType"] == device["hardware_class"] &&
+          "iOS #{captured_properties["osVersionNumber"]}" == device["os_version"] &&
+          captured_properties["developerModeStatus"] == "enabled" &&
+          captured_properties["ddiServicesAvailable"] == true &&
+          captured_connection["pairingState"] == "paired" &&
+          captured_connection["tunnelState"] == "connected"
+        errors << "#{prefix} device_capture does not prove a connected physical iPhone matching the run" unless valid_physical_iphone
+        unless captured_hardware.is_a?(Hash) && DeviceEvidenceContract.physical_tier_matches?(
+          tier: tier,
+          product_type: captured_hardware["productType"],
+          marketing_name: captured_hardware["marketingName"],
+        )
+          errors << "#{prefix} captured iPhone does not satisfy the frozen #{tier} hardware tier"
+        end
+        captured_device_udid = captured_hardware["udid"] if captured_hardware.is_a?(Hash)
+        errors << "#{prefix} device_capture does not contain the tested iPhone UDID" unless concrete_string?(captured_device_udid)
+        if concrete_string?(captured_device_udid)
+          udid_hash = Digest::SHA256.hexdigest(captured_device_udid)
+          if device_udids[udid_hash]
+            errors << "duplicate captured physical iPhone UDID"
+          else
+            device_udids[udid_hash] = true
+          end
+        end
+      end
+      installed_apps = capture.is_a?(Hash) ? capture["installed_apps"] : nil
+      app_info = installed_apps.is_a?(Hash) ? installed_apps["info"] : nil
+      apps = installed_apps.is_a?(Hash) && installed_apps["result"].is_a?(Hash) ? installed_apps["result"]["apps"] : nil
+      valid_app_capture = app_info.is_a?(Hash) && app_info["commandType"] == "devicectl.device.info.apps" &&
+        app_info["outcome"] == "success" && apps.is_a?(Array)
+      matching_apps = valid_app_capture ? apps.select { |app| app.is_a?(Hash) && app["bundleIdentifier"] == build["bundle_id"] } : []
+      installed_build_matches = matching_apps.length == 1 &&
+        matching_apps.first["bundleVersion"].to_s == build["build_number"].to_s &&
+        [matching_apps.first["bundleShortVersionString"], matching_apps.first["version"]].compact.map(&:to_s).include?(build["version"].to_s)
+      errors << "#{prefix} device_capture does not prove the frozen app version/build is installed" unless installed_build_matches
+
+      unless ENV["YINGJIAN_DEVICE_EVIDENCE_TEST"] == "1" || !concrete_string?(captured_device_udid)
+        Tempfile.create(["yingjian-live-devices-", ".json"]) do |live_file|
+          live_file.close
+          _output, live_error, live_status = Open3.capture3(
+            "/usr/bin/xcrun", "devicectl", "list", "devices", "--json-output", live_file.path
+          )
+          if live_status.success?
+            live_record = JSON.parse(File.read(live_file.path))
+            live_devices = live_record.dig("result", "devices")
+            live_devices = [] unless live_devices.is_a?(Array)
+            live_matches = live_devices.select do |live_device|
+              live_device.is_a?(Hash) && live_device["identifier"] == captured["identifier"] &&
+                live_device.dig("hardwareProperties", "udid") == captured_device_udid
+            end
+            live_connected = live_matches.length == 1 &&
+              live_matches.first.dig("hardwareProperties", "reality") == "physical" &&
+              live_matches.first.dig("hardwareProperties", "marketingName") == captured_hardware["marketingName"] &&
+              live_matches.first.dig("hardwareProperties", "productType") == captured_hardware["productType"] &&
+              live_matches.first.dig("deviceProperties", "osVersionNumber") == captured_properties["osVersionNumber"] &&
+              live_matches.first.dig("connectionProperties", "pairingState") == "paired" &&
+              live_matches.first.dig("connectionProperties", "tunnelState") == "connected" &&
+              live_matches.first.dig("deviceProperties", "ddiServicesAvailable") == true
+            errors << "#{prefix} live devicectl query does not confirm the captured iPhone is connected" unless live_connected
+          else
+            errors << "#{prefix} live devicectl device query failed: #{live_error.strip}"
+          end
+        end
+        Tempfile.create(["yingjian-live-apps-", ".json"]) do |live_file|
+          live_file.close
+          _output, live_error, live_status = Open3.capture3(
+            "/usr/bin/xcrun", "devicectl", "device", "info", "apps",
+            "--device", captured["identifier"], "--bundle-id", build["bundle_id"].to_s,
+            "--json-output", live_file.path
+          )
+          if live_status.success?
+            live_record = JSON.parse(File.read(live_file.path))
+            live_apps = live_record.dig("result", "apps")
+            live_apps = [] unless live_apps.is_a?(Array)
+            live_matches = live_apps.select do |app|
+              app.is_a?(Hash) && app["bundleIdentifier"] == build["bundle_id"] &&
+                app["bundleVersion"].to_s == build["build_number"].to_s &&
+                [app["bundleShortVersionString"], app["version"]].compact.map(&:to_s).include?(build["version"].to_s)
+            end
+            errors << "#{prefix} live devicectl query does not confirm the frozen build is installed" unless live_matches.length == 1
+          else
+            errors << "#{prefix} live devicectl app query failed: #{live_error.strip}"
+          end
+        end
+      end
+    rescue JSON::ParserError, SystemCallError, ArgumentError => error
+      errors << "#{prefix} device_capture is unreadable: #{error.message}"
+    end
+  end
+
+  build_artifact_file = artifact_files["build_artifact"]
+  if build_artifact_file && platform == "ios" && concrete_string?(captured_device_udid)
+    verifier_arguments = [
+      RbConfig.ruby, File.join(repo_root, "scripts", "verify_ios_ipa.rb"), build_artifact_file,
+      "--bundle-id", build["bundle_id"].to_s,
+      "--version", build["version"].to_s,
+      "--build", build["build_number"].to_s,
+      "--source-commit", source_commit.to_s,
+      "--team-id", "V86Q54AQQU",
+      "--firebase-config", File.join(repo_root, "ios", "Runner", "GoogleService-Info.plist"),
+      "--expected-sha256", build["artifact_sha256"].to_s,
+      "--device-evidence-mode", build["mode"].to_s,
+      "--expected-device-udid", captured_device_udid,
+    ]
+    verifier_environment = {
+      "YINGJIAN_ALLOW_TEST_TOOLS" => nil,
+      "YINGJIAN_TEST_TOOL_DIRECTORY" => nil,
+    }
+    if ENV["YINGJIAN_DEVICE_EVIDENCE_TEST"] == "1"
+      verifier_environment["YINGJIAN_ALLOW_TEST_TOOLS"] = "1"
+      verifier_arguments.concat(["--test-tool-directory", ENV.fetch("YINGJIAN_TEST_TOOL_DIRECTORY", "")])
+    end
+    verification_output, verification_error, verification_status = Open3.capture3(
+      verifier_environment, *verifier_arguments
+    )
+    unless verification_status.success?
+      details = verification_error.strip.empty? ? verification_output.strip : verification_error.strip
+      errors << "#{prefix} build_artifact is not a verified signed iOS device build: #{details}"
+    end
   end
 
   metrics_file = artifact_files["metrics_log"]

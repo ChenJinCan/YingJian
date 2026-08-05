@@ -239,8 +239,11 @@ expect_failure \
     --source-commit "$source_commit"
 
 ruby "$ROOT_DIR/scripts/test_verify_ios_ipa.rb"
+ruby -c "$ROOT_DIR/scripts/capture_ios_device_evidence.rb" >/dev/null
 ruby "$ROOT_DIR/scripts/test_mvp_acceptance.rb"
 ruby "$ROOT_DIR/scripts/test_usability_evidence.rb"
+ruby "$ROOT_DIR/scripts/test_build_usability_evidence.rb"
+ruby "$ROOT_DIR/scripts/test_device_evidence.rb"
 ruby "$ROOT_DIR/scripts/test_altool_delivery.rb"
 ruby "$ROOT_DIR/scripts/test_ios_testflight_workflow.rb"
 
