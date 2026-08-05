@@ -88,7 +88,7 @@ void main() {
   });
 
   test(
-    'portrait retouch stays with its photo when color edits sync to group',
+    'portrait retouch and reshape stay with their photo when color edits sync to group',
     () {
       final project = PhotoProject(
         id: 'project-portrait-sync',
@@ -97,7 +97,12 @@ void main() {
         photos: const [first, second],
         photoOverrides: {
           first.id: PhotoOverride(
-            recipe: EditRecipe(exposure: 0.2, portraitStrength: 0.4),
+            recipe: EditRecipe(
+              exposure: 0.2,
+              portraitStrength: 0.4,
+              faceSlimStrength: 0.25,
+              bodySlimStrength: 0.15,
+            ),
           ),
         },
       );
@@ -106,7 +111,17 @@ void main() {
 
       expect(plan.sharedStyle.recipe.exposure, closeTo(0.2, 1e-12));
       expect(plan.sharedStyle.recipe.portraitStrength, 0);
+      expect(plan.sharedStyle.recipe.faceSlimStrength, 0);
+      expect(plan.sharedStyle.recipe.bodySlimStrength, 0);
       expect(plan.remainingPhotoOverride.portraitStrength, closeTo(0.4, 1e-12));
+      expect(
+        plan.remainingPhotoOverride.faceSlimStrength,
+        closeTo(0.25, 1e-12),
+      );
+      expect(
+        plan.remainingPhotoOverride.bodySlimStrength,
+        closeTo(0.15, 1e-12),
+      );
     },
   );
 
@@ -238,7 +253,7 @@ void main() {
     expect(restored.exportStates[first.id], PhotoExportState.queued);
     expect(restored.editingScope, ProjectEditingScope.currentPhoto);
     expect(restored.undoHistory, project.undoHistory);
-    expect(project.toJson()['schemaVersion'], 5);
+    expect(project.toJson()['schemaVersion'], 6);
   });
 
   test('version three project migrates to a safe scope with empty history', () {
@@ -268,6 +283,26 @@ void main() {
     expect(restored.undoHistory, isEmpty);
     expect(restored.redoHistory, isEmpty);
   });
+
+  test(
+    'version five project migrates portrait geometry as safely disabled',
+    () {
+      final project = PhotoProject(
+        id: 'version-five',
+        createdAt: DateTime.utc(2026, 8, 5),
+        updatedAt: DateTime.utc(2026, 8, 5),
+        photos: const [first],
+      );
+      final legacy = Map<String, Object?>.from(project.toJson())
+        ..['schemaVersion'] = 5;
+
+      final restored = PhotoProject.fromJson(legacy);
+
+      expect(restored.effectiveRecipeFor(first.id).faceSlimStrength, 0);
+      expect(restored.effectiveRecipeFor(first.id).bodySlimStrength, 0);
+      expect(restored.toJson()['schemaVersion'], 6);
+    },
+  );
 
   test(
     'version two project migrates stable per-photo states without layers',

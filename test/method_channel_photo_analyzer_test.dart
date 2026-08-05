@@ -33,13 +33,14 @@ void main() {
             captured = call;
             return <String, Object>{
               'analysisVersion': 'local-pixels-v1',
-              'capabilityVersion': 'ios-core-image-vision-v4-local-portrait',
+              'capabilityVersion': 'ios-core-image-vision-v6-portrait-reshape',
               'confidence': 'medium',
               'exposure': 'underexposed',
               'whiteBalance': 'coolCast',
               'clarity': 'clear',
               'portrait': 'applicable',
               'portraitReason': 'none',
+              'body': 'applicable',
               'scene': 'people',
             };
           });
@@ -55,13 +56,14 @@ void main() {
       expect(result.usesSafeFallback, isFalse);
       expect(
         result.capabilityVersion,
-        'ios-core-image-vision-v4-local-portrait',
+        'ios-core-image-vision-v6-portrait-reshape',
       );
       expect(result.exposure.name, 'underexposed');
       expect(result.whiteBalance.name, 'coolCast');
       expect(result.scene.name, 'people');
       expect(result.portrait.name, 'applicable');
       expect(result.portraitReason.name, 'none');
+      expect(result.body.name, 'applicable');
       expect(result.matchesInput(photo), isTrue);
     },
   );

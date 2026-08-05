@@ -428,6 +428,18 @@ abstract class AppLocalizations {
   /// **'自然精修'**
   String get naturalPortraitRetouch;
 
+  /// No description provided for @faceSlim.
+  ///
+  /// In zh, this message translates to:
+  /// **'瘦脸'**
+  String get faceSlim;
+
+  /// No description provided for @bodySlim.
+  ///
+  /// In zh, this message translates to:
+  /// **'瘦身'**
+  String get bodySlim;
+
   /// No description provided for @composition.
   ///
   /// In zh, this message translates to:

@@ -14,10 +14,39 @@ private enum IOSFilePipelineProbe {
   static func main() throws {
     if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "identity" {
       try printJSON([
-        "pipelineSchema": 2,
+        "pipelineSchema": 3,
         "workingColorSpace": "srgb",
         "portraitStrength": 0,
+        "faceSlimStrength": 0,
+        "bodySlimStrength": 0,
         "outputFormat": "jpeg",
+      ])
+      return
+    }
+    if CommandLine.arguments.count == 3,
+       CommandLine.arguments[1] == "body-applicable"
+    {
+      let sourceURL = URL(fileURLWithPath: CommandLine.arguments[2])
+      guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil) else {
+        throw FilePipelineProbeError.invalidArguments
+      }
+      let options: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        // Keep this probe aligned with AppDelegate.analyzePhoto so engineering
+        // evidence cannot pass at a resolution the product never uses.
+        kCGImageSourceThumbnailMaxPixelSize: Int(IOSPortraitRetoucher.analysisMaxEdge),
+        kCGImageSourceShouldCacheImmediately: true,
+      ]
+      guard let image = CGImageSourceCreateThumbnailAtIndex(
+        source,
+        0,
+        options as CFDictionary
+      ) else {
+        throw FilePipelineProbeError.invalidArguments
+      }
+      try printJSON([
+        "body_applicable": IOSPortraitRetoucher.bodySlimApplicable(image: image),
       ])
       return
     }

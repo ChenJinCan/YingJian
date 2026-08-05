@@ -1,18 +1,20 @@
 # 映见 MVP Spec
 
-> 状态：ready-for-agent；版本：1.1；日期：2026-08-05；核心承诺：一张精修，整组好看；首发平台：iOS / TestFlight；本轮目标：验证“可靠单张质量 + 三套本地推荐 + 整组自适应 + 重点照片精修 + 批量保真导出”的完整闭环。
+> 状态：ready-for-agent；版本：1.2；日期：2026-08-06；核心承诺：一张精修，整组好看；首发平台：iOS / TestFlight；本轮目标：验证“可靠单张质量 + 三套本地推荐 + 整组自适应 + 自然人像与基础塑形 + 批量保真导出”的完整闭环。
 
 ## Problem Statement
 
 用户准备发布一张或一组照片时，通常知道自己想要“自然、干净、有氛围、适合发出来”，但不知道应该选择什么工具、滤镜和参数。传统全能编辑器提供大量能力，却把决策和重复劳动留给用户；固定滤镜产品路径很短，但难以修复具体问题；纯生成式 AI 操作简单，却存在等待、成本、身份漂移和不可控修改。
 
-对于一组照片，问题更明显：用户需要重复修每一张，又希望其中最重要的照片可以进一步精修。现有映见代码只能导入照片、调整曝光/对比度/色温并导出单张，尚不能形成三套推荐、整组一致性、重点单张覆盖和批量导出的用户闭环，也没有证明单张质量达到竞品入场基线。
+对于人像，用户说的“精修”和“变美”不只指肤色、光影和磨皮，也包括本人显式选择的克制瘦脸与瘦身。只做人像识别或全局色彩，不能构成最低可用的人像修图能力。
+
+对于一组照片，问题更明显：用户需要重复修每一张，又希望其中最重要的照片可以进一步精修。现有映见代码虽已具备部分导入、基础编辑和导出能力，但尚未证明自然人像、瘦脸、瘦身、整组一致性和批量导出的完整用户闭环达到竞品入场基线。
 
 ## Solution
 
 映见让用户先选择结果，再逐步展开工具。
 
-用户无需登录即可导入 1–6 张照片。应用在本地分析照片的基础质量、主体、人脸和光线，为单张或整组生成三套差异明确、可即时预览的本地推荐方案。用户选择一个方向后，可以调整整组强度，也可以进入任意重点照片做基础光色、构图和最低可用的自然人像精修。整组共享审美风格，每张照片保留独立补偿和单张覆盖，最终从原图批量导出。
+用户无需登录即可导入 1–6 张照片。应用在本地分析照片的基础质量、主体、人脸和光线，为单张或整组生成三套差异明确、可即时预览的本地推荐方案。用户选择一个方向后，可以调整整组强度，也可以进入任意重点照片做基础光色、构图，并分别使用 `自然精修`、`瘦脸`、`瘦身`。三项人像能力相互独立：自然精修改善肤色、面部光线和皮肤纹理；瘦脸只克制调整脸部轮廓；瘦身只克制调整安全可识别的躯干宽度。整组共享审美风格，每张照片保留独立补偿和单张覆盖，最终从原图批量导出。
 
 默认闭环完全本地执行，不上传照片、不调用图片生成模型、不要求账号，也不依赖云端服务成功。
 
@@ -31,7 +33,7 @@
     ↓
 选择整组方向
     ↓
-整组调整 ⇄ 重点照片精修
+整组调整 ⇄ 重点照片光色/构图/自然精修/瘦脸/瘦身
     ↓
 逐张检查
     ↓
@@ -51,6 +53,17 @@
 5. 至少一张照片从原图成功导出。
 6. 默认流程没有创建云端图片任务。
 
+### 人像场景成功条件
+
+对满足安全门的单人已有图片，人像 MVP 必须同时满足：
+
+1. `自然精修`、`瘦脸`、`瘦身`按各自适用条件独立出现，不能用一个“人像”总开关混合语义。
+2. 瘦脸和瘦身默认均为 `0`，只在用户主动滑动后改变，不由三套推荐自动开启。
+3. 非零瘦脸产生可见且单调的脸部轮廓收窄，同时保护眼、鼻、嘴和背景。
+4. 非零瘦身产生可见且单调的躯干宽度收窄，同时保护头部、四肢和背景。
+5. 前后对比、撤销/重做、归零、项目恢复、预览和原图导出保持三项能力的独立语义。
+6. 多人、遮挡、低置信度或保护门失败时，对应塑形工具不可用，但基础修图和导出不受阻。
+
 ### MVP 产品验证门
 
 封闭测试进入下一阶段前，需要取得以下证据：
@@ -59,6 +72,7 @@
 - 至少 70% 的多图测试用户能正确区分整组调整与单张调整。
 - 至少 60% 的测试用户认为三套推荐比从空白工具列表开始更省事。
 - 固定样片盲评中，映见基础单张结果达到冻结后的最低自然度与保真评分。
+- 固定人像盲评中，自然精修、瘦脸、瘦身分别达到各自质量门；不得用肤质得分替代几何塑形得分。
 - 关键图像正确性检查没有方向错误、明显二次压缩、预览/导出裁剪错位或原图覆盖。
 
 这些阈值是首轮验证门，不是已经达到的业务指标。
@@ -103,13 +117,14 @@ MVP_INTERACTION_REJECTABLE_STRUCTURES: web_tool_dashboard,poster_style_mobile,hi
 - 三套预览全部由本地配方产生，不创建云端生成任务。
 - 推荐只从声明过的参数和配方中选择，不执行任意脚本、着色器或自由参数。
 
-### P0.4 单张基础精修
+### P0.4 单张精修与基础人像塑形
 
 - 提供曝光、高光、阴影、对比度、色温、色调、饱和度和清晰度/锐度等核心光色能力。
 - 提供裁剪、旋转、水平校正和恢复原始构图。
 - 提供滤镜/配方强度调整。
-- 有人脸时提供最低可用的自然人像能力：受控的肤色/面部光线修正和纹理保护型轻度磨皮。
-- MVP 不提供五官重塑、美体、妆容和高风险几何修改。
+- 有人脸时提供自然人像能力：受控的肤色/面部光线修正和纹理保护型轻度磨皮。
+- 单个高置信度成人主体满足安全条件时，提供用户显式控制的轻度瘦脸与躯干瘦身；默认值为 0，不由三套推荐自动改变。
+- MVP 不提供大眼、鼻形、嘴形、下巴长度、头身比、局部身体部位或妆容重塑。
 - 人像检测或引擎不可用时，稳定降级到基础光色与构图，不阻塞导出。
 - 所有参数具有合法范围、默认值、归零、前后对比和撤销语义。
 - 一次连续滑块手势只形成一个撤销步骤。
@@ -181,7 +196,7 @@ MVP_INTERACTION_REJECTABLE_STRUCTURES: web_tool_dashboard,poster_style_mobile,hi
 - 整组/当前照片范围是工作台一级状态，并在参数修改前后保持可见。
 - 默认先展示系统建议调整和常用参数，完整 MVP 工具渐进展开。
 - 前后对比、撤销、重做和重置不隐藏在二级设置中。
-- 人像工具只有在能力可用且检测到适用主体时出现；失败不会留下不可操作入口。
+- 自然精修、瘦脸与瘦身是独立工具；只有在各自能力可用且检测到适用主体时出现，失败不会留下不可操作入口。
 - 从当前照片返回整组时保留滚动位置、选中照片和未导出状态。
 
 ### 导出确认与结果
@@ -237,22 +252,24 @@ empty
 24. 作为用户，我希望使用裁剪、旋转和水平校正，以免基本构图问题还需要切换应用。
 25. 作为人像用户，我希望获得克制的肤色和面部光线修正，以便人物自然、不像生成或变形。
 26. 作为人像用户，我希望皮肤纹理得到保护，以免磨皮产生塑料感。
-27. 作为使用不支持设备的用户，我希望人像能力稳定降级，以便基础编辑和导出仍然可用。
-28. 作为用户，我希望每项调整都能归零，以便安全尝试。
-29. 作为用户，我希望一次连续滑动只形成一个撤销步骤，以便撤销符合操作意图。
-30. 作为用户，我希望查看前后对比，以便判断修改是否真的改善照片。
-31. 作为用户，我希望原图始终不被修改，以免使用应用损坏源文件。
-32. 作为用户，我希望导出从原始像素生成，以免得到截图级预览画质。
-33. 作为用户，我希望导出前看到张数、质量和保存位置，以便结果可预期。
-34. 作为批量导出用户，我希望看到逐张进度，以便理解长任务状态。
-35. 作为用户，我希望某张失败时保留其他成功结果，以免重复已完成工作。
-36. 作为用户，我希望失败项被明确标记并可重试，以便只处理真正的问题。
-37. 作为用户，我希望取消尚未执行的导出，以便控制等待、耗电和发热。
-38. 作为用户，我希望导出的方向、尺寸和色彩正确，以便成片符合批准的预览。
-39. 作为用户，我希望导出后使用系统分享，以免应用要求访问社交账号。
-40. 作为无障碍用户，我希望控件和编辑范围被清楚朗读，以便借助辅助技术完成流程。
-41. 作为产品测试人员，我希望默认路径能证明没有创建云端图片任务，以便核心成本合同可执行。
-42. 作为产品团队成员，我希望失败和未验证质量门被明确报告，以免工程完成被误认为 MVP 已验证。
+27. 作为人像用户，我希望可以显式、克制地瘦脸，并保护五官和背景不变形。
+28. 作为全身照用户，我希望可以显式、克制地调整躯干宽度，并保护头部、四肢和背景。
+29. 作为使用不支持设备的用户，我希望每项人像能力独立稳定降级，以便基础编辑和导出仍然可用。
+30. 作为用户，我希望每项调整都能归零，以便安全尝试。
+31. 作为用户，我希望一次连续滑动只形成一个撤销步骤，以便撤销符合操作意图。
+32. 作为用户，我希望查看前后对比，以便判断修改是否真的改善照片。
+33. 作为用户，我希望原图始终不被修改，以免使用应用损坏源文件。
+34. 作为用户，我希望导出从原始像素生成，以免得到截图级预览画质。
+35. 作为用户，我希望导出前看到张数、质量和保存位置，以便结果可预期。
+36. 作为批量导出用户，我希望看到逐张进度，以便理解长任务状态。
+37. 作为用户，我希望某张失败时保留其他成功结果，以免重复已完成工作。
+38. 作为用户，我希望失败项被明确标记并可重试，以便只处理真正的问题。
+39. 作为用户，我希望取消尚未执行的导出，以便控制等待、耗电和发热。
+40. 作为用户，我希望导出的方向、尺寸和色彩正确，以便成片符合批准的预览。
+41. 作为用户，我希望导出后使用系统分享，以免应用要求访问社交账号。
+42. 作为无障碍用户，我希望控件和编辑范围被清楚朗读，以便借助辅助技术完成流程。
+43. 作为产品测试人员，我希望默认路径能证明没有创建云端图片任务，以便核心成本合同可执行。
+44. 作为产品团队成员，我希望失败和未验证质量门被明确报告，以免工程完成被误认为 MVP 已验证。
 
 ## Implementation Decisions
 
@@ -294,11 +311,12 @@ empty
 ### Portrait quality
 
 - Natural portrait quality is a release gate, not a checkbox based on API availability.
-- The MVP supports conservative texture-preserving smoothing and face/skin light-color correction only.
-- Reshaping, beautification presets and makeup are excluded.
+- The MVP supports conservative texture-preserving smoothing, face/skin light-color correction, explicit face slimming and explicit torso slimming.
+- Face/body geometry defaults to zero, remains outside automatic recommendations, and is exposed only when landmark, segmentation and background-safety gates pass.
+- Eye, nose, mouth, chin-length, head/body-ratio, localized body-part reshaping, beautification presets and makeup are excluded.
 - A system/self-built candidate and at least one commercial candidate are compared on the same licensed corpus unless evidence eliminates a candidate earlier.
 - Failure or license unavailability degrades to base editing and never prevents project access or export.
-- The normative quality corpus, blind-review rubric, safety subsets, capability boundary and stop conditions are defined in [Natural Portrait Retouch Vertical Slice Spec](natural-portrait-retouch-vertical-slice-spec.md). Portrait implementation must not proceed to product integration until that slice freezes a candidate.
+- Natural skin/light/texture quality is governed by [Natural Portrait Retouch Vertical Slice Spec](natural-portrait-retouch-vertical-slice-spec.md); face/body geometry, applicability and protection gates are governed separately by [Portrait Reshape Vertical Slice Spec](portrait-reshape-vertical-slice-spec.md). Each capability must freeze its own candidate before product integration.
 
 ### Export and failure behavior
 
@@ -388,6 +406,7 @@ Target users complete the primary journey without coaching. Observe whether they
 - Export uses the original input and never overwrites it.
 - Fixed samples pass orientation, dimensions, crop, color and compression checks.
 - The frozen natural-portrait and group-coherence review thresholds are met.
+- Applicable single-person samples prove visible, bounded face slimming and torso slimming independently; feature, limb and background protection gates pass.
 - Reopening and exporting a project does not accumulate repeated compression.
 
 ### Runtime closure
@@ -414,7 +433,7 @@ Target users complete the primary journey without coaching. Observe whether they
 - Real-time camera, Live Photo, video, audio and live-stream beautification.
 - Text, fonts, stickers, templates, collages and creator marketplaces.
 - Manual brushes, complex local masks, layers, curves, channels and RAW workflows.
-- Advanced face reshaping, body editing and makeup.
+- Advanced facial-feature reshaping, localized body-part editing and makeup; the bounded face/torso slimming defined by the portrait-reshape vertical slice remains in scope.
 - Automatic social publishing, community and content feeds.
 - Store submission, test distribution and public release.
 
@@ -422,17 +441,20 @@ Target users complete the primary journey without coaching. Observe whether they
 
 图像格式、样片配额、评分量表、设备矩阵和性能预算以《MVP 图像质量与工程基线》及其图像输入输出 ADR 为规范性门禁。若本 Spec 与质量基线冲突，必须先显式修改两份文档并记录原因，不能由实现代码暗中选择。
 
+人像几何的参数、适用性、背景保护和验收门以《[人像塑形纵切 Spec](portrait-reshape-vertical-slice-spec.md)》为规范来源；自然肤质仍以《[自然人像精修纵切 Spec](natural-portrait-retouch-vertical-slice-spec.md)》为准。
+
 ### Required execution order
 
 1. Freeze the quality corpus, supported image contract, device matrix and measurable budgets.
 2. Build a throwaway interaction prototype for the complete single/group journey and test comprehension.
 3. Prove the Flutter-to-native preview/export vertical slice on iOS; retain the Android adapter as deferred, non-blocking work.
-4. Compare portrait candidates behind the same capability boundary and freeze the minimum quality gate.
-5. Implement the single-photo base editor on the proven rendering path.
-6. Add deterministic analysis and three local recommendations.
-7. Add shared style, per-photo compensation and single-photo overrides.
-8. Complete bounded batch export, recovery and quality verification.
-9. Run uncoached usability testing and physical-device Profile/Release gates.
+4. Compare natural-retouch candidates behind the same capability boundary and freeze the minimum quality gate.
+5. Prove explicit face slimming and torso slimming separately, including landmark/pose/segmentation applicability and background-protection gates.
+6. Implement the single-photo base editor on the proven rendering path.
+7. Add deterministic analysis and three local recommendations.
+8. Add shared style, per-photo compensation and single-photo overrides.
+9. Complete bounded batch export, recovery and quality verification.
+10. Run uncoached usability testing and physical-device Profile/Release gates.
 
 Interaction prototype and rendering Spike may proceed in parallel after the baseline is frozen. Production feature expansion must not outrun failed image-quality or architecture gates.
 
@@ -443,6 +465,7 @@ Pause product implementation and revisit the corresponding decision if:
 - the native vertical slice cannot meet the frozen interaction or memory budget;
 - preview and original-resolution export cannot maintain the same recipe semantics;
 - no portrait candidate reaches the naturalness floor within acceptable license and privacy constraints;
+- face slimming or torso slimming cannot meet the frozen feature/body/background protection gates at a visibly useful strength;
 - users repeatedly mistake group and single-photo scope;
 - three recommendations do not reduce decision effort in uncoached testing;
 - group adaptation performs no better than applying one absolute preset to every photo.

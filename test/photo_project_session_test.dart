@@ -504,7 +504,13 @@ void main() {
           },
           photoOverrides: {
             'photo-2': PhotoOverride(
-              recipe: EditRecipe(exposure: 0.125, contrast: 0.25, crop: crop),
+              recipe: EditRecipe(
+                exposure: 0.125,
+                contrast: 0.25,
+                faceSlimStrength: 0.25,
+                bodySlimStrength: 0.15,
+                crop: crop,
+              ),
             ),
           },
         );
@@ -527,7 +533,11 @@ void main() {
         );
         expect(
           session.project?.photoOverrides['photo-2']?.recipe,
-          EditRecipe(crop: crop),
+          EditRecipe(
+            faceSlimStrength: 0.25,
+            bodySlimStrength: 0.15,
+            crop: crop,
+          ),
         );
         expect(session.project?.effectiveRecipeFor('photo-2'), beforeCurrent);
         expect(

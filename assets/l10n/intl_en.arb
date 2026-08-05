@@ -63,6 +63,8 @@
   "saturation": "Saturation",
   "clarity": "Clarity",
   "naturalPortraitRetouch": "Natural retouch",
+  "faceSlim": "Face slim",
+  "bodySlim": "Body slim",
   "composition": "Composition",
   "straighten": "Straighten",
   "rotateLeft": "Rotate left",

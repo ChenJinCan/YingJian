@@ -68,6 +68,7 @@ class LocalPhotoAnalysis {
     this.clarity = ClarityCondition.unknown,
     this.portrait = PortraitApplicability.unavailable,
     this.portraitReason = PortraitDegradationReason.none,
+    this.body = PortraitApplicability.unavailable,
     this.scene = SceneKind.unknown,
   });
 
@@ -86,6 +87,7 @@ class LocalPhotoAnalysis {
   final ClarityCondition clarity;
   final PortraitApplicability portrait;
   final PortraitDegradationReason portraitReason;
+  final PortraitApplicability body;
   final SceneKind scene;
 
   String get cacheIdentity => [
@@ -117,6 +119,7 @@ class LocalPhotoAnalysis {
     'clarity': clarity.name,
     'portrait': portrait.name,
     'portraitReason': portraitReason.name,
+    'body': body.name,
     'scene': scene.name,
   };
 
@@ -158,6 +161,9 @@ class LocalPhotoAnalysis {
       portraitReason: json['portraitReason'] == null
           ? PortraitDegradationReason.none
           : enumValue('portraitReason', PortraitDegradationReason.values),
+      body: json['body'] == null
+          ? PortraitApplicability.unavailable
+          : enumValue('body', PortraitApplicability.values),
       scene: enumValue('scene', SceneKind.values),
     );
   }
@@ -193,6 +199,7 @@ class LocalPhotoAnalysis {
       other.clarity == clarity &&
       other.portrait == portrait &&
       other.portraitReason == portraitReason &&
+      other.body == body &&
       other.scene == scene;
 
   @override
@@ -212,6 +219,7 @@ class LocalPhotoAnalysis {
     clarity,
     portrait,
     portraitReason,
+    body,
     scene,
   );
 }

@@ -45,7 +45,7 @@ void main() {
     expect(arguments['sourcePath'], photo.localPath);
     expect(arguments.containsKey('imageBytes'), isFalse);
     final pipeline = arguments['pipeline']! as Map<Object?, Object?>;
-    expect(pipeline['schemaVersion'], 2);
+    expect(pipeline['schemaVersion'], 3);
     expect(pipeline['workingColorSpace'], 'srgb');
     final adjustments = pipeline['adjustments']! as Map<Object?, Object?>;
     expect(adjustments['exposureEv'], 0.5);

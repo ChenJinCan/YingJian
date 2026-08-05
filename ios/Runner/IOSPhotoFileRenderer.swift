@@ -24,7 +24,8 @@ struct IOSPhotoFileRenderer {
   func render(
     sourcePath: String,
     pipeline: IOSImagePipeline,
-    destinationURL: URL
+    destinationURL: URL,
+    preparedPortraitContext: IOSPortraitRetouchContext? = nil
   ) throws -> IOSPhotoRenderedFile {
     guard let input = CIImage(
       contentsOf: URL(fileURLWithPath: sourcePath),
@@ -37,9 +38,12 @@ struct IOSPhotoFileRenderer {
     )
     let metadata = ImageExportMetadata.sanitize(input.properties)
     let sourceExtent = normalizedInput.extent.integral
-    let portraitContext = pipeline.portraitStrength > 0
-      ? IOSPortraitRetoucher.prepare(source: normalizedInput, extent: sourceExtent)
-      : .unavailable
+    let portraitContext = preparedPortraitContext
+      ?? (pipeline.portraitStrength > 0
+        || pipeline.faceSlimStrength > 0
+        || pipeline.bodySlimStrength > 0
+        ? IOSPortraitRetoucher.prepare(source: normalizedInput, extent: sourceExtent)
+        : .unavailable)
     let output = pipeline
       .applying(
         to: normalizedInput,
@@ -142,6 +146,8 @@ struct IOSImagePipeline {
   let saturation: Double
   let clarity: Double
   let portraitStrength: Double
+  let faceSlimStrength: Double
+  let bodySlimStrength: Double
   let crop: CGRect
   let quarterTurns: Int
   let straightenDegrees: Double
@@ -150,7 +156,7 @@ struct IOSImagePipeline {
     guard
       let pipeline = arguments as? [String: Any],
       let schemaVersion = Self.exactInteger(pipeline["schemaVersion"]),
-      schemaVersion == 1 || schemaVersion == 2,
+      (1...3).contains(schemaVersion),
       pipeline["workingColorSpace"] as? String == "srgb",
       let adjustments = pipeline["adjustments"] as? [String: Any],
       let exposureEV = Self.finiteNumber(adjustments["exposureEv"]),
@@ -175,6 +181,8 @@ struct IOSImagePipeline {
       saturation = 0
       clarity = 0
       portraitStrength = 0
+      faceSlimStrength = 0
+      bodySlimStrength = 0
       crop = CGRect(x: 0, y: 0, width: 1, height: 1)
       quarterTurns = 0
       straightenDegrees = 0
@@ -215,6 +223,23 @@ struct IOSImagePipeline {
     self.saturation = saturation
     self.clarity = clarity
     self.portraitStrength = portraitStrength
+    if schemaVersion == 3 {
+      guard
+        let reshape = pipeline["reshape"] as? [String: Any],
+        Self.exactInteger(reshape["recipeVersion"]) == 1,
+        let faceSlimStrength = Self.finiteNumber(reshape["faceSlimStrength"]),
+        let bodySlimStrength = Self.finiteNumber(reshape["bodySlimStrength"]),
+        (0.0...1.0).contains(faceSlimStrength),
+        (0.0...1.0).contains(bodySlimStrength)
+      else {
+        return nil
+      }
+      self.faceSlimStrength = faceSlimStrength
+      self.bodySlimStrength = bodySlimStrength
+    } else {
+      faceSlimStrength = 0
+      bodySlimStrength = 0
+    }
     crop = CGRect(
       x: values[0],
       y: values[1],
@@ -265,8 +290,33 @@ struct IOSImagePipeline {
     let white = CIImage(color: CIColor(red: 1, green: 1, blue: 1, alpha: 1))
       .cropped(to: extent)
     let opaqueInput = input.composited(over: white)
+    var reshapedInput = opaqueInput
+    if bodySlimStrength > 0 {
+      let context = portraitContext ?? IOSPortraitRetoucher.prepare(
+        source: opaqueInput,
+        extent: extent
+      )
+      reshapedInput = IOSPortraitRetoucher.applyingBodySlim(
+        to: reshapedInput,
+        strength: bodySlimStrength,
+        extent: extent,
+        context: context
+      )
+    }
+    if faceSlimStrength > 0 {
+      let context = portraitContext ?? IOSPortraitRetoucher.prepare(
+        source: opaqueInput,
+        extent: extent
+      )
+      reshapedInput = IOSPortraitRetoucher.applyingFaceSlim(
+        to: reshapedInput,
+        strength: faceSlimStrength,
+        extent: extent,
+        context: context
+      )
+    }
     let transform = colorTransform
-    var output = opaqueInput.applyingFilter(
+    var output = reshapedInput.applyingFilter(
       "CIColorMatrix",
       parameters: [
         "inputRVector": CIVector(x: transform.redScale, y: 0, z: 0, w: 0),

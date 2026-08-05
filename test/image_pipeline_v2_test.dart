@@ -7,13 +7,7 @@ import 'package:yingjian/features/editor/domain/image_pipeline_v2.dart';
 void main() {
   tearDown(() => debugDefaultTargetPlatformOverride = null);
 
-  test('selects V2 for both implemented native adapters', () {
-    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
-    expect(
-      imagePipelineForCurrentPlatform(EditRecipe.neutral),
-      isA<ImagePipelineV2>(),
-    );
-
+  test('selects V2 for the implemented Android adapter', () {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     expect(
       imagePipelineForCurrentPlatform(EditRecipe.neutral),

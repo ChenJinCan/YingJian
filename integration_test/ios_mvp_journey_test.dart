@@ -185,35 +185,29 @@ void main() {
     );
 
     final workspace = find.byKey(const ValueKey('photo-workspace-scroll'));
-    final exposureSlider = find.byKey(
-      const ValueKey('editor-adjustment-exposure'),
-    );
-    await tester.dragUntilVisible(
-      exposureSlider,
-      workspace,
-      const Offset(0, -260),
-    );
-    final exposureControl = find.descendant(
-      of: exposureSlider,
-      matching: find.byType(Slider),
-    );
-    expect(exposureControl, findsOneWidget);
-    await tester.drag(exposureControl, const Offset(70, 0));
-    await tester.pumpAndSettle();
-    expect(
-      (await store.loadLatest())?.effectiveRecipeFor(importedPhoto.id).exposure,
-      isNot(0),
-    );
-
     final portraitTab = find.byKey(
       const ValueKey('editor-adjustment-tab-portraitRetouch'),
     );
-    await tester.drag(
-      find.byKey(const ValueKey('editor-adjustment-tabs')),
-      const Offset(-800, 0),
+    expect(portraitTab.hitTestable(), findsOneWidget);
+    final exposureTab = find.byKey(
+      const ValueKey('editor-adjustment-tab-exposure'),
     );
-    await tester.pumpAndSettle();
-    expect(portraitTab, findsOneWidget);
+    expect(
+      tester.getTopLeft(portraitTab).dx,
+      lessThan(tester.getTopLeft(exposureTab).dx),
+    );
+    expect(
+      find.byKey(const ValueKey('editor-adjustment-portraitRetouch')),
+      findsOneWidget,
+    );
+    final faceSlimTab = find.byKey(
+      const ValueKey('editor-adjustment-tab-faceSlim'),
+    );
+    expect(faceSlimTab.hitTestable(), findsOneWidget);
+    expect(
+      tester.getTopLeft(faceSlimTab).dx,
+      lessThan(tester.getTopLeft(exposureTab).dx),
+    );
     await tester.tap(portraitTab);
     await tester.pumpAndSettle();
     final portraitSlider = find.byKey(
@@ -232,6 +226,66 @@ void main() {
           ?.effectiveRecipeFor(importedPhoto.id)
           .portraitStrength,
       greaterThan(0),
+    );
+
+    final bodySlimTab = find.byKey(
+      const ValueKey('editor-adjustment-tab-bodySlim'),
+    );
+    expect(bodySlimTab.hitTestable(), findsOneWidget);
+    await tester.tap(bodySlimTab);
+    await tester.pumpAndSettle();
+    final bodySlimControl = find.descendant(
+      of: find.byKey(const ValueKey('editor-adjustment-bodySlim')),
+      matching: find.byType(Slider),
+    );
+    expect(bodySlimControl, findsOneWidget);
+    expect(tester.widget<Slider>(bodySlimControl).max, 0.35);
+    await tester.drag(bodySlimControl, const Offset(70, 0));
+    await tester.pumpAndSettle();
+    expect(
+      (await store.loadLatest())
+          ?.effectiveRecipeFor(importedPhoto.id)
+          .bodySlimStrength,
+      greaterThan(0),
+    );
+
+    await tester.tap(faceSlimTab);
+    await tester.pumpAndSettle();
+    final faceSlimControl = find.descendant(
+      of: find.byKey(const ValueKey('editor-adjustment-faceSlim')),
+      matching: find.byType(Slider),
+    );
+    expect(faceSlimControl, findsOneWidget);
+    expect(tester.widget<Slider>(faceSlimControl).max, 0.5);
+    await tester.drag(faceSlimControl, const Offset(90, 0));
+    await tester.pumpAndSettle();
+    expect(
+      (await store.loadLatest())
+          ?.effectiveRecipeFor(importedPhoto.id)
+          .faceSlimStrength,
+      greaterThan(0),
+    );
+
+    await tester.tap(exposureTab);
+    await tester.pumpAndSettle();
+    final exposureSlider = find.byKey(
+      const ValueKey('editor-adjustment-exposure'),
+    );
+    await tester.dragUntilVisible(
+      exposureSlider,
+      workspace,
+      const Offset(0, -260),
+    );
+    final exposureControl = find.descendant(
+      of: exposureSlider,
+      matching: find.byType(Slider),
+    );
+    expect(exposureControl, findsOneWidget);
+    await tester.drag(exposureControl, const Offset(70, 0));
+    await tester.pumpAndSettle();
+    expect(
+      (await store.loadLatest())?.effectiveRecipeFor(importedPhoto.id).exposure,
+      isNot(0),
     );
 
     await tester.dragUntilVisible(
@@ -541,7 +595,7 @@ final class _NativeExportProbe implements PhotoExporter {
 
 final class _ApplicablePortraitAnalyzer implements PhotoAnalyzer {
   static const _analysisVersion = 'ios-runtime-fixture-v1';
-  static const _capabilityVersion = 'ios-core-image-vision-v4-local-portrait';
+  static const _capabilityVersion = 'ios-core-image-vision-v6-portrait-reshape';
   final List<String> photoIds = [];
 
   @override
@@ -570,6 +624,7 @@ final class _ApplicablePortraitAnalyzer implements PhotoAnalyzer {
       clarity: ClarityCondition.clear,
       portrait: PortraitApplicability.applicable,
       portraitReason: PortraitDegradationReason.none,
+      body: PortraitApplicability.applicable,
       scene: SceneKind.people,
     );
   }

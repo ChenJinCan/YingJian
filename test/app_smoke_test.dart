@@ -1298,6 +1298,7 @@ void main() {
           disposition: PhotoAnalysisDisposition.ready,
           fallbackReason: AnalysisFallbackReason.none,
           portrait: PortraitApplicability.applicable,
+          body: PortraitApplicability.applicable,
         ),
       );
       await cache.commit(cachedWrite, canCommit: () => true);
@@ -1309,6 +1310,7 @@ void main() {
           photoProjectStore: store,
           photoAnalyzer: _CountingPhotoAnalyzer(
             portrait: PortraitApplicability.applicable,
+            body: PortraitApplicability.applicable,
           ),
           photoAnalysisCache: cache,
           photoPreviewRenderer: FakePhotoPreviewRenderer.supported(),
@@ -1322,7 +1324,30 @@ void main() {
         find.byKey(const Key('photo-workspace-scroll')),
         const Offset(0, -220),
       );
-      await tester.tap(find.text('自然精修'));
+      final portraitTab = find.byKey(
+        const ValueKey('editor-adjustment-tab-portraitRetouch'),
+      );
+      expect(portraitTab.hitTestable(), findsOneWidget);
+      final exposureTab = find.byKey(
+        const ValueKey('editor-adjustment-tab-exposure'),
+      );
+      expect(
+        tester.getTopLeft(portraitTab).dx,
+        lessThan(tester.getTopLeft(exposureTab).dx),
+      );
+      expect(
+        find.byKey(const ValueKey('editor-adjustment-portraitRetouch')),
+        findsOneWidget,
+      );
+      final faceSlimTab = find.byKey(
+        const ValueKey('editor-adjustment-tab-faceSlim'),
+      );
+      expect(faceSlimTab.hitTestable(), findsOneWidget);
+      expect(
+        tester.getTopLeft(faceSlimTab).dx,
+        lessThan(tester.getTopLeft(exposureTab).dx),
+      );
+      await tester.tap(portraitTab);
       await tester.pumpAndSettle();
 
       final slider = find.byType(Slider).last;
@@ -1343,18 +1368,71 @@ void main() {
       );
       tester.semantics.increase(portraitSlider);
       await tester.pumpAndSettle();
-      expect(tester.widget<Slider>(slider).value, greaterThan(0));
 
+      await tester.tap(faceSlimTab);
+      await tester.pumpAndSettle();
+      final faceSlimSlider = find.semantics.byPredicate(
+        (node) => node.label.startsWith('瘦脸') && node.flagsCollection.isSlider,
+      );
+      expect(faceSlimSlider, findsOne);
+      expect(
+        find.byKey(const ValueKey('editor-adjustment-faceSlim')),
+        findsOneWidget,
+      );
+      final faceSlimControl = find.descendant(
+        of: find.byKey(const ValueKey('editor-adjustment-faceSlim')),
+        matching: find.byType(Slider),
+      );
+      expect(tester.widget<Slider>(faceSlimControl).max, 0.5);
+      await tester.drag(faceSlimControl, const Offset(80, 0));
+      await tester.pumpAndSettle();
+      expect(
+        (await store.loadLatest())
+            ?.effectiveRecipeFor(photo.id)
+            .faceSlimStrength,
+        greaterThan(0),
+      );
+      final bodySlimTab = find.byKey(
+        const ValueKey('editor-adjustment-tab-bodySlim'),
+      );
+      expect(bodySlimTab.hitTestable(), findsOneWidget);
+      await tester.tap(bodySlimTab);
+      await tester.pumpAndSettle();
+      final bodySlimControl = find.descendant(
+        of: find.byKey(const ValueKey('editor-adjustment-bodySlim')),
+        matching: find.byType(Slider),
+      );
+      expect(bodySlimControl, findsOneWidget);
+      expect(tester.widget<Slider>(bodySlimControl).max, 0.35);
+      await tester.drag(bodySlimControl, const Offset(70, 0));
+      await tester.pumpAndSettle();
+      expect(
+        (await store.loadLatest())
+            ?.effectiveRecipeFor(photo.id)
+            .bodySlimStrength,
+        greaterThan(0),
+      );
       final recipe = store.project!.effectiveRecipeFor('portrait-photo');
       expect(recipe.portraitStrength, greaterThan(0));
       expect(find.text('选择人像'), findsNothing);
 
       await tester.tap(find.text('撤销'));
       await tester.pumpAndSettle();
+      expect(store.project!.effectiveRecipeFor(photo.id).bodySlimStrength, 0);
       expect(
-        store.project!.effectiveRecipeFor('portrait-photo').portraitStrength,
-        0,
+        store.project!.effectiveRecipeFor(photo.id).faceSlimStrength,
+        greaterThan(0),
       );
+      await tester.tap(find.text('撤销'));
+      await tester.pumpAndSettle();
+      expect(store.project!.effectiveRecipeFor(photo.id).faceSlimStrength, 0);
+      expect(
+        store.project!.effectiveRecipeFor(photo.id).portraitStrength,
+        greaterThan(0),
+      );
+      await tester.tap(find.text('撤销'));
+      await tester.pumpAndSettle();
+      expect(store.project!.effectiveRecipeFor(photo.id).portraitStrength, 0);
       semantics.dispose();
       debugDefaultTargetPlatformOverride = null;
     },
@@ -2148,9 +2226,13 @@ final class _DeferredAnalysisStateProjectStore
 }
 
 final class _CountingPhotoAnalyzer implements PhotoAnalyzer {
-  _CountingPhotoAnalyzer({this.portrait = PortraitApplicability.unavailable});
+  _CountingPhotoAnalyzer({
+    this.portrait = PortraitApplicability.unavailable,
+    this.body = PortraitApplicability.unavailable,
+  });
 
   final PortraitApplicability portrait;
+  final PortraitApplicability body;
   int calls = 0;
 
   @override
@@ -2178,6 +2260,7 @@ final class _CountingPhotoAnalyzer implements PhotoAnalyzer {
       whiteBalance: WhiteBalanceCondition.warmCast,
       clarity: ClarityCondition.clear,
       portrait: portrait,
+      body: body,
     );
   }
 }

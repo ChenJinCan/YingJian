@@ -630,7 +630,9 @@ class PhotoProject {
   }
 
   static const maxPhotoCount = 6;
-  static const schemaVersion = 5;
+  // V6 persists explicit per-photo portrait geometry controls. Older recipes
+  // migrate with both values at zero through EditRecipe.fromJson.
+  static const schemaVersion = 6;
 
   final String id;
   final DateTime createdAt;
@@ -772,6 +774,8 @@ class PhotoProject {
       ),
       remainingPhotoOverride: EditRecipe(
         portraitStrength: override.portraitStrength,
+        faceSlimStrength: override.faceSlimStrength,
+        bodySlimStrength: override.bodySlimStrength,
         crop: override.crop,
       ),
     );
@@ -856,6 +860,10 @@ class PhotoProject {
       // must not inherit from or be promoted into the group's shared style.
       portraitStrength:
           override?.portraitStrength ?? adaptiveLayer?.portraitStrength ?? 0,
+      // Geometry is also explicit and per-photo. Automatic analysis and group
+      // synchronization must never enable it on the user's behalf.
+      faceSlimStrength: override?.faceSlimStrength ?? 0,
+      bodySlimStrength: override?.bodySlimStrength ?? 0,
       crop: photoOverride != null || photoOverrides.containsKey(photoId)
           ? override!.crop
           : shared.crop,

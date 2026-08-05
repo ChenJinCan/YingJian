@@ -205,6 +205,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get naturalPortraitRetouch => 'Natural retouch';
 
   @override
+  String get faceSlim => 'Face slim';
+
+  @override
+  String get bodySlim => 'Body slim';
+
+  @override
   String get composition => 'Composition';
 
   @override

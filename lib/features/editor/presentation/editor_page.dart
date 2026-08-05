@@ -45,6 +45,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   bool _preparingRecommendations = false;
   RecommendationPreparation? _recommendationPreparation;
   final Map<String, PortraitApplicability> _portraitApplicabilityByPhotoId = {};
+  final Map<String, PortraitApplicability> _bodyApplicabilityByPhotoId = {};
   int _previewRecommendationIndex = -1;
   double? _pendingPhotoStripOffset;
   bool _savingPhotoStripPosition = false;
@@ -175,6 +176,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     final analyzer = context.read<PhotoAnalyzer>();
     final cache = context.read<PhotoAnalysisCache>();
     final restored = <String, PortraitApplicability>{};
+    final restoredBody = <String, PortraitApplicability>{};
     for (final photo in project.photos) {
       try {
         final analysis = await cache.read(
@@ -182,7 +184,10 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           photo: photo,
           engineIdentity: analyzer.identityFor(photo),
         );
-        if (analysis != null) restored[photo.id] = analysis.portrait;
+        if (analysis != null) {
+          restored[photo.id] = analysis.portrait;
+          restoredBody[photo.id] = analysis.body;
+        }
       } on Object {
         // Analysis cache is advisory; editing and export remain available.
       }
@@ -192,6 +197,9 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       _portraitApplicabilityByPhotoId
         ..clear()
         ..addAll(restored);
+      _bodyApplicabilityByPhotoId
+        ..clear()
+        ..addAll(restoredBody);
     });
   }
 
@@ -244,6 +252,10 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           _portraitApplicabilityByPhotoId.addAll({
             for (final entry in preparation.analyses.entries)
               entry.key: entry.value.portrait,
+          });
+          _bodyApplicabilityByPhotoId.addAll({
+            for (final entry in preparation.analyses.entries)
+              entry.key: entry.value.body,
           });
           _previewRecommendationIndex = preparation.recommendations.isEmpty
               ? -1
@@ -497,6 +509,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       await _session!.removePhoto(photo.id);
       await analysisCache.clearPhoto(projectId: projectId, photoId: photo.id);
       _portraitApplicabilityByPhotoId.remove(photo.id);
+      _bodyApplicabilityByPhotoId.remove(photo.id);
       final focusPhotoId = _session!.project?.focusPhotoId;
       if (focusPhotoId != null) {
         _selectedIndex = _session!.photos.indexWhere(
@@ -532,6 +545,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       await _session!.deleteProject();
       await analysisCache.clearProject(projectId);
       _portraitApplicabilityByPhotoId.clear();
+      _bodyApplicabilityByPhotoId.clear();
       await _discardShareFiles();
       _selectedIndex = 0;
       _editorSession.load(EditRecipe.neutral);
@@ -976,6 +990,12 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                             PortraitApplicability.applicable &&
                         session.project!.editingScope ==
                             ProjectEditingScope.currentPhoto,
+                    bodyApplicable:
+                        _bodyApplicabilityByPhotoId[photos[_selectedIndex]
+                                .id] ==
+                            PortraitApplicability.applicable &&
+                        session.project!.editingScope ==
+                            ProjectEditingScope.currentPhoto,
                     canSyncCurrentPhoto:
                         session.canSyncCurrentPhotoAdjustmentsToGroup,
                     photoStripController: _photoStripController ??=
@@ -1128,6 +1148,7 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.selectedRecommendationIndex,
     required this.editorSession,
     required this.portraitApplicable,
+    required this.bodyApplicable,
     required this.canSyncCurrentPhoto,
     required this.photoStripController,
     required this.onSelected,
@@ -1159,6 +1180,7 @@ class _PhotoWorkspace extends StatelessWidget {
   final int selectedRecommendationIndex;
   final EditorSession editorSession;
   final bool portraitApplicable;
+  final bool bodyApplicable;
   final bool canSyncCurrentPhoto;
   final ScrollController photoStripController;
   final ValueChanged<int> onSelected;
@@ -1424,6 +1446,7 @@ class _PhotoWorkspace extends StatelessWidget {
                     enabled: editingEnabled,
                     extended: supportsImagePipelineV2,
                     portraitAvailable: portraitApplicable,
+                    bodyAvailable: bodyApplicable,
                     recipe: recipe,
                     editorSession: editorSession,
                     onRecipeCommitted: onRecipeCommitted,
@@ -2085,6 +2108,8 @@ enum _AdjustmentParameter {
   saturation,
   clarity,
   portraitRetouch,
+  faceSlim,
+  bodySlim,
 }
 
 class _AdjustmentToolStrip extends StatefulWidget {
@@ -2092,6 +2117,7 @@ class _AdjustmentToolStrip extends StatefulWidget {
     required this.enabled,
     required this.extended,
     required this.portraitAvailable,
+    required this.bodyAvailable,
     required this.recipe,
     required this.editorSession,
     required this.onRecipeCommitted,
@@ -2100,6 +2126,7 @@ class _AdjustmentToolStrip extends StatefulWidget {
   final bool enabled;
   final bool extended;
   final bool portraitAvailable;
+  final bool bodyAvailable;
   final EditRecipe recipe;
   final EditorSession editorSession;
   final VoidCallback onRecipeCommitted;
@@ -2109,16 +2136,57 @@ class _AdjustmentToolStrip extends StatefulWidget {
 }
 
 class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
-  _AdjustmentParameter _selected = _AdjustmentParameter.exposure;
+  late _AdjustmentParameter _selected;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = widget.portraitAvailable
+        ? _AdjustmentParameter.portraitRetouch
+        : widget.bodyAvailable
+        ? _AdjustmentParameter.bodySlim
+        : _AdjustmentParameter.exposure;
+  }
+
+  @override
+  void didUpdateWidget(covariant _AdjustmentToolStrip oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.portraitAvailable && widget.portraitAvailable) {
+      _selected = _AdjustmentParameter.portraitRetouch;
+    } else if (oldWidget.portraitAvailable &&
+        !widget.portraitAvailable &&
+        (_selected == _AdjustmentParameter.portraitRetouch ||
+            _selected == _AdjustmentParameter.faceSlim)) {
+      _selected = widget.bodyAvailable
+          ? _AdjustmentParameter.bodySlim
+          : _AdjustmentParameter.exposure;
+    }
+    if (!oldWidget.bodyAvailable &&
+        widget.bodyAvailable &&
+        !widget.portraitAvailable) {
+      _selected = _AdjustmentParameter.bodySlim;
+    } else if (oldWidget.bodyAvailable &&
+        !widget.bodyAvailable &&
+        _selected == _AdjustmentParameter.bodySlim) {
+      _selected = widget.portraitAvailable
+          ? _AdjustmentParameter.portraitRetouch
+          : _AdjustmentParameter.exposure;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final parameters = widget.extended
         ? <_AdjustmentParameter>[
-            ..._AdjustmentParameter.values.where(
-              (parameter) => parameter != _AdjustmentParameter.portraitRetouch,
-            ),
             if (widget.portraitAvailable) _AdjustmentParameter.portraitRetouch,
+            if (widget.portraitAvailable) _AdjustmentParameter.faceSlim,
+            if (widget.bodyAvailable) _AdjustmentParameter.bodySlim,
+            ..._AdjustmentParameter.values.where(
+              (parameter) =>
+                  parameter != _AdjustmentParameter.portraitRetouch &&
+                  parameter != _AdjustmentParameter.faceSlim &&
+                  parameter != _AdjustmentParameter.bodySlim,
+            ),
           ]
         : const <_AdjustmentParameter>[
             _AdjustmentParameter.exposure,
@@ -2171,7 +2239,17 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
           label: '',
           semanticLabel: _label(context, selected),
           value: _value(widget.recipe, selected),
-          minimum: selected == _AdjustmentParameter.portraitRetouch ? 0 : -1,
+          minimum:
+              selected == _AdjustmentParameter.portraitRetouch ||
+                  selected == _AdjustmentParameter.faceSlim ||
+                  selected == _AdjustmentParameter.bodySlim
+              ? 0
+              : -1,
+          maximum: selected == _AdjustmentParameter.faceSlim
+              ? 0.5
+              : selected == _AdjustmentParameter.bodySlim
+              ? 0.35
+              : 1,
           onStart: widget.editorSession.beginAdjustment,
           onChanged: (value) => widget.editorSession.preview(
             _copyWith(widget.recipe, selected, value),
@@ -2197,6 +2275,8 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
         _AdjustmentParameter.clarity => context.l10n.clarity,
         _AdjustmentParameter.portraitRetouch =>
           context.l10n.naturalPortraitRetouch,
+        _AdjustmentParameter.faceSlim => context.l10n.faceSlim,
+        _AdjustmentParameter.bodySlim => context.l10n.bodySlim,
       };
 
   double _value(EditRecipe recipe, _AdjustmentParameter parameter) =>
@@ -2210,6 +2290,8 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
         _AdjustmentParameter.saturation => recipe.saturation,
         _AdjustmentParameter.clarity => recipe.clarity,
         _AdjustmentParameter.portraitRetouch => recipe.portraitStrength,
+        _AdjustmentParameter.faceSlim => recipe.faceSlimStrength,
+        _AdjustmentParameter.bodySlim => recipe.bodySlimStrength,
       };
 
   EditRecipe _copyWith(
@@ -2228,6 +2310,8 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
     _AdjustmentParameter.portraitRetouch => recipe.copyWith(
       portraitStrength: value,
     ),
+    _AdjustmentParameter.faceSlim => recipe.copyWith(faceSlimStrength: value),
+    _AdjustmentParameter.bodySlim => recipe.copyWith(bodySlimStrength: value),
   };
 }
 
@@ -2359,6 +2443,7 @@ class _AdjustmentSlider extends StatelessWidget {
     required this.onChanged,
     required this.onEnd,
     this.minimum = -1,
+    this.maximum = 1,
   });
 
   final bool enabled;
@@ -2369,7 +2454,7 @@ class _AdjustmentSlider extends StatelessWidget {
   final ValueChanged<double> onChanged;
   final VoidCallback onEnd;
   final double minimum;
-  static const double maximum = 1;
+  final double maximum;
 
   @override
   Widget build(BuildContext context) {

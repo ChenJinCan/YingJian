@@ -310,6 +310,76 @@ class RunnerTests: XCTestCase {
     )
   }
 
+  func testPhotoPreviewTextureMatchesFinalJpegFaceAndBodySlimSemantics() throws {
+    let sourceURL = temporaryURL(extension: "jpg")
+    let outputURL = temporaryURL(extension: "jpg")
+    defer { removeTemporaryFiles(sourceURL, outputURL) }
+    try writeStripedJpeg(to: sourceURL, width: 96, height: 64)
+    let extent = CGRect(x: 0, y: 0, width: 96, height: 64)
+    let portraitContext = IOSPortraitRetouchContext(
+      effectiveMask: nil,
+      faceSlimGeometry: IOSFaceSlimGeometry(
+        centerX: 48,
+        halfWidth: 28,
+        lowerY: 20,
+        upperY: 58
+      ),
+      faceMask: CIImage(color: .white).cropped(to: extent),
+      bodySlimGeometry: IOSBodySlimGeometry(
+        centerX: 48,
+        halfWidth: 38,
+        lowerY: 4,
+        upperY: 60
+      ),
+      personMask: CIImage(color: .white).cropped(to: extent)
+    )
+    let pipeline = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV3(
+        faceSlimStrength: 0.5,
+        bodySlimStrength: 0.35
+      ))
+    )
+    let neutral = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV3()))
+    let neutralBytes = try rgbaBytes(
+      neutral.applying(to: try XCTUnwrap(CIImage(contentsOf: sourceURL)), extent: extent)
+    )
+
+    let session = try IOSPhotoPreviewSession(
+      sourcePath: sourceURL.path,
+      maxEdge: 2_048,
+      pipeline: pipeline,
+      preparedPortraitContext: portraitContext
+    )
+    defer { session.close() }
+    let previewBuffer = try XCTUnwrap(session.copyPixelBuffer()).takeRetainedValue()
+    let previewBytes = try rgbaBytes(CIImage(cvPixelBuffer: previewBuffer))
+
+    _ = try IOSPhotoFileRenderer(context: imageContext).render(
+      sourcePath: sourceURL.path,
+      pipeline: pipeline,
+      destinationURL: outputURL,
+      preparedPortraitContext: portraitContext
+    )
+    let exported = try XCTUnwrap(
+      CIImage(contentsOf: outputURL, options: [.applyOrientationProperty: true])
+    )
+    let exportedBytes = try rgbaBytes(normalized(exported))
+
+    XCTAssertGreaterThan(
+      meanAbsoluteDifference(neutralBytes, previewBytes),
+      0.25,
+      "non-zero face and body slim must reach the texture preview"
+    )
+    XCTAssertEqual(session.width, Int(exported.extent.width))
+    XCTAssertEqual(session.height, Int(exported.extent.height))
+    XCTAssertLessThanOrEqual(
+      meanAbsoluteDifference(previewBytes, exportedBytes),
+      6.5,
+      "Texture preview and final JPEG must preserve face and body slim semantics "
+        + "within the striped fixture's JPEG recompression tolerance"
+    )
+  }
+
   func testPhotoPreviewSessionReleasesItsBufferAndRejectsRenderingAfterClose() throws {
     let sourceURL = temporaryURL(extension: "jpg")
     defer { removeTemporaryFiles(sourceURL) }
@@ -399,6 +469,346 @@ class RunnerTests: XCTestCase {
     XCTAssertNil(IOSImagePipeline(arguments: booleanStrength))
   }
 
+  func testImagePipelineV3AcceptsBoundedFaceAndBodySlimStrengths() {
+    let neutral = IOSImagePipeline(arguments: pipelineV3())
+    XCTAssertEqual(neutral?.faceSlimStrength, 0)
+    XCTAssertEqual(neutral?.bodySlimStrength, 0)
+    XCTAssertEqual(
+      IOSImagePipeline(arguments: pipelineV3(faceSlimStrength: 0.1))?.faceSlimStrength,
+      0.1
+    )
+    XCTAssertEqual(
+      IOSImagePipeline(arguments: pipelineV3(bodySlimStrength: 0.1))?.bodySlimStrength,
+      0.1
+    )
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV3(faceSlimStrength: -0.01)))
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV3(bodySlimStrength: 1.01)))
+
+    var booleanReshape = pipelineV3()
+    var reshape = booleanReshape["reshape"] as! [String: Any]
+    reshape["faceSlimStrength"] = true
+    booleanReshape["reshape"] = reshape
+    XCTAssertNil(IOSImagePipeline(arguments: booleanReshape))
+  }
+
+  func testFaceSlimInverseMappingIsLocalProtectedAndMonotonic() {
+    let geometry = IOSFaceSlimGeometry(
+      centerX: 50,
+      halfWidth: 30,
+      lowerY: 20,
+      upperY: 60
+    )
+
+    XCTAssertEqual(
+      geometry.sourcePoint(for: CGPoint(x: 50, y: 40), strength: 1),
+      CGPoint(x: 50, y: 40),
+      "the central feature corridor must remain fixed"
+    )
+    XCTAssertEqual(
+      geometry.sourcePoint(for: CGPoint(x: 10, y: 40), strength: 1),
+      CGPoint(x: 10, y: 40),
+      "pixels outside the face ROI must remain fixed"
+    )
+
+    let target = CGPoint(x: 68, y: 40)
+    let neutral = geometry.sourcePoint(for: target, strength: 0)
+    let medium = geometry.sourcePoint(for: target, strength: 0.5)
+    let strong = geometry.sourcePoint(for: target, strength: 1)
+    XCTAssertEqual(neutral, target)
+    XCTAssertGreaterThan(medium.x, neutral.x)
+    XCTAssertGreaterThan(strong.x, medium.x)
+    XCTAssertEqual(strong.y, target.y)
+  }
+
+  func testProductionPipelineAppliesInjectedFaceSlimGeometryAndKeepsZeroExact() throws {
+    let extent = CGRect(x: 0, y: 0, width: 96, height: 96)
+    let source = stripedImage(extent: extent)
+    let geometry = IOSFaceSlimGeometry(
+      centerX: 48,
+      halfWidth: 34,
+      lowerY: 18,
+      upperY: 66
+    )
+    let context = IOSPortraitRetouchContext(
+      effectiveMask: nil,
+      faceSlimGeometry: geometry,
+      faceMask: CIImage(color: .white).cropped(to: extent)
+    )
+    let neutral = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV3()))
+    let faceSlim = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV3(faceSlimStrength: 0.5))
+    )
+
+    let sourceBytes = try rgbaBytes(source)
+    let zeroBytes = try rgbaBytes(
+      neutral.applying(to: source, extent: extent, portraitContext: context)
+    )
+    let faceSlimBytes = try rgbaBytes(
+      faceSlim.applying(to: source, extent: extent, portraitContext: context)
+    )
+
+    XCTAssertEqual(zeroBytes, sourceBytes, "strength zero must remain exact")
+    XCTAssertGreaterThan(
+      meanAbsoluteDifference(sourceBytes, faceSlimBytes),
+      0.25,
+      "a safe injected face geometry must visibly affect the production pipeline"
+    )
+  }
+
+  func testFaceSlimMaskKeepsBackgroundPixelsExact() throws {
+    let extent = CGRect(x: 0, y: 0, width: 96, height: 96)
+    let source = stripedImage(extent: extent)
+    let protectedBackground = CGRect(x: 48, y: 0, width: 48, height: 96)
+    let faceMask = CIImage(color: .white)
+      .cropped(to: CGRect(x: 0, y: 0, width: 48, height: 96))
+      .composited(over: CIImage(color: .black).cropped(to: extent))
+      .cropped(to: extent)
+    let context = IOSPortraitRetouchContext(
+      effectiveMask: nil,
+      faceSlimGeometry: IOSFaceSlimGeometry(
+        centerX: 48,
+        halfWidth: 40,
+        lowerY: 10,
+        upperY: 84
+      ),
+      faceMask: faceMask
+    )
+    let pipeline = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV3(faceSlimStrength: 0.5))
+    )
+    let output = pipeline.applying(
+      to: source,
+      extent: extent,
+      portraitContext: context
+    )
+
+    XCTAssertEqual(
+      try rgbaBytes(source.cropped(to: protectedBackground)),
+      try rgbaBytes(output.cropped(to: protectedBackground)),
+      "pixels outside the face mask must remain exact"
+    )
+    XCTAssertGreaterThan(
+      meanAbsoluteDifference(
+        try rgbaBytes(source.cropped(to: CGRect(x: 0, y: 0, width: 48, height: 96))),
+        try rgbaBytes(output.cropped(to: CGRect(x: 0, y: 0, width: 48, height: 96)))
+      ),
+      0.1,
+      "the permitted face region must still deform"
+    )
+  }
+
+  func testBodySlimInverseMappingIsLocalProtectedAndMonotonic() {
+    let geometry = IOSBodySlimGeometry(
+      centerX: 50,
+      halfWidth: 28,
+      lowerY: 18,
+      upperY: 72
+    )
+
+    XCTAssertEqual(
+      geometry.sourcePoint(for: CGPoint(x: 50, y: 45), strength: 1),
+      CGPoint(x: 50, y: 45),
+      "the body center line must remain fixed"
+    )
+    XCTAssertEqual(
+      geometry.sourcePoint(for: CGPoint(x: 10, y: 45), strength: 1),
+      CGPoint(x: 10, y: 45),
+      "pixels outside the torso ROI must remain fixed"
+    )
+
+    let target = CGPoint(x: 67, y: 45)
+    let neutral = geometry.sourcePoint(for: target, strength: 0)
+    let medium = geometry.sourcePoint(for: target, strength: 0.175)
+    let strong = geometry.sourcePoint(for: target, strength: 0.35)
+    XCTAssertEqual(neutral, target)
+    XCTAssertGreaterThan(medium.x, neutral.x)
+    XCTAssertGreaterThan(strong.x, medium.x)
+    XCTAssertEqual(strong.y, target.y)
+  }
+
+  func testBodySafetyRequiresOnePersonConfidentTorsoAndSegmentation() {
+    XCTAssertTrue(
+      IOSBodySlimSafetyPolicy.isEligible(
+        personCount: 1,
+        leftShoulderConfidence: 0.9,
+        rightShoulderConfidence: 0.9,
+        leftHipConfidence: 0.9,
+        rightHipConfidence: 0.9,
+        torsoHeightRatio: 0.3,
+        segmentationAvailable: true
+      )
+    )
+    XCTAssertFalse(
+      IOSBodySlimSafetyPolicy.isEligible(
+        personCount: 2,
+        leftShoulderConfidence: 0.9,
+        rightShoulderConfidence: 0.9,
+        leftHipConfidence: 0.9,
+        rightHipConfidence: 0.9,
+        torsoHeightRatio: 0.3,
+        segmentationAvailable: true
+      )
+    )
+    XCTAssertFalse(
+      IOSBodySlimSafetyPolicy.isEligible(
+        personCount: 1,
+        leftShoulderConfidence: 0.9,
+        rightShoulderConfidence: 0.9,
+        leftHipConfidence: 0.9,
+        rightHipConfidence: 0.2,
+        torsoHeightRatio: 0.3,
+        segmentationAvailable: true
+      )
+    )
+    XCTAssertFalse(
+      IOSBodySlimSafetyPolicy.isEligible(
+        personCount: 1,
+        leftShoulderConfidence: 0.9,
+        rightShoulderConfidence: 0.9,
+        leftHipConfidence: 0.9,
+        rightHipConfidence: 0.9,
+        torsoHeightRatio: 0.3,
+        segmentationAvailable: false
+      )
+    )
+  }
+
+  func testReshapeBackgroundSafetyRejectsDenseHighContrastLines() throws {
+    let extent = CGRect(x: 0, y: 0, width: 96, height: 112)
+    let subjectMask = CIImage(color: .white)
+      .cropped(to: CGRect(x: 32, y: 0, width: 32, height: 112))
+      .composited(over: CIImage(color: .black).cropped(to: extent))
+      .cropped(to: extent)
+    let quiet = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5))
+      .cropped(to: extent)
+    let risky = stripedImage(extent: extent)
+
+    XCTAssertTrue(
+      IOSReshapeBackgroundSafetyPolicy.isEligible(
+        source: quiet,
+        subjectMask: subjectMask,
+        influenceRect: extent
+      )
+    )
+    XCTAssertFalse(
+      IOSReshapeBackgroundSafetyPolicy.isEligible(
+        source: risky,
+        subjectMask: subjectMask,
+        influenceRect: extent
+      )
+    )
+    XCTAssertGreaterThan(
+      try XCTUnwrap(
+        IOSReshapeBackgroundSafetyPolicy.outsideEdgeMean(
+          source: risky,
+          subjectMask: subjectMask,
+          influenceRect: extent
+        )
+      ),
+      0.18
+    )
+  }
+
+  func testProductionPipelineAppliesInjectedBodySlimGeometryAndKeepsZeroExact() throws {
+    let extent = CGRect(x: 0, y: 0, width: 96, height: 112)
+    let source = stripedImage(extent: extent)
+    let geometry = IOSBodySlimGeometry(
+      centerX: 48,
+      halfWidth: 34,
+      lowerY: 18,
+      upperY: 88
+    )
+    let context = IOSPortraitRetouchContext(
+      effectiveMask: nil,
+      bodySlimGeometry: geometry,
+      personMask: CIImage(color: .white).cropped(to: extent)
+    )
+    let neutral = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV3()))
+    let bodySlim = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV3(bodySlimStrength: 0.25))
+    )
+
+    let sourceBytes = try rgbaBytes(source)
+    let zeroBytes = try rgbaBytes(
+      neutral.applying(to: source, extent: extent, portraitContext: context)
+    )
+    let bodySlimBytes = try rgbaBytes(
+      bodySlim.applying(to: source, extent: extent, portraitContext: context)
+    )
+
+    XCTAssertEqual(zeroBytes, sourceBytes, "strength zero must remain exact")
+    XCTAssertGreaterThan(
+      meanAbsoluteDifference(sourceBytes, bodySlimBytes),
+      0.25,
+      "safe torso geometry and a person mask must affect the production pipeline"
+    )
+  }
+
+  func testFaceAndBodySlimFailClosedWhenPortraitContextIsUnavailable() throws {
+    let extent = CGRect(x: 0, y: 0, width: 96, height: 112)
+    let source = stripedImage(extent: extent)
+    let pipeline = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV3(
+        faceSlimStrength: 0.5,
+        bodySlimStrength: 0.35
+      ))
+    )
+
+    XCTAssertEqual(
+      try rgbaBytes(
+        pipeline.applying(
+          to: source,
+          extent: extent,
+          portraitContext: .unavailable
+        )
+      ),
+      try rgbaBytes(source),
+      "unavailable Vision geometry and masks must disable all reshaping"
+    )
+  }
+
+  func testBodySlimPersonMaskKeepsBackgroundPixelsExact() throws {
+    let extent = CGRect(x: 0, y: 0, width: 96, height: 112)
+    let source = stripedImage(extent: extent)
+    let protectedBackground = CGRect(x: 48, y: 0, width: 48, height: 112)
+    let personMask = CIImage(color: .white)
+      .cropped(to: CGRect(x: 0, y: 0, width: 48, height: 112))
+      .composited(over: CIImage(color: .black).cropped(to: extent))
+      .cropped(to: extent)
+    let context = IOSPortraitRetouchContext(
+      effectiveMask: nil,
+      bodySlimGeometry: IOSBodySlimGeometry(
+        centerX: 48,
+        halfWidth: 40,
+        lowerY: 10,
+        upperY: 102
+      ),
+      personMask: personMask
+    )
+    let pipeline = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV3(bodySlimStrength: 0.35))
+    )
+    let output = pipeline.applying(
+      to: source,
+      extent: extent,
+      portraitContext: context
+    )
+
+    XCTAssertEqual(
+      try rgbaBytes(source.cropped(to: protectedBackground)),
+      try rgbaBytes(output.cropped(to: protectedBackground)),
+      "pixels outside the person mask must remain exact"
+    )
+    XCTAssertGreaterThan(
+      meanAbsoluteDifference(
+        try rgbaBytes(source.cropped(to: CGRect(x: 0, y: 0, width: 48, height: 112))),
+        try rgbaBytes(output.cropped(to: CGRect(x: 0, y: 0, width: 48, height: 112)))
+      ),
+      0.1,
+      "the permitted torso region must still deform"
+    )
+  }
+
   func testLocalAnalysisUsesBoundedCategoriesForDarkCoolInput() throws {
     let image = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64)).image { context in
       UIColor(red: 0.04, green: 0.08, blue: 0.28, alpha: 1).setFill()
@@ -417,6 +827,7 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(result["clarity"] as? String, "blurred")
     XCTAssertEqual(result["scene"] as? String, "unknown")
     XCTAssertEqual(result["portrait"] as? String, "unavailable")
+    XCTAssertEqual(result["body"] as? String, "unavailable")
     XCTAssertTrue(
       ["noFace", "capabilityUnavailable"].contains(
         try XCTUnwrap(result["portraitReason"] as? String)
@@ -1329,6 +1740,19 @@ class RunnerTests: XCTestCase {
     ]
   }
 
+  private func pipelineV3(
+    faceSlimStrength: Double = 0,
+    bodySlimStrength: Double = 0
+  ) -> [String: Any] {
+    var pipeline = pipelineV2(schemaVersion: 3)
+    pipeline["reshape"] = [
+      "recipeVersion": 1,
+      "faceSlimStrength": faceSlimStrength,
+      "bodySlimStrength": bodySlimStrength,
+    ]
+    return pipeline
+  }
+
   private func firstPixel(_ image: CIImage) throws -> [Int] {
     try Array(rgbaBytes(image).prefix(4)).map(Int.init)
   }
@@ -1356,6 +1780,16 @@ class RunnerTests: XCTestCase {
         y: -image.extent.minY
       )
     )
+  }
+
+  private func stripedImage(extent: CGRect) -> CIImage {
+    var image = CIImage(color: .black).cropped(to: extent)
+    for x in stride(from: Int(extent.minX), to: Int(extent.maxX), by: 4) {
+      let color = (x / 4).isMultiple(of: 2) ? CIColor.white : CIColor.red
+      let stripe = CGRect(x: x, y: Int(extent.minY), width: 4, height: Int(extent.height))
+      image = CIImage(color: color).cropped(to: stripe).composited(over: image)
+    }
+    return image.cropped(to: extent)
   }
 
   private func meanAbsoluteDifference(_ left: [UInt8], _ right: [UInt8]) -> Double {
@@ -1530,6 +1964,20 @@ class RunnerTests: XCTestCase {
       of: image.settingProperties([
         kCGImagePropertyOrientation as String: orientation
       ]),
+      to: url,
+      colorSpace: sRGB,
+      options: [
+        kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.95
+      ]
+    )
+  }
+
+  private func writeStripedJpeg(to url: URL, width: Int, height: Int) throws {
+    let image = stripedImage(
+      extent: CGRect(x: 0, y: 0, width: width, height: height)
+    )
+    try imageContext.writeJPEGRepresentation(
+      of: image,
       to: url,
       colorSpace: sRGB,
       options: [

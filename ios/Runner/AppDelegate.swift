@@ -474,7 +474,7 @@ enum IOSPortraitCapabilityPolicy {
     guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
       throw PhotoInputInspectionError.unreadable
     }
-    let options: [CFString: Any] = [
+    let pixelOptions: [CFString: Any] = [
       kCGImageSourceCreateThumbnailFromImageAlways: true,
       kCGImageSourceCreateThumbnailWithTransform: true,
       kCGImageSourceThumbnailMaxPixelSize: 128,
@@ -483,7 +483,22 @@ enum IOSPortraitCapabilityPolicy {
     guard let image = CGImageSourceCreateThumbnailAtIndex(
       source,
       0,
-      options as CFDictionary
+      pixelOptions as CFDictionary
+    ) else {
+      throw PhotoInputInspectionError.unreadable
+    }
+    // Pixel statistics stay deliberately small, while Vision receives enough
+    // detail for face landmarks and shoulder/hip pose on full-body photos.
+    let visionOptions: [CFString: Any] = [
+      kCGImageSourceCreateThumbnailFromImageAlways: true,
+      kCGImageSourceCreateThumbnailWithTransform: true,
+      kCGImageSourceThumbnailMaxPixelSize: Int(IOSPortraitRetoucher.analysisMaxEdge),
+      kCGImageSourceShouldCacheImmediately: true,
+    ]
+    guard let visionImage = CGImageSourceCreateThumbnailAtIndex(
+      source,
+      0,
+      visionOptions as CFDictionary
     ) else {
       throw PhotoInputInspectionError.unreadable
     }
@@ -560,7 +575,7 @@ enum IOSPortraitCapabilityPolicy {
     let faceCount: Int
     let landmarkRequest = VNDetectFaceLandmarksRequest()
     do {
-      let handler = VNImageRequestHandler(cgImage: image, orientation: .up)
+      let handler = VNImageRequestHandler(cgImage: visionImage, orientation: .up)
       try handler.perform([landmarkRequest])
       let observations = landmarkRequest.results ?? []
       faceCount = observations.count
@@ -572,7 +587,7 @@ enum IOSPortraitCapabilityPolicy {
       // some simulator runtimes. A rectangle pass can still distinguish a
       // confirmed no-face input from a face whose landmarks are unavailable.
       let rectangleRequest = VNDetectFaceRectanglesRequest()
-      let handler = VNImageRequestHandler(cgImage: image, orientation: .up)
+      let handler = VNImageRequestHandler(cgImage: visionImage, orientation: .up)
       do {
         try handler.perform([rectangleRequest])
         let observations = rectangleRequest.results ?? []
@@ -599,16 +614,18 @@ enum IOSPortraitCapabilityPolicy {
         )
       }
     }
+    let bodyApplicable = IOSPortraitRetoucher.bodySlimApplicable(image: visionImage)
     return [
       "analysisVersion": "local-pixels-v1",
-      "capabilityVersion": "ios-core-image-vision-v4-local-portrait",
+      "capabilityVersion": "ios-core-image-vision-v6-portrait-reshape",
       "confidence": "medium",
       "exposure": exposure,
       "whiteBalance": whiteBalance,
       "clarity": clarity,
       "portrait": portraitStatus.applicability,
       "portraitReason": portraitStatus.reason,
-      "scene": faceCount == 0 ? "unknown" : "people",
+      "body": bodyApplicable ? "applicable" : "unavailable",
+      "scene": faceCount == 0 && !bodyApplicable ? "unknown" : "people",
     ]
   }
 
@@ -940,7 +957,12 @@ final class IOSPhotoPreviewSession: NSObject, FlutterTexture {
   private var pixelBuffer: CVPixelBuffer?
   private var isClosed = false
 
-  init(sourcePath: String, maxEdge: Int, pipeline: IOSImagePipeline) throws {
+  init(
+    sourcePath: String,
+    maxEdge: Int,
+    pipeline: IOSImagePipeline,
+    preparedPortraitContext: IOSPortraitRetouchContext? = nil
+  ) throws {
     guard let input = CIImage(
       contentsOf: URL(fileURLWithPath: sourcePath),
       options: [.applyOrientationProperty: true]
@@ -966,7 +988,7 @@ final class IOSPhotoPreviewSession: NSObject, FlutterTexture {
       height: max(1, floor(normalizedScaled.extent.height))
     )
     source = normalizedScaled.cropped(to: sourceExtent)
-    portraitContext = IOSPortraitRetoucher.prepare(
+    portraitContext = preparedPortraitContext ?? IOSPortraitRetoucher.prepare(
       source: source,
       extent: sourceExtent
     )

@@ -191,6 +191,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get naturalPortraitRetouch => '自然精修';
 
   @override
+  String get faceSlim => '瘦脸';
+
+  @override
+  String get bodySlim => '瘦身';
+
+  @override
   String get composition => '构图';
 
   @override

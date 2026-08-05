@@ -86,12 +86,232 @@ struct IOSPortraitMasks {
   let effective: CIImage
 }
 
+/// Landmark-derived local deformation area. The mapping is inverse: every
+/// destination pixel asks for a source coordinate, avoiding holes or seams.
+struct IOSFaceSlimGeometry: Equatable {
+  let centerX: CGFloat
+  let halfWidth: CGFloat
+  let lowerY: CGFloat
+  let upperY: CGFloat
+
+  var influenceRect: CGRect {
+    CGRect(
+      x: centerX - halfWidth,
+      y: lowerY,
+      width: halfWidth * 2,
+      height: upperY - lowerY
+    )
+  }
+
+  func sourcePoint(for destination: CGPoint, strength: Double) -> CGPoint {
+    let bounded = CGFloat(max(0, min(1, strength)))
+    guard bounded > 0, halfWidth > 0, upperY > lowerY else { return destination }
+    let normalizedX = abs(destination.x - centerX) / halfWidth
+    let verticalSpan = upperY - lowerY
+    let horizontalGate = smoothstep(0.24, 0.48, normalizedX)
+      * (1 - smoothstep(0.78, 1, normalizedX))
+    let verticalGate = smoothstep(lowerY, lowerY + verticalSpan * 0.2, destination.y)
+      * (1 - smoothstep(upperY - verticalSpan * 0.2, upperY, destination.y))
+    let shift = (destination.x - centerX) * bounded * 0.12
+      * horizontalGate * verticalGate
+    return CGPoint(x: destination.x + shift, y: destination.y)
+  }
+
+  func scaled(x xScale: CGFloat, y yScale: CGFloat) -> IOSFaceSlimGeometry {
+    IOSFaceSlimGeometry(
+      centerX: centerX * xScale,
+      halfWidth: halfWidth * xScale,
+      lowerY: lowerY * yScale,
+      upperY: upperY * yScale
+    )
+  }
+
+  private func smoothstep(_ edge0: CGFloat, _ edge1: CGFloat, _ value: CGFloat) -> CGFloat {
+    guard edge1 > edge0 else { return value < edge0 ? 0 : 1 }
+    let t = max(0, min(1, (value - edge0) / (edge1 - edge0)))
+    return t * t * (3 - 2 * t)
+  }
+}
+
+struct IOSBodySlimGeometry: Equatable {
+  let centerX: CGFloat
+  let halfWidth: CGFloat
+  let lowerY: CGFloat
+  let upperY: CGFloat
+
+  var influenceRect: CGRect {
+    CGRect(
+      x: centerX - halfWidth,
+      y: lowerY,
+      width: halfWidth * 2,
+      height: upperY - lowerY
+    )
+  }
+
+  func sourcePoint(for destination: CGPoint, strength: Double) -> CGPoint {
+    let bounded = CGFloat(max(0, min(1, strength)))
+    guard bounded > 0, halfWidth > 0, upperY > lowerY else { return destination }
+    let normalizedX = abs(destination.x - centerX) / halfWidth
+    let verticalSpan = upperY - lowerY
+    let horizontalGate = smoothstep(0.22, 0.46, normalizedX)
+      * (1 - smoothstep(0.82, 1, normalizedX))
+    let verticalGate = smoothstep(lowerY, lowerY + verticalSpan * 0.12, destination.y)
+      * (1 - smoothstep(upperY - verticalSpan * 0.12, upperY, destination.y))
+    let shift = (destination.x - centerX) * bounded * 0.10
+      * horizontalGate * verticalGate
+    return CGPoint(x: destination.x + shift, y: destination.y)
+  }
+
+  func scaled(x xScale: CGFloat, y yScale: CGFloat) -> IOSBodySlimGeometry {
+    IOSBodySlimGeometry(
+      centerX: centerX * xScale,
+      halfWidth: halfWidth * xScale,
+      lowerY: lowerY * yScale,
+      upperY: upperY * yScale
+    )
+  }
+
+  private func smoothstep(_ edge0: CGFloat, _ edge1: CGFloat, _ value: CGFloat) -> CGFloat {
+    guard edge1 > edge0 else { return value < edge0 ? 0 : 1 }
+    let t = max(0, min(1, (value - edge0) / (edge1 - edge0)))
+    return t * t * (3 - 2 * t)
+  }
+}
+
+enum IOSBodySlimSafetyPolicy {
+  private static let minimumJointConfidence: Float = 0.5
+  private static let minimumTorsoHeightRatio: CGFloat = 0.12
+
+  static func isEligible(
+    personCount: Int,
+    leftShoulderConfidence: Float,
+    rightShoulderConfidence: Float,
+    leftHipConfidence: Float,
+    rightHipConfidence: Float,
+    torsoHeightRatio: CGFloat,
+    segmentationAvailable: Bool
+  ) -> Bool {
+    personCount == 1
+      && leftShoulderConfidence >= minimumJointConfidence
+      && rightShoulderConfidence >= minimumJointConfidence
+      && leftHipConfidence >= minimumJointConfidence
+      && rightHipConfidence >= minimumJointConfidence
+      && torsoHeightRatio >= minimumTorsoHeightRatio
+      && segmentationAvailable
+  }
+}
+
+/// Rejects reshape when long/high-contrast background structure is dense near
+/// the deformation ROI. The mask is dilated first so the subject silhouette
+/// itself is not mistaken for a risky background line.
+enum IOSReshapeBackgroundSafetyPolicy {
+  private static let maximumOutsideEdgeMean = 0.18
+  private static let analysisContext = CIContext(options: [.cacheIntermediates: false])
+
+  static func isEligible(
+    source: CIImage,
+    subjectMask: CIImage,
+    influenceRect: CGRect
+  ) -> Bool {
+    guard let risk = outsideEdgeMean(
+      source: source,
+      subjectMask: subjectMask,
+      influenceRect: influenceRect
+    ) else {
+      return false
+    }
+    return risk <= maximumOutsideEdgeMean
+  }
+
+  static func outsideEdgeMean(
+    source: CIImage,
+    subjectMask: CIImage,
+    influenceRect: CGRect
+  ) -> Double? {
+    let extent = influenceRect.intersection(source.extent).integral
+    guard extent.width >= 2, extent.height >= 2 else { return nil }
+    let radius = max(2, min(12, min(source.extent.width, source.extent.height) * 0.01))
+    let dilatedMask = subjectMask
+      .applyingFilter("CIMorphologyMaximum", parameters: [kCIInputRadiusKey: radius])
+      .cropped(to: source.extent)
+    let outsideMask = dilatedMask
+      .applyingFilter("CIColorInvert")
+      .cropped(to: source.extent)
+    let edges = source
+      .applyingFilter("CIEdges", parameters: [kCIInputIntensityKey: 2.5])
+      .cropped(to: source.extent)
+    let outsideEdges = edges.applyingFilter(
+      "CIMultiplyCompositing",
+      parameters: [kCIInputBackgroundImageKey: outsideMask]
+    ).cropped(to: source.extent)
+    guard
+      let edgeMean = areaAverage(outsideEdges, extent: extent),
+      let outsideCoverage = areaAverage(outsideMask, extent: extent),
+      outsideCoverage > 0.01
+    else {
+      return nil
+    }
+    return min(1, edgeMean / outsideCoverage)
+  }
+
+  private static func areaAverage(_ image: CIImage, extent: CGRect) -> Double? {
+    guard let average = CIFilter(
+      name: "CIAreaAverage",
+      parameters: [kCIInputImageKey: image, kCIInputExtentKey: CIVector(cgRect: extent)]
+    )?.outputImage else {
+      return nil
+    }
+    var pixel = [UInt8](repeating: 0, count: 4)
+    analysisContext.render(
+      average,
+      toBitmap: &pixel,
+      rowBytes: 4,
+      bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+      format: .RGBA8,
+      colorSpace: CGColorSpaceCreateDeviceRGB()
+    )
+    return Double(max(pixel[0], pixel[1], pixel[2])) / 255
+  }
+}
+
 /// Reusable, native-only portrait geometry for one decoded source image.
 /// A missing mask is an intentional safe no-op for ineligible or failed analysis.
 struct IOSPortraitRetouchContext {
   let effectiveMask: CIImage?
+  let faceSlimGeometry: IOSFaceSlimGeometry?
+  let faceSlimDisplacementMap: CIImage?
+  let faceMask: CIImage?
+  let bodySlimGeometry: IOSBodySlimGeometry?
+  let bodySlimDisplacementMap: CIImage?
+  let personMask: CIImage?
 
-  static let unavailable = IOSPortraitRetouchContext(effectiveMask: nil)
+  init(
+    effectiveMask: CIImage?,
+    faceSlimGeometry: IOSFaceSlimGeometry? = nil,
+    faceSlimDisplacementMap: CIImage? = nil,
+    faceMask: CIImage? = nil,
+    bodySlimGeometry: IOSBodySlimGeometry? = nil,
+    bodySlimDisplacementMap: CIImage? = nil,
+    personMask: CIImage? = nil
+  ) {
+    self.effectiveMask = effectiveMask
+    self.faceSlimGeometry = faceSlimGeometry
+    self.faceSlimDisplacementMap = faceSlimDisplacementMap
+    self.faceMask = faceMask
+    self.bodySlimGeometry = bodySlimGeometry
+    self.bodySlimDisplacementMap = bodySlimDisplacementMap
+    self.personMask = personMask
+  }
+
+  static let unavailable = IOSPortraitRetouchContext(
+    effectiveMask: nil,
+    faceSlimGeometry: nil,
+    faceSlimDisplacementMap: nil,
+    faceMask: nil,
+    bodySlimGeometry: nil,
+    bodySlimDisplacementMap: nil,
+    personMask: nil
+  )
 }
 
 /// Deterministic, on-device portrait retouching. Vision geometry and masks
@@ -99,8 +319,18 @@ struct IOSPortraitRetouchContext {
 enum IOSPortraitRetoucher {
   static let candidateKind = "vision-landmarks-geometry-roi"
   static let effectVersion = "ios-geometry-retouch-candidate-v5"
-  private static let analysisMaxEdge: CGFloat = 1_600
+  static let analysisMaxEdge: CGFloat = 768
+  private static let displacementMapMaxEdge: CGFloat = 512
   private static let context = CIContext(options: [.cacheIntermediates: false])
+
+  static func bodySlimApplicable(image: CGImage) -> Bool {
+    let extent = CGRect(x: 0, y: 0, width: image.width, height: image.height)
+    return prepareBody(
+      proxyImage: image,
+      proxyExtent: extent,
+      targetExtent: extent
+    ) != nil
+  }
 
   static func applying(
     to source: CIImage,
@@ -117,6 +347,84 @@ enum IOSPortraitRetoucher {
       extent: extent,
       context: prepare(source: input, extent: extent)
     )
+  }
+
+  static func applyingFaceSlim(
+    to source: CIImage,
+    strength: Double,
+    extent: CGRect,
+    context: IOSPortraitRetouchContext
+  ) -> CIImage {
+    let bounded = max(0, min(1, strength))
+    let input = source.cropped(to: extent)
+    guard
+      bounded > 0,
+      let geometry = context.faceSlimGeometry,
+      geometry.halfWidth > 0,
+      geometry.upperY > geometry.lowerY,
+      let rawMap = context.faceSlimDisplacementMap
+        ?? makeFaceSlimDisplacementMap(geometry: geometry, extent: extent),
+      let faceMask = context.faceMask
+    else {
+      return input
+    }
+    let neutralMap = CIImage(
+      color: CIColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1)
+    ).cropped(to: extent)
+    let protectedMap = rawMap.applyingFilter(
+      "CIBlendWithMask",
+      parameters: [
+        kCIInputBackgroundImageKey: neutralMap,
+        kCIInputMaskImageKey: faceMask.cropped(to: extent),
+      ]
+    ).cropped(to: extent)
+    let maximumShift = geometry.halfWidth * 0.12
+    return input.clampedToExtent().applyingFilter(
+      "CIDisplacementDistortion",
+      parameters: [
+        "inputDisplacementImage": protectedMap,
+        kCIInputScaleKey: maximumShift * 2 * bounded,
+      ]
+    ).cropped(to: extent)
+  }
+
+  static func applyingBodySlim(
+    to source: CIImage,
+    strength: Double,
+    extent: CGRect,
+    context: IOSPortraitRetouchContext
+  ) -> CIImage {
+    let bounded = max(0, min(1, strength))
+    let input = source.cropped(to: extent)
+    guard
+      bounded > 0,
+      let geometry = context.bodySlimGeometry,
+      geometry.halfWidth > 0,
+      geometry.upperY > geometry.lowerY,
+      let rawMap = context.bodySlimDisplacementMap
+        ?? makeBodySlimDisplacementMap(geometry: geometry, extent: extent),
+      let personMask = context.personMask
+    else {
+      return input
+    }
+    let neutralMap = CIImage(
+      color: CIColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1)
+    ).cropped(to: extent)
+    let protectedMap = rawMap.applyingFilter(
+      "CIBlendWithMask",
+      parameters: [
+        kCIInputBackgroundImageKey: neutralMap,
+        kCIInputMaskImageKey: personMask.cropped(to: extent),
+      ]
+    ).cropped(to: extent)
+    let maximumShift = geometry.halfWidth * 0.10
+    return input.clampedToExtent().applyingFilter(
+      "CIDisplacementDistortion",
+      parameters: [
+        "inputDisplacementImage": protectedMap,
+        kCIInputScaleKey: maximumShift * 2 * bounded,
+      ]
+    ).cropped(to: extent)
   }
 
   static func applying(
@@ -147,32 +455,304 @@ enum IOSPortraitRetoucher {
       return .unavailable
     }
 
+    var effectiveMask: CIImage?
+    var faceGeometry: IOSFaceSlimGeometry?
+    var faceDisplacementMap: CIImage?
+    var faceMask: CIImage?
+
     let request = VNDetectFaceLandmarksRequest()
 #if targetEnvironment(simulator)
     request.usesCPUOnly = true
 #endif
     let handler = VNImageRequestHandler(cgImage: proxyImage, orientation: .up)
-    guard
+    if
       (try? handler.perform([request])) != nil,
       let observations = request.results,
       IOSPortraitSafetyPolicy.isEligible(observations),
-      let proxyMasks = try? masks(
-        observations: observations,
-        extent: proxyExtent
-      )
-    else {
-      return .unavailable
+      let proxyMasks = try? masks(observations: observations, extent: proxyExtent)
+    {
+      effectiveMask = proxyMasks.effective
+        .transformed(
+          by: CGAffineTransform(
+            scaleX: extent.width / proxyExtent.width,
+            y: extent.height / proxyExtent.height
+          )
+        )
+        .cropped(to: extent)
+      faceMask = proxyMasks.candidate
+        .transformed(
+          by: CGAffineTransform(
+            scaleX: extent.width / proxyExtent.width,
+            y: extent.height / proxyExtent.height
+          )
+        )
+        .cropped(to: extent)
+      if
+        let face = observations.first,
+        let proxyGeometry = faceSlimGeometry(face: face, size: proxyExtent.size),
+        IOSReshapeBackgroundSafetyPolicy.isEligible(
+          source: CIImage(cgImage: proxyImage),
+          subjectMask: proxyMasks.candidate,
+          influenceRect: proxyGeometry.influenceRect
+        )
+      {
+        let geometry = proxyGeometry.scaled(
+          x: extent.width / proxyExtent.width,
+          y: extent.height / proxyExtent.height
+        )
+        faceGeometry = geometry
+        faceDisplacementMap = makeFaceSlimDisplacementMap(
+          geometry: geometry,
+          extent: extent
+        )
+      }
     }
 
-    let mask = proxyMasks.effective
+    let body = prepareBody(
+      proxyImage: proxyImage,
+      proxyExtent: proxyExtent,
+      targetExtent: extent
+    )
+    return IOSPortraitRetouchContext(
+      effectiveMask: effectiveMask,
+      faceSlimGeometry: faceGeometry,
+      faceSlimDisplacementMap: faceDisplacementMap,
+      faceMask: faceMask,
+      bodySlimGeometry: body?.geometry,
+      bodySlimDisplacementMap: body?.displacementMap,
+      personMask: body?.personMask
+    )
+  }
+
+  private static func prepareBody(
+    proxyImage: CGImage,
+    proxyExtent: CGRect,
+    targetExtent: CGRect
+  ) -> (
+    geometry: IOSBodySlimGeometry,
+    displacementMap: CIImage,
+    personMask: CIImage
+  )? {
+    let poseRequest = VNDetectHumanBodyPoseRequest()
+    let segmentationRequest = VNGeneratePersonSegmentationRequest()
+    segmentationRequest.qualityLevel = .balanced
+    segmentationRequest.outputPixelFormat = kCVPixelFormatType_OneComponent8
+#if targetEnvironment(simulator)
+    poseRequest.usesCPUOnly = true
+    segmentationRequest.usesCPUOnly = true
+#endif
+    let handler = VNImageRequestHandler(cgImage: proxyImage, orientation: .up)
+    guard
+      (try? handler.perform([poseRequest, segmentationRequest])) != nil,
+      let observations = poseRequest.results,
+      observations.count == 1,
+      let observation = observations.first,
+      let leftShoulder = try? observation.recognizedPoint(.leftShoulder),
+      let rightShoulder = try? observation.recognizedPoint(.rightShoulder),
+      let leftHip = try? observation.recognizedPoint(.leftHip),
+      let rightHip = try? observation.recognizedPoint(.rightHip),
+      let segmentation = segmentationRequest.results?.first,
+      IOSBodySlimSafetyPolicy.isEligible(
+        personCount: observations.count,
+        leftShoulderConfidence: leftShoulder.confidence,
+        rightShoulderConfidence: rightShoulder.confidence,
+        leftHipConfidence: leftHip.confidence,
+        rightHipConfidence: rightHip.confidence,
+        torsoHeightRatio: abs(
+          ((leftShoulder.y + rightShoulder.y) / 2)
+            - ((leftHip.y + rightHip.y) / 2)
+        ),
+        segmentationAvailable: true
+      )
+    else {
+      return nil
+    }
+
+    func imagePoint(_ point: VNRecognizedPoint) -> CGPoint {
+      CGPoint(
+        x: point.x * proxyExtent.width,
+        y: point.y * proxyExtent.height
+      )
+    }
+    let shoulders = [imagePoint(leftShoulder), imagePoint(rightShoulder)]
+    let hips = [imagePoint(leftHip), imagePoint(rightHip)]
+    let shoulderWidth = abs(shoulders[0].x - shoulders[1].x)
+    let hipWidth = abs(hips[0].x - hips[1].x)
+    let shoulderY = (shoulders[0].y + shoulders[1].y) / 2
+    let hipY = (hips[0].y + hips[1].y) / 2
+    let torsoHeight = abs(shoulderY - hipY)
+    let proxyGeometry = IOSBodySlimGeometry(
+      centerX: (shoulders[0].x + shoulders[1].x + hips[0].x + hips[1].x) / 4,
+      halfWidth: max(shoulderWidth * 0.62, hipWidth * 0.72),
+      lowerY: min(shoulderY, hipY) - torsoHeight * 0.04,
+      upperY: max(shoulderY, hipY) + torsoHeight * 0.04
+    )
+    let xScale = targetExtent.width / proxyExtent.width
+    let yScale = targetExtent.height / proxyExtent.height
+    let geometry = proxyGeometry.scaled(x: xScale, y: yScale)
+    guard let displacementMap = makeBodySlimDisplacementMap(
+      geometry: geometry,
+      extent: targetExtent
+    ) else {
+      return nil
+    }
+    let rawMask = CIImage(cvPixelBuffer: segmentation.pixelBuffer)
+    let normalizedMask = rawMask.transformed(
+      by: CGAffineTransform(
+        translationX: -rawMask.extent.minX,
+        y: -rawMask.extent.minY
+      )
+    )
+    let personMask = normalizedMask
       .transformed(
         by: CGAffineTransform(
-          scaleX: extent.width / proxyExtent.width,
-          y: extent.height / proxyExtent.height
+          scaleX: targetExtent.width / normalizedMask.extent.width,
+          y: targetExtent.height / normalizedMask.extent.height
+        )
+      )
+      .cropped(to: targetExtent)
+    guard IOSReshapeBackgroundSafetyPolicy.isEligible(
+      source: CIImage(cgImage: proxyImage),
+      subjectMask: normalizedMask
+        .transformed(
+          by: CGAffineTransform(
+            scaleX: proxyExtent.width / normalizedMask.extent.width,
+            y: proxyExtent.height / normalizedMask.extent.height
+          )
+        )
+        .cropped(to: proxyExtent),
+      influenceRect: proxyGeometry.influenceRect
+    ) else {
+      return nil
+    }
+    return (geometry, displacementMap, personMask)
+  }
+
+  private static func makeFaceSlimDisplacementMap(
+    geometry: IOSFaceSlimGeometry,
+    extent: CGRect
+  ) -> CIImage? {
+    guard extent.width >= 1, extent.height >= 1 else { return nil }
+    let scale = min(1, displacementMapMaxEdge / max(extent.width, extent.height))
+    let width = max(1, Int((extent.width * scale).rounded(.up)))
+    let height = max(1, Int((extent.height * scale).rounded(.up)))
+    let mapGeometry = geometry.scaled(x: scale, y: scale)
+    let maximumShift = max(mapGeometry.halfWidth * 0.12, 0.001)
+    var pixels = [UInt8](repeating: 0, count: width * height * 4)
+    for y in 0..<height {
+      for x in 0..<width {
+        let destination = CGPoint(x: CGFloat(x) + 0.5, y: CGFloat(y) + 0.5)
+        let source = mapGeometry.sourcePoint(for: destination, strength: 1)
+        let normalizedShift = max(-1, min(1, (source.x - destination.x) / maximumShift))
+        let offset = (y * width + x) * 4
+        pixels[offset] = UInt8((127.5 + normalizedShift * 127.5).rounded())
+        pixels[offset + 1] = 128
+        pixels[offset + 2] = 128
+        pixels[offset + 3] = 255
+      }
+    }
+    guard
+      let provider = CGDataProvider(data: Data(pixels) as CFData),
+      let image = CGImage(
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bitsPerPixel: 32,
+        bytesPerRow: width * 4,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+        provider: provider,
+        decode: nil,
+        shouldInterpolate: true,
+        intent: .defaultIntent
+      )
+    else {
+      return nil
+    }
+    return CIImage(cgImage: image)
+      .transformed(
+        by: CGAffineTransform(
+          scaleX: extent.width / CGFloat(width),
+          y: extent.height / CGFloat(height)
         )
       )
       .cropped(to: extent)
-    return IOSPortraitRetouchContext(effectiveMask: mask)
+  }
+
+  private static func makeBodySlimDisplacementMap(
+    geometry: IOSBodySlimGeometry,
+    extent: CGRect
+  ) -> CIImage? {
+    guard extent.width >= 1, extent.height >= 1 else { return nil }
+    let scale = min(1, displacementMapMaxEdge / max(extent.width, extent.height))
+    let width = max(1, Int((extent.width * scale).rounded(.up)))
+    let height = max(1, Int((extent.height * scale).rounded(.up)))
+    let mapGeometry = geometry.scaled(x: scale, y: scale)
+    let maximumShift = max(mapGeometry.halfWidth * 0.10, 0.001)
+    var pixels = [UInt8](repeating: 0, count: width * height * 4)
+    for y in 0..<height {
+      for x in 0..<width {
+        let destination = CGPoint(x: CGFloat(x) + 0.5, y: CGFloat(y) + 0.5)
+        let source = mapGeometry.sourcePoint(for: destination, strength: 1)
+        let normalizedShift = max(-1, min(1, (source.x - destination.x) / maximumShift))
+        let offset = (y * width + x) * 4
+        pixels[offset] = UInt8((127.5 + normalizedShift * 127.5).rounded())
+        pixels[offset + 1] = 128
+        pixels[offset + 2] = 128
+        pixels[offset + 3] = 255
+      }
+    }
+    guard
+      let provider = CGDataProvider(data: Data(pixels) as CFData),
+      let image = CGImage(
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bitsPerPixel: 32,
+        bytesPerRow: width * 4,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+        provider: provider,
+        decode: nil,
+        shouldInterpolate: true,
+        intent: .defaultIntent
+      )
+    else {
+      return nil
+    }
+    return CIImage(cgImage: image)
+      .transformed(
+        by: CGAffineTransform(
+          scaleX: extent.width / CGFloat(width),
+          y: extent.height / CGFloat(height)
+        )
+      )
+      .cropped(to: extent)
+  }
+
+  private static func faceSlimGeometry(
+    face: VNFaceObservation,
+    size: CGSize
+  ) -> IOSFaceSlimGeometry? {
+    let faceRect = CGRect(
+      x: face.boundingBox.minX * size.width,
+      y: face.boundingBox.minY * size.height,
+      width: face.boundingBox.width * size.width,
+      height: face.boundingBox.height * size.height
+    )
+    guard faceRect.width > 0, faceRect.height > 0 else { return nil }
+    let contour = points(for: face.landmarks?.faceContour, face: face, size: size)
+    let minX = contour.map(\.x).min() ?? faceRect.minX
+    let maxX = contour.map(\.x).max() ?? faceRect.maxX
+    let contourWidth = maxX - minX
+    let centerX = contourWidth > 0 ? (minX + maxX) / 2 : faceRect.midX
+    let halfWidth = max(faceRect.width * 0.35, contourWidth * 0.52)
+    return IOSFaceSlimGeometry(
+      centerX: centerX,
+      halfWidth: halfWidth,
+      lowerY: faceRect.minY + faceRect.height * 0.04,
+      upperY: faceRect.minY + faceRect.height * 0.62
+    )
   }
 
   static func masks(

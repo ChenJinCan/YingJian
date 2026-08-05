@@ -163,6 +163,8 @@ class EditRecipe {
     double saturation = 0,
     double clarity = 0,
     double portraitStrength = 0,
+    double faceSlimStrength = 0,
+    double bodySlimStrength = 0,
     CropGeometry crop = CropGeometry.original,
   }) {
     for (final entry in <String, double>{
@@ -178,6 +180,8 @@ class EditRecipe {
       _validate(entry.value, entry.key);
     }
     _validate(portraitStrength, 'portraitStrength', minimum: 0);
+    _validate(faceSlimStrength, 'faceSlimStrength', minimum: 0);
+    _validate(bodySlimStrength, 'bodySlimStrength', minimum: 0);
     return EditRecipe._(
       exposure: exposure,
       highlights: highlights,
@@ -188,6 +192,8 @@ class EditRecipe {
       saturation: saturation,
       clarity: clarity,
       portraitStrength: portraitStrength,
+      faceSlimStrength: faceSlimStrength,
+      bodySlimStrength: bodySlimStrength,
       crop: crop,
     );
   }
@@ -202,6 +208,8 @@ class EditRecipe {
     required this.saturation,
     required this.clarity,
     required this.portraitStrength,
+    required this.faceSlimStrength,
+    required this.bodySlimStrength,
     required this.crop,
   });
 
@@ -216,6 +224,8 @@ class EditRecipe {
   final double saturation;
   final double clarity;
   final double portraitStrength;
+  final double faceSlimStrength;
+  final double bodySlimStrength;
   final CropGeometry crop;
 
   bool get isLegacyColorOnly =>
@@ -225,6 +235,8 @@ class EditRecipe {
       saturation == 0 &&
       clarity == 0 &&
       portraitStrength == 0 &&
+      faceSlimStrength == 0 &&
+      bodySlimStrength == 0 &&
       crop.isOriginal;
 
   bool get hasColorAdjustments =>
@@ -247,6 +259,8 @@ class EditRecipe {
     'saturation': saturation,
     'clarity': clarity,
     'portraitStrength': portraitStrength,
+    'faceSlimStrength': faceSlimStrength,
+    'bodySlimStrength': bodySlimStrength,
     'crop': crop.toJson(),
   };
 
@@ -260,6 +274,8 @@ class EditRecipe {
     saturation: (json['saturation'] as num?)?.toDouble() ?? 0,
     clarity: (json['clarity'] as num?)?.toDouble() ?? 0,
     portraitStrength: (json['portraitStrength'] as num?)?.toDouble() ?? 0,
+    faceSlimStrength: (json['faceSlimStrength'] as num?)?.toDouble() ?? 0,
+    bodySlimStrength: (json['bodySlimStrength'] as num?)?.toDouble() ?? 0,
     crop: json['crop'] is Map<String, Object?>
         ? CropGeometry.fromJson(json['crop']! as Map<String, Object?>)
         : CropGeometry.original,
@@ -275,6 +291,8 @@ class EditRecipe {
     double? saturation,
     double? clarity,
     double? portraitStrength,
+    double? faceSlimStrength,
+    double? bodySlimStrength,
     CropGeometry? crop,
   }) => EditRecipe(
     exposure: exposure ?? this.exposure,
@@ -286,6 +304,8 @@ class EditRecipe {
     saturation: saturation ?? this.saturation,
     clarity: clarity ?? this.clarity,
     portraitStrength: portraitStrength ?? this.portraitStrength,
+    faceSlimStrength: faceSlimStrength ?? this.faceSlimStrength,
+    bodySlimStrength: bodySlimStrength ?? this.bodySlimStrength,
     crop: crop ?? this.crop,
   );
 
@@ -307,6 +327,8 @@ class EditRecipe {
       other.saturation == saturation &&
       other.clarity == clarity &&
       other.portraitStrength == portraitStrength &&
+      other.faceSlimStrength == faceSlimStrength &&
+      other.bodySlimStrength == bodySlimStrength &&
       other.crop == crop;
 
   @override
@@ -320,6 +342,8 @@ class EditRecipe {
     saturation,
     clarity,
     portraitStrength,
+    faceSlimStrength,
+    bodySlimStrength,
     crop,
   );
 }
