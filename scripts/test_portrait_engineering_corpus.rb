@@ -5,6 +5,16 @@ require "tmpdir"
 require_relative "support/portrait_engineering_corpus"
 
 class PortraitEngineeringCorpusTest < Minitest::Test
+  def portrait_manifest(assets)
+    {
+      "status" => "ready",
+      "portrait_required_assets" => 48,
+      "portrait_minimum_single_assets" => 36,
+      "portrait_roles" => %w[portrait_single portrait_multi no_face],
+      "assets" => assets,
+    }
+  end
+
   def test_requires_the_frozen_portrait_quality_matrix
     assets = Array.new(36) do |index|
       {
@@ -29,10 +39,7 @@ class PortraitEngineeringCorpusTest < Minitest::Test
       end,
     )
 
-    PortraitEngineeringCorpus.validate_manifest!(
-      "status" => "ready",
-      "assets" => assets,
-    )
+    PortraitEngineeringCorpus.validate_manifest!(portrait_manifest(assets))
 
     too_few_portraits = assets.map(&:dup)
     too_few_portraits[35] = {
@@ -40,10 +47,7 @@ class PortraitEngineeringCorpusTest < Minitest::Test
       "tags" => ["no_face"],
     }
     error = assert_raises(PortraitEngineeringCorpus::ContractError) do
-      PortraitEngineeringCorpus.validate_manifest!(
-        "status" => "ready",
-        "assets" => too_few_portraits,
-      )
+      PortraitEngineeringCorpus.validate_manifest!(portrait_manifest(too_few_portraits))
     end
     assert_includes(error.message, "at least 36 portrait_single")
   end
@@ -61,12 +65,19 @@ class PortraitEngineeringCorpusTest < Minitest::Test
     }
 
     error = assert_raises(PortraitEngineeringCorpus::ContractError) do
-      PortraitEngineeringCorpus.validate_manifest!(
-        "status" => "ready",
-        "assets" => assets,
-      )
+      PortraitEngineeringCorpus.validate_manifest!(portrait_manifest(assets))
     end
     assert_includes(error.message, "exactly one portrait role")
+  end
+
+  def test_rejects_manifest_declarations_that_drift_from_the_frozen_matrix
+    manifest = portrait_manifest([])
+    manifest["portrait_minimum_single_assets"] = 35
+
+    error = assert_raises(PortraitEngineeringCorpus::ContractError) do
+      PortraitEngineeringCorpus.validate_manifest!(manifest)
+    end
+    assert_includes(error.message, "portrait_minimum_single_assets must equal 36")
   end
 
   def test_classifies_only_complete_effect_or_complete_preservation

@@ -13,6 +13,16 @@ module PortraitEngineeringCorpus
     unless manifest.is_a?(Hash) && manifest["status"] == "ready"
       raise ContractError, "manifest must be ready"
     end
+    unless manifest["portrait_required_assets"] == REQUIRED_ASSET_COUNT
+      raise ContractError, "portrait_required_assets must equal #{REQUIRED_ASSET_COUNT}"
+    end
+    unless manifest["portrait_minimum_single_assets"] == MINIMUM_SINGLE_PORTRAIT_COUNT
+      raise ContractError,
+            "portrait_minimum_single_assets must equal #{MINIMUM_SINGLE_PORTRAIT_COUNT}"
+    end
+    unless manifest["portrait_roles"] == PORTRAIT_ROLES
+      raise ContractError, "portrait_roles must equal #{PORTRAIT_ROLES.join(", ")}"
+    end
     assets = manifest["assets"]
     unless assets.is_a?(Array) && assets.length == REQUIRED_ASSET_COUNT
       raise ContractError, "manifest must contain exactly #{REQUIRED_ASSET_COUNT} assets"
