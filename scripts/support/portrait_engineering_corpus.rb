@@ -3,7 +3,43 @@
 module PortraitEngineeringCorpus
   class ContractError < StandardError; end
 
+  REQUIRED_ASSET_COUNT = 48
+  MINIMUM_SINGLE_PORTRAIT_COUNT = 36
+  PORTRAIT_ROLES = %w[portrait_single portrait_multi no_face].freeze
+
   module_function
+
+  def validate_manifest!(manifest)
+    unless manifest.is_a?(Hash) && manifest["status"] == "ready"
+      raise ContractError, "manifest must be ready"
+    end
+    assets = manifest["assets"]
+    unless assets.is_a?(Array) && assets.length == REQUIRED_ASSET_COUNT
+      raise ContractError, "manifest must contain exactly #{REQUIRED_ASSET_COUNT} assets"
+    end
+
+    single_portrait_count = 0
+    assets.each_with_index do |asset, index|
+      unless asset.is_a?(Hash)
+        raise ContractError, "assets[#{index}] must be a mapping"
+      end
+      tags = asset["tags"]
+      unless tags.is_a?(Array) && tags.all? { |tag| tag.is_a?(String) }
+        raise ContractError, "assets[#{index}] tags must be strings"
+      end
+      roles = tags & PORTRAIT_ROLES
+      unless roles.length == 1
+        asset_id = asset["id"] || "assets[#{index}]"
+        raise ContractError, "#{asset_id} must declare exactly one portrait role"
+      end
+      single_portrait_count += 1 if roles.first == "portrait_single"
+    end
+
+    return if single_portrait_count >= MINIMUM_SINGLE_PORTRAIT_COUNT
+
+    raise ContractError,
+          "manifest must contain at least #{MINIMUM_SINGLE_PORTRAIT_COUNT} portrait_single assets"
+  end
 
   def classify_hashes(hashes)
     values = %w[off default high_safe].map do |name|

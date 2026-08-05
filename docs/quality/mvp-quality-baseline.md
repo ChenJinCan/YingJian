@@ -121,7 +121,9 @@ Android runner 仍可用于后续里程碑，但本轮不得自动启动 ADB、�
     evidence_ref: .quality/evidence/portrait-001-consent.pdf
 ```
 
-清单 schema 2 会用系统 ImageIO 工具实际回查格式、像素尺寸、嵌入色彩配置和方向，不接受只修改扩展名或标签来满足配额。完整门精确要求 48 张：24 张独立单图，以及 6 组各 4 张组图；不能用额外组图挤占单图，也不能用超额成员掩盖缺组。对应根字段为 `required_assets`、`required_single_assets`、`required_group_sets` 与 `required_members_per_group`。`high_resolution` 必须至少 24 MP，`exif_rotated` 必须具有非 1 的真实方向；所有资产同时受 48 MP、12,000 px 和 100 MB 输入硬门约束。许可证据必须位于被忽略的 `.quality/evidence/` 内，语料和许可证据的符号链接均不得逃逸仓库边界。
+通用图像与组图清单 schema 2 会用系统 ImageIO 工具实际回查格式、像素尺寸、嵌入色彩配置和方向，不接受只修改扩展名或标签来满足配额。其完整门精确要求 48 张：24 张独立单图，以及 6 组各 4 张组图；不能用额外组图挤占单图，也不能用超额成员掩盖缺组。对应根字段为 `required_assets`、`required_single_assets`、`required_group_sets` 与 `required_members_per_group`。
+
+自然人像使用独立的 `quality/portrait-corpus-manifest.yaml` 合同，不复用上述组图配额。人像门精确要求 48 张、至少 36 张 `portrait_single`，且每张资产必须恰好声明 `portrait_single`、`portrait_multi` 或 `no_face` 中的一个角色；非单人资产只用于多人和负向安全验证。两种清单复用相同的文件、哈希、许可和实际媒体探针。`high_resolution` 必须至少 24 MP，`exif_rotated` 必须具有非 1 的真实方向；所有资产同时受 48 MP、12,000 px 和 100 MB 输入硬门约束。许可证据必须位于被忽略的 `.quality/evidence/` 内，语料和许可证据的符号链接均不得逃逸仓库边界。
 
 ## 5. 自动质量门
 
@@ -129,7 +131,7 @@ Android runner 仍可用于后续里程碑，但本轮不得自动启动 ADB、�
 
 ```sh
 ruby scripts/run_portrait_engineering_corpus.rb \
-  .quality/corpus-manifest.local.yaml \
+  .quality/portrait-corpus-manifest.local.yaml \
   .quality/portrait-engineering-<candidate-id>
 ```
 

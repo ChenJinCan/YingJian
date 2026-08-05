@@ -16,12 +16,13 @@ def assert(condition, message)
   raise message unless condition
 end
 
-def run_checker(checker, repo_root, manifest_path, environment = {})
+def run_checker(checker, repo_root, manifest_path, environment = {}, arguments = [])
   relative = manifest_path.delete_prefix("#{repo_root}/")
   Open3.capture3(
     environment,
     RbConfig.ruby,
     checker,
+    *arguments,
     relative,
     chdir: repo_root,
   )
@@ -86,6 +87,29 @@ begin
 
     stdout, stderr, status = run_checker(checker, repo_root, manifest_path)
     assert(status.success?, "valid media manifest failed: #{stdout}#{stderr}")
+
+    asset_contract_manifest = manifest.reject do |key, _value|
+      %w[
+        required_assets
+        required_single_assets
+        required_group_sets
+        required_members_per_group
+        minimum_tag_counts
+      ].include?(key)
+    end
+    File.write(manifest_path, YAML.dump(asset_contract_manifest))
+    stdout, stderr, status = run_checker(
+      checker,
+      repo_root,
+      manifest_path,
+      {},
+      ["--asset-contract-only"],
+    )
+    assert(status.success?, "asset-only media contract failed: #{stdout}#{stderr}")
+    _stdout, stderr, status = run_checker(checker, repo_root, manifest_path)
+    assert(!status.success?, "general matrix passed without its quota fields")
+    assert(stderr.include?("required_assets"), "missing general quota was not explicit")
+    File.write(manifest_path, YAML.dump(manifest))
 
     oriented_image = File.join(corpus, "fixture-oriented.jpg")
     oriented_source = File.join(directory, "write-oriented.swift")

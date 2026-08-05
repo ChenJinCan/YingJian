@@ -1,0 +1,11 @@
+---
+schema: 2
+status: blocked_missing_assets
+corpus_root: .quality/corpus
+portrait_required_assets: 48
+portrait_minimum_single_assets: 36
+portrait_roles:
+  - portrait_single
+  - portrait_multi
+  - no_face
+assets: []

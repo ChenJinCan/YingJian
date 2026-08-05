@@ -34,7 +34,7 @@ end
 fail_contract("output directory already exists") if File.exist?(output_root)
 
 checker = File.join(repo_root, "scripts/check_image_quality_corpus.rb")
-unless system("ruby", checker, manifest_path, out: $stdout, err: $stderr)
+unless system("ruby", checker, "--asset-contract-only", manifest_path, out: $stdout, err: $stderr)
   fail_contract("image quality corpus contract did not pass")
 end
 
@@ -43,9 +43,12 @@ begin
 rescue Psych::Exception => error
   fail_contract("manifest YAML is invalid: #{error.message}")
 end
-fail_contract("manifest must be ready") unless manifest.is_a?(Hash) && manifest["status"] == "ready"
-assets = manifest["assets"]
-fail_contract("manifest assets must be a non-empty list") unless assets.is_a?(Array) && !assets.empty?
+begin
+  PortraitEngineeringCorpus.validate_manifest!(manifest)
+rescue PortraitEngineeringCorpus::ContractError => error
+  fail_contract(error.message)
+end
+assets = manifest.fetch("assets")
 corpus_root = File.expand_path(manifest.fetch("corpus_root"), repo_root)
 
 renderer_source = File.join(

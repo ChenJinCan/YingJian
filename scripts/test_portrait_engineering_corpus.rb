@@ -5,6 +5,70 @@ require "tmpdir"
 require_relative "support/portrait_engineering_corpus"
 
 class PortraitEngineeringCorpusTest < Minitest::Test
+  def test_requires_the_frozen_portrait_quality_matrix
+    assets = Array.new(36) do |index|
+      {
+        "id" => format("portrait-%03d", index + 1),
+        "tags" => ["portrait_single"],
+      }
+    end
+    assets.concat(
+      Array.new(8) do |index|
+        {
+          "id" => format("no-face-%03d", index + 1),
+          "tags" => ["no_face"],
+        }
+      end,
+    )
+    assets.concat(
+      Array.new(4) do |index|
+        {
+          "id" => format("portrait-multi-%03d", index + 1),
+          "tags" => ["portrait_multi"],
+        }
+      end,
+    )
+
+    PortraitEngineeringCorpus.validate_manifest!(
+      "status" => "ready",
+      "assets" => assets,
+    )
+
+    too_few_portraits = assets.map(&:dup)
+    too_few_portraits[35] = {
+      "id" => "no-face-009",
+      "tags" => ["no_face"],
+    }
+    error = assert_raises(PortraitEngineeringCorpus::ContractError) do
+      PortraitEngineeringCorpus.validate_manifest!(
+        "status" => "ready",
+        "assets" => too_few_portraits,
+      )
+    end
+    assert_includes(error.message, "at least 36 portrait_single")
+  end
+
+  def test_rejects_ambiguous_or_missing_portrait_safety_roles
+    assets = Array.new(48) do |index|
+      {
+        "id" => format("portrait-%03d", index + 1),
+        "tags" => ["portrait_single"],
+      }
+    end
+    assets[36] = {
+      "id" => "ambiguous-001",
+      "tags" => ["portrait_single", "no_face"],
+    }
+
+    error = assert_raises(PortraitEngineeringCorpus::ContractError) do
+      PortraitEngineeringCorpus.validate_manifest!(
+        "status" => "ready",
+        "assets" => assets,
+      )
+    end
+    assert_includes(error.message, "exactly one portrait role")
+  end
+
   def test_classifies_only_complete_effect_or_complete_preservation
     assert_equal(
       "preserved",

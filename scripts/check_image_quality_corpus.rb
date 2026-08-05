@@ -7,6 +7,7 @@ require "yaml"
 
 repo_root = File.expand_path("..", __dir__)
 allow_incomplete = ARGV.delete("--allow-incomplete")
+asset_contract_only = ARGV.delete("--asset-contract-only")
 manifest_argument = ARGV.shift || "quality/corpus-manifest.yaml"
 manifest_path = File.expand_path(manifest_argument, repo_root)
 
@@ -62,23 +63,30 @@ unless assets.is_a?(Array)
   assets = []
 end
 
-required_assets = manifest["required_assets"]
-required_single_assets = manifest["required_single_assets"]
-required_group_sets = manifest["required_group_sets"]
-required_members_per_group = manifest["required_members_per_group"]
-minimum_tag_counts = manifest["minimum_tag_counts"]
+required_assets = nil
+required_single_assets = nil
+required_group_sets = nil
+required_members_per_group = nil
+minimum_tag_counts = {}
+unless asset_contract_only
+  required_assets = manifest["required_assets"]
+  required_single_assets = manifest["required_single_assets"]
+  required_group_sets = manifest["required_group_sets"]
+  required_members_per_group = manifest["required_members_per_group"]
+  minimum_tag_counts = manifest["minimum_tag_counts"]
 
-errors << "required_assets must be a positive integer" unless required_assets.is_a?(Integer) && required_assets.positive?
-unless required_single_assets.is_a?(Integer) && required_single_assets >= 0
-  errors << "required_single_assets must be a non-negative integer"
-end
-errors << "required_group_sets must be a positive integer" unless required_group_sets.is_a?(Integer) && required_group_sets.positive?
-unless required_members_per_group.is_a?(Integer) && required_members_per_group.positive?
-  errors << "required_members_per_group must be a positive integer"
-end
-unless minimum_tag_counts.is_a?(Hash) && minimum_tag_counts.values.all? { |count| count.is_a?(Integer) && count.positive? }
-  errors << "minimum_tag_counts must map tags to positive integers"
-  minimum_tag_counts = {}
+  errors << "required_assets must be a positive integer" unless required_assets.is_a?(Integer) && required_assets.positive?
+  unless required_single_assets.is_a?(Integer) && required_single_assets >= 0
+    errors << "required_single_assets must be a non-negative integer"
+  end
+  errors << "required_group_sets must be a positive integer" unless required_group_sets.is_a?(Integer) && required_group_sets.positive?
+  unless required_members_per_group.is_a?(Integer) && required_members_per_group.positive?
+    errors << "required_members_per_group must be a positive integer"
+  end
+  unless minimum_tag_counts.is_a?(Hash) && minimum_tag_counts.values.all? { |count| count.is_a?(Integer) && count.positive? }
+    errors << "minimum_tag_counts must map tags to positive integers"
+    minimum_tag_counts = {}
+  end
 end
 
 ids = {}
@@ -294,7 +302,7 @@ assets.each_with_index do |asset, index|
   errors << "#{prefix}.file exceeds the 100 MB input contract" if File.size(full_path) > 100 * 1024 * 1024
 end
 
-unless allow_incomplete
+unless allow_incomplete || asset_contract_only
   errors << "status must be ready for the complete gate" unless status == "ready"
   if required_assets.is_a?(Integer) && assets.length != required_assets
     errors << "asset count #{assets.length} must equal #{required_assets}"
@@ -318,7 +326,13 @@ unless allow_incomplete
 end
 
 if errors.empty?
-  mode = allow_incomplete ? "schema-only" : "complete"
+  mode = if asset_contract_only
+           "asset-contract"
+         elsif allow_incomplete
+           "schema-only"
+         else
+           "complete"
+         end
   puts "Image quality corpus check passed (#{mode}, #{assets.length} assets)"
   exit 0
 end
