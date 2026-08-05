@@ -17,7 +17,7 @@ struct IOSPortraitSafetyDecision: Equatable {
 }
 
 enum IOSPortraitSafetyPolicy {
-  private static let minimumConfidence: Float = 0.5
+  static let minimumConfidence: Float = 0.5
   private static let minimumFaceDimension: CGFloat = 0.12
   private static let minimumFaceArea: CGFloat = 0.025
 
@@ -569,6 +569,35 @@ enum IOSPortraitRetoucher {
     geometry: IOSBodySlimGeometry,
     personMask: CIImage
   )? {
+#if targetEnvironment(simulator)
+    // Human pose and person segmentation can both report no result on iOS
+    // Simulator and can stall every preview while doing so. Do not start those
+    // known-unavailable requests here. Keep the production UI testable without
+    // pretending this is hardware evidence: infer one conservative torso only
+    // from a confirmed single face, and confine the mask to that torso. Device
+    // builds never compile this fallback and still require pose + segmentation.
+    return prepareSimulatorBody(
+      proxyImage: proxyImage,
+      proxyExtent: proxyExtent,
+      targetExtent: targetExtent
+    )
+#else
+    return prepareVisionBody(
+      proxyImage: proxyImage,
+      proxyExtent: proxyExtent,
+      targetExtent: targetExtent
+    )
+#endif
+  }
+
+  private static func prepareVisionBody(
+    proxyImage: CGImage,
+    proxyExtent: CGRect,
+    targetExtent: CGRect
+  ) -> (
+    geometry: IOSBodySlimGeometry,
+    personMask: CIImage
+  )? {
     let poseRequest = VNDetectHumanBodyPoseRequest()
     let segmentationRequest = VNGeneratePersonSegmentationRequest()
     segmentationRequest.qualityLevel = .balanced
@@ -657,6 +686,108 @@ enum IOSPortraitRetoucher {
     }
     return (geometry, personMask)
   }
+
+#if targetEnvironment(simulator)
+  private static func prepareSimulatorBody(
+    proxyImage: CGImage,
+    proxyExtent: CGRect,
+    targetExtent: CGRect
+  ) -> (
+    geometry: IOSBodySlimGeometry,
+    personMask: CIImage
+  )? {
+    guard
+      proxyExtent.height >= proxyExtent.width * 1.15,
+      proxyExtent.width >= 1,
+      proxyExtent.height >= 1
+    else {
+      return nil
+    }
+    let request = VNDetectFaceRectanglesRequest()
+    request.usesCPUOnly = true
+    let handler = VNImageRequestHandler(cgImage: proxyImage, orientation: .up)
+    guard
+      (try? handler.perform([request])) != nil,
+      let faces = request.results,
+      faces.count == 1,
+      let face = faces.first,
+      face.confidence >= IOSPortraitSafetyPolicy.minimumConfidence,
+      let proxyGeometry = simulatorBodyFallbackGeometry(
+        faceBoundingBox: face.boundingBox,
+        proxyExtent: proxyExtent
+      )
+    else {
+      return nil
+    }
+    let proxyMaskImage: CGImage
+    do {
+      proxyMaskImage = try makeMask(
+        width: Int(proxyExtent.width),
+        height: Int(proxyExtent.height)
+      ) { graphics in
+        graphics.setFillColor(gray: 1, alpha: 1)
+        graphics.fillEllipse(in: CGRect(
+          x: proxyGeometry.centerX - proxyGeometry.halfWidth,
+          y: proxyGeometry.lowerY,
+          width: proxyGeometry.halfWidth * 2,
+          height: proxyGeometry.upperY - proxyGeometry.lowerY
+        ))
+      }
+    } catch {
+      return nil
+    }
+    let proxyMask = CIImage(cgImage: proxyMaskImage).cropped(to: proxyExtent)
+    guard IOSReshapeBackgroundSafetyPolicy.isEligible(
+      source: CIImage(cgImage: proxyImage),
+      subjectMask: proxyMask,
+      influenceRect: proxyGeometry.influenceRect
+    ) else {
+      return nil
+    }
+    let xScale = targetExtent.width / proxyExtent.width
+    let yScale = targetExtent.height / proxyExtent.height
+    return (
+      proxyGeometry.scaled(x: xScale, y: yScale),
+      proxyMask
+        .transformed(by: CGAffineTransform(scaleX: xScale, y: yScale))
+        .cropped(to: targetExtent)
+    )
+  }
+
+  static func simulatorBodyFallbackGeometry(
+    faceBoundingBox: CGRect,
+    proxyExtent: CGRect
+  ) -> IOSBodySlimGeometry? {
+    guard
+      proxyExtent.height >= proxyExtent.width * 1.15,
+      faceBoundingBox.midY >= 0.58,
+      faceBoundingBox.width >= 0.035,
+      faceBoundingBox.width <= 0.22
+    else {
+      return nil
+    }
+    let faceRect = CGRect(
+      x: faceBoundingBox.minX * proxyExtent.width,
+      y: faceBoundingBox.minY * proxyExtent.height,
+      width: faceBoundingBox.width * proxyExtent.width,
+      height: faceBoundingBox.height * proxyExtent.height
+    )
+    let upperY = faceRect.minY - faceRect.height * 0.18
+    let torsoHeight = min(proxyExtent.height * 0.43, faceRect.height * 6.0)
+    let lowerY = max(proxyExtent.height * 0.14, upperY - torsoHeight)
+    let halfWidth = min(
+      proxyExtent.width * 0.30,
+      max(proxyExtent.width * 0.17, faceRect.width * 1.65)
+    )
+    guard upperY > lowerY, halfWidth > 0 else { return nil }
+    return IOSBodySlimGeometry(
+      centerX: faceRect.midX,
+      halfWidth: halfWidth,
+      lowerY: lowerY,
+      upperY: upperY
+    )
+  }
+#endif
 
   private static func faceSlimGeometry(
     face: VNFaceObservation,

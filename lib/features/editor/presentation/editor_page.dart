@@ -139,7 +139,9 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       session,
     );
     final project = session.project;
-    await _restoreCachedPortraitApplicability(session);
+    final analysisRefreshRequired = await _restoreCachedPortraitApplicability(
+      session,
+    );
     _photoStripController?.dispose();
     _photoStripController = ScrollController(
       initialScrollOffset: project?.groupScrollOffset ?? 0,
@@ -165,18 +167,26 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         persistAnalysisStates:
             project.flowState == PhotoProjectFlowState.analyzing,
       );
+    } else if (project != null &&
+        project.flowState == PhotoProjectFlowState.editing &&
+        analysisRefreshRequired) {
+      await _prepareRecommendations(
+        persistAnalysisStates: false,
+        exposeRecommendations: false,
+      );
     }
   }
 
-  Future<void> _restoreCachedPortraitApplicability(
+  Future<bool> _restoreCachedPortraitApplicability(
     PhotoProjectSession session,
   ) async {
     final project = session.project;
-    if (project == null) return;
+    if (project == null) return false;
     final analyzer = context.read<PhotoAnalyzer>();
     final cache = context.read<PhotoAnalysisCache>();
     final restored = <String, PortraitApplicability>{};
     final restoredBody = <String, PortraitApplicability>{};
+    var refreshRequired = false;
     for (final photo in project.photos) {
       try {
         final analysis = await cache.read(
@@ -187,12 +197,15 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         if (analysis != null) {
           restored[photo.id] = analysis.portrait;
           restoredBody[photo.id] = analysis.body;
+        } else {
+          refreshRequired = true;
         }
       } on Object {
         // Analysis cache is advisory; editing and export remain available.
+        refreshRequired = true;
       }
     }
-    if (!mounted || session.project?.id != project.id) return;
+    if (!mounted || session.project?.id != project.id) return false;
     setState(() {
       _portraitApplicabilityByPhotoId
         ..clear()
@@ -201,10 +214,12 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         ..clear()
         ..addAll(restoredBody);
     });
+    return refreshRequired;
   }
 
   Future<void> _prepareRecommendations({
     required bool persistAnalysisStates,
+    bool exposeRecommendations = true,
   }) async {
     final session = _session!;
     if (_preparingRecommendations || session.photos.isEmpty) return;
@@ -248,7 +263,9 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       }
       if (_isCurrentAnalysisRun(cancellation, projectId)) {
         setState(() {
-          _recommendationPreparation = preparation;
+          if (exposeRecommendations) {
+            _recommendationPreparation = preparation;
+          }
           _portraitApplicabilityByPhotoId.addAll({
             for (final entry in preparation.analyses.entries)
               entry.key: entry.value.portrait,
@@ -257,9 +274,11 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
             for (final entry in preparation.analyses.entries)
               entry.key: entry.value.body,
           });
-          _previewRecommendationIndex = preparation.recommendations.isEmpty
-              ? -1
-              : 0;
+          if (exposeRecommendations) {
+            _previewRecommendationIndex = preparation.recommendations.isEmpty
+                ? -1
+                : 0;
+          }
         });
       }
     } finally {

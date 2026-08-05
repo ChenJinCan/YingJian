@@ -33,7 +33,7 @@ void main() {
             captured = call;
             return <String, Object>{
               'analysisVersion': 'local-pixels-v1',
-              'capabilityVersion': 'ios-core-image-vision-v6-portrait-reshape',
+              'capabilityVersion': 'ios-core-image-vision-v8-portrait-reshape',
               'confidence': 'medium',
               'exposure': 'underexposed',
               'whiteBalance': 'coolCast',
@@ -56,7 +56,7 @@ void main() {
       expect(result.usesSafeFallback, isFalse);
       expect(
         result.capabilityVersion,
-        'ios-core-image-vision-v6-portrait-reshape',
+        'ios-core-image-vision-v8-portrait-reshape',
       );
       expect(result.exposure.name, 'underexposed');
       expect(result.whiteBalance.name, 'coolCast');

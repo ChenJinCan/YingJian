@@ -24,7 +24,7 @@ final class MethodChannelPhotoAnalyzer implements PhotoAnalyzer {
       nativeCapabilityVersion ??
       (Platform.isAndroid
           ? 'android-bitmap-face-v1'
-          : 'ios-core-image-vision-v6-portrait-reshape');
+          : 'ios-core-image-vision-v8-portrait-reshape');
 
   @override
   PhotoAnalysisEngineIdentity identityFor(ProjectPhoto photo) {

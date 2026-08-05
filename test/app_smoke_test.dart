@@ -1439,6 +1439,117 @@ void main() {
   );
 
   testWidgets(
+    'restored editing project refreshes stale portrait capability cache',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final photoFile = File(
+        'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+        'Icon-App-1024x1024@1x.png',
+      );
+      final photo = ProjectPhoto(
+        id: 'stale-portrait-photo',
+        localPath: photoFile.path,
+        originalName: '升级前已有人像.jpg',
+        contentSha256:
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        pixelWidth: 1024,
+        pixelHeight: 1024,
+        colorSpace: PhotoColorSpace.srgb,
+        inputFormat: PhotoInputFormat.jpeg,
+        supportState: PhotoSupportState.supported,
+      );
+      final store = MemoryPhotoProjectStore(
+        PhotoProject(
+          id: 'stale-portrait-project',
+          createdAt: DateTime.utc(2026, 8, 5),
+          updatedAt: DateTime.utc(2026, 8, 5),
+          photos: [photo],
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'clean-natural-01',
+          editingScope: ProjectEditingScope.currentPhoto,
+          focusPhotoId: photo.id,
+          analysisStates: {photo.id: PhotoAnalysisState.ready},
+        ),
+      );
+      final cache = MemoryPhotoAnalysisCache();
+      final staleWrite = await cache.stage(
+        projectId: store.project!.id,
+        photoId: photo.id,
+        analysis: LocalPhotoAnalysis(
+          analysisVersion: 'widget-analysis-v1',
+          capabilityVersion: 'widget-capability-v0',
+          contentSha256: photo.contentSha256,
+          orientation: photo.orientation,
+          pixelWidth: photo.pixelWidth,
+          pixelHeight: photo.pixelHeight,
+          colorSpace: photo.colorSpace,
+          disposition: PhotoAnalysisDisposition.ready,
+          fallbackReason: AnalysisFallbackReason.none,
+          portrait: PortraitApplicability.unavailable,
+          body: PortraitApplicability.unavailable,
+        ),
+      );
+      await cache.commit(staleWrite, canCommit: () => true);
+      final analyzer = _CountingPhotoAnalyzer(
+        portrait: PortraitApplicability.applicable,
+        body: PortraitApplicability.applicable,
+        capabilityVersion: 'widget-capability-v2',
+      );
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoProjectStore: store,
+          photoAnalyzer: analyzer,
+          photoAnalysisCache: cache,
+          photoPreviewRenderer: FakePhotoPreviewRenderer.supported(),
+        ),
+      );
+      await tester.tap(find.text('开始修图'));
+      await tester.pumpAndSettle();
+
+      expect(analyzer.calls, 1);
+      expect(store.project?.flowState, PhotoProjectFlowState.editing);
+      expect(find.byKey(const ValueKey('recommendation-use')), findsNothing);
+      await tester.dragUntilVisible(
+        find.text('自然精修'),
+        find.byKey(const Key('photo-workspace-scroll')),
+        const Offset(0, -220),
+      );
+      expect(
+        find
+            .byKey(const ValueKey('editor-adjustment-tab-portraitRetouch'))
+            .hitTestable(),
+        findsOneWidget,
+      );
+      expect(
+        find
+            .byKey(const ValueKey('editor-adjustment-tab-faceSlim'))
+            .hitTestable(),
+        findsOneWidget,
+      );
+      expect(
+        find
+            .byKey(const ValueKey('editor-adjustment-tab-bodySlim'))
+            .hitTestable(),
+        findsOneWidget,
+      );
+      expect(
+        await cache.read(
+          projectId: store.project!.id,
+          photo: photo,
+          engineIdentity: analyzer.identityFor(photo),
+        ),
+        isNotNull,
+      );
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
+
+  testWidgets(
     'multi-photo editing makes group and current-photo scope explicit',
     (tester) async {
       final photoFile = File(
@@ -2229,17 +2340,19 @@ final class _CountingPhotoAnalyzer implements PhotoAnalyzer {
   _CountingPhotoAnalyzer({
     this.portrait = PortraitApplicability.unavailable,
     this.body = PortraitApplicability.unavailable,
+    this.capabilityVersion = 'widget-capability-v1',
   });
 
   final PortraitApplicability portrait;
   final PortraitApplicability body;
+  final String capabilityVersion;
   int calls = 0;
 
   @override
   PhotoAnalysisEngineIdentity identityFor(ProjectPhoto photo) =>
-      const PhotoAnalysisEngineIdentity(
+      PhotoAnalysisEngineIdentity(
         analysisVersion: 'widget-analysis-v1',
-        capabilityVersion: 'widget-capability-v1',
+        capabilityVersion: capabilityVersion,
       );
 
   @override
@@ -2247,7 +2360,7 @@ final class _CountingPhotoAnalyzer implements PhotoAnalyzer {
     calls += 1;
     return LocalPhotoAnalysis(
       analysisVersion: 'widget-analysis-v1',
-      capabilityVersion: 'widget-capability-v1',
+      capabilityVersion: capabilityVersion,
       contentSha256: photo.contentSha256,
       orientation: photo.orientation,
       pixelWidth: photo.pixelWidth,

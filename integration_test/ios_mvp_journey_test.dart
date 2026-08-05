@@ -595,7 +595,7 @@ final class _NativeExportProbe implements PhotoExporter {
 
 final class _ApplicablePortraitAnalyzer implements PhotoAnalyzer {
   static const _analysisVersion = 'ios-runtime-fixture-v1';
-  static const _capabilityVersion = 'ios-core-image-vision-v6-portrait-reshape';
+  static const _capabilityVersion = 'ios-core-image-vision-v8-portrait-reshape';
   final List<String> photoIds = [];
 
   @override

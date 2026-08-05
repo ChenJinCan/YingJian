@@ -970,6 +970,68 @@ class RunnerTests: XCTestCase {
     )
   }
 
+  func testLocalAnalysisExposesPortraitCapabilityForARealFrontFacingPhoto() throws {
+    let fixture = URL(fileURLWithPath: #filePath)
+      .deletingLastPathComponent()
+      .appendingPathComponent("Fixtures/portrait-front-cc-by-sa.jpg")
+    XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.path))
+
+    let result = try AppDelegate.analyzePhoto(path: fixture.path)
+
+    XCTAssertEqual(
+      result["capabilityVersion"] as? String,
+      "ios-core-image-vision-v8-portrait-reshape"
+    )
+    XCTAssertEqual(result["portrait"] as? String, "applicable")
+    XCTAssertEqual(result["portraitReason"] as? String, "none")
+    XCTAssertEqual(result["scene"] as? String, "people")
+  }
+
+#if targetEnvironment(simulator)
+  func testLocalAnalysisExposesBodyCapabilityForARealStandingPhoto() throws {
+    let fixture = URL(fileURLWithPath: #filePath)
+      .deletingLastPathComponent()
+      .appendingPathComponent("Fixtures/body-standing-cc-by-sa.jpg")
+    XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.path))
+
+    let result = try AppDelegate.analyzePhoto(path: fixture.path)
+
+    XCTAssertEqual(
+      result["capabilityVersion"] as? String,
+      "ios-core-image-vision-v8-portrait-reshape"
+    )
+    XCTAssertEqual(result["body"] as? String, "applicable")
+    XCTAssertEqual(result["scene"] as? String, "people")
+  }
+
+  func testSimulatorBodyFallbackRequiresConservativeFullBodyGeometry() throws {
+    let extent = CGRect(x: 0, y: 0, width: 500, height: 752)
+    let geometry = try XCTUnwrap(
+      IOSPortraitRetoucher.simulatorBodyFallbackGeometry(
+        faceBoundingBox: CGRect(x: 0.43, y: 0.72, width: 0.12, height: 0.09),
+        proxyExtent: extent
+      )
+    )
+    XCTAssertEqual(geometry.centerX, 245, accuracy: 0.001)
+    XCTAssertGreaterThan(geometry.upperY, geometry.lowerY)
+    XCTAssertGreaterThan(geometry.halfWidth, 0)
+    XCTAssertNil(
+      IOSPortraitRetoucher.simulatorBodyFallbackGeometry(
+        faceBoundingBox: CGRect(x: 0.43, y: 0.35, width: 0.12, height: 0.09),
+        proxyExtent: extent
+      ),
+      "a low face cannot infer a safe upright torso"
+    )
+    XCTAssertNil(
+      IOSPortraitRetoucher.simulatorBodyFallbackGeometry(
+        faceBoundingBox: CGRect(x: 0.43, y: 0.72, width: 0.12, height: 0.09),
+        proxyExtent: CGRect(x: 0, y: 0, width: 752, height: 500)
+      ),
+      "landscape inputs cannot use the simulator-only torso fallback"
+    )
+  }
+#endif
+
   func testSelfBuiltPortraitCandidateIsReportedApplicableOnlyForSafeSingleFaces() {
     XCTAssertTrue(IOSPortraitCapabilityPolicy.productionEligible)
     XCTAssertEqual(

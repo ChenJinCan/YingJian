@@ -574,6 +574,13 @@ enum IOSPortraitCapabilityPolicy {
     let portraitStatus: IOSPortraitCapabilityStatus
     let faceCount: Int
     let landmarkRequest = VNDetectFaceLandmarksRequest()
+#if targetEnvironment(simulator)
+    // Vision's default compute-device selection can reject face requests on
+    // some simulator runtimes even though the same image is supported on
+    // hardware. Keep Simulator production journeys on the CPU so local
+    // applicability is observable instead of silently cached as unavailable.
+    landmarkRequest.usesCPUOnly = true
+#endif
     do {
       let handler = VNImageRequestHandler(cgImage: visionImage, orientation: .up)
       try handler.perform([landmarkRequest])
@@ -587,6 +594,9 @@ enum IOSPortraitCapabilityPolicy {
       // some simulator runtimes. A rectangle pass can still distinguish a
       // confirmed no-face input from a face whose landmarks are unavailable.
       let rectangleRequest = VNDetectFaceRectanglesRequest()
+#if targetEnvironment(simulator)
+      rectangleRequest.usesCPUOnly = true
+#endif
       let handler = VNImageRequestHandler(cgImage: visionImage, orientation: .up)
       do {
         try handler.perform([rectangleRequest])
@@ -617,7 +627,7 @@ enum IOSPortraitCapabilityPolicy {
     let bodyApplicable = IOSPortraitRetoucher.bodySlimApplicable(image: visionImage)
     return [
       "analysisVersion": "local-pixels-v1",
-      "capabilityVersion": "ios-core-image-vision-v6-portrait-reshape",
+      "capabilityVersion": "ios-core-image-vision-v8-portrait-reshape",
       "confidence": "medium",
       "exposure": exposure,
       "whiteBalance": whiteBalance,
