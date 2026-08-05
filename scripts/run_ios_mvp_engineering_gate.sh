@@ -12,9 +12,10 @@ list_gates() {
 4. iOS runtime journey
 5. image corpus contracts
 6. portrait engineering corpus
-7. portrait review structure
-8. iOS device evidence contract
-9. release contract
+7. portrait engineering diagnostic tools
+8. portrait review structure
+9. iOS device evidence contract
+10. release contract
 EOF
 }
 
@@ -90,6 +91,8 @@ run_gate "portrait engineering checker tests" \
   ruby scripts/test_portrait_engineering_corpus.rb
 run_gate "portrait engineering corpus" \
   ruby scripts/run_portrait_engineering_corpus.rb "$portrait_manifest" "$portrait_output"
+run_gate "portrait engineering diagnostic tools" \
+  ruby scripts/test_portrait_engineering_diagnostic.rb
 
 run_gate "portrait review plan tools" ruby scripts/test_portrait_review_plan_tools.rb
 run_gate "portrait review structure" ruby scripts/test_blind_review_tools.rb

@@ -45,7 +45,20 @@ func normalizedPixelSHA256(_ image: CGImage) throws -> String {
 }
 
 func run() throws {
-  guard CommandLine.arguments.count == 3 else { throw SanitizerError.invalidArguments }
+  guard CommandLine.arguments.count == 3 || CommandLine.arguments.count == 5 else {
+    throw SanitizerError.invalidArguments
+  }
+  let requestedMaxEdge: Int?
+  if CommandLine.arguments.count == 5 {
+    guard
+      CommandLine.arguments[3] == "--max-edge",
+      let value = Int(CommandLine.arguments[4]),
+      value > 0
+    else { throw SanitizerError.invalidArguments }
+    requestedMaxEdge = value
+  } else {
+    requestedMaxEdge = nil
+  }
   let inputURL = URL(fileURLWithPath: CommandLine.arguments[1])
   let outputURL = URL(fileURLWithPath: CommandLine.arguments[2])
   guard
@@ -59,10 +72,12 @@ func run() throws {
     height.intValue > 0
   else { throw SanitizerError.decodeFailed }
 
+  let sourceMaxEdge = max(width.intValue, height.intValue)
+  let outputMaxEdge = min(sourceMaxEdge, requestedMaxEdge ?? sourceMaxEdge)
   let options: [CFString: Any] = [
     kCGImageSourceCreateThumbnailFromImageAlways: true,
     kCGImageSourceCreateThumbnailWithTransform: true,
-    kCGImageSourceThumbnailMaxPixelSize: max(width.intValue, height.intValue),
+    kCGImageSourceThumbnailMaxPixelSize: outputMaxEdge,
     kCGImageSourceShouldCacheImmediately: true,
   ]
   guard

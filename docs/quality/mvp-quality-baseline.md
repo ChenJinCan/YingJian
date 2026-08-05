@@ -148,16 +148,16 @@ ruby scripts/run_portrait_engineering_corpus.rb \
   .quality/portrait-engineering-<candidate-id>
 ```
 
-本机 `candidate-engineering-v12` 报告绑定候选
+本机 `candidate-engineering-v13` 报告绑定候选
 `ios-geometry-retouch-candidate-v4`、manifest、retoucher、renderer、runner 与合同校验器
-SHA-256，结果为 48 个资产、
+及共享指标实现 SHA-256，结果为 48 个资产、
 36 个单人应用、12 个多人/无人脸安全保持、0 个意外结果。对成人年龄纹理、胡须、
 眼镜、侧脸和清晰肤质代表样片的关闭/默认/高安全局部放大工程观察中，默认档仅作
 克制的低频整理，高安全档变化更明显；五官、发丝、胡须、嘴唇、深皱纹、永久斑点
 和背景边缘仍可辨认，未观察到明显黑边、光晕或轮廓过锐。该结论只允许把候选带入
 正式盲评，不能把 `productionEligible` 改为 true。
 
-`candidate-engineering-v12` 不再把“JPEG 哈希不同”当作单人候选已产生有效变化。
+`candidate-engineering-v13` 不再把“JPEG 哈希不同”当作单人候选已产生有效变化。
 运行器先从规范化源图独立编码 baseline，再要求候选强度 0 的 off 与 baseline 文件哈希
 完全相同；随后把 baseline/off/default/high-safe 最终 sRGB JPEG 解码为最长边 512 px 的
 RGBA8 代理，记录全图 RGB 平均绝对差、任一通道差至少 2 个码值的像素比例，以及
@@ -173,6 +173,23 @@ RGBA8 代理，记录全图 RGB 平均绝对差、任一通道差至少 2 个码
 强度反序、方向/区域突变或超出全图变化预算的结果；它不能定位背景、五官或边缘上的
 局部泄漏，也不能衡量“更好看”、自然度、身份保持、肤色、公平性或局部 halo，因此
 仍不能替代保护区域回归、正式匿名盲评和物理设备检查。
+
+在正式竞品同路径和物理设备输入尚未齐备时，可从同一工程报告生成本地候选诊断包：
+
+```sh
+ruby scripts/build_portrait_engineering_diagnostic.rb \
+  .quality/candidate-engineering-v13/engineering-report.json \
+  .quality/portrait-corpus-manifest.local.yaml \
+  .quality/portrait-diagnostic-v13 \
+  --seed candidate-engineering-v13
+```
+
+生成器逐项回查 manifest 原图 SHA、方向规范化后的尺寸、sRGB JPEG、报告源码身份和
+实际规范化像素差，并用与报告相同的共享 Swift 指标实现从最终 JPEG 重算全部数值；
+所有参与者图片会清除元数据并限制为最长边 2048 px 的 PNG，资产
+和候选身份只保存在独立 key 中。HTML 和 key 都明确标记这是
+`local-desktop-engineering`、非物理设备且 `freeze_eligible=false`。该包用于集中放大
+检查纹理与边界，不能提交给正式评分器，也不能代替竞品、五名评审或真机证据。
 
 下列项目任一失败即阻断对应图像链路：
 

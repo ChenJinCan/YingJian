@@ -55,6 +55,7 @@ renderer_source = File.join(
   repo_root,
   "scripts/support/render_portrait_engineering_candidate.swift",
 )
+metrics_source = File.join(repo_root, "scripts/support/portrait_engineering_metrics.swift")
 retoucher_source = File.join(repo_root, "ios/Runner/IOSPortraitRetoucher.swift")
 runner_source = File.expand_path(__FILE__)
 contract_source = File.join(repo_root, "scripts/support/portrait_engineering_corpus.rb")
@@ -78,6 +79,7 @@ Dir.mktmpdir(".portrait-engineering-", quality_root) do |temporary_root|
     "swiftc",
     "-parse-as-library",
     retoucher_source,
+    metrics_source,
     renderer_source,
     "-o",
     renderer,
@@ -178,11 +180,12 @@ Dir.mktmpdir(".portrait-engineering-", quality_root) do |temporary_root|
   counts = report_assets.group_by { |asset| asset.fetch("classification") }
     .transform_values(&:length)
   report = {
-    "schema" => 3,
+    "schema" => 4,
     "engineering_only" => true,
     "manifest_sha256" => Digest::SHA256.file(manifest_path).hexdigest,
     "retoucher_source_sha256" => Digest::SHA256.file(retoucher_source).hexdigest,
     "renderer_source_sha256" => Digest::SHA256.file(renderer_source).hexdigest,
+    "metrics_source_sha256" => Digest::SHA256.file(metrics_source).hexdigest,
     "runner_source_sha256" => Digest::SHA256.file(runner_source).hexdigest,
     "contract_source_sha256" => Digest::SHA256.file(contract_source).hexdigest,
     "candidate" => candidate_identity,

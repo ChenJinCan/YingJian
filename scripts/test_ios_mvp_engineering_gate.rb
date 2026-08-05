@@ -20,6 +20,7 @@ expected = [
   "iOS runtime journey",
   "image corpus contracts",
   "portrait engineering corpus",
+  "portrait engineering diagnostic tools",
   "portrait review structure",
   "iOS device evidence contract",
   "release contract",

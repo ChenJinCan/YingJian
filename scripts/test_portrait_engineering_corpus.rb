@@ -350,6 +350,7 @@ class PortraitEngineeringCorpusTest < Minitest::Test
         "swiftc",
         "-parse-as-library",
         File.join(repo_root, "ios/Runner/IOSPortraitRetoucher.swift"),
+        File.join(repo_root, "scripts/support/portrait_engineering_metrics.swift"),
         File.join(repo_root, "scripts/support/render_portrait_engineering_candidate.swift"),
         "-o",
         renderer,
