@@ -1,6 +1,6 @@
 # 映见 MVP 图像质量与工程基线
 
-> 状态：合同已冻结，样片与物理设备证据仍阻断；日期：2026-08-04。
+> 状态：iOS 首发合同已冻结，样片与 iOS 物理设备证据仍阻断；日期：2026-08-05。
 
 ## 1. 目的
 
@@ -14,11 +14,11 @@
 |---|---|---|
 | Flutter | 3.44.8 / Dart 3.12.2 | 已确认 |
 | iOS 最低系统 | 15.0 | 已确认 |
-| Android | min API 24，compile/target API 36 | 已确认 |
+| Android | min API 24，compile/target API 36 | 已有工程基线；本轮 MVP 验证延期且不阻断 iOS |
 | 当前预览 | iOS Core Image Texture、Android GLES3 Texture；Flutter 矩阵仅兼容降级 | 目标接缝已实现，真机质量未验证 |
 | iOS 导出 | Core Image 从原图输出 sRGB JPEG 95 并应用安全元数据策略 | 模拟器测试通过，真机未验证 |
 | Android 导出 | API 28+ 单 Bitmap 原位分块变换；API 24–27 分块方向解码到单输出 Bitmap；JPEG 95 | 模拟器真实文件/48 MP 通过，真机内存门未验证 |
-| 当前物理设备 | iPhone 14 Plus 已配对但当前锁屏阻止测试启动；未发现可用 Android 物理设备 | 物理验证阻断 |
+| 当前物理设备 | iPhone 14 Plus 已配对但当前锁屏阻止测试启动 | iOS 三档物理验证阻断 |
 | 授权质量样片 | 本机忽略目录已有 48 资产工程语料，完整机器门通过；其中 10 张真实授权单人图用于人像候选观察，4 张多人图为授权人像技术合成，24 张组图为格式/曝光/白平衡/裁剪工程变体 | 图像合同工程输入已齐；竞品、真人盲评和真实拍摄组图仍阻断主观质量冻结 |
 
 ## 3. 冻结图像合同
@@ -26,13 +26,13 @@
 规范性决策见 ADR 0001。摘要如下：
 
 - 项目支持 1–6 张照片。
-- JPEG、无动画 PNG 双端必需；iOS 和 Android API 28+ 必须支持 HEIC/HEIF。
+- iOS 首发必须支持 JPEG、无动画 PNG 和 HEIC/HEIF；Android 的既有格式合同保留到后续里程碑。
 - 上限为 48 MP、最长边 12,000 px、100 MB。
 - 预览标准最长边 2,048 px，低档设备可降至 1,280 px。
 - MVP 输出为 sRGB JPEG，质量 95。
 - 导出从只读原始输入重新渲染，不能连续重编码。
 - 默认移除 GPS、MakerNote、人脸区域和应用内部信息，保留可用拍摄时间。
-- iOS 与 Android 的 Display P3 输入均已通过固定样片到 sRGB JPEG 的生产文件渲染回归；跨端感知容差仍未冻结，因此不得宣传广色域保真。
+- iOS 的 Display P3 输入必须通过固定样片到 sRGB JPEG 的生产文件渲染回归；已有 Android 与跨端报告仅作历史工程证据，不属于本轮完成门，因此仍不得宣传跨平台广色域保真。
 
 “原画质导出”在产品文案中的可验证含义是“原像素尺寸高质量导出”，不是有损 JPEG 与源文件逐字节相同。
 
@@ -88,7 +88,7 @@
 37 sRGB、11 Display P3、4 个真实 EXIF 旋转和 20 个高分辨率资产；canonical 空清单仍 fail closed。
 `scripts/run_android_file_render_corpus.rb` 会构建本地 Debug app/test APK，把同一批只读源图挂载到应用私有缓存，并由专用 instrumentation 逐张调用生产 `AndroidPhotoExporter`。最终 MediaStore JPEG 会先回拷到应用私有证据目录、回查后删除，再由宿主拉取到 `.quality`；报告绑定语料、生产 Kotlin 源码、instrumentation、宿主运行器、源码提交和模拟器 build fingerprint。本机 API 35 arm64 模拟器首轮同为 48/48 通过，且 canonical 空清单 fail closed。
 
-两端结果证明当前生产文件渲染的格式、尺寸、源只读和隐私合同，但不证明预览帧率、峰值内存、物理设备耗时、跨端感知容差或主观质量。Android 模拟器报告也不能计入六档物理设备矩阵。
+已有双端结果证明当前生产文件渲染的格式、尺寸、源只读和隐私合同，但不证明预览帧率、峰值内存、物理设备耗时或主观质量。本轮只继续采集 iOS 证据；Android 模拟器与跨端结果保留但不计入 iOS MVP 完成门。
 
 本机完整门命令为：
 
@@ -97,10 +97,9 @@ ruby scripts/check_image_quality_corpus.rb .quality/corpus-manifest.local.yaml
 ruby scripts/run_ios_file_render_corpus.rb \
   .quality/corpus-manifest.local.yaml \
   .quality/ios-file-render-<source-id>
-ruby scripts/run_android_file_render_corpus.rb \
-  .quality/corpus-manifest.local.yaml \
-  .quality/android-file-render-<source-id>
 ```
+
+Android runner 仍可用于后续里程碑，但本轮不得自动启动 ADB、模拟器或 Android 语料任务。
 
 清单条目使用以下结构；`evidence_ref` 指向本机被忽略的许可或同意证据，不提交个人资料：
 
@@ -145,11 +144,11 @@ ruby scripts/run_portrait_engineering_corpus.rb \
 7. **项目恢复**：保存、退出、恢复和导出不累积额外处理或重复压缩。
 8. **元数据**：GPS、MakerNote 和内部编辑数据不出现在结果；拍摄时间按合同保留。
 9. **部分失败**：一张损坏图不影响其他照片编辑和已完成导出。
-10. **跨端语义**：相同参数在 iOS/Android 的亮度、色彩方向和强度趋势一致。
+10. **iOS 同义性**：同一配方的 iOS Texture 预览与原图导出保持相同方向、色彩趋势、构图和安全降级。
 
 确定性光色操作使用数值或感知容差；人像自然度和审美推荐不能只用像素 Golden 判定。
 
-### 5.1 双端中性导出容差
+### 5.1 已保留的双端中性导出证据（非本轮阻断门）
 
 `neutral-export-v1` 只验证同一原图经 iOS 与 Android 生产文件渲染器执行中性配方后，解码、方向归一、sRGB 转换和 JPEG 95 导出的差异受控。它不验证非中性参数强度、人像自然度、推荐审美、预览帧率或设备性能，也不得用于替代盲评。
 
@@ -180,7 +179,7 @@ ruby scripts/check_cross_platform_render_tolerance.rb \
 
 非中性 V2 配方另行验证：曝光、对比度和色温等可比较数值强度；高光、阴影、饱和度、色调、清晰度因平台算法不同，至少锁定方向、单调性、安全范围和视觉盲评，不能套用中性逐像素容差后宣称画质等价。
 
-### 5.2 双端曝光语义门
+### 5.2 已保留的双端曝光语义证据（非本轮阻断门）
 
 `exposure-semantic-v1` 使用同一 48 张语料分别执行 `-0.5 EV / 0 EV / +0.5 EV`，对两端生产最终 JPEG 在 sRGB、最长边 512 px 上测量平均亮度和黑白 clipping。每张照片必须满足：
 
@@ -258,11 +257,8 @@ ruby scripts/check_exposure_semantic_alignment.rb \
 | iOS | 低 | iPhone 11 / A13 / 4 GB / iOS 15 | 12 MP、人像、六张组图 |
 | iOS | 中 | iPhone 13 或 14 / 4–6 GB / 当前支持系统 | 12/24 MP、P3、HEIC、组图 |
 | iOS | 高 | iPhone 15 Pro 或更新 Pro / 8 GB 级 | 48 MP、多人、批量导出 |
-| Android | 低 | Snapdragon 695 或同级 / 6 GB / API 24–28 覆盖 | JPEG、12 MP、降级路径 |
-| Android | 中 | Snapdragon 778G/7 Gen 系或同级 / 8 GB | HEIC、24 MP、组图 |
-| Android | 高 | Snapdragon 8 Gen 2 或更新 / 12 GB 级 | 48 MP、多人、批量导出 |
 
-模拟器、Debug 和桌面运行只用于开发，不计入矩阵证据。当前六个物理档位均为 `未验证`。
+模拟器、Debug 和桌面运行只用于开发，不计入矩阵证据。当前 iOS 三个物理档位均为 `未验证`。Android 低/中/高档位延期到后续里程碑，不影响本轮 iOS MVP 与 TestFlight 判定。
 
 ## 9. 性能预算
 
@@ -296,7 +292,7 @@ ruby scripts/check_exposure_semantic_alignment.rb \
 - [x] 设备档位和性能预算已冻结。
 - [ ] 48 个合法样片及哈希已补齐。
 - [ ] 醒图与 Berry 同样片结果已采集。
-- [ ] 六档物理设备或获批替代矩阵已落实。
+- [ ] iOS 低/中/高三档物理设备或获批替代矩阵已落实。
 - [ ] Flutter → 原生预览 → 原图导出 Spike 已达到预算。
 - [ ] 人像候选已通过盲评并形成采用/降级 ADR。
 
@@ -309,7 +305,6 @@ ruby scripts/check_image_quality_corpus.rb --allow-incomplete
 ruby scripts/check_image_quality_corpus.rb
 ruby scripts/test_image_quality_corpus.rb
 ruby scripts/test_ios_file_render_corpus.rb
-ruby scripts/test_android_file_render_corpus.rb
 ruby scripts/test_portrait_engineering_corpus.rb
 ruby scripts/test_portrait_review_plan_tools.rb
 ruby scripts/test_blind_review_tools.rb
@@ -319,4 +314,4 @@ ruby scripts/test_device_evidence.rb
 
 第一条只检查当前清单结构，第二条是完整门禁；在样片缺失时第二条必须失败。
 匿名包构建、评分表字段和人像冻结门见[本地匿名图片评审工作流](blind-review-workflow.md)。
-六档 Profile/Release 原始测量、产物回查和生命周期门见[物理设备性能与生命周期证据工作流](device-evidence-workflow.md)。
+iOS 三档 Profile/Release 原始测量、产物回查和生命周期门见[物理设备性能与生命周期证据工作流](device-evidence-workflow.md)。

@@ -42,7 +42,7 @@ quality_root = File.join(repo_root, ".quality")
 manifest_path = File.expand_path(manifest_argument, repo_root)
 unless File.file?(manifest_path)
   if allow_incomplete
-    puts "Device evidence incomplete: manifest is missing (0/6 runs)"
+    puts "Device evidence incomplete: manifest is missing (0/3 iOS runs)"
     exit 0
   end
   fail_evidence("manifest is missing: #{manifest_argument}")
@@ -100,9 +100,6 @@ required_coverage = {
   ["ios", "low"] => %w[12mp portrait_single six_photo_group],
   ["ios", "mid"] => %w[12mp 24mp display_p3 heic six_photo_group],
   ["ios", "high"] => %w[48mp portrait_multi six_photo_batch],
-  ["android", "low"] => %w[12mp jpeg legacy_api_path],
-  ["android", "mid"] => %w[12mp 24mp heic six_photo_group],
-  ["android", "high"] => %w[48mp portrait_multi six_photo_batch],
 }.freeze
 required_outcomes = %w[
   source_hash_unchanged final_artifacts_valid three_batch_rounds_completed
@@ -135,7 +132,7 @@ runs.each_with_index do |run, index|
     run_ids[run_id] = true
   end
   unless required_coverage.key?(slot)
-    errors << "#{prefix} platform/tier must be one frozen iOS/Android low/mid/high slot"
+    errors << "#{prefix} platform/tier must be one frozen iOS low/mid/high slot"
     next
   end
   if slots[slot]
@@ -402,17 +399,13 @@ runs.each_with_index do |run, index|
   summaries << { "run_id" => run_id, "platform" => platform, "tier" => tier }.merge(computed)
 end
 
-if runs.length < 6 && status != "blocked_missing_runs"
-  errors << "status must equal blocked_missing_runs until all six runs exist"
-end
-if platform_builds.keys.sort == %w[android ios] &&
-    platform_builds["android"]["artifact_sha256"] == platform_builds["ios"]["artifact_sha256"]
-  errors << "iOS and Android build artifacts must be distinct"
+if runs.length < 3 && status != "blocked_missing_runs"
+  errors << "status must equal blocked_missing_runs until all three iOS runs exist"
 end
 
 unless allow_incomplete
   errors << "status must equal ready for the complete gate" unless status == "ready"
-  errors << "device run count must equal 6" unless runs.length == 6
+  errors << "device run count must equal 3" unless runs.length == 3
   missing_slots = required_coverage.keys - slots.keys
   errors << "missing device slots: #{missing_slots.map { |slot| slot.join("/") }.join(", ")}" unless missing_slots.empty?
 end
@@ -423,9 +416,9 @@ unless errors.empty?
 end
 
 if allow_incomplete
-  puts "Device evidence check passed (incomplete, #{runs.length}/6 runs)"
+  puts "Device evidence check passed (incomplete, #{runs.length}/3 iOS runs)"
 else
-  puts "Device evidence check passed (6/6 physical runs)"
+  puts "Device evidence check passed (3/3 iOS physical runs)"
   summaries.sort_by { |summary| [summary["platform"], summary["tier"]] }.each do |summary|
     puts YAML.dump(summary).sub(/\A---\s*\n/, "").strip
   end

@@ -33,19 +33,13 @@ end
 
 FileUtils.mkdir_p(evidence_root)
 Dir.mktmpdir("device-evidence-test-", evidence_root) do |directory|
-  slots = [
-    ["ios", "low"], ["ios", "mid"], ["ios", "high"],
-    ["android", "low"], ["android", "mid"], ["android", "high"],
-  ]
+  slots = [["ios", "low"], ["ios", "mid"], ["ios", "high"]]
   coverage = {
     ["ios", "low"] => %w[12mp portrait_single six_photo_group],
     ["ios", "mid"] => %w[12mp 24mp display_p3 heic six_photo_group],
     ["ios", "high"] => %w[48mp portrait_multi six_photo_batch],
-    ["android", "low"] => %w[12mp jpeg legacy_api_path],
-    ["android", "mid"] => %w[12mp 24mp heic six_photo_group],
-    ["android", "high"] => %w[48mp portrait_multi six_photo_batch],
   }
-  platform_build_files = %w[ios android].to_h do |platform|
+  platform_build_files = %w[ios].to_h do |platform|
     path = File.join(directory, "#{platform}-profile-build.zip")
     File.binwrite(path, "fixture-build-#{platform}")
     [platform, path]
@@ -139,7 +133,7 @@ Dir.mktmpdir("device-evidence-test-", evidence_root) do |directory|
       "build" => {
         "mode" => "profile",
         "source_commit" => source_commit,
-        "bundle_id" => platform == "ios" ? "com.babycompany.yingjian" : "com.babycompany.yingjian",
+        "bundle_id" => "com.babycompany.yingjian",
         "version" => "0.1.0",
         "build_number" => "1",
         "artifact_sha256" => Digest::SHA256.file(build_file).hexdigest,
@@ -163,8 +157,8 @@ Dir.mktmpdir("device-evidence-test-", evidence_root) do |directory|
   stdout, stderr, status = run(
     "ruby", checker, manifest_path, "--source-commit", source_commit
   )
-  assert(status.success?, "valid six-device evidence failed: #{stdout}#{stderr}")
-  assert(stdout.include?("6/6 physical runs"), "complete evidence summary is missing")
+  assert(status.success?, "valid iOS three-tier evidence failed: #{stdout}#{stderr}")
+  assert(stdout.include?("3/3 iOS physical runs"), "complete evidence summary is missing")
   assert(stdout.include?("slider_p95_ms"), "computed percentile summary is missing")
 
   incomplete = Marshal.load(Marshal.dump(manifest))
@@ -176,8 +170,16 @@ Dir.mktmpdir("device-evidence-test-", evidence_root) do |directory|
   assert(!status.success? && stderr.include?("device run count"),
          "incomplete device matrix passed the complete gate")
   stdout, stderr, status = run("ruby", checker, incomplete_path, "--allow-incomplete")
-  assert(status.success? && stdout.include?("1/6 runs"),
+  assert(status.success? && stdout.include?("1/3 iOS runs"),
          "valid partial device evidence failed schema mode: #{stderr}")
+
+  android = Marshal.load(Marshal.dump(manifest))
+  android["runs"].first["platform"] = "android"
+  android_path = File.join(directory, "android.yaml")
+  File.write(android_path, YAML.dump(android))
+  _stdout, stderr, status = run("ruby", checker, android_path, "--allow-incomplete")
+  assert(!status.success? && stderr.include?("iOS low/mid/high slot"),
+         "deferred Android evidence entered the iOS MVP gate")
 
   slow = Marshal.load(Marshal.dump(manifest))
   high = slow["runs"].find { |entry| entry["platform"] == "ios" && entry["tier"] == "high" }

@@ -1,6 +1,6 @@
 # 映见 MVP Spec
 
-> 状态：ready-for-agent；版本：1.0；日期：2026-08-04；核心承诺：一张精修，整组好看；本轮目标：验证“可靠单张质量 + 三套本地推荐 + 整组自适应 + 重点照片精修 + 批量保真导出”的完整闭环。
+> 状态：ready-for-agent；版本：1.1；日期：2026-08-05；核心承诺：一张精修，整组好看；首发平台：iOS / TestFlight；本轮目标：验证“可靠单张质量 + 三套本地推荐 + 整组自适应 + 重点照片精修 + 批量保真导出”的完整闭环。
 
 ## Problem Statement
 
@@ -15,6 +15,12 @@
 用户无需登录即可导入 1–6 张照片。应用在本地分析照片的基础质量、主体、人脸和光线，为单张或整组生成三套差异明确、可即时预览的本地推荐方案。用户选择一个方向后，可以调整整组强度，也可以进入任意重点照片做基础光色、构图和最低可用的自然人像精修。整组共享审美风格，每张照片保留独立补偿和单张覆盖，最终从原图批量导出。
 
 默认闭环完全本地执行，不上传照片、不调用图片生成模型、不要求账号，也不依赖云端服务成功。
+
+### 首发平台边界
+
+- 本轮 MVP 的实现、样片、真机、无障碍、性能、候选和交付门只要求 iOS 闭环成立，最终交付到 TestFlight。
+- Flutter domain/application、项目文件和版本化配方继续保持跨平台；已有 Android 代码和证据保留，但 Android 构建、ADB、设备矩阵、商店交付和跨端画质对齐不再阻断本轮 MVP。
+- 本轮不得因为 Android 尚未验证而阻断 iOS TestFlight，也不得把 iOS 通过外推成 Android 已完成。恢复 Android 验证时另开后续里程碑并重新冻结其设备与质量门。
 
 ```text
 导入 1–6 张
@@ -264,7 +270,7 @@ empty
 - The native rendering capability owns preview resources, deterministic processing and final export.
 - Flutter and native layers exchange file references, declared parameters, progress and stable errors; slider interaction does not transfer complete image bytes.
 - Export replays the effective recipe from the original input.
-- The first production vertical slice must prove one shared parameter from Flutter interaction through native preview to original-resolution export on both platforms.
+- The first production vertical slice must prove one shared parameter from Flutter interaction through iOS native preview to original-resolution export. Android remains a deferred adapter, not a launch gate.
 - Platform-specific or commercial portrait capabilities remain behind a supplier-neutral portrait boundary.
 
 ### Recommendation system
@@ -327,8 +333,8 @@ Existing editor session, photo project session, importer, store and method-chann
 - Use licensed fixed samples with a manifest and hashes.
 - Automatically verify orientation, dimensions, crop coordinates, deterministic output, preview/export trend and unacceptable compression regressions.
 - Use numeric or perceptual tolerances for deterministic light/color operations.
-- Apply the frozen `neutral-export-v1` cross-platform profile only to neutral decode, orientation, sRGB conversion and JPEG export. Non-neutral adjustments require parameter-specific direction and strength contracts plus blinded review; neutral pixel tolerance is not evidence of retouch quality.
-- Exposure uses the frozen `exposure-semantic-v1` three-level contract. Both native renderers apply the base exposure/color matrix in linear light and must keep per-photo step strength and clipping aligned across platforms.
+- Treat the frozen cross-platform `neutral-export-v1` and `exposure-semantic-v1` reports as retained engineering evidence, not as current iOS MVP gates.
+- On iOS, every non-neutral adjustment requires a parameter-specific direction, visible-strength and clipping contract over the frozen corpus plus blinded review; neutral pixel tolerance is not evidence of retouch quality.
 - Use blinded human review in addition to automation for skin naturalness, texture preservation, recommendation quality and group coherence.
 - Compare candidate engines using identical inputs, parameter levels, devices and scoring rubrics.
 - Do not claim quality parity based only on screenshots or one favorable sample.
@@ -339,7 +345,7 @@ Existing editor session, photo project session, importer, store and method-chann
 - Verify preview resource creation, update, release and foreground/background recovery.
 - Verify final export runs away from the Flutter UI thread.
 - Verify bounded batch concurrency and low-memory fallback.
-- Run Profile or Release on frozen low-, mid- and high-tier physical iOS and Android devices.
+- Run Profile or Release on frozen low-, mid- and high-tier physical iOS devices.
 - Record first preview time, slider response, preview frame rate, per-photo export time, peak memory and thermal behavior.
 - Debug and simulator results are development evidence only.
 
@@ -409,7 +415,7 @@ Target users complete the primary journey without coaching. Observe whether they
 
 1. Freeze the quality corpus, supported image contract, device matrix and measurable budgets.
 2. Build a throwaway interaction prototype for the complete single/group journey and test comprehension.
-3. Prove the Flutter-to-native preview/export vertical slice on both platforms.
+3. Prove the Flutter-to-native preview/export vertical slice on iOS; retain the Android adapter as deferred, non-blocking work.
 4. Compare portrait candidates behind the same capability boundary and freeze the minimum quality gate.
 5. Implement the single-photo base editor on the proven rendering path.
 6. Add deterministic analysis and three local recommendations.
