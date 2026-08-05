@@ -658,6 +658,51 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(try rgbaBytes(output), try rgbaBytes(source))
   }
 
+  func testPortraitCandidateSafetyRejectsAmbiguousOrLowQualityFaces() {
+    let safeFace = CGRect(x: 0.25, y: 0.2, width: 0.5, height: 0.6)
+
+    XCTAssertTrue(
+      IOSPortraitSafetyPolicy.isEligible(
+        faceCount: 1,
+        confidence: 0.9,
+        boundingBox: safeFace,
+        hasLandmarks: true
+      )
+    )
+    XCTAssertFalse(
+      IOSPortraitSafetyPolicy.isEligible(
+        faceCount: 2,
+        confidence: 0.9,
+        boundingBox: safeFace,
+        hasLandmarks: true
+      )
+    )
+    XCTAssertFalse(
+      IOSPortraitSafetyPolicy.isEligible(
+        faceCount: 1,
+        confidence: 0.49,
+        boundingBox: safeFace,
+        hasLandmarks: true
+      )
+    )
+    XCTAssertFalse(
+      IOSPortraitSafetyPolicy.isEligible(
+        faceCount: 1,
+        confidence: 0.9,
+        boundingBox: CGRect(x: 0.45, y: 0.45, width: 0.08, height: 0.08),
+        hasLandmarks: true
+      )
+    )
+    XCTAssertFalse(
+      IOSPortraitSafetyPolicy.isEligible(
+        faceCount: 1,
+        confidence: 0.9,
+        boundingBox: safeFace,
+        hasLandmarks: false
+      )
+    )
+  }
+
   private func pipelineV2(
     schemaVersion: NSNumber = 2,
     exposureEV: Double = 0,

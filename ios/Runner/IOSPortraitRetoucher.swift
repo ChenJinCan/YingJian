@@ -2,6 +2,36 @@ import CoreImage
 import CoreGraphics
 import Vision
 
+enum IOSPortraitSafetyPolicy {
+  private static let minimumConfidence: Float = 0.5
+  private static let minimumFaceDimension: CGFloat = 0.12
+  private static let minimumFaceArea: CGFloat = 0.025
+
+  static func isEligible(
+    faceCount: Int,
+    confidence: Float,
+    boundingBox: CGRect,
+    hasLandmarks: Bool
+  ) -> Bool {
+    faceCount == 1 &&
+      confidence >= minimumConfidence &&
+      boundingBox.width >= minimumFaceDimension &&
+      boundingBox.height >= minimumFaceDimension &&
+      boundingBox.width * boundingBox.height >= minimumFaceArea &&
+      hasLandmarks
+  }
+
+  static func isEligible(_ observations: [VNFaceObservation]) -> Bool {
+    guard let face = observations.first else { return false }
+    return isEligible(
+      faceCount: observations.count,
+      confidence: face.confidence,
+      boundingBox: face.boundingBox,
+      hasLandmarks: face.landmarks != nil
+    )
+  }
+}
+
 /// Deterministic, on-device portrait candidate reserved for corpus evaluation.
 /// The production pipeline rejects nonzero strength until the eligibility gate
 /// is frozen; Vision geometry never leaves this native boundary.
@@ -39,7 +69,7 @@ enum IOSPortraitRetoucher {
     guard
       (try? handler.perform([request])) != nil,
       let observations = request.results,
-      !observations.isEmpty,
+      IOSPortraitSafetyPolicy.isEligible(observations),
       let proxyMask = try? effectiveMask(
         observations: observations,
         extent: proxyExtent
