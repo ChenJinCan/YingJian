@@ -8,6 +8,7 @@ require "open3"
 require "pathname"
 require "tmpdir"
 require "yaml"
+require_relative "support/portrait_review_contract"
 
 def median(values)
   ordered = values.sort
@@ -39,10 +40,11 @@ rescue Errno::ENOENT, JSON::ParserError => error
   warn "Blind review score check failed: review key is unavailable: #{error.message}"
   exit 1
 end
-unless key.is_a?(Hash) && key["schema"] == 1 && key["items"].is_a?(Array)
-  warn "Blind review score check failed: review key has an unsupported schema"
+unless key.is_a?(Hash) && key["schema"] == 2 && key["items"].is_a?(Array)
+  warn "Blind review score check failed: MVP freeze requires review key schema 2"
   exit 1
 end
+schema = key["schema"]
 unless key["task"] == "portrait"
   warn "Blind review score check failed: review key task must equal portrait"
   exit 1
@@ -77,6 +79,15 @@ else
   end
 end
 plan_items = if plan.is_a?(Hash) && plan["items"].is_a?(Array)
+  begin
+    PortraitReviewContract.validate_mvp_plan_bindings!(
+      plan,
+      plan_path: source_plan["file"],
+      quality_root: quality_root_real,
+    )
+  rescue PortraitReviewContract::ContractError => error
+    errors << error.message
+  end
   plan["items"].each_with_object({}) { |item, result| result[item["asset_id"]] = item }
 else
   errors << "source plan has an unsupported schema" if plan
@@ -117,6 +128,8 @@ sanitizer_counter = 0
 selected_by_item = {}
 baseline_by_item = {}
 tags_by_item = {}
+required_score_codes_by_item = {}
+candidate_identity_by_item_and_code = {}
 baseline_hashes = []
 normalized_hashes_by_slot = Hash.new { |hash, slot| hash[slot] = [] }
 key["items"].each do |item|
@@ -155,6 +168,7 @@ key["items"].each do |item|
     unless entry["review_file"] == expected_review_file
       errors << "item #{item_code} candidate #{entry["candidate_id"]} review_file does not match the anonymous mapping"
     end
+    candidate_identity_by_item_and_code[[item_code, entry["candidate_code"]]] = entry["candidate_id"]
     review_path = File.join(File.dirname(key_path), "participant-package", entry["review_file"].to_s)
     normalized_raster_hash = entry["normalized_raster_sha256"]
     if !inside_real_directory?(review_path, quality_root_real) ||
@@ -191,7 +205,7 @@ key["items"].each do |item|
           Digest::SHA256.file(regenerated_path).hexdigest != Digest::SHA256.file(review_path).hexdigest
         errors << "item #{item_code} candidate #{entry["candidate_id"]} review image is not the normalized source candidate#{stderr.empty? ? "" : ": #{stderr.strip}"}"
       elsif provenance.is_a?(Hash)
-        slot = [entry["role"], provenance["variant"], provenance["render_kind"]].join(":")
+        slot = [entry["role"], provenance["producer"], provenance["variant"], provenance["render_kind"]].join(":")
         normalized_hashes_by_slot[slot] << regenerated_pixel_hash
       end
     end
@@ -208,26 +222,31 @@ key["items"].each do |item|
     end
   end
 
-  expected_slots = [
-    ["baseline_original", "original", "source"],
-    ["subject", "off", "export"],
-    ["subject", "default", "export"],
-    ["subject", "high_safe", "export"],
-    ["subject", "default", "preview"],
-    ["reference", "fixed_path", "export"],
-  ]
-  errors << "item #{item_code} must contain exactly six matrix results" unless candidates.length == 6
-  expected_slots.each do |role, variant, render_kind|
+  expected_slots = PortraitReviewContract.expected_slots(schema)
+  expected_count = expected_slots.length
+  errors << "item #{item_code} must contain exactly #{expected_count} matrix results" unless candidates.length == expected_count
+  expected_slots.each do |role, producer, variant, render_kind|
     count = candidates.count do |entry|
       provenance = entry["provenance"]
       entry["role"] == role && provenance.is_a?(Hash) &&
+        provenance["producer"] == producer &&
         provenance["variant"] == variant && provenance["render_kind"] == render_kind
     end
-    errors << "item #{item_code} must contain exactly one #{role} #{variant} #{render_kind}" unless count == 1
+    errors << "item #{item_code} must contain exactly one #{role} #{producer} #{variant} #{render_kind}" unless count == 1
   end
-  competitor = candidates.find { |entry| entry["role"] == "reference" }
-  operation_path = competitor && competitor.dig("provenance", "operation_path")
-  errors << "item #{item_code} competitor fixed_path export requires operation_path" unless operation_path.is_a?(String) && !operation_path.empty?
+  competitors = candidates.select { |entry| entry["role"] == "reference" }
+  competitors.each do |competitor|
+    operation_path = competitor.dig("provenance", "operation_path")
+    producer = competitor.dig("provenance", "producer")
+    errors << "item #{item_code} #{producer} fixed_path export requires operation_path" unless operation_path.is_a?(String) && !operation_path.empty?
+  end
+  reference_pixels = competitors.map { |entry| entry["normalized_pixel_sha256"] }
+  unless reference_pixels.uniq.length == PortraitReviewContract::COMPETITOR_IDENTITIES.length
+    errors << "item #{item_code} Xingtu and Berry must have distinct normalized pixels"
+  end
+  required_score_codes_by_item[item_code] = candidates.reject do |entry|
+    entry["role"] == "baseline_original"
+  end.map { |entry| entry["candidate_code"] }.sort
   rendered = candidates.reject { |entry| entry["role"] == "baseline_original" }
   %w[device os].each do |field|
     values = rendered.map { |entry| entry.dig("provenance", field) }.uniq
@@ -273,14 +292,9 @@ errors << "item count #{selected_by_item.length} is below 48" if selected_by_ite
 if baseline_hashes.compact.uniq.length < 48
   errors << "unique baseline image count #{baseline_hashes.compact.uniq.length} is below 48"
 end
-expected_normalized_slots = [
-  "baseline_original:original:source",
-  "subject:off:export",
-  "subject:default:export",
-  "subject:high_safe:export",
-  "subject:default:preview",
-  "reference:fixed_path:export",
-]
+expected_normalized_slots = PortraitReviewContract.expected_slots(schema).map do |role, producer, variant, render_kind|
+  [role, producer, variant, render_kind].join(":")
+end
 expected_normalized_slots.each do |slot|
   unique_count = normalized_hashes_by_slot[slot].uniq.length
   errors << "normalized raster slot #{slot} unique count #{unique_count} is below 48" if unique_count < 48
@@ -316,12 +330,14 @@ score_dimensions = %w[
   skin_tone_lighting local_boundaries non_skin_protection
 ]
 rows = []
+all_scored_rows = []
 seen = {}
 table.each_with_index do |row, index|
-  next unless selected_by_item[row["item_code"]] == row["candidate_code"]
   prefix = "row #{index + 2}"
   reviewer_id = row["reviewer_id"]
   item_code = row["item_code"]
+  candidate_code = row["candidate_code"]
+  next unless required_score_codes_by_item.fetch(item_code, []).include?(candidate_code)
   if row["baseline_code"] != baseline_by_item[item_code]
     errors << "#{prefix}.baseline_code does not match the original anchor"
   end
@@ -329,9 +345,9 @@ table.each_with_index do |row, index|
     errors << "#{prefix} has no reviewer_id"
     next
   end
-  identity = [reviewer_id, item_code]
+  identity = [reviewer_id, item_code, candidate_code]
   if seen[identity]
-    errors << "duplicate score for reviewer #{reviewer_id} and item #{item_code}"
+    errors << "duplicate score for reviewer #{reviewer_id}, item #{item_code}, and candidate #{candidate_code}"
     next
   end
   seen[identity] = true
@@ -349,16 +365,20 @@ table.each_with_index do |row, index|
   preferred = parse_boolean(row["preferred_over_baseline"])
   errors << "#{prefix}.catastrophic_error must be true or false" if catastrophic.nil?
   errors << "#{prefix}.preferred_over_baseline must be true or false" if preferred.nil?
-  rows << {
+  scored_row = {
     "reviewer_id" => reviewer_id,
     "item_code" => item_code,
+    "candidate_code" => candidate_code,
+    "candidate_id" => candidate_identity_by_item_and_code[[item_code, candidate_code]],
     "scores" => values,
     "catastrophic" => catastrophic,
     "preferred" => preferred,
   }
+  all_scored_rows << scored_row
+  rows << scored_row if selected_by_item[item_code] == candidate_code
 end
 
-reviewers = rows.map { |row| row["reviewer_id"] }.uniq.sort
+reviewers = all_scored_rows.map { |row| row["reviewer_id"] }.uniq.sort
 minimum_reviewers = key["minimum_reviewers"]
 unless minimum_reviewers.is_a?(Integer) && minimum_reviewers >= 5
   errors << "review key minimum_reviewers must be at least 5"
@@ -368,9 +388,11 @@ if reviewers.length < minimum_reviewers
   errors << "reviewer count #{reviewers.length} is below #{minimum_reviewers}"
 end
 reviewers.each do |reviewer_id|
-  selected_by_item.each_key do |item_code|
-    unless seen[[reviewer_id, item_code]]
-      errors << "reviewer #{reviewer_id} is missing item #{item_code}"
+  required_score_codes_by_item.each do |item_code, candidate_codes|
+    candidate_codes.each do |candidate_code|
+      unless seen[[reviewer_id, item_code, candidate_code]]
+        errors << "reviewer #{reviewer_id} is missing score for item #{item_code} candidate #{candidate_code}"
+      end
     end
   end
 end
@@ -429,13 +451,27 @@ required_coverage.each_key do |tag|
   end
 end
 
+comparison_candidates = all_scored_rows.group_by { |row| row["candidate_id"] }.sort.to_h do |scored_candidate_id, candidate_rows|
+  candidate_medians = score_dimensions.to_h do |dimension|
+    values = candidate_rows.map { |row| row["scores"][dimension] }.compact
+    [dimension, values.empty? ? nil : median(values)]
+  end
+  [scored_candidate_id, {
+    "score_row_count" => candidate_rows.length,
+    "medians" => candidate_medians,
+    "catastrophic_error_count" => candidate_rows.count { |row| row["catastrophic"] == true },
+  }]
+end
+
 summary = {
-  "schema" => 1,
+  "schema" => schema,
   "review_id" => key["review_id"],
   "candidate_id" => candidate_id,
   "reviewer_count" => reviewers.length,
   "item_count" => selected_by_item.length,
   "score_row_count" => rows.length,
+  "all_candidate_score_row_count" => all_scored_rows.length,
+  "comparison_candidates" => comparison_candidates,
   "medians" => medians,
   "pairwise_preference_rate" => preference_rate,
   "coverage_counts" => coverage_counts.sort.to_h,

@@ -1,7 +1,16 @@
-schema: 1
+schema: 2
 review_id: portrait-round-1
 task: portrait
 minimum_reviewers: 5
+portrait_corpus_manifest:
+  file: ../.quality/portrait-corpus-manifest.yaml
+  sha256: replace_with_64_character_lowercase_sha256
+device_evidence:
+  id: replace_with_privacy_safe_round_device_id
+  file: ../.quality/evidence/portrait-round-1/device-record.json
+  sha256: replace_with_64_character_lowercase_sha256
+  device: replace_with_device
+  os: replace_with_os
 items:
   - asset_id: portrait-001
     tags: [portrait_single, improvable, glasses]
@@ -17,7 +26,9 @@ items:
           os: source-os-record
           variant: original
           render_kind: source
-          parameters: {}
+          parameters:
+            raw_source_sha256: replace_with_original_sha256
+            device_evidence_id: replace_with_same_round_device_id
       - id: yingjian-off-export
         role: subject
         file: ../.quality/review-inputs/portrait-001/yingjian-off-export.jpg
@@ -30,7 +41,7 @@ items:
           variant: off
           render_kind: export
           source_sha256: replace_with_original_sha256
-          parameters: {strength: 0}
+          parameters: {strength: 0, device_evidence_id: replace_with_same_round_device_id}
       - id: yingjian-default-export
         role: subject
         file: ../.quality/review-inputs/portrait-001/yingjian-default-export.jpg
@@ -43,7 +54,7 @@ items:
           variant: default
           render_kind: export
           source_sha256: replace_with_original_sha256
-          parameters: {strength: replace_with_frozen_default}
+          parameters: {strength: replace_with_frozen_default, device_evidence_id: replace_with_same_round_device_id}
       - id: yingjian-high-safe-export
         role: subject
         file: ../.quality/review-inputs/portrait-001/yingjian-high-safe-export.jpg
@@ -56,7 +67,7 @@ items:
           variant: high_safe
           render_kind: export
           source_sha256: replace_with_original_sha256
-          parameters: {strength: replace_with_frozen_high_safe}
+          parameters: {strength: replace_with_frozen_high_safe, device_evidence_id: replace_with_same_round_device_id}
       - id: yingjian-default-preview
         role: subject
         file: ../.quality/review-inputs/portrait-001/yingjian-default-preview.jpg
@@ -69,18 +80,38 @@ items:
           variant: default
           render_kind: preview
           source_sha256: replace_with_original_sha256
-          parameters: {strength: replace_with_frozen_default}
-      - id: competitor-fixed-path-export
+          parameters: {strength: replace_with_frozen_default, device_evidence_id: replace_with_same_round_device_id}
+      - id: xingtu-fixed-path-export
         role: reference
-        file: ../.quality/review-inputs/portrait-001/competitor-fixed-path-export.jpg
+        file: ../.quality/review-inputs/portrait-001/xingtu-fixed-path-export.jpg
         sha256: replace_with_64_character_lowercase_sha256
         provenance:
-          producer: competitor
-          version: replace_with_competitor_app_version
+          producer: xingtu
+          version: replace_with_xingtu_app_version
+          app_store_id: "1500526240"
+          bundle_id: com.xt.retouch
+          device_evidence_id: replace_with_same_round_device_id
           device: replace_with_device
           os: replace_with_os
           variant: fixed_path
           render_kind: export
           source_sha256: replace_with_original_sha256
           parameters: {preset: replace_with_preset_and_strength}
+          operation_path: replace_with_recorded_fixed_steps
+      - id: berry-fixed-path-export
+        role: reference
+        file: ../.quality/review-inputs/portrait-001/berry-fixed-path-export.jpg
+        sha256: replace_with_64_character_lowercase_sha256
+        provenance:
+          producer: berry
+          version: replace_with_berry_app_version
+          app_store_id: "6741474933"
+          bundle_id: com.seesun.berryFilm
+          device_evidence_id: replace_with_same_round_device_id
+          device: replace_with_device
+          os: replace_with_os
+          variant: fixed_path
+          render_kind: export
+          source_sha256: replace_with_original_sha256
+          parameters: {filter: replace_with_filter_and_strength}
           operation_path: replace_with_recorded_fixed_steps

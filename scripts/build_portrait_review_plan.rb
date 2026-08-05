@@ -6,6 +6,8 @@ require "fileutils"
 require "pathname"
 require "yaml"
 require_relative "support/portrait_capture_contract"
+require_relative "support/portrait_engineering_corpus"
+require_relative "support/portrait_review_contract"
 
 def fail_plan(message)
   warn "Portrait review plan build failed: #{message}"
@@ -75,15 +77,75 @@ rescue Psych::Exception => error
   fail_plan("intake is invalid YAML: #{error.message}")
 end
 fail_plan("intake must be a mapping") unless intake.is_a?(Hash)
-fail_plan("schema must equal 1") unless intake["schema"] == 1
+schema = intake["schema"]
+fail_plan("schema must equal 1 or 2") unless PortraitReviewContract.supported_schema?(schema)
 review_id = intake["review_id"]
 minimum_reviewers = intake["minimum_reviewers"]
 items = intake["items"]
 fail_plan("review_id must use lowercase letters, digits, dashes, or underscores") unless review_id.is_a?(String) && review_id.match?(/\A[a-z0-9][a-z0-9_-]*\z/)
 fail_plan("minimum_reviewers must be at least 5") unless minimum_reviewers.is_a?(Integer) && minimum_reviewers >= 5
 fail_plan("items must be a non-empty list") unless items.is_a?(Array) && !items.empty?
-
 intake_directory = File.dirname(intake_path)
+
+corpus_manifest_path = nil
+corpus_manifest_sha256 = nil
+corpus_assets_by_id = {}
+device_evidence = nil
+if schema == PortraitReviewContract::MVP_SCHEMA
+  corpus_manifest_value = intake["portrait_corpus_manifest"]
+  unless corpus_manifest_value.is_a?(String) && !corpus_manifest_value.empty?
+    fail_plan("portrait_corpus_manifest must be a non-empty path")
+  end
+  corpus_manifest_path = if Pathname.new(corpus_manifest_value).absolute?
+    corpus_manifest_value
+  else
+    File.expand_path(corpus_manifest_value, intake_directory)
+  end
+  unless inside_quality_file?(corpus_manifest_path, quality_root_real)
+    fail_plan("portrait_corpus_manifest must remain inside the ignored .quality directory")
+  end
+  corpus_manifest_path = File.realpath(corpus_manifest_path)
+  begin
+    corpus_manifest = YAML.safe_load(File.read(corpus_manifest_path), permitted_classes: [], aliases: false)
+    fail_plan("portrait corpus manifest schema must equal 2") unless corpus_manifest.is_a?(Hash) && corpus_manifest["schema"] == 2
+    PortraitEngineeringCorpus.validate_manifest!(corpus_manifest)
+  rescue Psych::Exception, PortraitEngineeringCorpus::ContractError => error
+    fail_plan("portrait corpus manifest is invalid: #{error.message}")
+  end
+  corpus_manifest_sha256 = Digest::SHA256.file(corpus_manifest_path).hexdigest
+  corpus_assets_by_id = corpus_manifest.fetch("assets").to_h { |asset| [asset["id"], asset] }
+
+  evidence_input = intake["device_evidence"]
+  fail_plan("device_evidence must be a mapping") unless evidence_input.is_a?(Hash)
+  %w[id file sha256].each do |field|
+    fail_plan("device_evidence.#{field} must be a concrete string") unless concrete_string?(evidence_input[field])
+  end
+  evidence_path = Pathname.new(evidence_input["file"]).absolute? ? evidence_input["file"] : File.expand_path(evidence_input["file"], intake_directory)
+  evidence_root = File.join(quality_root_real, "evidence")
+  unless inside_quality_file?(evidence_path, evidence_root)
+    fail_plan("device_evidence.file must remain inside .quality/evidence")
+  end
+  unless evidence_input["sha256"].match?(PortraitCaptureContract::SHA256) &&
+      Digest::SHA256.file(evidence_path).hexdigest == evidence_input["sha256"]
+    fail_plan("device_evidence.sha256 does not match the file")
+  end
+  begin
+    device_record = JSON.parse(File.read(evidence_path))
+  rescue JSON::ParserError => error
+    fail_plan("device_evidence.file is invalid JSON: #{error.message}")
+  end
+  unless device_record.is_a?(Hash) && device_record["schema"] == 1 &&
+      device_record["device_evidence_id"] == evidence_input["id"] &&
+      concrete_string?(device_record["device"]) && concrete_string?(device_record["os"])
+    fail_plan("device_evidence.file does not match the declared device evidence identity")
+  end
+  device_evidence = evidence_input.merge(
+    "path" => File.realpath(evidence_path),
+    "device" => device_record["device"],
+    "os" => device_record["os"],
+  )
+end
+
 asset_ids = {}
 raw_source_hashes = {}
 capture_manifest_hashes = {}
@@ -128,41 +190,108 @@ begin
   fail_plan("duplicate baseline output for #{asset_id}") if baseline_hashes[baseline_output_hash]
   baseline_hashes[baseline_output_hash] = true
 
+  corpus_asset = corpus_assets_by_id[asset_id] if schema == PortraitReviewContract::MVP_SCHEMA
+  if schema == PortraitReviewContract::MVP_SCHEMA
+    fail_plan("#{prefix}.asset_id is missing from portrait_corpus_manifest") unless corpus_asset.is_a?(Hash)
+    unless corpus_asset["sha256"] == raw_source_hash
+      fail_plan("#{prefix} raw source does not match the authorized portrait corpus asset")
+    end
+    unless corpus_asset["tags"] == tags
+      fail_plan("#{prefix}.tags must exactly match the authorized portrait corpus asset")
+    end
+    license = corpus_asset["license"]
+    unless license.is_a?(Hash) && license["internal_review_authorized"] == true &&
+        concrete_string?(license["evidence_ref"]) &&
+        license["evidence_sha256"].is_a?(String) && license["evidence_sha256"].match?(PortraitCaptureContract::SHA256)
+      fail_plan("#{prefix} corpus license must explicitly authorize internal review and bind evidence")
+    end
+    license_path = File.expand_path(license["evidence_ref"], repo_root)
+    evidence_root = File.join(quality_root_real, "evidence")
+    unless inside_quality_file?(license_path, evidence_root) &&
+        Digest::SHA256.file(license_path).hexdigest == license["evidence_sha256"]
+      fail_plan("#{prefix} corpus license evidence is missing or has changed")
+    end
+  end
+
   source = item["source"]
-  competitor = item["competitor"]
   fail_plan("#{prefix}.source must be a mapping") unless source.is_a?(Hash)
-  fail_plan("#{prefix}.competitor must be a mapping") unless competitor.is_a?(Hash)
   %w[version device os].each do |field|
     value = source[field]
     fail_plan("#{prefix}.source.#{field} must be a concrete string") unless concrete_string?(value)
   end
-  %w[file version device os operation_path sha256].each do |field|
-    value = competitor[field]
-    fail_plan("#{prefix}.competitor.#{field} must be a concrete string") unless concrete_string?(value)
+  if schema == PortraitReviewContract::MVP_SCHEMA
+    unless source["device_evidence_id"] == device_evidence["id"] &&
+        manifest["device"] == device_evidence["device"] && manifest["os"] == device_evidence["os"]
+      fail_plan("#{prefix}.source device_evidence_id, device, and os must match the frozen iPhone record")
+    end
   end
-  fail_plan("#{prefix}.competitor.parameters must contain concrete values") unless concrete_parameters?(competitor["parameters"])
-  unless competitor["device"] == manifest["device"] && competitor["os"] == manifest["os"]
-    fail_plan("#{prefix}.competitor must use the same device and OS as the Yingjian capture")
-  end
-
-  competitor_path = Pathname.new(competitor["file"]).absolute? ? competitor["file"] : File.expand_path(competitor["file"], intake_directory)
-  unless inside_quality_file?(competitor_path, quality_root_real)
-    fail_plan("#{prefix}.competitor.file must remain inside the ignored .quality directory")
-  end
-  unless competitor["sha256"].match?(PortraitCaptureContract::SHA256)
-    fail_plan("#{prefix}.competitor.sha256 must be a lowercase SHA-256")
-  end
-  competitor_sha256 = Digest::SHA256.file(competitor_path).hexdigest
-  unless competitor_sha256 == competitor["sha256"]
-    fail_plan("#{prefix}.competitor.sha256 does not match the file")
-  end
-  fail_plan("duplicate competitor output for #{asset_id}") if competitor_hashes[competitor_sha256]
-  competitor_hashes[competitor_sha256] = true
-  competitor_media = PortraitCaptureContract.probe_image(competitor_path, "#{prefix}.competitor.file")
   source_dimensions = [manifest["sourceWidth"], manifest["sourceHeight"]]
-  unless %w[jpeg png].include?(competitor_media[:format]) && competitor_media[:color_space] == "srgb" &&
-      competitor_media[:orientation] == 1 && [competitor_media[:width], competitor_media[:height]] == source_dimensions
-    fail_plan("#{prefix}.competitor.file must be an orientation-1 sRGB JPEG/PNG at #{source_dimensions.join("x")}")
+  competitor_inputs = if schema == 2
+    competitors = item["competitors"]
+    expected_competitors = PortraitReviewContract::COMPETITOR_IDENTITIES.keys.sort
+    fail_plan("#{prefix}.competitors must contain exactly xingtu and berry") unless
+      competitors.is_a?(Hash) && competitors.keys.sort == expected_competitors
+    competitors
+  else
+    competitor = item["competitor"]
+    fail_plan("#{prefix}.competitor must be a mapping") unless competitor.is_a?(Hash)
+    { "competitor" => competitor }
+  end
+  competitor_records = competitor_inputs.map do |competitor_id, competitor|
+    competitor_prefix = schema == 2 ? "#{prefix}.competitors.#{competitor_id}" : "#{prefix}.competitor"
+    fail_plan("#{competitor_prefix} must be a mapping") unless competitor.is_a?(Hash)
+    %w[file version device os operation_path sha256].each do |field|
+      value = competitor[field]
+      fail_plan("#{competitor_prefix}.#{field} must be a concrete string") unless concrete_string?(value)
+    end
+    if schema == PortraitReviewContract::MVP_SCHEMA
+      begin
+        PortraitReviewContract.validate_competitor_identity!(competitor_id, competitor)
+      rescue PortraitReviewContract::ContractError => error
+        fail_plan("#{prefix}.competitors.#{error.message}")
+      end
+      unless competitor["device_evidence_id"] == device_evidence["id"]
+        fail_plan("#{competitor_prefix}.device_evidence_id must match the frozen iPhone record")
+      end
+    end
+    unless concrete_parameters?(competitor["parameters"])
+      fail_plan("#{competitor_prefix}.parameters must contain concrete values")
+    end
+    unless competitor["device"] == manifest["device"] && competitor["os"] == manifest["os"]
+      fail_plan("#{competitor_prefix} must use the same device and OS as the Yingjian capture")
+    end
+    if schema == PortraitReviewContract::MVP_SCHEMA &&
+        (competitor["device"] != device_evidence["device"] || competitor["os"] != device_evidence["os"])
+      fail_plan("#{competitor_prefix} must match the frozen iPhone record")
+    end
+    competitor_path = if Pathname.new(competitor["file"]).absolute?
+      competitor["file"]
+    else
+      File.expand_path(competitor["file"], intake_directory)
+    end
+    unless inside_quality_file?(competitor_path, quality_root_real)
+      fail_plan("#{competitor_prefix}.file must remain inside the ignored .quality directory")
+    end
+    unless competitor["sha256"].match?(PortraitCaptureContract::SHA256)
+      fail_plan("#{competitor_prefix}.sha256 must be a lowercase SHA-256")
+    end
+    competitor_sha256 = Digest::SHA256.file(competitor_path).hexdigest
+    unless competitor_sha256 == competitor["sha256"]
+      fail_plan("#{competitor_prefix}.sha256 does not match the file")
+    end
+    fail_plan("duplicate competitor output for #{asset_id}") if competitor_hashes[competitor_sha256]
+    competitor_hashes[competitor_sha256] = true
+    competitor_media = PortraitCaptureContract.probe_image(competitor_path, "#{competitor_prefix}.file")
+    unless %w[jpeg png].include?(competitor_media[:format]) && competitor_media[:color_space] == "srgb" &&
+        competitor_media[:orientation] == 1 && [competitor_media[:width], competitor_media[:height]] == source_dimensions
+      fail_plan("#{competitor_prefix}.file must be an orientation-1 sRGB JPEG/PNG at #{source_dimensions.join("x")}")
+    end
+    {
+      "id" => competitor_id,
+      "data" => competitor,
+      "path" => competitor_path,
+      "sha256" => competitor_sha256,
+    }
   end
 
   item_signature = {
@@ -174,9 +303,17 @@ begin
     "os" => manifest["os"],
     "default_strength" => manifest["defaultStrength"],
     "high_safe_strength" => manifest["highSafeStrength"],
-    "competitor_version" => competitor["version"],
-    "competitor_parameters" => competitor["parameters"],
-    "competitor_operation_path" => competitor["operation_path"],
+    "competitors" => competitor_records.to_h do |record|
+      competitor = record["data"]
+      [record["id"], {
+        "version" => competitor["version"],
+        "app_store_id" => competitor["app_store_id"],
+        "bundle_id" => competitor["bundle_id"],
+        "device_evidence_id" => competitor["device_evidence_id"],
+        "parameters" => competitor["parameters"],
+        "operation_path" => competitor["operation_path"],
+      }]
+    end,
   }
   round_signature ||= item_signature
   unless item_signature == round_signature
@@ -192,7 +329,8 @@ begin
     "captured_at_utc" => manifest["capturedAtUtc"],
     "raw_source_sha256" => manifest["rawSourceSha256"],
     "capture_manifest_sha256" => capture["manifest_sha256"],
-  }
+    "device_evidence_id" => source["device_evidence_id"],
+  }.compact
   relative_file = lambda do |path|
     Pathname.new(path).relative_path_from(Pathname.new(output_parent_real)).to_s
   end
@@ -237,30 +375,38 @@ begin
             "raw_source_sha256" => manifest["rawSourceSha256"],
             "source_width" => manifest["sourceWidth"],
             "source_height" => manifest["sourceHeight"],
-          },
+            "device_evidence_id" => source["device_evidence_id"],
+          }.compact,
         },
       },
       candidate.call("yingjian-off-export", "subject", "offExport", 0),
       candidate.call("yingjian-default-export", "subject", "defaultExport", manifest["defaultStrength"]),
       candidate.call("yingjian-high-safe-export", "subject", "highSafeExport", manifest["highSafeStrength"]),
       candidate.call("yingjian-default-preview", "subject", "defaultPreview", manifest["defaultStrength"]),
-      {
-        "id" => "competitor-fixed-path-export",
-        "role" => "reference",
-        "file" => relative_file.call(competitor_path),
-        "sha256" => competitor_sha256,
-        "provenance" => {
-          "producer" => "competitor",
-          "version" => competitor["version"],
-          "device" => competitor["device"],
-          "os" => competitor["os"],
-          "variant" => "fixed_path",
-          "render_kind" => "export",
-          "source_sha256" => baseline_hash,
-          "parameters" => competitor["parameters"],
-          "operation_path" => competitor["operation_path"],
-        },
-      },
+      *competitor_records.map do |record|
+        competitor = record["data"]
+        competitor_id = record["id"]
+        {
+          "id" => "#{competitor_id}-fixed-path-export",
+          "role" => "reference",
+          "file" => relative_file.call(record["path"]),
+          "sha256" => record["sha256"],
+          "provenance" => {
+            "producer" => competitor_id,
+            "version" => competitor["version"],
+            "app_store_id" => competitor["app_store_id"],
+            "bundle_id" => competitor["bundle_id"],
+            "device_evidence_id" => competitor["device_evidence_id"],
+            "device" => competitor["device"],
+            "os" => competitor["os"],
+            "variant" => "fixed_path",
+            "render_kind" => "export",
+            "source_sha256" => baseline_hash,
+            "parameters" => competitor["parameters"],
+            "operation_path" => competitor["operation_path"],
+          },
+        }
+      end,
     ],
   }
   end
@@ -269,16 +415,43 @@ rescue PortraitCaptureContract::ValidationError, SystemCallError => error
 end
 
 plan = {
-  "schema" => 1,
+  "schema" => schema,
   "review_id" => review_id,
   "task" => "portrait",
   "minimum_reviewers" => minimum_reviewers,
   "items" => plan_items.sort_by { |item| item["asset_id"] },
 }
+if schema == PortraitReviewContract::MVP_SCHEMA
+  relative_file = lambda do |path|
+    Pathname.new(path).relative_path_from(Pathname.new(output_parent_real)).to_s
+  end
+  plan["portrait_corpus_manifest"] = {
+    "file" => relative_file.call(corpus_manifest_path),
+    "sha256" => corpus_manifest_sha256,
+  }
+  plan["device_evidence"] = {
+    "id" => device_evidence["id"],
+    "file" => relative_file.call(device_evidence["path"]),
+    "sha256" => device_evidence["sha256"],
+    "device" => device_evidence["device"],
+    "os" => device_evidence["os"],
+  }
+end
 
 temporary_path = "#{output_path}.tmp-#{Process.pid}"
 begin
   File.write(temporary_path, YAML.dump(plan))
+  if schema == PortraitReviewContract::MVP_SCHEMA
+    begin
+      PortraitReviewContract.validate_mvp_plan_bindings!(
+        plan,
+        plan_path: temporary_path,
+        quality_root: quality_root_real,
+      )
+    rescue PortraitReviewContract::ContractError => error
+      fail_plan(error.message)
+    end
+  end
   File.rename(temporary_path, output_path)
 ensure
   File.delete(temporary_path) if File.exist?(temporary_path)

@@ -9,3 +9,7 @@ portrait_roles:
   - portrait_multi
   - no_face
 assets: []
+# 正式盲评中的每个 asset.license 还必须声明：
+# internal_review_authorized: true
+# evidence_ref: .quality/evidence/<round>/<authorization-file>
+# evidence_sha256: <64-character-lowercase-sha256>

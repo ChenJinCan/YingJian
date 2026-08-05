@@ -7,6 +7,7 @@ require "json"
 require "open3"
 require "pathname"
 require "yaml"
+require_relative "support/portrait_review_contract"
 
 def fail_with(message)
   warn "Blind review package build failed: #{message}"
@@ -58,7 +59,19 @@ rescue Psych::Exception => error
   fail_with("plan is invalid YAML: #{error.message}")
 end
 fail_with("plan must be a mapping") unless plan.is_a?(Hash)
-fail_with("schema must equal 1") unless plan["schema"] == 1
+schema = plan["schema"]
+fail_with("schema must equal 1 or 2") unless PortraitReviewContract.supported_schema?(schema)
+if schema == PortraitReviewContract::MVP_SCHEMA
+  begin
+    PortraitReviewContract.validate_mvp_plan_bindings!(
+      plan,
+      plan_path: plan_path,
+      quality_root: quality_root_real,
+    )
+  rescue PortraitReviewContract::ContractError => error
+    fail_with(error.message)
+  end
+end
 review_id = plan["review_id"]
 task = plan["task"]
 minimum_reviewers = plan["minimum_reviewers"]
@@ -116,13 +129,9 @@ validated = items.map.with_index do |item, item_index|
     unless provenance["parameters"].is_a?(Hash)
       fail_with("#{candidate_prefix}.provenance.parameters must be a mapping")
     end
-    expected_producer = {
-      "baseline_original" => "original",
-      "subject" => "yingjian",
-      "reference" => "competitor",
-    }.fetch(role)
-    unless provenance["producer"] == expected_producer
-      fail_with("#{candidate_prefix}.provenance.producer must equal #{expected_producer}")
+    valid_producers = PortraitReviewContract.valid_producers(role, schema)
+    unless valid_producers.include?(provenance["producer"])
+      fail_with("#{candidate_prefix}.provenance.producer must be one of #{valid_producers.join(", ")}")
     end
     unless file_value.is_a?(String) && !file_value.empty?
       fail_with("#{candidate_prefix}.file must be a non-empty path")
@@ -158,29 +167,27 @@ validated = items.map.with_index do |item, item_index|
       fail_with("#{prefix} #{candidate["candidate_id"]} source_sha256 must match baseline_original")
     end
   end
-  expected_slots = [
-    ["baseline_original", "original", "source"],
-    ["subject", "off", "export"],
-    ["subject", "default", "export"],
-    ["subject", "high_safe", "export"],
-    ["subject", "default", "preview"],
-    ["reference", "fixed_path", "export"],
-  ]
-  expected_slots.each do |role, variant, render_kind|
+  expected_slots = PortraitReviewContract.expected_slots(schema)
+  expected_slots.each do |role, producer, variant, render_kind|
     matches = normalized_candidates.select do |candidate|
       provenance = candidate["provenance"]
-      candidate["role"] == role && provenance["variant"] == variant &&
+      candidate["role"] == role && provenance["producer"] == producer &&
+        provenance["variant"] == variant &&
         provenance["render_kind"] == render_kind
     end
     unless matches.length == 1
-      fail_with("#{prefix} must contain exactly one #{role} #{variant} #{render_kind}")
+      fail_with("#{prefix} must contain exactly one #{role} #{producer} #{variant} #{render_kind}")
     end
   end
-  fail_with("#{prefix}.candidates must contain exactly six matrix results") unless normalized_candidates.length == 6
-  competitor = normalized_candidates.find { |candidate| candidate["role"] == "reference" }
-  operation_path = competitor["provenance"]["operation_path"]
-  unless operation_path.is_a?(String) && !operation_path.empty?
-    fail_with("#{prefix} competitor fixed_path export requires operation_path")
+  expected_count = expected_slots.length
+  unless normalized_candidates.length == expected_count
+    fail_with("#{prefix}.candidates must contain exactly #{expected_count} matrix results")
+  end
+  normalized_candidates.select { |candidate| candidate["role"] == "reference" }.each do |competitor|
+    operation_path = competitor["provenance"]["operation_path"]
+    unless operation_path.is_a?(String) && !operation_path.empty?
+      fail_with("#{prefix} #{competitor["provenance"]["producer"]} fixed_path export requires operation_path")
+    end
   end
   rendered = normalized_candidates.reject { |candidate| candidate["role"] == "baseline_original" }
   %w[device os].each do |field|
@@ -212,7 +219,7 @@ _stdout, stderr, compiled = Open3.capture3(
 )
 fail_with("review image sanitizer could not compile: #{stderr.strip}") unless compiled.success?
 review_key = {
-  "schema" => 1,
+  "schema" => schema,
   "review_id" => review_id,
   "task" => task,
   "minimum_reviewers" => minimum_reviewers,
@@ -258,6 +265,13 @@ ordered_items.each_with_index do |item, item_index|
       "is_baseline" => candidate["role"] == "baseline_original",
     }
   end
+  if schema == PortraitReviewContract::MVP_SCHEMA
+    reference_pixels = key_candidates.select { |candidate| candidate["role"] == "reference" }
+      .map { |candidate| candidate["normalized_pixel_sha256"] }
+    unless reference_pixels.uniq.length == PortraitReviewContract::COMPETITOR_IDENTITIES.length
+      fail_with("#{item["asset_id"]} Xingtu and Berry must have distinct normalized pixels")
+    end
+  end
   baseline_code = page_candidates.find { |candidate| candidate["is_baseline"] }["code"]
   review_key["items"] << {
     "item_code" => item_code,
@@ -285,7 +299,7 @@ headers = %w[
 CSV.open(File.join(participant_path, "score-sheet.csv"), "w") do |csv|
   csv << headers
   page_items.each do |item|
-    item["candidates"].each do |candidate|
+    item["candidates"].reject { |candidate| candidate["is_baseline"] }.each do |candidate|
       csv << [nil, item["code"], item["baseline_code"], candidate["code"]]
     end
   end

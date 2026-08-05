@@ -83,6 +83,7 @@ Dir.mktmpdir("portrait-review-plan-test-", quality_root) do |directory|
       let extent = CGRect(x: 0, y: 0, width: 96, height: 64)
       let original = CIImage(color: CIColor(red: 0.25, green: 0.35, blue: 0.45)).cropped(to: extent)
       let competitor = CIImage(color: CIColor(red: 0.28, green: 0.36, blue: 0.44)).cropped(to: extent)
+      let berry = CIImage(color: CIColor(red: 0.31, green: 0.34, blue: 0.42)).cropped(to: extent)
       let jpegOptions = [
         kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.95
       ]
@@ -102,6 +103,18 @@ Dir.mktmpdir("portrait-review-plan-test-", quality_root) do |directory|
       try context.writeJPEGRepresentation(
         of: competitor,
         to: directory.appendingPathComponent("competitor-fixed-path-export.jpg"),
+        colorSpace: colorSpace,
+        options: jpegOptions
+      )
+      try context.writeJPEGRepresentation(
+        of: competitor,
+        to: directory.appendingPathComponent("xingtu-fixed-path-export.jpg"),
+        colorSpace: colorSpace,
+        options: jpegOptions
+      )
+      try context.writeJPEGRepresentation(
+        of: berry,
+        to: directory.appendingPathComponent("berry-fixed-path-export.jpg"),
         colorSpace: colorSpace,
         options: jpegOptions
       )
@@ -172,6 +185,148 @@ Dir.mktmpdir("portrait-review-plan-test-", quality_root) do |directory|
   subject = candidates.find { |candidate| candidate["id"] == "yingjian-default-export" }
   assert(subject.dig("provenance", "parameters", "capture_manifest_sha256") == Digest::SHA256.file(manifest_path).hexdigest,
          "capture manifest identity was not preserved")
+
+  xingtu_path = File.join(capture_directory, "xingtu-fixed-path-export.jpg")
+  berry_path = File.join(capture_directory, "berry-fixed-path-export.jpg")
+  evidence_root = File.join(quality_root, "evidence")
+  FileUtils.mkdir_p(evidence_root)
+  evidence_directory = Dir.mktmpdir("portrait-review-plan-fixture-", evidence_root)
+  at_exit { FileUtils.remove_entry(evidence_directory) if File.exist?(evidence_directory) }
+  authorization_path = File.join(evidence_directory, "authorization.txt")
+  File.write(authorization_path, "fixture authorization for internal blind review")
+  device_record_path = File.join(evidence_directory, "device-record.json")
+  device_evidence_id = "fixture-iphone-round-1"
+  File.write(
+    device_record_path,
+    JSON.pretty_generate(
+      "schema" => 1,
+      "device_evidence_id" => device_evidence_id,
+      "device" => "iPhone14,8",
+      "os" => "iOS 26.5",
+    ),
+  )
+  corpus_manifest_path = File.join(directory, "portrait-corpus-manifest.yaml")
+  corpus_assets = 48.times.map do |index|
+    {
+      "id" => format("portrait-%03d", index + 1),
+      "sha256" => index.zero? ? "a" * 64 : format("%064x", index + 1),
+      "tags" => index.zero? ? %w[portrait_single improvable glasses] : ["portrait_single"],
+      "license" => {
+        "internal_review_authorized" => true,
+        "evidence_ref" => authorization_path.sub("#{repo_root}/", ""),
+        "evidence_sha256" => Digest::SHA256.file(authorization_path).hexdigest,
+      },
+    }
+  end
+  File.write(
+    corpus_manifest_path,
+    YAML.dump(
+      "schema" => 2,
+      "status" => "ready",
+      "portrait_required_assets" => 48,
+      "portrait_minimum_single_assets" => 36,
+      "portrait_roles" => %w[portrait_single portrait_multi no_face],
+      "assets" => corpus_assets,
+    ),
+  )
+  schema_two_intake = Marshal.load(Marshal.dump(intake))
+  schema_two_intake["schema"] = 2
+  schema_two_intake["portrait_corpus_manifest"] = corpus_manifest_path
+  schema_two_intake["device_evidence"] = {
+    "id" => device_evidence_id,
+    "file" => device_record_path,
+    "sha256" => Digest::SHA256.file(device_record_path).hexdigest,
+  }
+  schema_two_intake["items"].first.delete("competitor")
+  schema_two_intake["items"].first["source"]["device_evidence_id"] = device_evidence_id
+  schema_two_intake["items"].first["competitors"] = {
+    "xingtu" => {
+      "file" => xingtu_path,
+      "sha256" => Digest::SHA256.file(xingtu_path).hexdigest,
+      "version" => "15.2.0",
+      "app_store_id" => "1500526240",
+      "bundle_id" => "com.xt.retouch",
+      "device" => "iPhone14,8",
+      "os" => "iOS 26.5",
+      "device_evidence_id" => device_evidence_id,
+      "parameters" => { "preset" => "natural", "strength" => 50 },
+      "operation_path" => "portrait > natural > strength 50 > export",
+    },
+    "berry" => {
+      "file" => berry_path,
+      "sha256" => Digest::SHA256.file(berry_path).hexdigest,
+      "version" => "1.3.35",
+      "app_store_id" => "6741474933",
+      "bundle_id" => "com.seesun.berryFilm",
+      "device" => "iPhone14,8",
+      "os" => "iOS 26.5",
+      "device_evidence_id" => device_evidence_id,
+      "parameters" => { "filter" => "daily", "strength" => 50 },
+      "operation_path" => "album > daily > strength 50 > save",
+    },
+  }
+  schema_two_path = File.join(directory, "portrait-review-intake-v2.yaml")
+  File.write(schema_two_path, YAML.dump(schema_two_intake))
+  schema_two_plan_path = File.join(directory, "review-plan-v2.yaml")
+  stdout, stderr, status = run("ruby", plan_builder, schema_two_path, schema_two_plan_path)
+  assert(status.success?, "dual-competitor review plan failed: #{stdout}#{stderr}")
+  schema_two_plan = YAML.safe_load(File.read(schema_two_plan_path), permitted_classes: [], aliases: false)
+  assert(schema_two_plan["schema"] == 2, "dual-competitor plan did not preserve schema 2")
+  assert(schema_two_plan.fetch("items").first.fetch("candidates").length == 7,
+         "dual-competitor plan does not contain seven slots")
+  schema_two_output = File.join(directory, "review-package-v2")
+  stdout, stderr, status = run(
+    "ruby", package_builder, schema_two_plan_path, schema_two_output,
+    "--seed", "portrait-round-1-dual-competitor-seed"
+  )
+  assert(status.success?, "dual-competitor plan failed package construction: #{stdout}#{stderr}")
+  schema_two_key = JSON.parse(File.read(File.join(schema_two_output, "review-key.json")))
+  assert(schema_two_key["schema"] == 2, "dual-competitor review key did not preserve schema 2")
+  assert(schema_two_key.fetch("items").first.fetch("candidates").length == 7,
+         "dual-competitor package does not contain seven slots")
+
+  missing_berry_intake = Marshal.load(Marshal.dump(schema_two_intake))
+  missing_berry_intake["items"].first["competitors"].delete("berry")
+  missing_berry_path = File.join(directory, "missing-berry-intake.yaml")
+  File.write(missing_berry_path, YAML.dump(missing_berry_intake))
+  _stdout, stderr, status = run(
+    "ruby", plan_builder, missing_berry_path, File.join(directory, "missing-berry-plan.yaml")
+  )
+  assert(!status.success? && stderr.include?("exactly xingtu and berry"),
+         "schema 2 intake without Berry entered the formal review round")
+
+  mislabeled_plan = Marshal.load(Marshal.dump(schema_two_plan))
+  mislabeled_plan.fetch("items").first.fetch("candidates").find do |candidate|
+    candidate["id"] == "xingtu-fixed-path-export"
+  end.fetch("provenance")["producer"] = "berry"
+  mislabeled_path = File.join(directory, "mislabeled-competitor-plan.yaml")
+  File.write(mislabeled_path, YAML.dump(mislabeled_plan))
+  _stdout, stderr, status = run(
+    "ruby", package_builder, mislabeled_path, File.join(directory, "mislabeled-package"),
+    "--seed", "portrait-round-1-dual-competitor-seed"
+  )
+  assert(!status.success? && stderr.include?("app_store_id"),
+         "Berry evidence mislabeled as Xingtu entered the seven-slot package")
+
+  wrong_identity_intake = Marshal.load(Marshal.dump(schema_two_intake))
+  wrong_identity_intake["items"].first["competitors"]["berry"]["bundle_id"] = "com.example.not-berry"
+  wrong_identity_path = File.join(directory, "wrong-competitor-identity.yaml")
+  File.write(wrong_identity_path, YAML.dump(wrong_identity_intake))
+  _stdout, stderr, status = run(
+    "ruby", plan_builder, wrong_identity_path, File.join(directory, "wrong-identity-plan.yaml")
+  )
+  assert(!status.success? && stderr.include?("berry.bundle_id"),
+         "an arbitrary app labeled as Berry entered the formal review round")
+
+  wrong_device_intake = Marshal.load(Marshal.dump(schema_two_intake))
+  wrong_device_intake["items"].first["competitors"]["xingtu"]["device_evidence_id"] = "another-iphone"
+  wrong_device_path = File.join(directory, "wrong-device-evidence.yaml")
+  File.write(wrong_device_path, YAML.dump(wrong_device_intake))
+  _stdout, stderr, status = run(
+    "ruby", plan_builder, wrong_device_path, File.join(directory, "wrong-device-plan.yaml")
+  )
+  assert(!status.success? && stderr.include?("device_evidence_id"),
+         "a second iPhone with the same model and OS entered the formal review round")
 
   review_output = File.join(directory, "review-package")
   stdout, stderr, status = run(

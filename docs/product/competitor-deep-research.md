@@ -5,6 +5,10 @@
 > 证据截止与访问日期：2026-08-04
 > 证据范围：官方 App Store / Google Play 商品页与版本记录、官方站点、官方协议与隐私说明、开发者公开资料
 
+### iOS 正式采集身份快照（2026-08-05）
+
+Apple 中国区 Lookup API 当前返回：醒图 App Store ID `1500526240`、bundle ID `com.xt.retouch`、版本 `15.2.0`、最低 iOS 13.0、免费下载；Berry App Store ID `6741474933`、bundle ID `com.seesun.berryFilm`、版本 `1.3.35`、最低 iOS 15.0、价格 ¥15。正式七槽采集必须从这两个 App Store 身份安装，并在采集当天重新读取实际安装版本；本快照不能替代当轮版本记录，也不授权代用户购买 Berry 或同意醒图协议。
+
 ## 1. 结论先行
 
 六款产品并不存在一套公开、可直接复刻的“行业标准图像引擎”。官方资料能够证明的是它们如何包装结果、缩短路径、划分免费与付费能力，以及哪些数据会被处理；无法证明其预览使用 OpenGL、Metal、Core Image、Vulkan、自研 Shader 或第三方 SDK。

@@ -1,0 +1,6 @@
+{
+  "schema": 1,
+  "device_evidence_id": "replace_with_privacy_safe_round_device_id",
+  "device": "replace_with_exact_iphone_hardware_model",
+  "os": "replace_with_exact_ios_version"
+}

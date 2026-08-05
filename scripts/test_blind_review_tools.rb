@@ -44,21 +44,75 @@ Dir.mktmpdir("blind-review-test-", quality_root) do |directory|
   )
   files = %w[
     original.png yingjian-off.png yingjian.png yingjian-high.png
-    yingjian-preview.png competitor.png
+    yingjian-preview.png xingtu.png berry.png
   ]
   files.each { |name| File.binwrite(File.join(inputs, name), png) }
   privacy_marker = "PRIVATE-CAMERA-METADATA"
   File.binwrite(
-    File.join(inputs, "competitor.png"),
+    File.join(inputs, "xingtu.png"),
     png_with_text(png, "Comment", privacy_marker),
   )
+  File.binwrite(File.join(inputs, "berry.png"), rgba_png(32, 64, 96))
   source_sha256 = Digest::SHA256.file(File.join(inputs, "original.png")).hexdigest
+  evidence_root = File.join(quality_root, "evidence")
+  FileUtils.mkdir_p(evidence_root)
+  evidence_directory = Dir.mktmpdir("blind-review-tool-fixture-", evidence_root)
+  at_exit { FileUtils.remove_entry(evidence_directory) if File.exist?(evidence_directory) }
+  authorization_path = File.join(evidence_directory, "authorization.txt")
+  File.write(authorization_path, "fixture authorization for internal blind review")
+  device_record_path = File.join(evidence_directory, "device-record.json")
+  device_evidence_id = "fixture-iphone-blind-review"
+  File.write(
+    device_record_path,
+    JSON.pretty_generate(
+      "schema" => 1,
+      "device_evidence_id" => device_evidence_id,
+      "device" => "fixture-device",
+      "os" => "fixture-os",
+    ),
+  )
+  authorization = {
+    "internal_review_authorized" => true,
+    "evidence_ref" => authorization_path.sub("#{repo_root}/", ""),
+    "evidence_sha256" => Digest::SHA256.file(authorization_path).hexdigest,
+  }
+  corpus_manifest_path = File.join(directory, "portrait-corpus-manifest.yaml")
+  corpus_assets = 48.times.map do |index|
+    {
+      "id" => index.zero? ? "portrait-001" : format("filler-%03d", index + 1),
+      "sha256" => index.zero? ? source_sha256 : format("%064x", index + 1),
+      "tags" => index.zero? ? ["portrait_single", "improvable"] : ["portrait_single"],
+      "license" => Marshal.load(Marshal.dump(authorization)),
+    }
+  end
+  File.write(
+    corpus_manifest_path,
+    YAML.dump(
+      "schema" => 2,
+      "status" => "ready",
+      "portrait_required_assets" => 48,
+      "portrait_minimum_single_assets" => 36,
+      "portrait_roles" => %w[portrait_single portrait_multi no_face],
+      "assets" => corpus_assets,
+    ),
+  )
 
   plan = {
-    "schema" => 1,
+    "schema" => 2,
     "review_id" => "portrait-round-1",
     "task" => "portrait",
     "minimum_reviewers" => 5,
+    "portrait_corpus_manifest" => {
+      "file" => corpus_manifest_path,
+      "sha256" => Digest::SHA256.file(corpus_manifest_path).hexdigest,
+    },
+    "device_evidence" => {
+      "id" => device_evidence_id,
+      "file" => device_record_path,
+      "sha256" => Digest::SHA256.file(device_record_path).hexdigest,
+      "device" => "fixture-device",
+      "os" => "fixture-os",
+    },
     "items" => [
       {
         "asset_id" => "portrait-001",
@@ -67,7 +121,7 @@ Dir.mktmpdir("blind-review-test-", quality_root) do |directory|
           path = File.join(inputs, name)
           {
             "id" => File.basename(name, ".png"),
-            "role" => name == "original.png" ? "baseline_original" : (name == "competitor.png" ? "reference" : "subject"),
+            "role" => name == "original.png" ? "baseline_original" : (%w[xingtu.png berry.png].include?(name) ? "reference" : "subject"),
             "file" => path,
             "sha256" => Digest::SHA256.file(path).hexdigest,
             "provenance" => if name == "original.png"
@@ -78,18 +132,25 @@ Dir.mktmpdir("blind-review-test-", quality_root) do |directory|
                 "os" => "fixture-os",
                 "variant" => "original",
                 "render_kind" => "source",
-                "parameters" => {},
+                "parameters" => {
+                  "raw_source_sha256" => source_sha256,
+                  "device_evidence_id" => device_evidence_id,
+                },
               }
-            elsif name == "competitor.png"
+            elsif %w[xingtu.png berry.png].include?(name)
+              producer = File.basename(name, ".png")
               {
-                "producer" => "competitor",
-                "version" => "1.2.3",
+                "producer" => producer,
+                "version" => producer == "xingtu" ? "15.2.0" : "1.3.35",
+                "app_store_id" => producer == "xingtu" ? "1500526240" : "6741474933",
+                "bundle_id" => producer == "xingtu" ? "com.xt.retouch" : "com.seesun.berryFilm",
+                "device_evidence_id" => device_evidence_id,
                 "device" => "fixture-device",
                 "os" => "fixture-os",
                 "variant" => "fixed_path",
                 "render_kind" => "export",
-                "parameters" => { "preset" => "natural" },
-                "operation_path" => "preset natural, strength 50",
+                "parameters" => { "preset" => producer == "xingtu" ? "natural" : "daily" },
+                "operation_path" => "#{producer} fixed path, strength 50",
                 "source_sha256" => source_sha256,
               }
             else
@@ -101,7 +162,10 @@ Dir.mktmpdir("blind-review-test-", quality_root) do |directory|
                 "os" => "fixture-os",
                 "variant" => variant,
                 "render_kind" => name.include?("preview") ? "preview" : "export",
-                "parameters" => { "strength" => variant == "off" ? 0 : 50 },
+                "parameters" => {
+                  "strength" => variant == "off" ? 0 : 50,
+                  "device_evidence_id" => device_evidence_id,
+                },
                 "source_sha256" => source_sha256,
               }
             end,
@@ -112,6 +176,23 @@ Dir.mktmpdir("blind-review-test-", quality_root) do |directory|
   }
   plan_path = File.join(directory, "plan.yaml")
   File.write(plan_path, plan.to_yaml)
+
+  duplicate_competitor_plan = Marshal.load(Marshal.dump(plan))
+  duplicate_berry_path = File.join(inputs, "berry-duplicate-pixels.png")
+  File.binwrite(duplicate_berry_path, png_with_text(png, "Comment", "different-encoding"))
+  duplicate_berry = duplicate_competitor_plan.fetch("items").first.fetch("candidates").find do |candidate|
+    candidate.dig("provenance", "producer") == "berry"
+  end
+  duplicate_berry["file"] = duplicate_berry_path
+  duplicate_berry["sha256"] = Digest::SHA256.file(duplicate_berry_path).hexdigest
+  duplicate_competitor_path = File.join(directory, "duplicate-competitor-plan.yaml")
+  File.write(duplicate_competitor_path, duplicate_competitor_plan.to_yaml)
+  _stdout, stderr, status = Open3.capture3(
+    "ruby", builder, duplicate_competitor_path,
+    File.join(directory, "duplicate-competitor-package"), "--seed", "fixed-seed",
+  )
+  assert(!status.success?, "Xingtu pixels re-encoded as Berry entered the formal review package")
+  assert(stderr.include?("Xingtu and Berry"), "cross-competitor pixel substitution was not explicit: #{stderr}")
 
   first_output = File.join(directory, "review-a")
   stdout, stderr, status = Open3.capture3(
@@ -135,8 +216,40 @@ Dir.mktmpdir("blind-review-test-", quality_root) do |directory|
   review_page = File.read(File.join(participant_package, "index.html"))
   assert(review_page.include?("原图锚点"), "participant cannot identify the baseline anchor")
   assert(!review_page.include?("portrait-001"), "page leaked the source asset id")
-  %w[original yingjian competitor].each do |candidate_id|
+  %w[original yingjian xingtu berry].each do |candidate_id|
     assert(!review_page.include?(candidate_id), "page leaked candidate #{candidate_id}")
+  end
+
+  review_key = JSON.parse(File.read(File.join(first_output, "review-key.json")))
+  review_item = review_key.fetch("items").first
+  baseline_code = review_item.fetch("candidates").find do |candidate|
+    candidate["role"] == "baseline_original"
+  end.fetch("candidate_code")
+  blank_score_rows = CSV.read(File.join(participant_package, "score-sheet.csv"), headers: true)
+  assert(blank_score_rows.length == 6, "blank score sheet must contain exactly six non-baseline candidates")
+  assert(
+    blank_score_rows.none? { |row| row["candidate_code"] == baseline_code },
+    "blank score sheet must not ask reviewers to score the original baseline",
+  )
+
+  mismatched_device_cases = {
+    "original" => plan["items"].first["candidates"].find { |candidate| candidate["role"] == "baseline_original" },
+    "Yingjian" => plan["items"].first["candidates"].find { |candidate| candidate["role"] == "subject" },
+  }
+  mismatched_device_cases.each do |label, original_candidate|
+    mismatched_device_plan = Marshal.load(Marshal.dump(plan))
+    candidate = mismatched_device_plan["items"].first["candidates"].find do |entry|
+      entry["id"] == original_candidate["id"]
+    end
+    candidate["provenance"]["parameters"]["device_evidence_id"] = "another-iphone"
+    mismatched_device_path = File.join(directory, "mismatched-#{label.downcase}-device-plan.yaml")
+    File.write(mismatched_device_path, mismatched_device_plan.to_yaml)
+    _stdout, stderr, status = Open3.capture3(
+      "ruby", builder, mismatched_device_path,
+      File.join(directory, "mismatched-#{label.downcase}-device-review"), "--seed", "fixed-seed",
+    )
+    assert(!status.success?, "#{label} with mismatched device evidence entered the formal package")
+    assert(stderr.include?("frozen iPhone record"), "#{label} device mismatch was not explicit: #{stderr}")
   end
 
   missing_slots = [
@@ -189,7 +302,7 @@ Dir.mktmpdir("blind-review-test-", quality_root) do |directory|
   mismatched_default_plan["items"].first["candidates"].find do |candidate|
     candidate.dig("provenance", "variant") == "default" &&
       candidate.dig("provenance", "render_kind") == "preview"
-  end["provenance"]["parameters"] = { "strength" => 49 }
+  end["provenance"]["parameters"]["strength"] = 49
   mismatched_default_path = File.join(directory, "mismatched-default-plan.yaml")
   File.write(mismatched_default_path, mismatched_default_plan.to_yaml)
   _stdout, stderr, status = Open3.capture3(
@@ -257,7 +370,7 @@ Dir.mktmpdir("blind-review-test-", quality_root) do |directory|
     tags = if index < 36
       ["portrait_single", "improvable"]
     else
-      ["negative_safety"]
+      ["no_face", "negative_safety"]
     end
     tags << %w[deep_skin beard freckles_moles glasses makeup][index % 5]
     candidates = Marshal.load(Marshal.dump(plan["items"].first["candidates"]))
@@ -276,6 +389,7 @@ Dir.mktmpdir("blind-review-test-", quality_root) do |directory|
       candidate["sha256"] = Digest::SHA256.file(candidate_path).hexdigest
       if candidate["role"] == "baseline_original"
         baseline_hash = candidate["sha256"]
+        candidate["provenance"]["parameters"]["raw_source_sha256"] = baseline_hash
       end
     end
     candidates.reject { |candidate| candidate["role"] == "baseline_original" }.each do |candidate|
@@ -287,6 +401,31 @@ Dir.mktmpdir("blind-review-test-", quality_root) do |directory|
       "candidates" => candidates,
     }
   end
+  expanded_corpus_path = File.join(directory, "expanded-portrait-corpus-manifest.yaml")
+  expanded_corpus_assets = expanded_plan["items"].map do |item|
+    baseline = item["candidates"].find { |candidate| candidate["role"] == "baseline_original" }
+    {
+      "id" => item["asset_id"],
+      "sha256" => baseline.dig("provenance", "parameters", "raw_source_sha256"),
+      "tags" => item["tags"],
+      "license" => Marshal.load(Marshal.dump(authorization)),
+    }
+  end
+  File.write(
+    expanded_corpus_path,
+    YAML.dump(
+      "schema" => 2,
+      "status" => "ready",
+      "portrait_required_assets" => 48,
+      "portrait_minimum_single_assets" => 36,
+      "portrait_roles" => %w[portrait_single portrait_multi no_face],
+      "assets" => expanded_corpus_assets,
+    ),
+  )
+  expanded_plan["portrait_corpus_manifest"] = {
+    "file" => expanded_corpus_path,
+    "sha256" => Digest::SHA256.file(expanded_corpus_path).hexdigest,
+  }
   expanded_plan_path = File.join(directory, "expanded-plan.yaml")
   File.write(expanded_plan_path, expanded_plan.to_yaml)
   expanded_output = File.join(directory, "expanded-review")
@@ -320,8 +459,71 @@ Dir.mktmpdir("blind-review-test-", quality_root) do |directory|
     "ruby", score_checker, expanded_key_path, score_path,
     "--candidate", "yingjian",
   )
+  assert(!status.success?, "Yingjian-only scores passed without anonymous competitor assessment")
+  assert(stderr.include?("missing score for"), "competitor score completeness failure was not explicit")
+
+  CSV.open(score_path, "w") do |csv|
+    csv << score_headers
+    5.times do |reviewer_index|
+      expanded_items.each do |expanded_item|
+        expanded_baseline = expanded_item["candidates"].find do |candidate|
+          candidate["role"] == "baseline_original"
+        end
+        expanded_item["candidates"].reject do |candidate|
+          candidate["role"] == "baseline_original"
+        end.each do |scored_candidate|
+          csv << [
+            "reviewer-#{reviewer_index + 1}", expanded_item["item_code"],
+            expanded_baseline["candidate_code"], scored_candidate["candidate_code"],
+            5, 5, 5, 5, 5, 5, 5, false, true, nil,
+          ]
+        end
+      end
+    end
+  end
+  passing_summary_path = File.join(directory, "passing-summary.json")
+  stdout, stderr, status = Open3.capture3(
+    "ruby", score_checker, expanded_key_path, score_path,
+    "--candidate", "yingjian", "--output", passing_summary_path,
+  )
   assert(status.success?, "complete passing scores were rejected: #{stdout}#{stderr}")
   assert(stdout.include?("passed"), "passing result did not report its state")
+  passing_summary = JSON.parse(File.read(passing_summary_path))
+  assert(passing_summary["all_candidate_score_row_count"] == 5 * 48 * 6,
+         "summary did not retain every anonymous non-baseline score")
+  assert(passing_summary.fetch("comparison_candidates").keys.sort ==
+         %w[berry xingtu yingjian yingjian-high yingjian-off yingjian-preview].sort,
+         "summary did not preserve every comparison candidate")
+
+  legacy_key = Marshal.load(Marshal.dump(key))
+  legacy_key["schema"] = 1
+  legacy_key_path = File.join(directory, "legacy-review-key.json")
+  File.write(legacy_key_path, JSON.pretty_generate(legacy_key))
+  _stdout, stderr, status = Open3.capture3(
+    "ruby", score_checker, legacy_key_path, score_path,
+    "--candidate", "yingjian",
+  )
+  assert(!status.success?, "legacy single-competitor review key passed the MVP freeze gate")
+  assert(stderr.include?("schema 2"), "legacy freeze rejection did not require schema 2")
+
+  legacy_plan = YAML.safe_load(File.read(expanded_plan_path), permitted_classes: [], aliases: false)
+  legacy_plan["schema"] = 1
+  legacy_plan_path = File.join(directory, "legacy-source-plan.yaml")
+  File.write(legacy_plan_path, legacy_plan.to_yaml)
+  legacy_plan_key = Marshal.load(Marshal.dump(key))
+  legacy_plan_key["source_plan"] = {
+    "file" => legacy_plan_path,
+    "sha256" => Digest::SHA256.file(legacy_plan_path).hexdigest,
+  }
+  legacy_plan_key_path = File.join(directory, "legacy-source-plan-key.json")
+  File.write(legacy_plan_key_path, JSON.pretty_generate(legacy_plan_key))
+  _stdout, stderr, status = Open3.capture3(
+    "ruby", score_checker, legacy_plan_key_path, score_path,
+    "--candidate", "yingjian",
+  )
+  assert(!status.success?, "schema 2 key referencing a schema 1 plan passed the freeze gate")
+  assert(stderr.include?("source plan schema must equal 2"),
+         "source-plan schema mismatch was not explicit")
 
   code_tampered_key = Marshal.load(Marshal.dump(key))
   code_tampered_key["items"].first["candidates"].find do |candidate|
@@ -454,7 +656,14 @@ Dir.mktmpdir("blind-review-test-", quality_root) do |directory|
   assert(stderr.include?("high_safe"), "score-gate matrix failure was not explicit")
 
   rows = CSV.read(score_path, headers: true)
-  rows[0]["catastrophic_error"] = "true"
+  first_item = expanded_items.first
+  selected_code = first_item["candidates"].find do |candidate|
+    candidate["candidate_id"] == "yingjian"
+  end["candidate_code"]
+  catastrophic_row = rows.find do |row|
+    row["item_code"] == first_item["item_code"] && row["candidate_code"] == selected_code
+  end
+  catastrophic_row["catastrophic_error"] = "true"
   CSV.open(score_path, "w") do |csv|
     csv << score_headers
     rows.each { |row| csv << row.fields }
@@ -470,7 +679,7 @@ Dir.mktmpdir("blind-review-test-", quality_root) do |directory|
   assert(!status.success?, "catastrophic result passed the quality gate")
   assert(stderr.include?("catastrophic"), "catastrophic failure was not explicit")
 
-  FileUtils.rm_f(File.join(inputs, "competitor.png"))
+  FileUtils.rm_f(File.join(inputs, "berry.png"))
   _stdout, stderr, status = Open3.capture3(
     "ruby",
     builder,
