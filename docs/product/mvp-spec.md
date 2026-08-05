@@ -343,7 +343,7 @@ Existing editor session, photo project session, importer, store and method-chann
 
 - Verify Flutter-to-native parameter contracts and stable error mapping.
 - Verify preview resource creation, update, release and foreground/background recovery.
-- Verify final export runs away from the Flutter UI thread.
+- Verify the frozen `ios-preview-export-semantic-v1` CVPixelBuffer/final-JPEG contract, and verify final export runs away from the Flutter UI thread.
 - Verify bounded batch concurrency and low-memory fallback.
 - Run Profile or Release on frozen low-, mid- and high-tier physical iOS devices.
 - Record first preview time, slider response, preview frame rate, per-photo export time, peak memory and thermal behavior.

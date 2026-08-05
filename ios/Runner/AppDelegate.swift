@@ -864,7 +864,7 @@ private final class IOSPhotoPreviewRenderer {
   }
 }
 
-private final class IOSPhotoPreviewSession: NSObject, FlutterTexture {
+final class IOSPhotoPreviewSession: NSObject, FlutterTexture {
   private static let context = CIContext(options: [.cacheIntermediates: false])
   private static let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
 

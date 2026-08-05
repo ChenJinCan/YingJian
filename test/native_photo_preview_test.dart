@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
@@ -26,6 +28,29 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(renderer.disposedTextureIds, [1]);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+
+    expect(renderer.createCount, 2);
+    expect(find.byType(Texture), findsOneWidget);
+  });
+
+  testWidgets('disposes a late texture created after app suspension', (
+    tester,
+  ) async {
+    final renderer = _DelayedFirstCreatePreviewRenderer();
+    await tester.pumpWidget(_previewApp(renderer));
+    await tester.pump();
+    expect(renderer.createCount, 1);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    renderer.completeFirstCreate();
+    await tester.pumpAndSettle();
+
+    expect(renderer.disposedTextureIds, [1]);
+    expect(find.byType(Texture), findsNothing);
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
@@ -173,6 +198,40 @@ final class _FailFirstCreatePreviewRenderer extends _RecordingPreviewRenderer {
       sourcePath: sourcePath,
       pipeline: pipeline,
       maxEdge: maxEdge,
+    );
+  }
+}
+
+final class _DelayedFirstCreatePreviewRenderer
+    extends _RecordingPreviewRenderer {
+  final Completer<PhotoPreviewHandle> _firstCreate = Completer();
+
+  @override
+  Future<PhotoPreviewHandle> create({
+    required String sourcePath,
+    required ImagePipeline pipeline,
+    int maxEdge = 2048,
+  }) {
+    createCount += 1;
+    if (createCount == 1) return _firstCreate.future;
+    return Future.value(
+      PhotoPreviewHandle(
+        textureId: createCount,
+        width: 1200,
+        height: 800,
+        backend: 'recording-native',
+      ),
+    );
+  }
+
+  void completeFirstCreate() {
+    _firstCreate.complete(
+      const PhotoPreviewHandle(
+        textureId: 1,
+        width: 1200,
+        height: 800,
+        backend: 'recording-native',
+      ),
     );
   }
 }

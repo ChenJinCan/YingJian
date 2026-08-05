@@ -221,6 +221,78 @@ class RunnerTests: XCTestCase {
     )
   }
 
+  func testPhotoPreviewTextureMatchesFinalJpegRecipeSemantics() throws {
+    let sourceURL = temporaryURL(extension: "jpg")
+    let outputURL = temporaryURL(extension: "jpg")
+    defer { removeTemporaryFiles(sourceURL, outputURL) }
+    try writeAsymmetricJpeg(to: sourceURL, orientation: 1)
+    let pipeline = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV2(
+        exposureEV: 0.25,
+        highlights: 0.3,
+        shadows: -0.2,
+        contrast: 0.2,
+        warmth: 0.2,
+        crop: [0.1, 0.0, 0.9, 1.0],
+        quarterTurns: 1
+      ))
+    )
+    let session = try IOSPhotoPreviewSession(
+      sourcePath: sourceURL.path,
+      maxEdge: 2_048,
+      pipeline: pipeline
+    )
+    defer { session.close() }
+    let previewBuffer = try XCTUnwrap(session.copyPixelBuffer()).takeRetainedValue()
+    let previewBytes = try rgbaBytes(CIImage(cvPixelBuffer: previewBuffer))
+
+    _ = try IOSPhotoFileRenderer(context: imageContext).render(
+      sourcePath: sourceURL.path,
+      pipeline: pipeline,
+      destinationURL: outputURL
+    )
+    let exported = try XCTUnwrap(
+      CIImage(contentsOf: outputURL, options: [.applyOrientationProperty: true])
+    )
+    let exportedBytes = try rgbaBytes(normalized(exported))
+
+    XCTAssertEqual(session.width, Int(exported.extent.width))
+    XCTAssertEqual(session.height, Int(exported.extent.height))
+    XCTAssertLessThanOrEqual(
+      meanAbsoluteDifference(previewBytes, exportedBytes),
+      4.0,
+      "Texture preview and final JPEG must preserve the same recipe semantics"
+    )
+  }
+
+  func testPhotoPreviewSessionReleasesItsBufferAndRejectsRenderingAfterClose() throws {
+    let sourceURL = temporaryURL(extension: "jpg")
+    defer { removeTemporaryFiles(sourceURL) }
+    try writeAsymmetricJpeg(to: sourceURL, orientation: 1)
+    let pipeline = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV2()))
+    let adjusted = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV2(contrast: 0.35, warmth: 0.4))
+    )
+    let session = try IOSPhotoPreviewSession(
+      sourcePath: sourceURL.path,
+      maxEdge: 2_048,
+      pipeline: pipeline
+    )
+    let neutralBuffer = try XCTUnwrap(session.copyPixelBuffer()).takeRetainedValue()
+    let neutralBytes = try rgbaBytes(CIImage(cvPixelBuffer: neutralBuffer))
+
+    try session.render(pipeline: adjusted)
+    let adjustedBuffer = try XCTUnwrap(session.copyPixelBuffer()).takeRetainedValue()
+    let adjustedBytes = try rgbaBytes(CIImage(cvPixelBuffer: adjustedBuffer))
+
+    XCTAssertGreaterThan(meanAbsoluteDifference(neutralBytes, adjustedBytes), 0.25)
+
+    session.close()
+
+    XCTAssertNil(session.copyPixelBuffer())
+    XCTAssertThrowsError(try session.render(pipeline: pipeline))
+  }
+
   func testImagePipelineV2StraightenUsesWhiteOutsideTheSource() throws {
     let pipeline = try XCTUnwrap(
       IOSImagePipeline(arguments: pipelineV2(straightenDegrees: 45))

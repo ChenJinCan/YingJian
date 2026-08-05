@@ -276,6 +276,19 @@ ruby scripts/check_ios_color_detail_semantics.rb \
   .quality/ios-render-semantic-clarity/observation-report.json
 ```
 
+### 5.7 iOS Texture 预览与导出同义性
+
+`ios-preview-export-semantic-v1` 直接实例化生产 `IOSPhotoPreviewSession`，读取其
+`FlutterTexture.copyPixelBuffer()` 返回的真实 CVPixelBuffer，并与同一源文件、同一 V2 配方经
+`IOSPhotoFileRenderer` 产生的最终 JPEG 比较。固定非对称彩色样片同时应用曝光、高光、阴影、
+对比度、色温、规范化裁剪和 90° 旋转；方向归一后的尺寸必须相同，RGBA 平均绝对差不得超过
+4 个 8-bit 码值。该容差包含最终 JPEG 95 的有损编码，不应用来放宽前述参数方向门。
+
+原生会话还必须证明：初始帧可读、配方更新产生新帧、`close()` 后 CVPixelBuffer 不再可读且继续
+渲染被拒绝。Flutter 生命周期回归覆盖暂停/恢复、内存压力、失败重试，以及暂停后迟到的 Texture
+立即释放。本门证明模拟器内的真实 Core Image/CVPixelBuffer 路径和状态语义，不替代 Profile/Release
+物理设备上的首帧、连续滑杆帧率、内存、前后台和温控证据。
+
 ## 6. 人工盲评量表
 
 每张候选结果由至少 3 名评审在校准显示环境下匿名评分。使用 1–5 分：
