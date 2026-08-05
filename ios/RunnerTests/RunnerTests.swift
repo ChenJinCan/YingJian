@@ -12,6 +12,51 @@ class RunnerTests: XCTestCase {
   private let imageContext = CIContext(options: [.cacheIntermediates: false])
   private let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
 
+  func testPickedPhotoFileStorePreservesOriginalBytes() throws {
+    let source = temporaryURL(extension: "jpg")
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("yingjian-picker-test-\(UUID().uuidString)", isDirectory: true)
+    let original = Data([0xff, 0xd8, 0xff, 0xe1, 0x00, 0x08, 0x59, 0x4a])
+    try original.write(to: source, options: .atomic)
+    defer {
+      removeTemporaryFiles(source)
+      try? FileManager.default.removeItem(at: directory)
+    }
+
+    let copy = try IOSPickedPhotoFileStore.copy(
+      sourceURL: source,
+      suggestedName: "original.jpg",
+      destinationDirectory: directory
+    )
+
+    XCTAssertEqual(try Data(contentsOf: copy), original)
+    XCTAssertEqual(try Data(contentsOf: source), original)
+    XCTAssertEqual(copy.pathExtension.lowercased(), "jpg")
+    XCTAssertTrue(copy.path.hasPrefix(directory.path + "/"))
+  }
+
+  func testPhotoPickerDiscardsOnlyItsTemporaryRequestFiles() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("yingjian-photo-picker", isDirectory: true)
+    let directory = root
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let source = temporaryURL(extension: "png")
+    try Data([0x89, 0x50, 0x4e, 0x47]).write(to: source, options: .atomic)
+    defer { removeTemporaryFiles(source) }
+    let copy = try IOSPickedPhotoFileStore.copy(
+      sourceURL: source,
+      suggestedName: "original.png",
+      destinationDirectory: directory
+    )
+
+    XCTAssertThrowsError(try IOSPhotoPicker().discard(paths: [source.path]))
+    try IOSPhotoPicker().discard(paths: [copy.path])
+
+    XCTAssertFalse(FileManager.default.fileExists(atPath: copy.path))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+  }
+
   func testImagePipelineV2NeutralIsOpaqueAndPixelStable() throws {
     let pipeline = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV2()))
     let extent = CGRect(x: 0, y: 0, width: 8, height: 4)

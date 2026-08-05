@@ -14,6 +14,7 @@
 		74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74858FAE1ED2DC5600515810 /* AppDelegate.swift */; };
 		A7B6C5D4E3F2012345678901 /* IOSPortraitRetoucher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B6C5D4E3F2012345678902 /* IOSPortraitRetoucher.swift */; };
 		B8C7D6E5F401234567890123 /* IOSPhotoFileRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8C7D6E5F401234567890124 /* IOSPhotoFileRenderer.swift */; };
+		C9D8E7F6A512345678901234 /* IOSPhotoPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D8E7F6A512345678901235 /* IOSPhotoPicker.swift */; };
 		7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */; };
 		97C146FC1CF9000F007C117D /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FA1CF9000F007C117D /* Main.storyboard */; };
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
@@ -58,6 +59,7 @@
 		74858FAE1ED2DC5600515810 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		A7B6C5D4E3F2012345678902 /* IOSPortraitRetoucher.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = IOSPortraitRetoucher.swift; sourceTree = "<group>"; };
 		B8C7D6E5F401234567890124 /* IOSPhotoFileRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = IOSPhotoFileRenderer.swift; sourceTree = "<group>"; };
+		C9D8E7F6A512345678901235 /* IOSPhotoPicker.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = IOSPhotoPicker.swift; sourceTree = "<group>"; };
 		77445D0E04C265F2D5253CE3 /* Pods_Runner.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Runner.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		7AFA3C8E1D35360C0083082E /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Release.xcconfig; path = Flutter/Release.xcconfig; sourceTree = "<group>"; };
@@ -170,6 +172,7 @@
 				1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */,
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				B8C7D6E5F401234567890124 /* IOSPhotoFileRenderer.swift */,
+				C9D8E7F6A512345678901235 /* IOSPhotoPicker.swift */,
 				A7B6C5D4E3F2012345678902 /* IOSPortraitRetoucher.swift */,
 				7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
@@ -418,6 +421,7 @@
 			files = (
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				B8C7D6E5F401234567890123 /* IOSPhotoFileRenderer.swift in Sources */,
+				C9D8E7F6A512345678901234 /* IOSPhotoPicker.swift in Sources */,
 				A7B6C5D4E3F2012345678901 /* IOSPortraitRetoucher.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 				7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */,

@@ -42,6 +42,10 @@ abstract interface class PhotoSource {
   Future<List<SelectedPhoto>> pickPhotos({required int limit});
 }
 
+abstract interface class ReleasablePhotoSource implements PhotoSource {
+  Future<void> releasePhotos(List<SelectedPhoto> photos);
+}
+
 final class AppOwnedPhotoImporter implements PhotoImporter {
   static const maxFileBytes = 100 * 1024 * 1024;
   static const maxPixelCount = 48 * 1000 * 1000;
@@ -80,75 +84,92 @@ final class AppOwnedPhotoImporter implements PhotoImporter {
   @override
   Future<PhotoImportBatch> importPhotos({required int limit}) async {
     final selected = await _source.pickPhotos(limit: limit);
-    if (selected.length > limit) {
-      throw StateError('Photo source returned more than the requested limit');
-    }
-    if (selected.isEmpty) {
-      return const PhotoImportBatch();
-    }
+    PhotoImportBatch? completedBatch;
+    try {
+      if (selected.length > limit) {
+        throw StateError('Photo source returned more than the requested limit');
+      }
+      if (selected.isEmpty) {
+        return const PhotoImportBatch();
+      }
 
-    final directory = await _mediaDirectory();
-    await directory.create(recursive: true);
-    final imported = <ProjectPhoto>[];
-    final failures = <PhotoImportFailure>[];
-    for (final photo in selected) {
-      File? destination;
-      try {
-        await _validateInput(photo, supportsHeif: _supportsHeif);
-        final id = _createId();
-        destination = File('${directory.path}/$id.importing');
-        await File(photo.path).copy(destination.path);
-        await _validateInput(
-          SelectedPhoto(path: destination.path, name: photo.name),
-          supportsHeif: _supportsHeif,
-        );
-        final inspection = await _inspectPhoto(destination.path);
-        _validateInspection(inspection);
-        final finalCopy = File(
-          '${directory.path}/$id${_extensionFor(inspection.inputFormat)}',
-        );
-        await destination.rename(finalCopy.path);
-        destination = finalCopy;
-        imported.add(
-          ProjectPhoto(
-            id: id,
-            localPath: destination.path,
-            originalName: photo.name,
-            contentSha256: inspection.contentSha256,
-            pixelWidth: inspection.pixelWidth,
-            pixelHeight: inspection.pixelHeight,
-            orientation: inspection.orientation,
-            colorSpace: inspection.colorSpace,
-            inputFormat: inspection.inputFormat,
-            supportState: PhotoSupportState.supported,
-          ),
-        );
-      } on _PhotoValidationException catch (error) {
-        await _deleteIfExists(destination);
-        failures.add(
-          PhotoImportFailure(photoName: photo.name, reason: error.reason),
-        );
-      } on PlatformException catch (error) {
-        await _deleteIfExists(destination);
-        failures.add(
-          PhotoImportFailure(
-            photoName: photo.name,
-            reason: error.code == 'unsupportedColorSpace'
-                ? PhotoImportFailureReason.unsupportedColorSpace
-                : PhotoImportFailureReason.unreadable,
-          ),
-        );
-      } on FileSystemException {
-        await _deleteIfExists(destination);
-        failures.add(
-          PhotoImportFailure(
-            photoName: photo.name,
-            reason: PhotoImportFailureReason.copyFailed,
-          ),
-        );
+      final directory = await _mediaDirectory();
+      await directory.create(recursive: true);
+      final imported = <ProjectPhoto>[];
+      final failures = <PhotoImportFailure>[];
+      for (final photo in selected) {
+        File? destination;
+        try {
+          await _validateInput(photo, supportsHeif: _supportsHeif);
+          final id = _createId();
+          destination = File('${directory.path}/$id.importing');
+          await File(photo.path).copy(destination.path);
+          await _validateInput(
+            SelectedPhoto(path: destination.path, name: photo.name),
+            supportsHeif: _supportsHeif,
+          );
+          final inspection = await _inspectPhoto(destination.path);
+          _validateInspection(inspection);
+          final finalCopy = File(
+            '${directory.path}/$id${_extensionFor(inspection.inputFormat)}',
+          );
+          await destination.rename(finalCopy.path);
+          destination = finalCopy;
+          imported.add(
+            ProjectPhoto(
+              id: id,
+              localPath: destination.path,
+              originalName: photo.name,
+              contentSha256: inspection.contentSha256,
+              pixelWidth: inspection.pixelWidth,
+              pixelHeight: inspection.pixelHeight,
+              orientation: inspection.orientation,
+              colorSpace: inspection.colorSpace,
+              inputFormat: inspection.inputFormat,
+              supportState: PhotoSupportState.supported,
+            ),
+          );
+        } on _PhotoValidationException catch (error) {
+          await _deleteIfExists(destination);
+          failures.add(
+            PhotoImportFailure(photoName: photo.name, reason: error.reason),
+          );
+        } on PlatformException catch (error) {
+          await _deleteIfExists(destination);
+          failures.add(
+            PhotoImportFailure(
+              photoName: photo.name,
+              reason: error.code == 'unsupportedColorSpace'
+                  ? PhotoImportFailureReason.unsupportedColorSpace
+                  : PhotoImportFailureReason.unreadable,
+            ),
+          );
+        } on FileSystemException {
+          await _deleteIfExists(destination);
+          failures.add(
+            PhotoImportFailure(
+              photoName: photo.name,
+              reason: PhotoImportFailureReason.copyFailed,
+            ),
+          );
+        }
+      }
+      completedBatch = PhotoImportBatch(photos: imported, failures: failures);
+      return completedBatch;
+    } finally {
+      final source = _source;
+      if (selected.isNotEmpty && source is ReleasablePhotoSource) {
+        try {
+          await source.releasePhotos(selected);
+        } catch (_) {
+          for (final photo
+              in completedBatch?.photos ?? const <ProjectPhoto>[]) {
+            await _deleteIfExists(File(photo.localPath));
+          }
+          rethrow;
+        }
       }
     }
-    return PhotoImportBatch(photos: imported, failures: failures);
   }
 
   static Future<void> _deleteIfExists(File? file) async {

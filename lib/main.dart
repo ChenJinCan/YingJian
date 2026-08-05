@@ -17,6 +17,7 @@ import 'package:yingjian/features/project/application/photo_project_session.dart
 import 'package:yingjian/features/project/infrastructure/app_owned_photo_importer.dart';
 import 'package:yingjian/features/project/infrastructure/image_picker_photo_source.dart';
 import 'package:yingjian/features/project/infrastructure/json_photo_project_store.dart';
+import 'package:yingjian/features/project/infrastructure/method_channel_photo_source.dart';
 import 'package:yingjian/features/recommendations/application/photo_analysis_cache.dart';
 import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
 import 'package:yingjian/features/recommendations/infrastructure/json_photo_analysis_cache.dart';
@@ -58,7 +59,9 @@ Future<void> _startApplication() async {
       observability.installGlobalErrorHandlers();
       reviewManager = ReviewManager.production(observability);
       photoImporter = AppOwnedPhotoImporter(
-        source: ImagePickerPhotoSource(),
+        source: Platform.isIOS
+            ? const MethodChannelPhotoSource()
+            : ImagePickerPhotoSource(),
         mediaDirectory: () async {
           final root = await getApplicationSupportDirectory();
           return Directory('${root.path}/media');

@@ -50,6 +50,65 @@ void main() {
   );
 
   test(
+    'releases temporary picker files after creating app-owned copies',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'yingjian-photo-import-release-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final sourceFile = File('${directory.path}/picker/photo.jpg');
+      await sourceFile.parent.create(recursive: true);
+      await sourceFile.writeAsBytes(_jpeg(width: 1200, height: 900));
+      final source = _ReleasablePhotoSource([
+        SelectedPhoto(path: sourceFile.path, name: 'photo.jpg'),
+      ]);
+      final importer = AppOwnedPhotoImporter(
+        source: source,
+        mediaDirectory: () async => Directory('${directory.path}/app-media'),
+        inspectPhoto: _inspectJpeg,
+        createId: () => 'photo-release',
+      );
+
+      final batch = await importer.importPhotos(limit: 6);
+
+      expect(batch.photos.single.localPath, isNot(sourceFile.path));
+      expect(source.released, [sourceFile.path]);
+    },
+  );
+
+  test('removes app-owned copies when picker cleanup fails', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'yingjian-photo-import-release-failure-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final sourceFile = File('${directory.path}/picker/photo.jpg');
+    await sourceFile.parent.create(recursive: true);
+    await sourceFile.writeAsBytes(_jpeg(width: 1200, height: 900));
+    final source = _ReleasablePhotoSource([
+      SelectedPhoto(path: sourceFile.path, name: 'photo.jpg'),
+    ], releaseError: FileSystemException('cleanup failed'));
+    final importer = AppOwnedPhotoImporter(
+      source: source,
+      mediaDirectory: () async => Directory('${directory.path}/app-media'),
+      inspectPhoto: _inspectJpeg,
+      createId: () => 'photo-release-failure',
+    );
+
+    await expectLater(
+      importer.importPhotos(limit: 6),
+      throwsA(isA<FileSystemException>()),
+    );
+
+    expect(source.released, [sourceFile.path]);
+    expect(
+      File(
+        '${directory.path}/app-media/photo-release-failure.jpg',
+      ).existsSync(),
+      isFalse,
+    );
+  });
+
+  test(
     'keeps valid photos when another selected item is unsupported',
     () async {
       final directory = await Directory.systemTemp.createTemp(
@@ -368,4 +427,24 @@ final class _FakePhotoSource implements PhotoSource {
 
   @override
   Future<List<SelectedPhoto>> pickPhotos({required int limit}) async => photos;
+}
+
+final class _ReleasablePhotoSource implements ReleasablePhotoSource {
+  _ReleasablePhotoSource(this.photos, {this.releaseError});
+
+  final List<SelectedPhoto> photos;
+  final Object? releaseError;
+  final List<String> released = [];
+
+  @override
+  Future<List<SelectedPhoto>> pickPhotos({required int limit}) async => photos;
+
+  @override
+  Future<void> releasePhotos(List<SelectedPhoto> photos) async {
+    released.addAll(photos.map((photo) => photo.path));
+    final error = releaseError;
+    if (error != null) {
+      throw error;
+    }
+  }
 }

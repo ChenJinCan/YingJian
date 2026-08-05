@@ -53,11 +53,13 @@ enum IOSPortraitCapabilityPolicy {
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var photoExportChannel: FlutterMethodChannel?
   private var photoShareChannel: FlutterMethodChannel?
+  private var photoPickerChannel: FlutterMethodChannel?
   private var photoInputChannel: FlutterMethodChannel?
   private var photoAnalysisChannel: FlutterMethodChannel?
   private var photoPreviewRenderer: IOSPhotoPreviewRenderer?
   private let photoExportContext = CIContext(options: [.cacheIntermediates: false])
   private var photoShareInProgress = false
+  private let photoPicker = IOSPhotoPicker()
 #if DEBUG
   private var portraitMaskSpikeChannel: FlutterMethodChannel?
   private var portraitMaskSpikeStartupError: PortraitMaskSpikeError?
@@ -106,6 +108,7 @@ enum IOSPortraitCapabilityPolicy {
       self?.exportPhoto(arguments: call.arguments, result: result)
     }
     photoExportChannel = channel
+    configurePhotoPicker(messenger: registrar.messenger())
     configurePhotoShare(messenger: registrar.messenger())
     configurePhotoInput(messenger: registrar.messenger())
     configurePhotoAnalysis(messenger: registrar.messenger())
@@ -116,6 +119,71 @@ enum IOSPortraitCapabilityPolicy {
 #if DEBUG
     configurePortraitMaskSpike(messenger: registrar.messenger())
 #endif
+  }
+
+  private func configurePhotoPicker(messenger: FlutterBinaryMessenger) {
+    let channel = FlutterMethodChannel(
+      name: "yingjian/photo_picker",
+      binaryMessenger: messenger
+    )
+    channel.setMethodCallHandler { [weak self] call, result in
+      switch call.method {
+      case "pickPhotos":
+        guard
+          let values = call.arguments as? [String: Any],
+          let limit = values["limit"] as? Int,
+          (1...6).contains(limit),
+          let presenter = self?.topViewController()
+        else {
+          result(FlutterError(
+            code: "invalidArguments",
+            message: "Photo picker requires a visible presenter and a 1...6 limit",
+            details: nil
+          ))
+          return
+        }
+        self?.photoPicker.pickPhotos(
+          limit: limit,
+          presenter: presenter,
+          completion: result
+        )
+      case "discardPhotos":
+        guard
+          let values = call.arguments as? [String: Any],
+          let paths = values["paths"] as? [String],
+          !paths.isEmpty,
+          paths.count <= 6
+        else {
+          result(FlutterError(
+            code: "invalidArguments",
+            message: "Photo picker cleanup requires 1...6 paths",
+            details: nil
+          ))
+          return
+        }
+        guard let self else {
+          result(FlutterError(
+            code: "pickerUnavailable",
+            message: "Photo picker is no longer available",
+            details: nil
+          ))
+          return
+        }
+        do {
+          try self.photoPicker.discard(paths: paths)
+          result(nil)
+        } catch {
+          result(FlutterError(
+            code: "discardFailed",
+            message: "Temporary picker files could not be removed",
+            details: nil
+          ))
+        }
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+    photoPickerChannel = channel
   }
 
   private func configurePhotoShare(messenger: FlutterBinaryMessenger) {

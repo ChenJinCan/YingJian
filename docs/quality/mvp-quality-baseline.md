@@ -16,6 +16,7 @@
 | iOS 最低系统 | 15.0 | 已确认 |
 | Android | min API 24，compile/target API 36 | 已有工程基线；本轮 MVP 验证延期且不阻断 iOS |
 | 当前预览 | iOS Core Image Texture、Android GLES3 Texture；Flutter 矩阵仅兼容降级 | 目标接缝已实现，真机质量未验证 |
+| iOS 照片输入 | 系统 PHPicker 读取当前文件表示，原生临时文件复制到应用自有只读副本后立即清理 | 32 MP JPEG/PNG Simulator 真实 UI 与源 SHA 一致；真机授权仍未验证 |
 | iOS 导出 | Core Image 从原图输出 sRGB JPEG 95 并应用安全元数据策略 | 模拟器测试通过，真机未验证 |
 | Android 导出 | API 28+ 单 Bitmap 原位分块变换；API 24–27 分块方向解码到单输出 Bitmap；JPEG 95 | 模拟器真实文件/48 MP 通过，真机内存门未验证 |
 | 当前物理设备 | iPhone 14 Plus 已配对但当前锁屏阻止测试启动 | iOS 三档物理验证阻断 |
@@ -89,6 +90,18 @@
 `scripts/run_android_file_render_corpus.rb` 会构建本地 Debug app/test APK，把同一批只读源图挂载到应用私有缓存，并由专用 instrumentation 逐张调用生产 `AndroidPhotoExporter`。最终 MediaStore JPEG 会先回拷到应用私有证据目录、回查后删除，再由宿主拉取到 `.quality`；报告绑定语料、生产 Kotlin 源码、instrumentation、宿主运行器、源码提交和模拟器 build fingerprint。本机 API 35 arm64 模拟器首轮同为 48/48 通过，且 canonical 空清单 fail closed。
 
 已有双端结果证明当前生产文件渲染的格式、尺寸、源只读和隐私合同，但不证明预览帧率、峰值内存、物理设备耗时或主观质量。本轮只继续采集 iOS 证据；Android 模拟器与跨端结果保留但不计入 iOS MVP 完成门。
+
+2026-08-05 的 iPhone 17 Pro Simulator 真实系统 PHPicker 检查发现，旧的通用
+`image_picker_ios` 路径会把 4562×7027 JPEG 从 17,261,705 字节重编码为
+6,442,163 字节，虽然像素尺寸未变，仍违反“应用自有原始输入不得先被重编码”的合同。
+iOS 生产入口现改为原生 PHPicker `.current` 文件表示，只通过 MethodChannel 返回路径和名称。
+修复后同一 JPEG 的应用副本与源文件大小均为 17,261,705 字节，SHA-256 均为
+`653d56ec72b9d695163cc489f7ecc438d495670d69d741653c7b56409f54444f`；
+4562×7027 PNG 也以 4,759,419 字节和
+`6b04890a2f9c29fbb4174df50bfa3545ea36e39853b0904d0e0b460aceff3238`
+保持一致。成功、失败与用户取消后，`tmp/yingjian-photo-picker` 均无请求文件或子目录残留。
+这些是 Debug/Simulator 工程证据，不替代真实 iPhone 的授权、iCloud 原件下载、HEIC/Live Photo
+边界或 Profile/Release 内存与耗时证据。
 
 本机完整门命令为：
 
