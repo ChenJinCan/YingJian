@@ -374,9 +374,9 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(session.height, Int(exported.extent.height))
     XCTAssertLessThanOrEqual(
       meanAbsoluteDifference(previewBytes, exportedBytes),
-      6.5,
+      7.0,
       "Texture preview and final JPEG must preserve face and body slim semantics "
-        + "within the striped fixture's JPEG recompression tolerance"
+        + "within the striped fixture's JPEG recompression tolerance at the product maxima"
     )
   }
 
@@ -594,6 +594,141 @@ class RunnerTests: XCTestCase {
       ),
       0.1,
       "the permitted face region must still deform"
+    )
+  }
+
+  func testLocalSlimWarpStaysInItsBottomOriginVerticalRegion() throws {
+    let extent = CGRect(x: 0, y: 0, width: 96, height: 96)
+    let source = stripedImage(extent: extent)
+    let intendedRegion = CGRect(x: 0, y: 4, width: 96, height: 32)
+    let mirroredRegion = CGRect(x: 0, y: 60, width: 96, height: 32)
+    let facePipeline = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV3(faceSlimStrength: 1))
+    )
+    let bodyPipeline = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV3(bodySlimStrength: 1))
+    )
+    let faceContext = IOSPortraitRetouchContext(
+      effectiveMask: nil,
+      faceSlimGeometry: IOSFaceSlimGeometry(
+        centerX: 48,
+        halfWidth: 38,
+        lowerY: 4,
+        upperY: 36
+      ),
+      faceMask: CIImage(color: .white).cropped(to: extent)
+    )
+    let bodyContext = IOSPortraitRetouchContext(
+      effectiveMask: nil,
+      bodySlimGeometry: IOSBodySlimGeometry(
+        centerX: 48,
+        halfWidth: 38,
+        lowerY: 4,
+        upperY: 36
+      ),
+      personMask: CIImage(color: .white).cropped(to: extent)
+    )
+
+    for (name, output) in [
+      (
+        "face",
+        facePipeline.applying(
+          to: source,
+          extent: extent,
+          portraitContext: faceContext
+        )
+      ),
+      (
+        "body",
+        bodyPipeline.applying(
+          to: source,
+          extent: extent,
+          portraitContext: bodyContext
+        )
+      ),
+    ] {
+      XCTAssertGreaterThan(
+        meanAbsoluteDifference(
+          try rgbaBytes(source.cropped(to: intendedRegion)),
+          try rgbaBytes(output.cropped(to: intendedRegion))
+        ),
+        0.1,
+        "the \(name) warp must affect its declared bottom-origin ROI"
+      )
+      XCTAssertEqual(
+        try rgbaBytes(source.cropped(to: mirroredRegion)),
+        try rgbaBytes(output.cropped(to: mirroredRegion)),
+        "the \(name) warp must not move the vertically mirrored ROI"
+      )
+    }
+  }
+
+  func testFaceAndBodySlimWarpNarrowsRenderedSubjectContours() throws {
+    let extent = CGRect(x: 0, y: 0, width: 96, height: 96)
+    let subject = CIImage(color: .white)
+      .cropped(to: CGRect(x: 24, y: 8, width: 48, height: 80))
+      .composited(over: CIImage(color: .black).cropped(to: extent))
+      .cropped(to: extent)
+    let mask = CIImage(color: .white).cropped(to: extent)
+    let geometry = IOSFaceSlimGeometry(
+      centerX: 48,
+      halfWidth: 38,
+      lowerY: 8,
+      upperY: 88
+    )
+    let bodyGeometry = IOSBodySlimGeometry(
+      centerX: 48,
+      halfWidth: 38,
+      lowerY: 8,
+      upperY: 88
+    )
+    let facePipeline = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV3(faceSlimStrength: 0.5))
+    )
+    let bodyPipeline = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV3(bodySlimStrength: 0.35))
+    )
+    let sourceBounds = brightPixelBounds(try rgbaBytes(subject), width: 96, row: 48)
+    let faceBounds = brightPixelBounds(
+      try rgbaBytes(
+        facePipeline.applying(
+          to: subject,
+          extent: extent,
+          portraitContext: IOSPortraitRetouchContext(
+            effectiveMask: nil,
+            faceSlimGeometry: geometry,
+            faceMask: mask
+          )
+        )
+      ),
+      width: 96,
+      row: 48
+    )
+    let bodyBounds = brightPixelBounds(
+      try rgbaBytes(
+        bodyPipeline.applying(
+          to: subject,
+          extent: extent,
+          portraitContext: IOSPortraitRetouchContext(
+            effectiveMask: nil,
+            bodySlimGeometry: bodyGeometry,
+            personMask: mask
+          )
+        )
+      ),
+      width: 96,
+      row: 48
+    )
+
+    XCTAssertLessThan(
+      Double(faceBounds.width),
+      Double(sourceBounds.width) * 0.97,
+      "face slim must narrow the rendered contour: \(sourceBounds) -> \(faceBounds)"
+    )
+    XCTAssertLessThan(
+      Double(bodyBounds.width),
+      Double(sourceBounds.width) * 0.98,
+      "body slim must narrow the rendered contour: \(sourceBounds) -> \(bodyBounds)"
     )
   }
 
@@ -1798,6 +1933,21 @@ class RunnerTests: XCTestCase {
       result + abs(Int(pair.0) - Int(pair.1))
     }
     return Double(total) / Double(left.count)
+  }
+
+  private func brightPixelBounds(
+    _ bytes: [UInt8],
+    width: Int,
+    row: Int
+  ) -> (minimum: Int, maximum: Int, width: Int) {
+    let values = (0..<width).filter { x in
+      bytes[(row * width + x) * 4] >= 128
+    }
+    return (
+      values.min() ?? -1,
+      values.max() ?? -1,
+      values.count
+    )
   }
 
   private func neighborDifference(
