@@ -1033,6 +1033,123 @@ class RunnerTests: XCTestCase {
     XCTAssertLessThan(highTexture, defaultTexture)
   }
 
+  func testProductionPortraitCandidateRelightsFaceShadowsWithoutLiftingHighlightsOrBackground()
+    throws
+  {
+    let extent = CGRect(x: 0, y: 0, width: 120, height: 80)
+    let background = CIImage(
+      color: CIColor(red: 0.16, green: 0.18, blue: 0.20, alpha: 1)
+    ).cropped(to: extent)
+    let shadowSkin = CIImage(
+      color: CIColor(red: 0.31, green: 0.20, blue: 0.16, alpha: 1)
+    ).cropped(to: CGRect(x: 20, y: 10, width: 40, height: 60))
+    let highlightSkin = CIImage(
+      color: CIColor(red: 0.84, green: 0.68, blue: 0.58, alpha: 1)
+    ).cropped(to: CGRect(x: 60, y: 10, width: 40, height: 60))
+    let source = highlightSkin
+      .composited(over: shadowSkin)
+      .composited(over: background)
+      .cropped(to: extent)
+    let mask = CIImage(color: .white)
+      .cropped(to: CGRect(x: 20, y: 10, width: 80, height: 60))
+      .composited(over: CIImage(color: .black).cropped(to: extent))
+      .cropped(to: extent)
+
+    let output = IOSPortraitRetoucher.candidate(
+      source: source,
+      mask: mask,
+      strength: 0.35,
+      extent: extent
+    )
+    let sourceBytes = try rgbaBytes(source)
+    let outputBytes = try rgbaBytes(output)
+    let shadowLift = meanLuminance(outputBytes, width: 120, rect: CGRect(x: 30, y: 20, width: 20, height: 40))
+      - meanLuminance(sourceBytes, width: 120, rect: CGRect(x: 30, y: 20, width: 20, height: 40))
+    let highlightLift = meanLuminance(outputBytes, width: 120, rect: CGRect(x: 70, y: 20, width: 20, height: 40))
+      - meanLuminance(sourceBytes, width: 120, rect: CGRect(x: 70, y: 20, width: 20, height: 40))
+    let backgroundDifference = meanRegionAbsoluteDifference(
+      sourceBytes,
+      outputBytes,
+      width: 120,
+      rect: CGRect(x: 2, y: 2, width: 12, height: 72)
+    )
+
+    XCTAssertGreaterThanOrEqual(
+      shadowLift,
+      5,
+      "Default natural retouch must visibly lift face shadows"
+    )
+    XCTAssertLessThanOrEqual(
+      abs(highlightLift),
+      shadowLift * 0.4,
+      "Existing facial highlights must be protected from the shadow lift"
+    )
+    XCTAssertLessThanOrEqual(
+      backgroundDifference,
+      1,
+      "Face relighting must not brighten the background"
+    )
+  }
+
+  func testProductionPortraitCandidateEvensLowFrequencySkinColorWithoutChangingOverallTone()
+    throws
+  {
+    let extent = CGRect(x: 0, y: 0, width: 120, height: 80)
+    let warmPatch = CIImage(
+      color: CIColor(red: 0.72, green: 0.38, blue: 0.32, alpha: 1)
+    ).cropped(to: CGRect(x: 20, y: 10, width: 40, height: 60))
+    let yellowPatch = CIImage(
+      color: CIColor(red: 0.65, green: 0.50, blue: 0.27, alpha: 1)
+    ).cropped(to: CGRect(x: 60, y: 10, width: 40, height: 60))
+    let background = CIImage(
+      color: CIColor(red: 0.18, green: 0.20, blue: 0.22, alpha: 1)
+    ).cropped(to: extent)
+    let source = yellowPatch
+      .composited(over: warmPatch)
+      .composited(over: background)
+      .cropped(to: extent)
+    let mask = CIImage(color: .white)
+      .cropped(to: CGRect(x: 20, y: 10, width: 80, height: 60))
+      .composited(over: CIImage(color: .black).cropped(to: extent))
+      .cropped(to: extent)
+
+    let output = IOSPortraitRetoucher.candidate(
+      source: source,
+      mask: mask,
+      strength: 0.35,
+      extent: extent
+    )
+    let sourceBytes = try rgbaBytes(source)
+    let outputBytes = try rgbaBytes(output)
+    let leftRect = CGRect(x: 46, y: 20, width: 12, height: 40)
+    let rightRect = CGRect(x: 62, y: 20, width: 12, height: 40)
+    let sourceLeft = meanChroma(sourceBytes, width: 120, rect: leftRect)
+    let sourceRight = meanChroma(sourceBytes, width: 120, rect: rightRect)
+    let outputLeft = meanChroma(outputBytes, width: 120, rect: leftRect)
+    let outputRight = meanChroma(outputBytes, width: 120, rect: rightRect)
+    let sourceGap = chromaDistance(sourceLeft, sourceRight)
+    let outputGap = chromaDistance(outputLeft, outputRight)
+    let sourceAverage = (
+      (sourceLeft.redMinusGreen + sourceRight.redMinusGreen) / 2,
+      (sourceLeft.blueMinusGreen + sourceRight.blueMinusGreen) / 2
+    )
+    let outputAverage = (
+      (outputLeft.redMinusGreen + outputRight.redMinusGreen) / 2,
+      (outputLeft.blueMinusGreen + outputRight.blueMinusGreen) / 2
+    )
+
+    XCTAssertLessThanOrEqual(
+      outputGap,
+      sourceGap * 0.85,
+      "Default natural retouch must reduce local red/yellow skin-color patches"
+    )
+    XCTAssertLessThanOrEqual(
+      hypot(outputAverage.0 - sourceAverage.0, outputAverage.1 - sourceAverage.1),
+      8,
+      "Skin-color equalization must preserve the person's overall tone"
+    )
+  }
+
   func testProductionPortraitCandidatePreservesPermanentHighContrastEdges() throws {
     let extent = CGRect(x: 0, y: 0, width: 96, height: 96)
     let skin = CIImage(
@@ -1296,6 +1413,74 @@ class RunnerTests: XCTestCase {
       }
     }
     return strongest
+  }
+
+  private func meanLuminance(
+    _ bytes: [UInt8],
+    width: Int,
+    rect: CGRect
+  ) -> Double {
+    var total = 0.0
+    var pixels = 0
+    for y in Int(rect.minY)..<Int(rect.maxY) {
+      for x in Int(rect.minX)..<Int(rect.maxX) {
+        let offset = (y * width + x) * 4
+        total += 0.2126 * Double(bytes[offset])
+          + 0.7152 * Double(bytes[offset + 1])
+          + 0.0722 * Double(bytes[offset + 2])
+        pixels += 1
+      }
+    }
+    return total / Double(pixels)
+  }
+
+  private func meanRegionAbsoluteDifference(
+    _ left: [UInt8],
+    _ right: [UInt8],
+    width: Int,
+    rect: CGRect
+  ) -> Double {
+    var total = 0
+    var channels = 0
+    for y in Int(rect.minY)..<Int(rect.maxY) {
+      for x in Int(rect.minX)..<Int(rect.maxX) {
+        let offset = (y * width + x) * 4
+        for channel in 0..<3 {
+          total += abs(Int(left[offset + channel]) - Int(right[offset + channel]))
+          channels += 1
+        }
+      }
+    }
+    return Double(total) / Double(channels)
+  }
+
+  private func meanChroma(
+    _ bytes: [UInt8],
+    width: Int,
+    rect: CGRect
+  ) -> (redMinusGreen: Double, blueMinusGreen: Double) {
+    var redMinusGreen = 0.0
+    var blueMinusGreen = 0.0
+    var pixels = 0
+    for y in Int(rect.minY)..<Int(rect.maxY) {
+      for x in Int(rect.minX)..<Int(rect.maxX) {
+        let offset = (y * width + x) * 4
+        redMinusGreen += Double(bytes[offset]) - Double(bytes[offset + 1])
+        blueMinusGreen += Double(bytes[offset + 2]) - Double(bytes[offset + 1])
+        pixels += 1
+      }
+    }
+    return (redMinusGreen / Double(pixels), blueMinusGreen / Double(pixels))
+  }
+
+  private func chromaDistance(
+    _ left: (redMinusGreen: Double, blueMinusGreen: Double),
+    _ right: (redMinusGreen: Double, blueMinusGreen: Double)
+  ) -> Double {
+    hypot(
+      left.redMinusGreen - right.redMinusGreen,
+      left.blueMinusGreen - right.blueMinusGreen
+    )
   }
 
   private func render(sourceURL: URL, outputURL: URL) throws -> IOSPhotoRenderedFile {

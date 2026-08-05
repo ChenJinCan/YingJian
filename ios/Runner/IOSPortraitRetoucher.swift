@@ -98,7 +98,7 @@ struct IOSPortraitRetouchContext {
 /// remain inside this native boundary and never cross the Flutter channel.
 enum IOSPortraitRetoucher {
   static let candidateKind = "vision-landmarks-geometry-roi"
-  static let effectVersion = "ios-geometry-retouch-candidate-v4"
+  static let effectVersion = "ios-geometry-retouch-candidate-v5"
   private static let analysisMaxEdge: CGFloat = 1_600
   private static let context = CIContext(options: [.cacheIntermediates: false])
 
@@ -369,7 +369,25 @@ enum IOSPortraitRetoucher {
         "inputSharpness": 0.0,
       ]
     ).cropped(to: extent)
-    let relit = denoised.applyingFilter(
+    let toneRadius = min(24, max(6, min(extent.width, extent.height) * 0.015))
+    let lowFrequencyColor = opaqueSource.clampedToExtent().applyingFilter(
+      "CIGaussianBlur",
+      parameters: [kCIInputRadiusKey: toneRadius]
+    ).cropped(to: extent)
+    let luminancePreservingTone = lowFrequencyColor.applyingFilter(
+      "CIColorBlendMode",
+      parameters: [kCIInputBackgroundImageKey: denoised]
+    ).cropped(to: extent)
+    let toneBalanced = denoised.applyingFilter(
+      "CIDissolveTransition",
+      parameters: [
+        kCIInputTargetImageKey: luminancePreservingTone,
+        kCIInputTimeKey: 0.18 + bounded * 0.45,
+      ]
+    )
+      .composited(over: opaqueSource)
+      .cropped(to: extent)
+    let relit = toneBalanced.applyingFilter(
       "CIHighlightShadowAdjust",
       parameters: [
         "inputHighlightAmount": 1 - bounded * 0.08,
