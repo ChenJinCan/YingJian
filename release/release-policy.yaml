@@ -22,20 +22,26 @@ platforms:
   ios:
     identifier: com.babycompany.yingjian
     release_ready: false
-    blocker: App Privacy is published, but age rating, category, version metadata, screenshots, review information, production signing, build selection, and final archive verification are incomplete.
+    blocker: Local tooling exists, but frozen MVP acceptance evidence, production signing, a current authenticated store baseline, exact TestFlight group selection, and final archive verification remain incomplete.
     env_file: .env.testflight
     env_example: .env.testflight.example
     required_tools:
       - flutter
       - ruby
-      - bundle
       - xcodebuild
+      - xcrun
+      - codesign
+      - unzip
+      - plutil
     required_env:
       - ASC_KEY_ID
       - ASC_ISSUER_ID
       - ASC_KEY_PATH
-      - MATCH_GIT_URL
-      - MATCH_PASSWORD
+    build_required_env: []
+    upload_required_env:
+      - ASC_KEY_ID
+      - ASC_ISSUER_ID
+      - ASC_KEY_PATH
     forbidden_env:
       - VERSION
       - BUILD_NUMBER

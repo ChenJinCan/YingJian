@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLATFORM="${1:?platform is required}"
 VERSION_VALUE="${2:?version is required}"
 BUILD_VALUE="${3:?build is required}"
+STAGE="${4:-}"
 
 : "${RELEASE_PUBLIC_VERSION:?read the current public store version first}"
 : "${RELEASE_REMOTE_LATEST_VERSION:?read the latest uploaded marketing version first}"
@@ -17,9 +18,15 @@ ruby "$ROOT_DIR/scripts/check_legal_setup.rb"
 
 ruby "$ROOT_DIR/scripts/check_release_contract.rb" validate-config \
   --root "$ROOT_DIR"
-ruby "$ROOT_DIR/scripts/check_release_contract.rb" validate-env \
-  --root "$ROOT_DIR" \
+env_arguments=(
+  validate-env
+  --root "$ROOT_DIR"
   --platform "$PLATFORM"
+)
+if [[ -n "$STAGE" ]]; then
+  env_arguments+=(--stage "$STAGE")
+fi
+ruby "$ROOT_DIR/scripts/check_release_contract.rb" "${env_arguments[@]}"
 ruby "$ROOT_DIR/scripts/check_release_contract.rb" validate-candidate \
   --root "$ROOT_DIR" \
   --platform "$PLATFORM" \
@@ -33,3 +40,6 @@ ruby "$ROOT_DIR/scripts/check_release_contract.rb" validate-source \
   --root "$ROOT_DIR" \
   --platform "$PLATFORM" \
   --source-commit "$RELEASE_SOURCE_COMMIT"
+ruby "$ROOT_DIR/scripts/check_mvp_acceptance.rb" \
+  "$ROOT_DIR" \
+  "$RELEASE_SOURCE_COMMIT"

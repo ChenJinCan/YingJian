@@ -1,0 +1,16 @@
+schema: 1
+decision: implemented_and_validated
+authorized_terminal_stage: testflight
+source_commit: 0123456789abcdef0123456789abcdef01234567
+decided_at: 2026-08-05T00:00:00Z
+evidence:
+  image_corpus_manifest: .quality/corpus-manifest.local.yaml
+  portrait_review:
+    key_file: .quality/portrait-review/review-key.json
+    scores_file: .quality/portrait-review/completed-scores.csv
+    candidate_id: yingjian-default
+  usability_manifest: .quality/usability/ios-mvp.yaml
+  device_matrix_manifest: .quality/device-evidence/ios-mvp.yaml
+  final_report:
+    file: .quality/final-report.md
+    sha256: replace-with-64-lowercase-hex-digest

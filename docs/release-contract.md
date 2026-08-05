@@ -9,8 +9,12 @@ Every application uses the same release boundary:
    authorized terminal stage.
 3. Use a clean release worktree whose branch exactly matches its upstream.
 4. Build and sign locally. GitHub Actions is not a packaging or upload path.
-5. Verify the final artifact identity and SHA-256 before any upload.
-6. Report build, upload, processing, tester access, review, approval, and public
+5. Verify the frozen MVP acceptance manifest and every referenced evidence
+   digest before packaging.
+6. Verify the final artifact identity, distribution profile, signed
+   entitlements, required resources, Firebase identity, and SHA-256 before any
+   upload.
+7. Report build, upload, processing, tester access, review, approval, and public
    availability as separate states.
 
 `release/release-policy.yaml` is the committed, non-secret contract. It defines
@@ -19,12 +23,47 @@ Actual values live only in ignored local files based on the committed examples.
 A platform marked `release_ready: false` is intentionally blocked until its
 signing and artifact verification path is implemented.
 
+For iOS, packaging and TestFlight delivery are intentionally separate commands:
+
+```sh
+scripts/build_ios_testflight.sh <version> <build>
+scripts/upload_ios_testflight.sh \
+  <ipa-path> <artifact-report-path> <version> <build>
+```
+
+The build command is local-only. It runs the release preflight, creates one
+signed IPA with the committed App Store Connect export options, preserves any
+older IPA evidence, and records the new artifact in a candidate-specific
+ignored directory. It records a
+private artifact report after verifying the bundle ID, version, build, iOS
+baseline, permissions, Firebase configuration, provisioning profile, code
+signature, App Store distribution entitlements, source commit, and SHA-256. The upload command reruns the preflight,
+re-verifies the same IPA and SHA-256, asks Apple to validate it, uploads that
+exact package, waits on the same delivery, and requires a stable delivery ID
+plus a terminal provider-valid state. It never assigns a TestFlight group,
+claims real tester reachability, uploads store metadata, submits App Review, or
+releases the app publicly.
+
+Both commands remain fail-closed while `platforms.ios.release_ready` is false.
+Turning it true requires current signing and store-state evidence; the presence
+of these scripts alone is not release readiness. Packaging also requires the
+ignored `.quality/mvp-acceptance.yaml` to bind the exact pushed source commit to
+the image corpus gate, formal portrait score gate, usability gate, iOS device
+matrix, and final acceptance report. The acceptance checker executes the
+repository validators for those structured inputs; arbitrary self-declared
+Markdown cannot satisfy the gate. The decision expires after seven days and
+must be regenerated for the exact release source.
+
+The build stage does not require App Store Connect credentials. The upload
+stage requires the ignored API key configuration. Both stages still require
+the current store baseline and exact synchronized source identity.
+
 Version and build identity never belongs in `.env.testflight` or `.env.android`.
 After a store lookup, supply these runtime values:
 
-- `VERSION` / `BUILD_NUMBER` for iOS, or `VERSION_NAME` / `VERSION_CODE` for
-  Android. Pass them to Flutter as `--build-name` and `--build-number`; do not
-  persist them in an environment file.
+- Candidate version and build are positional wrapper arguments. They are passed
+  to Flutter as `--build-name` and `--build-number`; do not persist them in an
+  environment file.
 - `RELEASE_PUBLIC_VERSION`: current publicly available store version.
 - `RELEASE_REMOTE_LATEST_VERSION`: latest uploaded marketing version in the
   store, whether public or still in testing.
@@ -51,5 +90,9 @@ ruby scripts/check_release_contract.rb validate-config
 ```
 
 Release wrappers invoke `scripts/release_contract_preflight.sh` before signing
-or building. The preflight also rejects missing/forbidden environment variables,
-dirty worktrees, and branches ahead of, behind, or diverged from their upstream.
+or building. The preflight also rejects missing/forbidden stage-specific
+environment variables, an incomplete or stale MVP acceptance manifest, dirty
+worktrees, and branches ahead of, behind, or diverged from their upstream.
+
+The current MVP execution and validation target is iOS only. Android packaging,
+ADB, emulators, and Play delivery are outside this milestone.

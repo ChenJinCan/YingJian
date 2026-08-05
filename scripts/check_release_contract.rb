@@ -61,6 +61,14 @@ def required_string_array(mapping, key, label)
   value
 end
 
+def string_array(mapping, key, label)
+  value = mapping[key]
+  unless value.is_a?(Array) && value.all? { |entry| entry.is_a?(String) && !entry.strip.empty? }
+    fail_contract("#{label}.#{key} must be a string list")
+  end
+  value
+end
+
 def validate_policy(policy)
   fail_contract("schema_version must be 2") unless policy["schema_version"] == 2
   required_string(required_mapping(policy["app"], "app"), "id", "app")
@@ -97,6 +105,8 @@ def validate_policy(policy)
     required_string(platform, "env_example", label)
     required_string_array(platform, "required_tools", label)
     required_string_array(platform, "required_env", label)
+    string_array(platform, "build_required_env", label) if platform.key?("build_required_env")
+    string_array(platform, "upload_required_env", label) if platform.key?("upload_required_env")
     required_string_array(platform, "forbidden_env", label)
   end
 end
@@ -142,6 +152,7 @@ OptionParser.new do |parser|
   parser.on("--remote-latest-build NUMBER") { |value| options[:remote_latest_build] = value }
   parser.on("--verified-at TIMESTAMP") { |value| options[:verified_at] = value }
   parser.on("--source-commit SHA") { |value| options[:source_commit] = value }
+  parser.on("--stage NAME") { |value| options[:stage] = value }
 end.parse!
 
 root = Pathname.new(options[:root]).expand_path
@@ -160,16 +171,23 @@ when "validate-env"
   fail_contract("unsupported platform #{platform_name.inspect}") unless platform.is_a?(Hash)
   fail_contract("#{platform_name} release packaging is not ready") unless platform["release_ready"] == true
 
+  stage = options[:stage].to_s
+  fail_contract("stage must be build or upload") unless stage.empty? || %w[build upload].include?(stage)
+  required_env = if stage.empty?
+                   platform.fetch("required_env")
+                 else
+                   platform.fetch("#{stage}_required_env", platform.fetch("required_env"))
+                 end
   env_path = root.join(platform.fetch("env_file"))
-  fail_contract("missing ignored environment file #{env_path}") unless env_path.file?
+  fail_contract("missing ignored environment file #{env_path}") unless env_path.file? || required_env.empty?
 
-  entries = parse_env_file(env_path)
+  entries = env_path.file? ? parse_env_file(env_path) : {}
   platform.fetch("forbidden_env").each do |name|
     if entries.key?(name)
       fail_contract("#{env_path} must not define release identity variable #{name}")
     end
   end
-  platform.fetch("required_env").each do |name|
+  required_env.each do |name|
     value = entries[name].to_s.strip
     fail_contract("#{env_path} must define required variable #{name}") if value.empty?
   end

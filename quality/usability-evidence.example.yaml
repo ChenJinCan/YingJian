@@ -1,0 +1,47 @@
+schema: 1
+status: passed
+platform: ios
+source_commit: 0123456789abcdef0123456789abcdef01234567
+participants:
+  -
+    participant_id: replace-with-opaque-64-character-sha256
+    uncoached: true
+    physical_iphone: true
+    completed_import_to_export: true
+    understood_group_scope: true
+    recommendations_saved_effort: true
+    evidence:
+      file: session-01.json
+      sha256: replace-with-64-lowercase-hex-digest
+  -
+    participant_id: replace-with-a-different-opaque-sha256-000000000000000000000000
+    uncoached: true
+    physical_iphone: true
+    completed_import_to_export: true
+    understood_group_scope: true
+    recommendations_saved_effort: true
+    evidence: {file: session-02.json, sha256: replace-with-64-lowercase-hex-digest}
+  -
+    participant_id: replace-with-a-different-opaque-sha256-111111111111111111111111
+    uncoached: true
+    physical_iphone: true
+    completed_import_to_export: true
+    understood_group_scope: true
+    recommendations_saved_effort: true
+    evidence: {file: session-03.json, sha256: replace-with-64-lowercase-hex-digest}
+  -
+    participant_id: replace-with-a-different-opaque-sha256-222222222222222222222222
+    uncoached: true
+    physical_iphone: true
+    completed_import_to_export: true
+    understood_group_scope: true
+    recommendations_saved_effort: true
+    evidence: {file: session-04.json, sha256: replace-with-64-lowercase-hex-digest}
+  -
+    participant_id: replace-with-a-different-opaque-sha256-333333333333333333333333
+    uncoached: true
+    physical_iphone: true
+    completed_import_to_export: true
+    understood_group_scope: true
+    recommendations_saved_effort: true
+    evidence: {file: session-05.json, sha256: replace-with-64-lowercase-hex-digest}

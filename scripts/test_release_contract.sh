@@ -36,6 +36,9 @@ platforms:
       - flutter
     required_env:
       - ASC_KEY_ID
+    build_required_env: []
+    upload_required_env:
+      - ASC_KEY_ID
     forbidden_env:
       - VERSION
       - BUILD_NUMBER
@@ -57,6 +60,11 @@ ruby "$CHECKER" validate-env \
   --root "$FIXTURE_DIR" \
   --config "$FIXTURE_DIR/release/release-policy.yaml" \
   --platform ios
+ruby "$CHECKER" validate-env \
+  --root "$FIXTURE_DIR" \
+  --config "$FIXTURE_DIR/release/release-policy.yaml" \
+  --platform ios \
+  --stage build
 
 verified_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ruby "$CHECKER" validate-candidate \
@@ -189,6 +197,21 @@ expect_failure \
 mv "$FIXTURE_DIR/release/release-policy.yaml.bak" \
   "$FIXTURE_DIR/release/release-policy.yaml"
 
+rm "$FIXTURE_DIR/.env.testflight"
+ruby "$CHECKER" validate-env \
+  --root "$FIXTURE_DIR" \
+  --config "$FIXTURE_DIR/release/release-policy.yaml" \
+  --platform ios \
+  --stage build
+touch "$FIXTURE_DIR/.env.testflight"
+expect_failure \
+  "must define required variable ASC_KEY_ID" \
+  ruby "$CHECKER" validate-env \
+    --root "$FIXTURE_DIR" \
+    --config "$FIXTURE_DIR/release/release-policy.yaml" \
+    --platform ios \
+    --stage upload
+
 git -C "$FIXTURE_DIR" init -q
 git -C "$FIXTURE_DIR" config user.name "Release Contract Test"
 git -C "$FIXTURE_DIR" config user.email "release-contract@example.invalid"
@@ -214,5 +237,11 @@ expect_failure \
     --config "$FIXTURE_DIR/release/release-policy.yaml" \
     --platform ios \
     --source-commit "$source_commit"
+
+ruby "$ROOT_DIR/scripts/test_verify_ios_ipa.rb"
+ruby "$ROOT_DIR/scripts/test_mvp_acceptance.rb"
+ruby "$ROOT_DIR/scripts/test_usability_evidence.rb"
+ruby "$ROOT_DIR/scripts/test_altool_delivery.rb"
+ruby "$ROOT_DIR/scripts/test_ios_testflight_workflow.rb"
 
 echo "Release contract tests passed."
