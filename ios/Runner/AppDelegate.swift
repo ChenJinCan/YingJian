@@ -12,12 +12,40 @@ private enum PhotoInputInspectionError: Error {
 
 /// Production eligibility remains closed until the portrait candidate passes
 /// the frozen corpus, competitor comparison, and blind-review gates in ADR 0002.
+struct IOSPortraitCapabilityStatus: Equatable {
+  let applicability: String
+  let reason: String
+}
+
 enum IOSPortraitCapabilityPolicy {
   static let productionEligible = false
 
-  static func applicability(hasFace: Bool) -> String {
-    guard hasFace else { return "unavailable" }
-    return productionEligible ? "applicable" : "unsafe"
+  static func classify(_ decision: IOSPortraitSafetyDecision) -> IOSPortraitCapabilityStatus {
+    guard decision.applicable else {
+      let applicability = decision.reason == .noFace ? "unavailable" : "unsafe"
+      return IOSPortraitCapabilityStatus(
+        applicability: applicability,
+        reason: reasonName(decision.reason)
+      )
+    }
+    guard productionEligible else {
+      return IOSPortraitCapabilityStatus(
+        applicability: "unsafe",
+        reason: "capabilityLocked"
+      )
+    }
+    return IOSPortraitCapabilityStatus(applicability: "applicable", reason: "none")
+  }
+
+  private static func reasonName(_ reason: IOSPortraitDegradationReason) -> String {
+    switch reason {
+    case .none: return "none"
+    case .noFace: return "noFace"
+    case .multipleFaces: return "multipleFaces"
+    case .lowConfidence: return "lowConfidence"
+    case .faceTooSmall: return "faceTooSmall"
+    case .landmarksUnavailable: return "landmarksUnavailable"
+    }
   }
 }
 
@@ -466,19 +494,59 @@ enum IOSPortraitCapabilityPolicy {
       clarity = "clear"
     }
 
-    let faceRequest = VNDetectFaceRectanglesRequest()
-    let handler = VNImageRequestHandler(cgImage: image, orientation: .up)
-    try? handler.perform([faceRequest])
-    let hasFace = !(faceRequest.results ?? []).isEmpty
+    let portraitStatus: IOSPortraitCapabilityStatus
+    let faceCount: Int
+    let landmarkRequest = VNDetectFaceLandmarksRequest()
+    do {
+      let handler = VNImageRequestHandler(cgImage: image, orientation: .up)
+      try handler.perform([landmarkRequest])
+      let observations = landmarkRequest.results ?? []
+      faceCount = observations.count
+      portraitStatus = IOSPortraitCapabilityPolicy.classify(
+        IOSPortraitSafetyPolicy.evaluate(observations)
+      )
+    } catch {
+      // Vision landmarks can be unavailable for low-information inputs and in
+      // some simulator runtimes. A rectangle pass can still distinguish a
+      // confirmed no-face input from a face whose landmarks are unavailable.
+      let rectangleRequest = VNDetectFaceRectanglesRequest()
+      let handler = VNImageRequestHandler(cgImage: image, orientation: .up)
+      do {
+        try handler.perform([rectangleRequest])
+        let observations = rectangleRequest.results ?? []
+        faceCount = observations.count
+        if let face = observations.first {
+          portraitStatus = IOSPortraitCapabilityPolicy.classify(
+            IOSPortraitSafetyPolicy.evaluate(
+              faceCount: observations.count,
+              confidence: face.confidence,
+              boundingBox: face.boundingBox,
+              hasLandmarks: false
+            )
+          )
+        } else {
+          portraitStatus = IOSPortraitCapabilityPolicy.classify(
+            IOSPortraitSafetyDecision(applicable: false, reason: .noFace)
+          )
+        }
+      } catch {
+        faceCount = 0
+        portraitStatus = IOSPortraitCapabilityStatus(
+          applicability: "unavailable",
+          reason: "capabilityUnavailable"
+        )
+      }
+    }
     return [
       "analysisVersion": "local-pixels-v1",
-      "capabilityVersion": "ios-core-image-vision-v2-portrait-locked",
+      "capabilityVersion": "ios-core-image-vision-v3-portrait-locked",
       "confidence": "medium",
       "exposure": exposure,
       "whiteBalance": whiteBalance,
       "clarity": clarity,
-      "portrait": IOSPortraitCapabilityPolicy.applicability(hasFace: hasFace),
-      "scene": hasFace ? "people" : "unknown",
+      "portrait": portraitStatus.applicability,
+      "portraitReason": portraitStatus.reason,
+      "scene": faceCount == 0 ? "unknown" : "people",
     ]
   }
 

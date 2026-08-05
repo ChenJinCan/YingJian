@@ -167,17 +167,32 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(result["clarity"] as? String, "blurred")
     XCTAssertEqual(result["scene"] as? String, "unknown")
     XCTAssertEqual(result["portrait"] as? String, "unavailable")
+    XCTAssertTrue(
+      ["noFace", "capabilityUnavailable"].contains(
+        try XCTUnwrap(result["portraitReason"] as? String)
+      )
+    )
   }
 
   func testUnfrozenPortraitCandidateIsNeverReportedAsProductionApplicable() {
     XCTAssertFalse(IOSPortraitCapabilityPolicy.productionEligible)
     XCTAssertEqual(
-      IOSPortraitCapabilityPolicy.applicability(hasFace: false),
-      "unavailable"
+      IOSPortraitCapabilityPolicy.classify(
+        IOSPortraitSafetyDecision(applicable: false, reason: .noFace)
+      ),
+      IOSPortraitCapabilityStatus(applicability: "unavailable", reason: "noFace")
     )
     XCTAssertEqual(
-      IOSPortraitCapabilityPolicy.applicability(hasFace: true),
-      "unsafe"
+      IOSPortraitCapabilityPolicy.classify(
+        IOSPortraitSafetyDecision(applicable: false, reason: .multipleFaces)
+      ),
+      IOSPortraitCapabilityStatus(applicability: "unsafe", reason: "multipleFaces")
+    )
+    XCTAssertEqual(
+      IOSPortraitCapabilityPolicy.classify(
+        IOSPortraitSafetyDecision(applicable: true, reason: .none)
+      ),
+      IOSPortraitCapabilityStatus(applicability: "unsafe", reason: "capabilityLocked")
     )
   }
 

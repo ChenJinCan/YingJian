@@ -33,12 +33,13 @@ void main() {
             captured = call;
             return <String, Object>{
               'analysisVersion': 'local-pixels-v1',
-              'capabilityVersion': 'ios-core-image-vision-v2-portrait-locked',
+              'capabilityVersion': 'ios-core-image-vision-v3-portrait-locked',
               'confidence': 'medium',
               'exposure': 'underexposed',
               'whiteBalance': 'coolCast',
               'clarity': 'clear',
-              'portrait': 'unavailable',
+              'portrait': 'unsafe',
+              'portraitReason': 'capabilityLocked',
               'scene': 'people',
             };
           });
@@ -54,11 +55,13 @@ void main() {
       expect(result.usesSafeFallback, isFalse);
       expect(
         result.capabilityVersion,
-        'ios-core-image-vision-v2-portrait-locked',
+        'ios-core-image-vision-v3-portrait-locked',
       );
       expect(result.exposure.name, 'underexposed');
       expect(result.whiteBalance.name, 'coolCast');
       expect(result.scene.name, 'people');
+      expect(result.portrait.name, 'unsafe');
+      expect(result.portraitReason.name, 'capabilityLocked');
       expect(result.matchesInput(photo), isTrue);
     },
   );
@@ -69,6 +72,31 @@ void main() {
           channel,
           (_) => throw PlatformException(code: 'analysisUnavailable'),
         );
+
+    final result = await const MethodChannelPhotoAnalyzer(
+      channel: channel,
+      nativeAnalysisAvailable: true,
+    ).analyze(photo);
+
+    expect(result.usesSafeFallback, isTrue);
+    expect(result.fallbackReason.name, 'capabilityUnavailable');
+  });
+
+  test('unknown portrait degradation reason falls back safely', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (_) async {
+          return <String, Object>{
+            'analysisVersion': 'local-pixels-v1',
+            'capabilityVersion': 'ios-core-image-vision-v3-portrait-locked',
+            'confidence': 'medium',
+            'exposure': 'balanced',
+            'whiteBalance': 'balanced',
+            'clarity': 'clear',
+            'portrait': 'unsafe',
+            'portraitReason': 'unexpectedReason',
+            'scene': 'people',
+          };
+        });
 
     final result = await const MethodChannelPhotoAnalyzer(
       channel: channel,
@@ -139,6 +167,7 @@ void main() {
             'whiteBalance': 'warmCast',
             'clarity': 'soft',
             'portrait': 'unavailable',
+            'portraitReason': 'capabilityUnavailable',
             'scene': 'unknown',
           };
         });
@@ -152,6 +181,7 @@ void main() {
 
     expect(result.usesSafeFallback, isFalse);
     expect(result.capabilityVersion, 'android-bitmap-face-v1');
+    expect(result.portraitReason.name, 'capabilityUnavailable');
     expect(analyzer.identityFor(photo).matches(result), isTrue);
   });
 }

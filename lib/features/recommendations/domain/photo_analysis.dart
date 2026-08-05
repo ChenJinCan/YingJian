@@ -22,6 +22,17 @@ enum ClarityCondition { unknown, clear, soft, blurred }
 
 enum PortraitApplicability { unavailable, unsafe, applicable }
 
+enum PortraitDegradationReason {
+  none,
+  noFace,
+  multipleFaces,
+  lowConfidence,
+  faceTooSmall,
+  landmarksUnavailable,
+  capabilityLocked,
+  capabilityUnavailable,
+}
+
 enum SceneKind { unknown, people, landscape, food, night }
 
 @immutable
@@ -56,6 +67,7 @@ class LocalPhotoAnalysis {
     this.whiteBalance = WhiteBalanceCondition.unknown,
     this.clarity = ClarityCondition.unknown,
     this.portrait = PortraitApplicability.unavailable,
+    this.portraitReason = PortraitDegradationReason.none,
     this.scene = SceneKind.unknown,
   });
 
@@ -73,6 +85,7 @@ class LocalPhotoAnalysis {
   final WhiteBalanceCondition whiteBalance;
   final ClarityCondition clarity;
   final PortraitApplicability portrait;
+  final PortraitDegradationReason portraitReason;
   final SceneKind scene;
 
   String get cacheIdentity => [
@@ -103,6 +116,7 @@ class LocalPhotoAnalysis {
     'whiteBalance': whiteBalance.name,
     'clarity': clarity.name,
     'portrait': portrait.name,
+    'portraitReason': portraitReason.name,
     'scene': scene.name,
   };
 
@@ -141,6 +155,9 @@ class LocalPhotoAnalysis {
       whiteBalance: enumValue('whiteBalance', WhiteBalanceCondition.values),
       clarity: enumValue('clarity', ClarityCondition.values),
       portrait: enumValue('portrait', PortraitApplicability.values),
+      portraitReason: json['portraitReason'] == null
+          ? PortraitDegradationReason.none
+          : enumValue('portraitReason', PortraitDegradationReason.values),
       scene: enumValue('scene', SceneKind.values),
     );
   }
@@ -175,6 +192,7 @@ class LocalPhotoAnalysis {
       other.whiteBalance == whiteBalance &&
       other.clarity == clarity &&
       other.portrait == portrait &&
+      other.portraitReason == portraitReason &&
       other.scene == scene;
 
   @override
@@ -193,6 +211,7 @@ class LocalPhotoAnalysis {
     whiteBalance,
     clarity,
     portrait,
+    portraitReason,
     scene,
   );
 }

@@ -24,7 +24,7 @@ final class MethodChannelPhotoAnalyzer implements PhotoAnalyzer {
       nativeCapabilityVersion ??
       (Platform.isAndroid
           ? 'android-bitmap-face-v1'
-          : 'ios-core-image-vision-v2-portrait-locked');
+          : 'ios-core-image-vision-v3-portrait-locked');
 
   @override
   PhotoAnalysisEngineIdentity identityFor(ProjectPhoto photo) {
@@ -67,6 +67,9 @@ final class MethodChannelPhotoAnalyzer implements PhotoAnalyzer {
         whiteBalance: _enum(raw['whiteBalance'], WhiteBalanceCondition.values),
         clarity: _enum(raw['clarity'], ClarityCondition.values),
         portrait: _enum(raw['portrait'], PortraitApplicability.values),
+        portraitReason: raw['portraitReason'] == null
+            ? PortraitDegradationReason.none
+            : _enum(raw['portraitReason'], PortraitDegradationReason.values),
         scene: _enum(raw['scene'], SceneKind.values),
       );
       return analysis.matchesInput(photo) &&

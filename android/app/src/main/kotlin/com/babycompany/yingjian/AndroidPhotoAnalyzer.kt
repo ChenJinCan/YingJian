@@ -39,6 +39,7 @@ internal object AndroidPhotoAnalyzer {
                 "whiteBalance" to analysis.whiteBalance,
                 "clarity" to analysis.clarity,
                 "portrait" to "unavailable",
+                "portraitReason" to "capabilityUnavailable",
                 "scene" to if (hasFace(bitmap)) "people" else "unknown",
             )
         } finally {

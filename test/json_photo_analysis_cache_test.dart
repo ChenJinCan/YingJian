@@ -43,6 +43,7 @@ void main() {
         whiteBalance: WhiteBalanceCondition.coolCast,
         clarity: ClarityCondition.clear,
         portrait: PortraitApplicability.applicable,
+        portraitReason: PortraitDegradationReason.none,
         scene: SceneKind.people,
       );
       final writer = JsonPhotoAnalysisCache(directory: () async => root);
@@ -106,6 +107,7 @@ void main() {
         whiteBalance: WhiteBalanceCondition.balanced,
         clarity: ClarityCondition.clear,
         portrait: PortraitApplicability.unavailable,
+        portraitReason: PortraitDegradationReason.capabilityUnavailable,
         scene: SceneKind.landscape,
       );
       final replacementWrite = await reader.stage(
@@ -178,4 +180,25 @@ void main() {
       );
     },
   );
+
+  test('reads legacy analysis without a portrait degradation reason', () {
+    const analysis = LocalPhotoAnalysis(
+      analysisVersion: 'metadata-safe-v1',
+      capabilityVersion: 'metadata-only',
+      contentSha256:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      orientation: 1,
+      pixelWidth: 100,
+      pixelHeight: 100,
+      colorSpace: PhotoColorSpace.srgb,
+      disposition: PhotoAnalysisDisposition.safeFallback,
+      fallbackReason: AnalysisFallbackReason.capabilityUnavailable,
+    );
+    final legacyJson = analysis.toJson()..remove('portraitReason');
+
+    expect(
+      LocalPhotoAnalysis.fromJson(legacyJson).portraitReason,
+      PortraitDegradationReason.none,
+    );
+  });
 }

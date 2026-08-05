@@ -371,6 +371,7 @@ class AndroidPhotoExporterInstrumentedTest {
             assertEquals("coolCast", result["whiteBalance"])
             assertEquals("blurred", result["clarity"])
             assertEquals("unavailable", result["portrait"])
+            assertEquals("capabilityUnavailable", result["portraitReason"])
         } finally {
             source.delete()
         }
