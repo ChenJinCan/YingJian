@@ -161,6 +161,7 @@ void main() {
       find.byKey(const ValueKey('recommendation-use')).hitTestable(),
       findsOneWidget,
     );
+    expect(previewRenderer.portraitStrengths, contains(0.35));
 
     final useRecommendation = find.byKey(const ValueKey('recommendation-use'));
     await tester.ensureVisible(useRecommendation);
@@ -171,6 +172,13 @@ void main() {
       (await store.loadLatest())?.flowState,
       PhotoProjectFlowState.editing,
     );
+    expect(
+      (await store.loadLatest())
+          ?.effectiveRecipeFor(importedPhoto.id)
+          .portraitStrength,
+      0.35,
+    );
+    expect(previewRenderer.portraitStrengths.last, 0.35);
     expect(
       find.byKey(const ValueKey('editor-batch-export')).hitTestable(),
       findsOneWidget,
@@ -456,6 +464,7 @@ final class _NativePreviewProbe implements PhotoPreviewRenderer {
 
   final PhotoPreviewRenderer delegate;
   final List<String> backends = [];
+  final List<double> portraitStrengths = [];
   int updateCount = 0;
   int disposeCount = 0;
 
@@ -471,6 +480,7 @@ final class _NativePreviewProbe implements PhotoPreviewRenderer {
       maxEdge: maxEdge,
     );
     backends.add(handle.backend);
+    portraitStrengths.add(_portraitStrength(pipeline));
     return handle;
   }
 
@@ -480,6 +490,7 @@ final class _NativePreviewProbe implements PhotoPreviewRenderer {
     required ImagePipeline pipeline,
   }) async {
     await delegate.update(handle: handle, pipeline: pipeline);
+    portraitStrengths.add(_portraitStrength(pipeline));
     updateCount += 1;
   }
 
@@ -487,6 +498,12 @@ final class _NativePreviewProbe implements PhotoPreviewRenderer {
   Future<void> dispose(PhotoPreviewHandle handle) async {
     await delegate.dispose(handle);
     disposeCount += 1;
+  }
+
+  double _portraitStrength(ImagePipeline pipeline) {
+    final arguments = pipeline.toPlatformArguments();
+    final portrait = arguments['portrait']! as Map<String, Object>;
+    return (portrait['strength']! as num).toDouble();
   }
 }
 

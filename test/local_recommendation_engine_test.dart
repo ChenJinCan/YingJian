@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/recommendations/application/local_recommendation_coordinator.dart';
 import 'package:yingjian/features/recommendations/application/photo_analysis_cache.dart';
@@ -186,6 +187,77 @@ void main() {
         first.first.adaptiveCompensations['photo-1']!.recipe.warmth,
         -0.08,
       );
+    },
+  );
+
+  test(
+    'applicable portraits receive a restrained per-photo retouch recommendation',
+    () {
+      const secondPhoto = ProjectPhoto(
+        id: 'photo-2',
+        localPath: '/private/project/photo-2.jpg',
+        originalName: 'photo-2.jpg',
+        contentSha256:
+            'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        pixelWidth: 4032,
+        pixelHeight: 3024,
+        colorSpace: PhotoColorSpace.srgb,
+        inputFormat: PhotoInputFormat.jpeg,
+        supportState: PhotoSupportState.supported,
+      );
+      const applicable = LocalPhotoAnalysis(
+        analysisVersion: 'native-v1',
+        capabilityVersion: 'core-image-v1',
+        contentSha256: hash,
+        orientation: 1,
+        pixelWidth: 4032,
+        pixelHeight: 3024,
+        colorSpace: PhotoColorSpace.srgb,
+        disposition: PhotoAnalysisDisposition.ready,
+        fallbackReason: AnalysisFallbackReason.none,
+        confidence: AnalysisConfidence.high,
+        portrait: PortraitApplicability.applicable,
+        portraitReason: PortraitDegradationReason.none,
+        scene: SceneKind.people,
+      );
+      const unavailable = LocalPhotoAnalysis(
+        analysisVersion: 'native-v1',
+        capabilityVersion: 'core-image-v1',
+        contentSha256:
+            'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        orientation: 1,
+        pixelWidth: 4032,
+        pixelHeight: 3024,
+        colorSpace: PhotoColorSpace.srgb,
+        disposition: PhotoAnalysisDisposition.ready,
+        fallbackReason: AnalysisFallbackReason.none,
+        confidence: AnalysisConfidence.high,
+        portrait: PortraitApplicability.unavailable,
+        portraitReason: PortraitDegradationReason.noFace,
+      );
+
+      final recommendation = LocalRecommendationEngine()
+          .recommend(
+            photos: const [photo, secondPhoto],
+            analyses: const {'photo-1': applicable, 'photo-2': unavailable},
+          )
+          .first;
+      final project = PhotoProject(
+        id: 'portrait-recommendation',
+        createdAt: DateTime.utc(2026, 8, 5),
+        updatedAt: DateTime.utc(2026, 8, 5),
+        photos: const [photo, secondPhoto],
+        sharedStyle: recommendation.sharedStyle,
+        adaptiveCompensations: recommendation.adaptiveCompensations,
+      );
+
+      expect(project.effectiveRecipeFor(photo.id).portraitStrength, 0.35);
+      expect(project.effectiveRecipeFor(secondPhoto.id).portraitStrength, 0);
+
+      final userDisabled = project.copyWith(
+        photoOverrides: {photo.id: PhotoOverride(recipe: EditRecipe.neutral)},
+      );
+      expect(userDisabled.effectiveRecipeFor(photo.id).portraitStrength, 0);
     },
   );
 

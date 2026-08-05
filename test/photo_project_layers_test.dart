@@ -126,6 +126,7 @@ void main() {
           source: AdaptiveCompensationSource.localAnalysisV1,
           safeSharedIntensity: 0.4,
           skinProtection: 0.75,
+          portraitStrength: 0.35,
           recipe: EditRecipe(exposure: -0.1),
         ),
       },
@@ -133,7 +134,7 @@ void main() {
 
     expect(
       project.effectiveRecipeFor(first.id),
-      EditRecipe(exposure: 0.1, warmth: 0.2),
+      EditRecipe(exposure: 0.1, warmth: 0.2, portraitStrength: 0.35),
     );
     expect(
       project.effectiveRecipeFor(second.id),
@@ -148,6 +149,10 @@ void main() {
     expect(
       restored.adaptiveCompensations[first.id]?.skinProtection,
       closeTo(0.75, 1e-12),
+    );
+    expect(
+      restored.adaptiveCompensations[first.id]?.portraitStrength,
+      closeTo(0.35, 1e-12),
     );
   });
 

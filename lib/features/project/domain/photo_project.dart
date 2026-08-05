@@ -364,14 +364,17 @@ class AdaptiveCompensation {
     required AdaptiveCompensationSource source,
     double safeSharedIntensity = 1,
     double skinProtection = 0,
+    double portraitStrength = 0,
   }) {
     _validateUnitValue(safeSharedIntensity, 'safeSharedIntensity');
     _validateUnitValue(skinProtection, 'skinProtection');
+    _validateUnitValue(portraitStrength, 'portraitStrength');
     return AdaptiveCompensation._(
       recipe: recipe,
       source: source,
       safeSharedIntensity: safeSharedIntensity,
       skinProtection: skinProtection,
+      portraitStrength: portraitStrength,
     );
   }
 
@@ -380,18 +383,21 @@ class AdaptiveCompensation {
     required this.source,
     required this.safeSharedIntensity,
     required this.skinProtection,
+    required this.portraitStrength,
   });
 
   final EditRecipe recipe;
   final AdaptiveCompensationSource source;
   final double safeSharedIntensity;
   final double skinProtection;
+  final double portraitStrength;
 
   Map<String, Object> toJson() => {
     'recipe': recipe.toJson(),
     'source': source.name,
     'safeSharedIntensity': safeSharedIntensity,
     'skinProtection': skinProtection,
+    'portraitStrength': portraitStrength,
   };
 
   factory AdaptiveCompensation.fromJson(Map<String, Object?> json) {
@@ -407,6 +413,7 @@ class AdaptiveCompensation {
       safeSharedIntensity:
           (json['safeSharedIntensity'] as num?)?.toDouble() ?? 1,
       skinProtection: (json['skinProtection'] as num?)?.toDouble() ?? 0,
+      portraitStrength: (json['portraitStrength'] as num?)?.toDouble() ?? 0,
     );
   }
 
@@ -416,11 +423,17 @@ class AdaptiveCompensation {
       other.recipe == recipe &&
       other.source == source &&
       other.safeSharedIntensity == safeSharedIntensity &&
-      other.skinProtection == skinProtection;
+      other.skinProtection == skinProtection &&
+      other.portraitStrength == portraitStrength;
 
   @override
-  int get hashCode =>
-      Object.hash(recipe, source, safeSharedIntensity, skinProtection);
+  int get hashCode => Object.hash(
+    recipe,
+    source,
+    safeSharedIntensity,
+    skinProtection,
+    portraitStrength,
+  );
 }
 
 void _validateUnitValue(double value, String name) {
@@ -841,7 +854,8 @@ class PhotoProject {
       ),
       // Portrait retouch is deliberately a per-photo semantic adjustment. It
       // must not inherit from or be promoted into the group's shared style.
-      portraitStrength: override?.portraitStrength ?? 0,
+      portraitStrength:
+          override?.portraitStrength ?? adaptiveLayer?.portraitStrength ?? 0,
       crop: photoOverride != null || photoOverrides.containsKey(photoId)
           ? override!.crop
           : shared.crop,

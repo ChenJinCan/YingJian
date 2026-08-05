@@ -1025,7 +1025,11 @@ class RunnerTests: XCTestCase {
     let sourceTexture = neighborDifference(sourceBytes, width: 96, height: 96)
     let defaultTexture = neighborDifference(defaultBytes, width: 96, height: 96)
     let highTexture = neighborDifference(highBytes, width: 96, height: 96)
-    XCTAssertLessThan(defaultTexture, sourceTexture * 0.9)
+    XCTAssertLessThan(
+      defaultTexture,
+      sourceTexture * 0.8,
+      "Default retouch must visibly soften low-contrast skin texture without relying on relighting"
+    )
     XCTAssertLessThan(highTexture, defaultTexture)
   }
 

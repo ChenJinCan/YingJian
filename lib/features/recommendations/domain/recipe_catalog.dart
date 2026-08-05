@@ -388,6 +388,9 @@ final class LocalRecommendationEngine {
       skinProtection: analysis.portrait == PortraitApplicability.applicable
           ? 1
           : 0,
+      portraitStrength: analysis.portrait == PortraitApplicability.applicable
+          ? 0.35
+          : 0,
     );
   }
 

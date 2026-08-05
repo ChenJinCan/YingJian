@@ -273,6 +273,7 @@ void main() {
             'photo-2': AdaptiveCompensation(
               source: AdaptiveCompensationSource.safeFallbackV1,
               recipe: EditRecipe(exposure: -0.1),
+              portraitStrength: 0.35,
             ),
           },
         );
@@ -287,6 +288,24 @@ void main() {
           session.project?.adaptiveCompensations['photo-2']?.recipe,
           EditRecipe(exposure: -0.1),
         );
+        await session.setEditingScope(
+          ProjectEditingScope.currentPhoto,
+          photoId: 'photo-2',
+        );
+        expect(session.editableRecipe.portraitStrength, 0.35);
+        expect(
+          session
+              .previewRecipeFor('photo-2', session.editableRecipe)
+              .portraitStrength,
+          0.35,
+        );
+
+        await session.commitEdit(EditRecipe.neutral);
+        expect(session.effectiveRecipeFor('photo-2').portraitStrength, 0);
+        expect(session.project?.photoOverrides, contains('photo-2'));
+
+        await session.undoEdit();
+        expect(session.effectiveRecipeFor('photo-2').portraitStrength, 0.35);
         expect(store.savedProject, session.project);
       },
     );

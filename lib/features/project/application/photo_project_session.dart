@@ -114,7 +114,7 @@ class PhotoProjectSession extends ChangeNotifier {
       return current.sharedStyle.recipe;
     }
     final photoId = current.focusPhotoId ?? current.photos.first.id;
-    return current.photoOverrides[photoId]?.recipe ?? EditRecipe.neutral;
+    return _editablePhotoRecipe(current, photoId);
   }
 
   EditRecipe effectiveRecipeFor(String photoId) {
@@ -322,7 +322,7 @@ class PhotoProjectSession extends ChangeNotifier {
         : null;
     final beforeRecipe = photoId == null
         ? current.sharedStyle.recipe
-        : current.photoOverrides[photoId]?.recipe ?? EditRecipe.neutral;
+        : _editablePhotoRecipe(current, photoId);
     if (beforeRecipe == recipe) return;
     final operation = ProjectEditOperation(
       scope: current.editingScope,
@@ -620,7 +620,7 @@ class PhotoProjectSession extends ChangeNotifier {
       final photoId = operation.photoId!;
       final overrides = Map.of(current.photoOverrides);
       if (syncedPhotoOverride == null ||
-          syncedPhotoOverride == EditRecipe.neutral) {
+          _canRemovePhotoOverride(current, photoId, syncedPhotoOverride)) {
         overrides.remove(photoId);
       } else {
         overrides[photoId] = PhotoOverride(recipe: syncedPhotoOverride);
@@ -663,7 +663,7 @@ class PhotoProjectSession extends ChangeNotifier {
 
     final photoId = operation.photoId!;
     final overrides = Map.of(current.photoOverrides);
-    if (recipe == EditRecipe.neutral) {
+    if (_canRemovePhotoOverride(current, photoId, recipe)) {
       overrides.remove(photoId);
     } else {
       overrides[photoId] = PhotoOverride(recipe: recipe);
@@ -685,6 +685,23 @@ class PhotoProjectSession extends ChangeNotifier {
     _project = next;
     notifyListeners();
   }
+
+  EditRecipe _editablePhotoRecipe(PhotoProject project, String photoId) {
+    final stored = project.photoOverrides[photoId]?.recipe;
+    if (stored != null) return stored;
+    return EditRecipe(
+      portraitStrength:
+          project.adaptiveCompensations[photoId]?.portraitStrength ?? 0,
+    );
+  }
+
+  bool _canRemovePhotoOverride(
+    PhotoProject project,
+    String photoId,
+    EditRecipe recipe,
+  ) =>
+      recipe == EditRecipe.neutral &&
+      (project.adaptiveCompensations[photoId]?.portraitStrength ?? 0) == 0;
 
   PhotoProject _requirePhoto(String photoId) {
     final current = _project;
