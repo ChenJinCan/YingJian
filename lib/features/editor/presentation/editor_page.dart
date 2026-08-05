@@ -686,6 +686,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                 child: Text(context.l10n.cancel),
               ),
               FilledButton(
+                key: const ValueKey('export-confirm'),
                 onPressed: () => Navigator.pop(context, true),
                 child: Text(context.l10n.startExport),
               ),
@@ -888,6 +889,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                   )
                   .effectiveRecipeFor(photos[_selectedIndex].id);
         return Scaffold(
+          key: const ValueKey('editor-page'),
           appBar: AppBar(
             title: Text(context.l10n.editorTitle),
             actions: photos.isEmpty
@@ -1061,6 +1063,7 @@ class _EmptyProject extends StatelessWidget {
               liveRegion: busy,
               label: busy ? context.l10n.importingPhotos : null,
               child: FilledButton.icon(
+                key: const ValueKey('editor-select-photos'),
                 onPressed: busy ? null : onImport,
                 icon: busy
                     ? const SizedBox.square(
@@ -1424,6 +1427,7 @@ class _PhotoWorkspace extends StatelessWidget {
           liveRegion: exporting,
           label: exporting ? context.l10n.exportingPhotos : null,
           child: FilledButton.icon(
+            key: const ValueKey('editor-batch-export'),
             onPressed:
                 interactionsBlocked ||
                     !editingEnabled ||
@@ -1697,6 +1701,7 @@ class _RecommendationPanel extends StatelessWidget {
             SizedBox(
               width: double.infinity,
               child: FilledButton(
+                key: const ValueKey('recommendation-use'),
                 onPressed: () => onSelected(selected),
                 child: Text(context.l10n.useThisLook),
               ),

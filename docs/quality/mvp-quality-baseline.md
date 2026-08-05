@@ -404,8 +404,10 @@ ruby scripts/test_portrait_review_plan_tools.rb
 ruby scripts/test_blind_review_tools.rb
 ruby scripts/check_device_evidence.rb --allow-incomplete
 ruby scripts/test_device_evidence.rb
+scripts/test_ios_mvp_integration.sh <booted-ios-simulator-id>
 ```
 
 第一条只检查当前清单结构，第二条是完整门禁；在样片缺失时第二条必须失败。
+最后一条从正式首页路由进入编辑器，在 iOS Flutter 运行时完成“导入已有图片 → 本地推荐 → 导出”主旅程；系统相册和文件保存边界使用确定性替身。运行器结束时会恢复正常 `lib/main.dart` 构建目标，避免 Flutter 的临时 test listener 污染后续 Xcode 验证。它是模拟器工程证据，不能代替本章要求的 Profile/Release 物理设备矩阵。
 匿名包构建、评分表字段和人像冻结门见[本地匿名图片评审工作流](blind-review-workflow.md)。
 iOS 三档 Profile/Release 原始测量、产物回查和生命周期门见[物理设备性能与生命周期证据工作流](device-evidence-workflow.md)。

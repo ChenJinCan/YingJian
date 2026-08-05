@@ -116,6 +116,7 @@ class _HomePageState extends State<HomePage> {
                           ),
                           const SizedBox(height: 16),
                           FilledButton(
+                            key: const ValueKey('home-start-editing'),
                             onPressed: _openEditor,
                             child: Text(context.l10n.startEditing),
                           ),
@@ -131,6 +132,7 @@ class _HomePageState extends State<HomePage> {
                       )
                     else
                       FilledButton(
+                        key: const ValueKey('home-start-editing'),
                         onPressed: _openEditor,
                         child: Text(context.l10n.startEditing),
                       ),

@@ -316,6 +316,8 @@ The main acceptance seam is one observable journey:
 
 This seam must also assert that the default journey creates no cloud image task. Tests observe user-visible behavior, saved project state, declared engine requests and exported results; they do not bind to individual widgets, shaders, native classes or SDK objects.
 
+The production home-to-editor path is additionally exercised by `integration_test/ios_mvp_journey_test.dart` through `scripts/test_ios_mvp_integration.sh` on an iOS Simulator. It proves the Flutter runtime navigation and core interaction contract with deterministic system-boundary fakes; it does not satisfy physical-device image-quality, performance, PhotoKit or sharing gates.
+
 ### Product-state tests
 
 - Import limit, invalid-input isolation and project deletion.
