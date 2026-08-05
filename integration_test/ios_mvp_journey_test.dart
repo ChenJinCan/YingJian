@@ -97,6 +97,15 @@ void main() {
       'media/ios-runtime-photo.png',
     );
     expect(find.text('自然干净'), findsOneWidget);
+    expect(find.byKey(const ValueKey('editor-preview-stage')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('editor-bottom-command-bar')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('recommendation-use')).hitTestable(),
+      findsOneWidget,
+    );
 
     final useRecommendation = find.byKey(const ValueKey('recommendation-use'));
     await tester.ensureVisible(useRecommendation);
@@ -106,6 +115,10 @@ void main() {
     expect(
       (await store.loadLatest())?.flowState,
       PhotoProjectFlowState.editing,
+    );
+    expect(
+      find.byKey(const ValueKey('editor-batch-export')).hitTestable(),
+      findsOneWidget,
     );
 
     final workspace = find.byKey(const ValueKey('photo-workspace-scroll'));

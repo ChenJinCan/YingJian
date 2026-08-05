@@ -888,6 +888,16 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                         previewRecommendation.adaptiveCompensations,
                   )
                   .effectiveRecipeFor(photos[_selectedIndex].id);
+        final editingEnabled =
+            session.canEdit && !_sharing && _exportSummary == null;
+        final recommendationFlow =
+            session.flowState == PhotoProjectFlowState.analyzing ||
+            session.flowState == PhotoProjectFlowState.choosingRecommendation;
+        final hasPhotosReadyToExport =
+            session.project?.exportStates.values.any(
+              (state) => state == PhotoExportState.notQueued,
+            ) ??
+            false;
         return Scaffold(
           key: const ValueKey('editor-page'),
           appBar: AppBar(
@@ -904,6 +914,33 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                     ),
                   ],
           ),
+          bottomNavigationBar:
+              photos.isEmpty ||
+                  session.isRestoring ||
+                  session.restoreError != null
+              ? null
+              : _EditorCommandBar(
+                  recommendationFlow: recommendationFlow,
+                  preparingRecommendations: _preparingRecommendations,
+                  selectedRecommendation: previewRecommendation,
+                  editingEnabled: editingEnabled,
+                  canUndo: session.canUndo,
+                  canRedo: session.canRedo,
+                  isEdited: _editorSession.isEdited,
+                  exporting: _exporting,
+                  sharing: _sharing,
+                  exportSummary: _exportSummary,
+                  hasPhotosReadyToExport: hasPhotosReadyToExport,
+                  photoCount: photos.length,
+                  onUndo: () => unawaited(_undoEdit()),
+                  onRedo: () => unawaited(_redoEdit()),
+                  onReset: () => unawaited(_resetEdit()),
+                  onRecommendationSelected: (recommendation) =>
+                      unawaited(_selectRecommendation(recommendation)),
+                  onExport: () => unawaited(_exportBatch()),
+                  onCancelExport: _cancelBatchExport,
+                  onContinueEditing: () => unawaited(_continueEditing()),
+                ),
           body: SafeArea(
             child: session.isRestoring
                 ? Semantics(
@@ -926,8 +963,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                     selectedIndex: _selectedIndex,
                     busy: _busy,
                     exporting: _exporting,
-                    editingEnabled:
-                        session.canEdit && !_sharing && _exportSummary == null,
+                    editingEnabled: editingEnabled,
                     previewRecipe: previewRecipe,
                     flowState: session.flowState,
                     preparingRecommendations: _preparingRecommendations,
@@ -940,8 +976,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                             PortraitApplicability.applicable &&
                         session.project!.editingScope ==
                             ProjectEditingScope.currentPhoto,
-                    canUndo: session.canUndo,
-                    canRedo: session.canRedo,
                     canSyncCurrentPhoto:
                         session.canSyncCurrentPhotoAdjustmentsToGroup,
                     photoStripController: _photoStripController ??=
@@ -955,24 +989,16 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                     onRemove: (photo) => unawaited(_removePhoto(photo)),
                     onImport: _importPhotos,
                     exportSummary: _exportSummary,
-                    onExport: () => unawaited(_exportBatch()),
-                    onCancelExport: _cancelBatchExport,
                     onRetryExport: () =>
                         unawaited(_exportBatch(retryFailuresOnly: true)),
                     sharing: _sharing,
                     onShareExport: () => unawaited(_shareExportedPhotos()),
-                    onContinueEditing: () => unawaited(_continueEditing()),
                     onRecipeCommitted: () => unawaited(_persistRecipe()),
-                    onUndo: () => unawaited(_undoEdit()),
-                    onRedo: () => unawaited(_redoEdit()),
-                    onReset: () => unawaited(_resetEdit()),
                     onSyncCurrentPhotoToGroup: () =>
                         unawaited(_syncCurrentPhotoAdjustmentsToGroup()),
                     onPhotoStripScrollEnd: _savePhotoStripPosition,
                     onRecommendationPreviewed: (index) =>
                         setState(() => _previewRecommendationIndex = index),
-                    onRecommendationSelected: (recommendation) =>
-                        unawaited(_selectRecommendation(recommendation)),
                     onEditingScopeChanged: (scope) =>
                         unawaited(_setEditingScope(scope)),
                   ),
@@ -1102,28 +1128,19 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.selectedRecommendationIndex,
     required this.editorSession,
     required this.portraitApplicable,
-    required this.canUndo,
-    required this.canRedo,
     required this.canSyncCurrentPhoto,
     required this.photoStripController,
     required this.onSelected,
     required this.onMove,
     required this.onRemove,
     required this.onImport,
-    required this.onExport,
-    required this.onCancelExport,
     required this.onRetryExport,
     required this.sharing,
     required this.onShareExport,
-    required this.onContinueEditing,
     required this.onRecipeCommitted,
-    required this.onUndo,
-    required this.onRedo,
-    required this.onReset,
     required this.onSyncCurrentPhotoToGroup,
     required this.onPhotoStripScrollEnd,
     required this.onRecommendationPreviewed,
-    required this.onRecommendationSelected,
     required this.onEditingScopeChanged,
   });
 
@@ -1142,28 +1159,19 @@ class _PhotoWorkspace extends StatelessWidget {
   final int selectedRecommendationIndex;
   final EditorSession editorSession;
   final bool portraitApplicable;
-  final bool canUndo;
-  final bool canRedo;
   final bool canSyncCurrentPhoto;
   final ScrollController photoStripController;
   final ValueChanged<int> onSelected;
   final void Function(ProjectPhoto photo, int destination) onMove;
   final ValueChanged<ProjectPhoto> onRemove;
   final VoidCallback onImport;
-  final VoidCallback onExport;
-  final VoidCallback onCancelExport;
   final VoidCallback onRetryExport;
   final bool sharing;
   final VoidCallback onShareExport;
-  final VoidCallback onContinueEditing;
   final VoidCallback onRecipeCommitted;
-  final VoidCallback onUndo;
-  final VoidCallback onRedo;
-  final VoidCallback onReset;
   final VoidCallback onSyncCurrentPhotoToGroup;
   final VoidCallback onPhotoStripScrollEnd;
   final ValueChanged<int> onRecommendationPreviewed;
-  final ValueChanged<LocalRecommendation> onRecommendationSelected;
   final ValueChanged<ProjectEditingScope> onEditingScopeChanged;
 
   @override
@@ -1171,309 +1179,459 @@ class _PhotoWorkspace extends StatelessWidget {
     final selected = photos[selectedIndex];
     final recipe = editorSession.recipe;
     final previewRenderer = context.read<PhotoPreviewRenderer>();
-    final hasPhotosReadyToExport = project.exportStates.values.any(
-      (state) => state == PhotoExportState.notQueued,
-    );
     final interactionsBlocked = exporting || sharing || exportSummary != null;
-    return ListView(
-      key: const Key('photo-workspace-scroll'),
-      padding: const EdgeInsets.all(20),
+    final recommendationFlow =
+        flowState == PhotoProjectFlowState.analyzing ||
+        flowState == PhotoProjectFlowState.choosingRecommendation;
+    return Column(
       children: [
-        if (importFailures.isNotEmpty) ...[
-          _ImportFailures(failures: importFailures),
-          const SizedBox(height: 12),
-        ],
-        Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
-            child: AspectRatio(
-              aspectRatio: 4 / 3,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(24),
-                child: ColoredBox(
-                  color: Theme.of(context).colorScheme.surfaceContainerHigh,
-                  child: _BeforeAfterPreview(
-                    key: ValueKey('photo-preview-${selected.id}'),
-                    sourcePath: selected.localPath,
-                    recipe: previewRecipe,
-                    renderer: previewRenderer,
-                    recommendationMode:
-                        flowState ==
-                        PhotoProjectFlowState.choosingRecommendation,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                selected.originalName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            Text(context.l10n.photoCount(photos.length)),
-            IconButton(
-              tooltip: context.l10n.movePhotoEarlier,
-              onPressed: selectedIndex == 0 || interactionsBlocked
-                  ? null
-                  : () => onMove(selected, selectedIndex - 1),
-              icon: const Icon(Icons.arrow_back),
-            ),
-            IconButton(
-              tooltip: context.l10n.movePhotoLater,
-              onPressed:
-                  selectedIndex == photos.length - 1 || interactionsBlocked
-                  ? null
-                  : () => onMove(selected, selectedIndex + 1),
-              icon: const Icon(Icons.arrow_forward),
-            ),
-            IconButton(
-              tooltip: context.l10n.removePhoto,
-              onPressed: interactionsBlocked ? null : () => onRemove(selected),
-              icon: const Icon(Icons.remove_circle_outline),
-            ),
-          ],
-        ),
-        Text(
-          context.l10n.photoPositionAndScope(
-            selectedIndex + 1,
-            photos.length,
-            project.editingScope == ProjectEditingScope.group
-                ? context.l10n.editWholeGroup
-                : context.l10n.editCurrentPhoto,
-          ),
-          style: Theme.of(context).textTheme.labelLarge,
-        ),
-        if (photos.length > 1 && editingEnabled) ...[
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: SegmentedButton<ProjectEditingScope>(
-              segments: [
-                ButtonSegment(
-                  value: ProjectEditingScope.group,
-                  icon: const Icon(Icons.collections_outlined),
-                  label: Text(
-                    context.l10n.editWholeGroup,
-                    key: const ValueKey('editor-scope-group'),
-                  ),
-                ),
-                ButtonSegment(
-                  value: ProjectEditingScope.currentPhoto,
-                  icon: const Icon(Icons.photo_outlined),
-                  label: Text(
-                    context.l10n.editCurrentPhoto,
-                    key: const ValueKey('editor-scope-currentPhoto'),
-                  ),
-                ),
-              ],
-              selected: {project.editingScope},
-              onSelectionChanged: (selection) =>
-                  onEditingScopeChanged(selection.single),
-            ),
-          ),
-        ],
-        const SizedBox(height: 16),
-        NotificationListener<ScrollEndNotification>(
-          key: const Key('photo-strip-scroll'),
-          onNotification: (notification) {
-            if (notification.metrics.axis == Axis.horizontal) {
-              onPhotoStripScrollEnd();
-            }
-            return false;
-          },
-          child: SizedBox(
-            height: 112,
-            child: ListView.separated(
-              controller: photoStripController,
-              scrollDirection: Axis.horizontal,
-              itemCount: photos.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 8),
-              itemBuilder: (context, index) {
-                final photo = photos[index];
-                final status = _photoStatus(context, project, photo.id);
-                return Semantics(
-                  selected: index == selectedIndex,
-                  button: true,
-                  label: '${photo.originalName}, ${status.$2}',
-                  child: InkWell(
-                    key: ValueKey('editor-photo-${photo.id}'),
-                    onTap: () => onSelected(index),
-                    borderRadius: BorderRadius.circular(12),
-                    child: SizedBox(
-                      width: 88,
-                      child: Column(
-                        children: [
-                          Container(
-                            width: 68,
-                            height: 68,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: index == selectedIndex
-                                    ? Theme.of(context).colorScheme.primary
-                                    : Colors.transparent,
-                                width: 3,
-                              ),
-                            ),
-                            clipBehavior: Clip.antiAlias,
-                            child: Image.file(
-                              File(photo.localPath),
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, _, _) =>
-                                  const Icon(Icons.broken_image_outlined),
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(status.$1, size: 13),
-                              const SizedBox(width: 3),
-                              Flexible(
-                                child: Text(
-                                  status.$2,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.labelSmall,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
+        Expanded(
+          flex: exportSummary == null ? 4 : 3,
+          child: Padding(
+            key: const ValueKey('editor-preview-stage'),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 480),
+                child: AspectRatio(
+                  aspectRatio: 4 / 3,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(24),
+                    child: ColoredBox(
+                      color: Theme.of(context).colorScheme.surfaceContainerHigh,
+                      child: _BeforeAfterPreview(
+                        key: ValueKey('photo-preview-${selected.id}'),
+                        sourcePath: selected.localPath,
+                        recipe: previewRecipe,
+                        renderer: previewRenderer,
+                        recommendationMode:
+                            flowState ==
+                            PhotoProjectFlowState.choosingRecommendation,
                       ),
                     ),
                   ),
-                );
-              },
+                ),
+              ),
             ),
           ),
         ),
-        const SizedBox(height: 20),
-        if (flowState == PhotoProjectFlowState.analyzing ||
-            flowState == PhotoProjectFlowState.choosingRecommendation) ...[
-          _RecommendationPanel(
-            preparing: preparingRecommendations,
-            recommendations: recommendations,
-            selectedIndex: selectedRecommendationIndex,
-            onPreviewed: onRecommendationPreviewed,
-            onSelected: onRecommendationSelected,
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  selected.originalName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+              ),
+              Text(context.l10n.photoCount(photos.length)),
+              IconButton(
+                tooltip: context.l10n.movePhotoEarlier,
+                onPressed: selectedIndex == 0 || interactionsBlocked
+                    ? null
+                    : () => onMove(selected, selectedIndex - 1),
+                icon: const Icon(Icons.arrow_back),
+              ),
+              IconButton(
+                tooltip: context.l10n.movePhotoLater,
+                onPressed:
+                    selectedIndex == photos.length - 1 || interactionsBlocked
+                    ? null
+                    : () => onMove(selected, selectedIndex + 1),
+                icon: const Icon(Icons.arrow_forward),
+              ),
+              if (interactionsBlocked)
+                OutlinedButton.icon(
+                  onPressed: null,
+                  icon: const Icon(Icons.add_photo_alternate_outlined),
+                  label: Text(context.l10n.addPhotos),
+                )
+              else
+                IconButton(
+                  tooltip: context.l10n.addPhotos,
+                  onPressed: busy || photos.length >= PhotoProject.maxPhotoCount
+                      ? null
+                      : onImport,
+                  icon: const Icon(Icons.add_photo_alternate_outlined),
+                ),
+              IconButton(
+                tooltip: context.l10n.removePhoto,
+                onPressed: interactionsBlocked
+                    ? null
+                    : () => onRemove(selected),
+                icon: const Icon(Icons.remove_circle_outline),
+              ),
+            ],
           ),
-          const SizedBox(height: 20),
-        ],
-        _AdjustmentToolStrip(
-          enabled: editingEnabled,
-          extended: supportsImagePipelineV2,
-          portraitAvailable: portraitApplicable,
-          recipe: recipe,
-          editorSession: editorSession,
-          onRecipeCommitted: onRecipeCommitted,
         ),
-        const SizedBox(height: 8),
-        if (supportsImagePipelineV2 && photos.length == 1)
-          _CompositionTools(
-            enabled: editingEnabled,
-            photo: selected,
-            recipe: recipe,
-            editorSession: editorSession,
-            onRecipeCommitted: onRecipeCommitted,
+        if (photos.length > 1)
+          NotificationListener<ScrollEndNotification>(
+            key: const Key('photo-strip-scroll'),
+            onNotification: (notification) {
+              if (notification.metrics.axis == Axis.horizontal) {
+                onPhotoStripScrollEnd();
+              }
+              return false;
+            },
+            child: SizedBox(
+              height: MediaQuery.textScalerOf(context).scale(1) > 1.3
+                  ? 116
+                  : 88,
+              child: ListView.separated(
+                controller: photoStripController,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                scrollDirection: Axis.horizontal,
+                itemCount: photos.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final photo = photos[index];
+                  final status = _photoStatus(context, project, photo.id);
+                  return Semantics(
+                    selected: index == selectedIndex,
+                    button: true,
+                    label: '${photo.originalName}, ${status.$2}',
+                    child: InkWell(
+                      key: ValueKey('editor-photo-${photo.id}'),
+                      onTap: () => onSelected(index),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: SizedBox(
+                          width: 88,
+                          child: Column(
+                            children: [
+                              Container(
+                                width: 58,
+                                height: 58,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: index == selectedIndex
+                                        ? Theme.of(context).colorScheme.primary
+                                        : Colors.transparent,
+                                    width: 3,
+                                  ),
+                                ),
+                                clipBehavior: Clip.antiAlias,
+                                child: Image.file(
+                                  File(photo.localPath),
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, _, _) =>
+                                      const Icon(Icons.broken_image_outlined),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(status.$1, size: 12),
+                                  const SizedBox(width: 3),
+                                  Flexible(
+                                    child: Text(
+                                      status.$2,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.labelSmall,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
           ),
-        if (canSyncCurrentPhoto) ...[
-          OutlinedButton.icon(
-            onPressed: editingEnabled ? onSyncCurrentPhotoToGroup : null,
-            icon: const Icon(Icons.sync_alt),
-            label: Text(context.l10n.syncCurrentAdjustments),
+        Expanded(
+          flex: exportSummary == null ? 5 : 6,
+          child: Material(
+            color: Theme.of(context).colorScheme.surfaceContainerLow,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            clipBehavior: Clip.antiAlias,
+            child: ListView(
+              key: const Key('photo-workspace-scroll'),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+              children: [
+                Text(
+                  context.l10n.photoPositionAndScope(
+                    selectedIndex + 1,
+                    photos.length,
+                    project.editingScope == ProjectEditingScope.group
+                        ? context.l10n.editWholeGroup
+                        : context.l10n.editCurrentPhoto,
+                  ),
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                if (importFailures.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _ImportFailures(failures: importFailures),
+                ],
+                if (photos.length > 1 &&
+                    editingEnabled &&
+                    exportSummary == null) ...[
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: SegmentedButton<ProjectEditingScope>(
+                      segments: [
+                        ButtonSegment(
+                          value: ProjectEditingScope.group,
+                          icon: const Icon(Icons.collections_outlined),
+                          label: Text(
+                            context.l10n.editWholeGroup,
+                            key: const ValueKey('editor-scope-group'),
+                          ),
+                        ),
+                        ButtonSegment(
+                          value: ProjectEditingScope.currentPhoto,
+                          icon: const Icon(Icons.photo_outlined),
+                          label: Text(
+                            context.l10n.editCurrentPhoto,
+                            key: const ValueKey('editor-scope-currentPhoto'),
+                          ),
+                        ),
+                      ],
+                      selected: {project.editingScope},
+                      onSelectionChanged: (selection) =>
+                          onEditingScopeChanged(selection.single),
+                    ),
+                  ),
+                ],
+                if (exportSummary == null && recommendationFlow) ...[
+                  const SizedBox(height: 12),
+                  _RecommendationPanel(
+                    preparing: preparingRecommendations,
+                    recommendations: recommendations,
+                    selectedIndex: selectedRecommendationIndex,
+                    onPreviewed: onRecommendationPreviewed,
+                  ),
+                ] else if (exportSummary == null) ...[
+                  SizedBox(
+                    height: MediaQuery.textScalerOf(context).scale(1) > 1.3
+                        ? 56
+                        : 12,
+                  ),
+                  _AdjustmentToolStrip(
+                    enabled: editingEnabled,
+                    extended: supportsImagePipelineV2,
+                    portraitAvailable: portraitApplicable,
+                    recipe: recipe,
+                    editorSession: editorSession,
+                    onRecipeCommitted: onRecipeCommitted,
+                  ),
+                  const SizedBox(height: 8),
+                  if (supportsImagePipelineV2 && photos.length == 1)
+                    _CompositionTools(
+                      enabled: editingEnabled,
+                      photo: selected,
+                      recipe: recipe,
+                      editorSession: editorSession,
+                      onRecipeCommitted: onRecipeCommitted,
+                    ),
+                  if (canSyncCurrentPhoto) ...[
+                    OutlinedButton.icon(
+                      onPressed: editingEnabled
+                          ? onSyncCurrentPhotoToGroup
+                          : null,
+                      icon: const Icon(Icons.sync_alt),
+                      label: Text(context.l10n.syncCurrentAdjustments),
+                    ),
+                  ],
+                ],
+                if (exportSummary != null) ...[
+                  const SizedBox(height: 12),
+                  _ExportSummaryCard(
+                    summary: exportSummary!,
+                    exporting: exporting,
+                    sharing: sharing,
+                    onRetry: onRetryExport,
+                    onShare: onShareExport,
+                  ),
+                ],
+                if (!interactionsBlocked) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed:
+                        busy || photos.length >= PhotoProject.maxPhotoCount
+                        ? null
+                        : onImport,
+                    icon: const Icon(Icons.add_photo_alternate_outlined),
+                    label: Text(context.l10n.addPhotos),
+                  ),
+                ],
+              ],
+            ),
           ),
-          const SizedBox(height: 8),
-        ],
-        Row(
+        ),
+      ],
+    );
+  }
+}
+
+class _EditorCommandBar extends StatelessWidget {
+  const _EditorCommandBar({
+    required this.recommendationFlow,
+    required this.preparingRecommendations,
+    required this.selectedRecommendation,
+    required this.editingEnabled,
+    required this.canUndo,
+    required this.canRedo,
+    required this.isEdited,
+    required this.exporting,
+    required this.sharing,
+    required this.exportSummary,
+    required this.hasPhotosReadyToExport,
+    required this.photoCount,
+    required this.onUndo,
+    required this.onRedo,
+    required this.onReset,
+    required this.onRecommendationSelected,
+    required this.onExport,
+    required this.onCancelExport,
+    required this.onContinueEditing,
+  });
+
+  final bool recommendationFlow;
+  final bool preparingRecommendations;
+  final LocalRecommendation? selectedRecommendation;
+  final bool editingEnabled;
+  final bool canUndo;
+  final bool canRedo;
+  final bool isEdited;
+  final bool exporting;
+  final bool sharing;
+  final BatchExportSummary? exportSummary;
+  final bool hasPhotosReadyToExport;
+  final int photoCount;
+  final VoidCallback onUndo;
+  final VoidCallback onRedo;
+  final VoidCallback onReset;
+  final ValueChanged<LocalRecommendation> onRecommendationSelected;
+  final VoidCallback onExport;
+  final VoidCallback onCancelExport;
+  final VoidCallback onContinueEditing;
+
+  @override
+  Widget build(BuildContext context) {
+    final interactionsBlocked = exporting || sharing || exportSummary != null;
+    final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.3;
+    final historyActions = <Widget>[
+      TextButton(
+        style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+        onPressed: editingEnabled && canUndo ? onUndo : null,
+        child: Text(context.l10n.undo),
+      ),
+      TextButton(
+        style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+        onPressed: editingEnabled && canRedo ? onRedo : null,
+        child: Text(context.l10n.redo),
+      ),
+      TextButton(
+        style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+        onPressed: editingEnabled && isEdited ? onReset : null,
+        child: Text(context.l10n.reset),
+      ),
+    ];
+    return Material(
+      color: Theme.of(context).colorScheme.surface,
+      elevation: 2,
+      child: SafeArea(
+        key: const ValueKey('editor-bottom-command-bar'),
+        top: false,
+        minimum: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        child: largeText && !interactionsBlocked
+            ? Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Wrap(
+                    alignment: WrapAlignment.spaceEvenly,
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: historyActions,
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: _primaryAction(context),
+                  ),
+                ],
+              )
+            : Row(
+                children: [
+                  if (!interactionsBlocked) ...[
+                    ...historyActions,
+                    const SizedBox(width: 8),
+                  ],
+                  Expanded(child: _primaryAction(context)),
+                ],
+              ),
+      ),
+    );
+  }
+
+  Widget _primaryAction(BuildContext context) {
+    if (recommendationFlow) {
+      return FilledButton.icon(
+        key: const ValueKey('recommendation-use'),
+        onPressed: preparingRecommendations || selectedRecommendation == null
+            ? null
+            : () => onRecommendationSelected(selectedRecommendation!),
+        icon: const Icon(Icons.check),
+        label: Text(
+          preparingRecommendations
+              ? context.l10n.analysisPreparing
+              : context.l10n.useThisLook,
+        ),
+      );
+    }
+    if (exporting) {
+      return Semantics(
+        container: true,
+        liveRegion: true,
+        label: context.l10n.exportingPhotos,
+        child: Row(
           children: [
             Expanded(
-              child: TextButton.icon(
-                onPressed: editingEnabled && canUndo ? onUndo : null,
-                icon: const Icon(Icons.undo),
-                label: Text(context.l10n.undo),
+              child: FilledButton.icon(
+                onPressed: null,
+                icon: const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                label: Text(context.l10n.exportingPhotos),
               ),
             ),
-            Expanded(
-              child: TextButton.icon(
-                onPressed: editingEnabled && canRedo ? onRedo : null,
-                icon: const Icon(Icons.redo),
-                label: Text(context.l10n.redo),
-              ),
-            ),
-            Expanded(
-              child: TextButton(
-                onPressed: editingEnabled && editorSession.isEdited
-                    ? onReset
-                    : null,
-                child: Text(context.l10n.reset),
-              ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: onCancelExport,
+              icon: const Icon(Icons.cancel_outlined),
+              label: Text(context.l10n.cancelExport),
             ),
           ],
         ),
-        const SizedBox(height: 8),
-        if (exportSummary != null) ...[
-          _ExportSummaryCard(
-            summary: exportSummary!,
-            exporting: exporting,
-            sharing: sharing,
-            onRetry: onRetryExport,
-            onShare: onShareExport,
-            onContinueEditing: onContinueEditing,
-          ),
-          const SizedBox(height: 12),
-        ],
-        Semantics(
-          container: exporting,
-          liveRegion: exporting,
-          label: exporting ? context.l10n.exportingPhotos : null,
-          child: FilledButton.icon(
-            key: const ValueKey('editor-batch-export'),
-            onPressed:
-                interactionsBlocked ||
-                    !editingEnabled ||
-                    !hasPhotosReadyToExport
-                ? null
-                : onExport,
-            icon: exporting
-                ? const SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.file_download_outlined),
-            label: Text(
-              exporting
-                  ? context.l10n.exportingPhotos
-                  : context.l10n.batchExportPhotos(photos.length),
-            ),
-          ),
-        ),
-        if (exporting) ...[
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: onCancelExport,
-            icon: const Icon(Icons.cancel_outlined),
-            label: Text(context.l10n.cancelExport),
-          ),
-        ],
-        const SizedBox(height: 12),
-        OutlinedButton.icon(
-          onPressed:
-              busy ||
-                  interactionsBlocked ||
-                  photos.length >= PhotoProject.maxPhotoCount
-              ? null
-              : onImport,
-          icon: const Icon(Icons.add_photo_alternate_outlined),
-          label: Text(context.l10n.addPhotos),
-        ),
-      ],
+      );
+    }
+    if (exportSummary != null) {
+      return TextButton(
+        key: const ValueKey('export-continue-editing'),
+        onPressed: sharing ? null : onContinueEditing,
+        child: Text(context.l10n.continueEditing),
+      );
+    }
+    return FilledButton.icon(
+      key: const ValueKey('editor-batch-export'),
+      onPressed: !editingEnabled || !hasPhotosReadyToExport ? null : onExport,
+      icon: const Icon(Icons.file_download_outlined),
+      label: Text(context.l10n.batchExportPhotos(photoCount)),
     );
   }
 }
@@ -1485,7 +1643,6 @@ class _ExportSummaryCard extends StatelessWidget {
     required this.sharing,
     required this.onRetry,
     required this.onShare,
-    required this.onContinueEditing,
   });
 
   final BatchExportSummary summary;
@@ -1493,7 +1650,6 @@ class _ExportSummaryCard extends StatelessWidget {
   final bool sharing;
   final VoidCallback onRetry;
   final VoidCallback onShare;
-  final VoidCallback onContinueEditing;
 
   @override
   Widget build(BuildContext context) {
@@ -1535,10 +1691,6 @@ class _ExportSummaryCard extends StatelessWidget {
                         : context.l10n.shareSavedPhotos,
                   ),
                 ),
-              TextButton(
-                onPressed: exporting || sharing ? null : onContinueEditing,
-                child: Text(context.l10n.continueEditing),
-              ),
             ],
           ),
         ),
@@ -1573,14 +1725,12 @@ class _RecommendationPanel extends StatelessWidget {
     required this.recommendations,
     required this.selectedIndex,
     required this.onPreviewed,
-    required this.onSelected,
   });
 
   final bool preparing;
   final List<LocalRecommendation> recommendations;
   final int selectedIndex;
   final ValueChanged<int> onPreviewed;
-  final ValueChanged<LocalRecommendation> onSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -1707,15 +1857,6 @@ class _RecommendationPanel extends StatelessWidget {
                   ),
                 ),
               ],
-            ),
-            const SizedBox(height: 14),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                key: const ValueKey('recommendation-use'),
-                onPressed: () => onSelected(selected),
-                child: Text(context.l10n.useThisLook),
-              ),
             ),
           ],
         ),
@@ -2235,35 +2376,38 @@ class _AdjustmentSlider extends StatelessWidget {
       children: [
         if (label.isNotEmpty) SizedBox(width: 88, child: Text(label)),
         Expanded(
-          child: Semantics(
-            slider: true,
-            enabled: enabled,
-            label: semanticLabel,
-            value: '${(value * 100).round()}',
-            increasedValue: value < maximum
-                ? '${(_semanticValue(0.02) * 100).round()}'
-                : null,
-            decreasedValue: value > minimum
-                ? '${(_semanticValue(-0.02) * 100).round()}'
-                : null,
-            onIncrease: enabled && value < maximum
-                ? () => _adjustFromSemantics(0.02)
-                : null,
-            onDecrease: enabled && value > minimum
-                ? () => _adjustFromSemantics(-0.02)
-                : null,
-            child: ExcludeSemantics(
-              child: Slider(
-                value: value,
-                min: minimum,
-                max: maximum,
-                divisions: 100,
-                label: '${(value * 100).round()}',
-                semanticFormatterCallback: (value) =>
-                    '${(value * 100).round()}',
-                onChangeStart: enabled ? (_) => onStart() : null,
-                onChanged: enabled ? onChanged : null,
-                onChangeEnd: enabled ? (_) => onEnd() : null,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 48),
+            child: Semantics(
+              slider: true,
+              enabled: enabled,
+              label: semanticLabel,
+              value: '${(value * 100).round()}',
+              increasedValue: value < maximum
+                  ? '${(_semanticValue(0.02) * 100).round()}'
+                  : null,
+              decreasedValue: value > minimum
+                  ? '${(_semanticValue(-0.02) * 100).round()}'
+                  : null,
+              onIncrease: enabled && value < maximum
+                  ? () => _adjustFromSemantics(0.02)
+                  : null,
+              onDecrease: enabled && value > minimum
+                  ? () => _adjustFromSemantics(-0.02)
+                  : null,
+              child: ExcludeSemantics(
+                child: Slider(
+                  value: value,
+                  min: minimum,
+                  max: maximum,
+                  divisions: 100,
+                  label: '${(value * 100).round()}',
+                  semanticFormatterCallback: (value) =>
+                      '${(value * 100).round()}',
+                  onChangeStart: enabled ? (_) => onStart() : null,
+                  onChanged: enabled ? onChanged : null,
+                  onChangeEnd: enabled ? (_) => onEnd() : null,
+                ),
               ),
             ),
           ),

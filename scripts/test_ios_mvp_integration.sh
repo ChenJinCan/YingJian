@@ -16,6 +16,22 @@ if ! xcrun simctl list devices booted | grep -F "($simulator_id) (Booted)" >/dev
   exit 65
 fi
 
+flutter_config_root=$(mktemp -d "${TMPDIR:-/tmp}/yingjian-ios-flutter-config.XXXXXX")
+export XDG_CONFIG_HOME="$flutter_config_root"
+flutter config --no-enable-android --enable-ios >/dev/null
+flutter config --no-enable-swift-package-manager >/dev/null
+
+cleanup() {
+  status=$?
+  trap - EXIT HUP INT TERM
+  flutter build ios --debug --simulator --config-only >/dev/null || status=$?
+  if [ -d "$flutter_config_root" ]; then
+    find "$flutter_config_root" -depth -delete
+  fi
+  exit "$status"
+}
+trap cleanup EXIT HUP INT TERM
+
 if ! xcrun simctl get_app_container "$simulator_id" "$bundle_id" app >/dev/null 2>&1; then
   (
     cd "$repo_root"
@@ -24,11 +40,6 @@ if ! xcrun simctl get_app_container "$simulator_id" "$bundle_id" app >/dev/null 
   xcrun simctl install "$simulator_id" "$repo_root/build/ios/iphonesimulator/Runner.app"
 fi
 xcrun simctl privacy "$simulator_id" grant photos-add "$bundle_id"
-
-restore_normal_flutter_target() {
-  flutter build ios --debug --simulator --config-only >/dev/null
-}
-trap restore_normal_flutter_target EXIT HUP INT TERM
 
 cd "$repo_root"
 flutter test integration_test/ios_mvp_journey_test.dart -d "$simulator_id"

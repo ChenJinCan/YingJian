@@ -165,6 +165,15 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('photo-preview-photo-1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('editor-preview-stage')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('editor-bottom-command-bar')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('recommendation-use')).hitTestable(),
+      findsOneWidget,
+    );
     expect(find.text('周末人像.png'), findsOneWidget);
     expect(find.text('1/6'), findsOneWidget);
     expect(find.text('无法读取这张照片'), findsNothing);
@@ -315,7 +324,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('选择照片'));
     await tester.pumpAndSettle();
-    await tester.drag(find.byType(ListView).first, const Offset(0, -520));
+    await tester.drag(
+      find.byKey(const Key('photo-workspace-scroll')),
+      const Offset(0, -520),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('自然干净'), findsOneWidget);
@@ -940,7 +952,7 @@ void main() {
     expect(find.text('周末人像.png'), findsOneWidget);
     await tester.dragUntilVisible(
       find.text('曝光'),
-      find.byType(ListView).first,
+      find.byKey(const Key('photo-workspace-scroll')),
       const Offset(0, -200),
     );
     await tester.pumpAndSettle();
@@ -954,7 +966,7 @@ void main() {
 
     await tester.dragUntilVisible(
       find.text('重做'),
-      find.byType(ListView).first,
+      find.byKey(const Key('photo-workspace-scroll')),
       const Offset(0, -200),
     );
     expect(find.text('重做'), findsOneWidget);
@@ -1007,7 +1019,10 @@ void main() {
   ) async {
     await _pumpSinglePhotoExport(tester, FakePhotoSharer());
 
-    await tester.drag(find.byType(ListView).first, const Offset(0, 600));
+    await tester.drag(
+      find.byKey(const Key('photo-workspace-scroll')),
+      const Offset(0, 600),
+    );
     await tester.pumpAndSettle();
     expect(
       tester
@@ -1019,7 +1034,7 @@ void main() {
     );
     await tester.dragUntilVisible(
       find.text('继续添加照片'),
-      find.byType(ListView).first,
+      find.byKey(const Key('photo-workspace-scroll')),
       const Offset(0, -300),
     );
     expect(
@@ -1033,7 +1048,10 @@ void main() {
     await tester.tap(find.text('继续编辑'));
     await tester.pumpAndSettle();
 
-    await tester.drag(find.byType(ListView).first, const Offset(0, 600));
+    await tester.drag(
+      find.byKey(const Key('photo-workspace-scroll')),
+      const Offset(0, 600),
+    );
     await tester.pumpAndSettle();
     expect(
       tester
@@ -1398,7 +1416,7 @@ void main() {
 
       await tester.dragUntilVisible(
         find.text('曝光'),
-        find.byType(ListView).first,
+        find.byKey(const Key('photo-workspace-scroll')),
         const Offset(0, -240),
       );
       await tester.drag(find.byType(Slider).first, const Offset(90, 0));
@@ -1411,7 +1429,7 @@ void main() {
 
       await tester.dragUntilVisible(
         find.text('重置'),
-        find.byType(ListView).first,
+        find.byKey(const Key('photo-workspace-scroll')),
         const Offset(0, -180),
       );
       await tester.tap(find.text('重置'));
@@ -1671,10 +1689,13 @@ void main() {
     await tester.pumpAndSettle();
     await tester.dragUntilVisible(
       find.text('批量导出 2 张'),
-      find.byType(ListView).first,
+      find.byKey(const Key('photo-workspace-scroll')),
       const Offset(0, -320),
     );
-    await tester.drag(find.byType(ListView).first, const Offset(0, -80));
+    await tester.drag(
+      find.byKey(const Key('photo-workspace-scroll')),
+      const Offset(0, -80),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.text('批量导出 2 张'));
     await tester.pumpAndSettle();
@@ -1792,10 +1813,13 @@ void main() {
     await tester.pumpAndSettle();
     await tester.dragUntilVisible(
       find.text('批量导出 2 张'),
-      find.byType(ListView).first,
+      find.byKey(const Key('photo-workspace-scroll')),
       const Offset(0, -300),
     );
-    await tester.drag(find.byType(ListView).first, const Offset(0, -80));
+    await tester.drag(
+      find.byKey(const Key('photo-workspace-scroll')),
+      const Offset(0, -80),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.text('批量导出 2 张'));
     await tester.pumpAndSettle();
@@ -2028,7 +2052,7 @@ Future<MemoryPhotoProjectStore> _pumpSinglePhotoExport(
   await tester.pumpAndSettle();
   await tester.dragUntilVisible(
     find.text('批量导出 1 张'),
-    find.byType(ListView).first,
+    find.byKey(const Key('photo-workspace-scroll')),
     const Offset(0, -300),
   );
   await tester.pumpAndSettle();
