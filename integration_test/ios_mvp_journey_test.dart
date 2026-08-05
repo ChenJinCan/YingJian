@@ -7,7 +7,11 @@ import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
+import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/image_pipeline.dart';
+import 'package:yingjian/features/editor/infrastructure/method_channel_photo_exporter.dart';
+import 'package:yingjian/features/editor/infrastructure/method_channel_photo_preview_renderer.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 
 import '../test/support/test_services.dart';
@@ -23,20 +27,21 @@ void main() {
     );
     addTearDown(() => fixtureDirectory.delete(recursive: true));
     final source = File('${fixtureDirectory.path}/portrait.png');
-    await source.writeAsBytes(
-      base64Decode(
-        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFElEQVR4nGP4z8AAQgbG'
-        '////Z2BgAABOCAf03sBqAAAAAElFTkSuQmCC',
-      ),
-      flush: true,
+    final sourceBytes = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFElEQVR4nGP4z8AAQgbG'
+      '////Z2BgAABOCAf03sBqAAAAAElFTkSuQmCC',
     );
+    await source.writeAsBytes(sourceBytes, flush: true);
     final photo = ProjectPhoto(
       id: 'ios-runtime-photo',
       localPath: source.path,
       originalName: 'portrait.png',
     );
     final store = MemoryPhotoProjectStore();
-    final exporter = _RecordingExporter();
+    final previewRenderer = _NativePreviewProbe(
+      delegate: MethodChannelPhotoPreviewRenderer(),
+    );
+    final exporter = _NativeExportProbe(delegate: MethodChannelPhotoExporter());
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
     final settings = await AppSettings.load();
 
@@ -46,6 +51,7 @@ void main() {
         photoImporter: FakePhotoImporter([photo]),
         photoProjectStore: store,
         photoExporter: exporter,
+        photoPreviewRenderer: previewRenderer,
       ),
     );
     await tester.pumpAndSettle();
@@ -66,9 +72,22 @@ void main() {
     await tester.pumpAndSettle();
     expect(store.project?.flowState, PhotoProjectFlowState.editing);
 
+    final workspace = find.byKey(const ValueKey('photo-workspace-scroll'));
+    final exposureSlider = find.byKey(
+      const ValueKey('editor-adjustment-exposure'),
+    );
+    await tester.dragUntilVisible(
+      exposureSlider,
+      workspace,
+      const Offset(0, -260),
+    );
+    await tester.drag(exposureSlider, const Offset(70, 0));
+    await tester.pumpAndSettle();
+    expect(store.project?.sharedStyle.recipe.exposure, isNot(0));
+
     await tester.dragUntilVisible(
       find.byKey(const ValueKey('editor-batch-export')),
-      find.byType(ListView).first,
+      workspace,
       const Offset(0, -320),
     );
     await tester.tap(find.byKey(const ValueKey('editor-batch-export')));
@@ -77,12 +96,24 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(exporter.photoIds, ['ios-runtime-photo']);
+    expect(previewRenderer.backends, contains('ios-core-image'));
+    expect(previewRenderer.updateCount, greaterThan(0));
+    final exported = exporter.results.single;
+    expect(exported.width, 2);
+    expect(exported.height, 2);
+    final sharePath = exported.sharePath;
+    expect(sharePath, isNotNull);
+    final shareFile = File(sharePath!);
+    expect(await shareFile.exists(), isTrue);
+    expect((await shareFile.readAsBytes()).take(2), [0xff, 0xd8]);
     expect(find.text('已保存 1 张 · 失败 0 张 · 取消 0 张'), findsWidgets);
-    expect(
-      source.existsSync(),
-      isTrue,
-      reason: 'The original must stay intact.',
-    );
+    expect(await source.readAsBytes(), sourceBytes);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    expect(previewRenderer.disposeCount, greaterThan(0));
+    if (await shareFile.exists()) {
+      await shareFile.delete();
+    }
   });
 
   testWidgets(
@@ -253,8 +284,51 @@ void main() {
   );
 }
 
-final class _RecordingExporter implements PhotoExporter {
+final class _NativePreviewProbe implements PhotoPreviewRenderer {
+  _NativePreviewProbe({required this.delegate});
+
+  final PhotoPreviewRenderer delegate;
+  final List<String> backends = [];
+  int updateCount = 0;
+  int disposeCount = 0;
+
+  @override
+  Future<PhotoPreviewHandle> create({
+    required String sourcePath,
+    required ImagePipeline pipeline,
+    int maxEdge = 2048,
+  }) async {
+    final handle = await delegate.create(
+      sourcePath: sourcePath,
+      pipeline: pipeline,
+      maxEdge: maxEdge,
+    );
+    backends.add(handle.backend);
+    return handle;
+  }
+
+  @override
+  Future<void> update({
+    required PhotoPreviewHandle handle,
+    required ImagePipeline pipeline,
+  }) async {
+    await delegate.update(handle: handle, pipeline: pipeline);
+    updateCount += 1;
+  }
+
+  @override
+  Future<void> dispose(PhotoPreviewHandle handle) async {
+    await delegate.dispose(handle);
+    disposeCount += 1;
+  }
+}
+
+final class _NativeExportProbe implements PhotoExporter {
+  _NativeExportProbe({required this.delegate});
+
+  final PhotoExporter delegate;
   final List<String> photoIds = [];
+  final List<ExportedPhoto> results = [];
 
   @override
   Future<ExportedPhoto> export({
@@ -262,12 +336,9 @@ final class _RecordingExporter implements PhotoExporter {
     required EditRecipe recipe,
   }) async {
     photoIds.add(photo.id);
-    return ExportedPhoto(
-      assetId: 'export-${photo.id}',
-      width: 2,
-      height: 2,
-      sharePath: '${Directory.systemTemp.path}/export-${photo.id}.jpg',
-    );
+    final exported = await delegate.export(photo: photo, recipe: recipe);
+    results.add(exported);
+    return exported;
   }
 }
 
