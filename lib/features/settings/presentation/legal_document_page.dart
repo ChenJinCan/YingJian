@@ -24,6 +24,7 @@ final class LegalDocumentPage extends StatelessWidget {
     };
 
     return Scaffold(
+      key: ValueKey('legal-document-$name'),
       appBar: AppBar(title: Text(title)),
       body: FutureBuilder<String>(
         future: rootBundle.loadString('assets/legal/${name}_$language.md'),

@@ -79,6 +79,7 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         actions: [
           IconButton(
+            key: const ValueKey('home-settings'),
             tooltip: context.l10n.settings,
             onPressed: () =>
                 Navigator.of(context).pushNamed(AppRoutes.settings),

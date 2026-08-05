@@ -18,6 +18,7 @@ final class SettingsPage extends StatelessWidget {
         observability.status == ObservabilityStatus.initializing;
 
     return Scaffold(
+      key: const ValueKey('settings-page'),
       appBar: AppBar(title: Text(context.l10n.settings)),
       body: ListView(
         children: [
@@ -29,6 +30,7 @@ final class SettingsPage extends StatelessWidget {
             ),
           ),
           SwitchListTile.adaptive(
+            key: const ValueKey('settings-anonymous-diagnostics'),
             value: settings.diagnosticsEnabled,
             onChanged: diagnosticsBusy
                 ? null
@@ -37,6 +39,7 @@ final class SettingsPage extends StatelessWidget {
             subtitle: Text(_diagnosticsDescription(context, observability)),
           ),
           ListTile(
+            key: const ValueKey('settings-privacy-policy'),
             leading: const Icon(Icons.privacy_tip_outlined),
             title: Text(context.l10n.privacyPolicy),
             subtitle: Text(context.l10n.privacyPolicyDescription),
@@ -44,6 +47,7 @@ final class SettingsPage extends StatelessWidget {
             onTap: () => Navigator.of(context).pushNamed(AppRoutes.privacy),
           ),
           ListTile(
+            key: const ValueKey('settings-terms-of-use'),
             leading: const Icon(Icons.description_outlined),
             title: Text(context.l10n.termsOfUse),
             trailing: const Icon(Icons.chevron_right),

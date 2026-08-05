@@ -22,6 +22,53 @@ import '../test/support/test_services.dart';
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
+  testWidgets(
+    'iOS runtime opens privacy and terms through production settings navigation',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+
+      await tester.pumpWidget(buildTestApp(settings));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('home-settings')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('settings-page')), findsOneWidget);
+
+      final diagnostics = find.byKey(
+        const ValueKey('settings-anonymous-diagnostics'),
+      );
+      expect(diagnostics, findsOneWidget);
+      expect(tester.widget<SwitchListTile>(diagnostics).value, isFalse);
+
+      await tester.tap(find.byKey(const ValueKey('settings-privacy-policy')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('legal-document-privacy')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('隐私政策'), findsWidgets);
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('settings-page')), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('settings-terms-of-use')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('legal-document-terms')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('使用条款'), findsWidgets);
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('home-settings')), findsOneWidget);
+    },
+  );
+
   testWidgets('iOS runtime completes the production one-photo MVP journey', (
     tester,
   ) async {
