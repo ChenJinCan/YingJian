@@ -182,6 +182,8 @@ class _AnalysisState extends StatelessWidget {
             const SizedBox(height: 8),
             SelectableText(
               'faceCount: ${result.faceCount}\n'
+              'candidateApplicable: ${result.candidateApplicable}\n'
+              'degradationReason: ${result.degradationReason}\n'
               'proxy: ${result.width} × ${result.height}\n'
               'source: ${result.sourceWidth} × ${result.sourceHeight}\n'
               'candidateKind: ${result.candidateKind}\n'
@@ -198,9 +200,9 @@ class _AnalysisState extends StatelessWidget {
               const SizedBox(height: 8),
               const Text('模拟器仅验证通道和失败降级；五官坐标必须在物理 iPhone 上重新验收。'),
             ],
-            if (result.faceCount == 0) ...[
+            if (!result.candidateApplicable) ...[
               const SizedBox(height: 8),
-              const Text('没有检测到适用人脸；正式产品必须在这里安全降级。'),
+              Text('当前图片未应用人像效果，已安全保留原图（${result.degradationReason}）。'),
             ],
           ],
         ),
@@ -354,6 +356,8 @@ class _DebugImageCard extends StatelessWidget {
 class PortraitMaskSpikeResult {
   const PortraitMaskSpikeResult({
     required this.faceCount,
+    required this.candidateApplicable,
+    required this.degradationReason,
     required this.width,
     required this.height,
     required this.sourceWidth,
@@ -392,6 +396,8 @@ class PortraitMaskSpikeResult {
 
     return PortraitMaskSpikeResult(
       faceCount: read<int>('faceCount'),
+      candidateApplicable: read<bool>('candidateApplicable'),
+      degradationReason: read<String>('degradationReason'),
       width: read<int>('width'),
       height: read<int>('height'),
       sourceWidth: read<int>('sourceWidth'),
@@ -421,6 +427,8 @@ class PortraitMaskSpikeResult {
   }
 
   final int faceCount;
+  final bool candidateApplicable;
+  final String degradationReason;
   final int width;
   final int height;
   final int sourceWidth;

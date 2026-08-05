@@ -15,7 +15,7 @@
 
 每个候选的 `provenance` 必须记录 producer、能力或应用版本、设备、系统、variant、source/export/preview 身份和完整参数；非原图候选的 `source_sha256` 必须等于该项原图哈希；竞品还必须记录可复现的 `operation_path`。评分冻结只接受映见 `default + export` 身份，不能拿 Preview 或高强度结果替代。
 
-iOS Debug-only 人像采集工具会为单个输入生成 baseline、off/default/high-safe 原像素导出、默认代理预览和 `capture-manifest.json`。工具启动和每次新分析都会删除上一批临时采集，因此必须先将整组目录从设备复制到 `.quality/review-inputs/<asset-id>/`，再继续下一张。复制后先运行严格采集检查；它会核对物理设备身份、原始输入哈希、源尺寸、候选版本、强度、sRGB/方向/尺寸、五个产物哈希、关闭档字节等价和无人脸降级：
+iOS Debug-only 人像采集工具会为单个输入生成 baseline、off/default/high-safe 原像素导出、默认代理预览和 `capture-manifest.json`。工具启动和每次新分析都会删除上一批临时采集，因此必须先将整组目录从设备复制到 `.quality/review-inputs/<asset-id>/`，再继续下一张。复制后先运行严格采集检查；它会核对物理设备身份、原始输入哈希、源尺寸、候选版本、强度、sRGB/方向/尺寸、五个产物哈希、关闭档字节等价，以及 `candidateApplicable`/`degradationReason`。无人脸、多人脸、低置信度、小脸或缺少关键点时，default/high-safe 必须与 baseline 字节一致：
 
 ```sh
 ruby scripts/check_portrait_capture_manifest.rb \

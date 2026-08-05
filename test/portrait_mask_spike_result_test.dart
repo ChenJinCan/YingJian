@@ -7,6 +7,8 @@ void main() {
     () {
       final result = PortraitMaskSpikeResult.fromMap(<Object?, Object?>{
         'faceCount': 1,
+        'candidateApplicable': true,
+        'degradationReason': 'none',
         'width': 1200,
         'height': 800,
         'sourceWidth': 4032,
@@ -25,7 +27,7 @@ void main() {
         'captureRelativePath': 'tmp/portrait-mask-spike/capture-001',
         'candidateKind': 'vision-landmarks-geometry-roi',
         'geometryOnly': true,
-        'effectVersion': 'ios-geometry-retouch-spike-v1',
+        'effectVersion': 'ios-geometry-retouch-candidate-v2',
         'defaultStrength': 0.35,
         'highSafeStrength': 0.55,
         'productionEligible': false,
@@ -35,6 +37,8 @@ void main() {
       });
 
       expect(result.productionEligible, isFalse);
+      expect(result.candidateApplicable, isTrue);
+      expect(result.degradationReason, 'none');
       expect(result.offExportPath, endsWith('/off.jpg'));
       expect(result.sourceWidth, 4032);
       expect(

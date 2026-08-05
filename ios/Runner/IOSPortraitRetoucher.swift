@@ -2,6 +2,20 @@ import CoreImage
 import CoreGraphics
 import Vision
 
+enum IOSPortraitDegradationReason: String, Equatable {
+  case none
+  case noFace = "no_face"
+  case multipleFaces = "multiple_faces"
+  case lowConfidence = "low_confidence"
+  case faceTooSmall = "face_too_small"
+  case landmarksUnavailable = "landmarks_unavailable"
+}
+
+struct IOSPortraitSafetyDecision: Equatable {
+  let applicable: Bool
+  let reason: IOSPortraitDegradationReason
+}
+
 enum IOSPortraitSafetyPolicy {
   private static let minimumConfidence: Float = 0.5
   private static let minimumFaceDimension: CGFloat = 0.12
@@ -13,29 +27,71 @@ enum IOSPortraitSafetyPolicy {
     boundingBox: CGRect,
     hasLandmarks: Bool
   ) -> Bool {
-    faceCount == 1 &&
-      confidence >= minimumConfidence &&
-      boundingBox.width >= minimumFaceDimension &&
-      boundingBox.height >= minimumFaceDimension &&
-      boundingBox.width * boundingBox.height >= minimumFaceArea &&
-      hasLandmarks
+    evaluate(
+      faceCount: faceCount,
+      confidence: confidence,
+      boundingBox: boundingBox,
+      hasLandmarks: hasLandmarks
+    ).applicable
   }
 
-  static func isEligible(_ observations: [VNFaceObservation]) -> Bool {
-    guard let face = observations.first else { return false }
-    return isEligible(
+  static func evaluate(
+    faceCount: Int,
+    confidence: Float,
+    boundingBox: CGRect,
+    hasLandmarks: Bool
+  ) -> IOSPortraitSafetyDecision {
+    guard faceCount > 0 else {
+      return IOSPortraitSafetyDecision(applicable: false, reason: .noFace)
+    }
+    guard faceCount == 1 else {
+      return IOSPortraitSafetyDecision(applicable: false, reason: .multipleFaces)
+    }
+    guard confidence >= minimumConfidence else {
+      return IOSPortraitSafetyDecision(applicable: false, reason: .lowConfidence)
+    }
+    guard
+      boundingBox.width >= minimumFaceDimension,
+      boundingBox.height >= minimumFaceDimension,
+      boundingBox.width * boundingBox.height >= minimumFaceArea
+    else {
+      return IOSPortraitSafetyDecision(applicable: false, reason: .faceTooSmall)
+    }
+    guard hasLandmarks else {
+      return IOSPortraitSafetyDecision(applicable: false, reason: .landmarksUnavailable)
+    }
+    return IOSPortraitSafetyDecision(applicable: true, reason: .none)
+  }
+
+  static func evaluate(_ observations: [VNFaceObservation]) -> IOSPortraitSafetyDecision {
+    guard let face = observations.first else {
+      return IOSPortraitSafetyDecision(applicable: false, reason: .noFace)
+    }
+    return evaluate(
       faceCount: observations.count,
       confidence: face.confidence,
       boundingBox: face.boundingBox,
       hasLandmarks: face.landmarks != nil
     )
   }
+
+  static func isEligible(_ observations: [VNFaceObservation]) -> Bool {
+    evaluate(observations).applicable
+  }
+}
+
+struct IOSPortraitMasks {
+  let candidate: CIImage
+  let protection: CIImage
+  let effective: CIImage
 }
 
 /// Deterministic, on-device portrait candidate reserved for corpus evaluation.
 /// The production pipeline rejects nonzero strength until the eligibility gate
 /// is frozen; Vision geometry never leaves this native boundary.
 enum IOSPortraitRetoucher {
+  static let candidateKind = "vision-landmarks-geometry-roi"
+  static let effectVersion = "ios-geometry-retouch-candidate-v2"
   private static let analysisMaxEdge: CGFloat = 1_600
   private static let context = CIContext(options: [.cacheIntermediates: false])
 
@@ -70,7 +126,7 @@ enum IOSPortraitRetoucher {
       (try? handler.perform([request])) != nil,
       let observations = request.results,
       IOSPortraitSafetyPolicy.isEligible(observations),
-      let proxyMask = try? effectiveMask(
+      let proxyMasks = try? masks(
         observations: observations,
         extent: proxyExtent
       )
@@ -78,7 +134,7 @@ enum IOSPortraitRetoucher {
       return input
     }
 
-    let mask = proxyMask
+    let mask = proxyMasks.effective
       .transformed(
         by: CGAffineTransform(
           scaleX: extent.width / proxyExtent.width,
@@ -89,10 +145,10 @@ enum IOSPortraitRetoucher {
     return candidate(source: input, mask: mask, strength: bounded, extent: extent)
   }
 
-  private static func effectiveMask(
+  static func masks(
     observations: [VNFaceObservation],
     extent: CGRect
-  ) throws -> CIImage {
+  ) throws -> IOSPortraitMasks {
     let width = Int(extent.width)
     let height = Int(extent.height)
     let candidateMask = try makeMask(width: width, height: height) { graphics in
@@ -116,7 +172,7 @@ enum IOSPortraitRetoucher {
       .clampedToExtent()
       .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 3])
       .cropped(to: extent)
-    return candidate.applyingFilter(
+    let effective = candidate.applyingFilter(
       "CIMultiplyBlendMode",
       parameters: [
         kCIInputBackgroundImageKey: protection
@@ -124,6 +180,11 @@ enum IOSPortraitRetoucher {
           .cropped(to: extent),
       ]
     ).cropped(to: extent)
+    return IOSPortraitMasks(
+      candidate: candidate,
+      protection: protection,
+      effective: effective
+    )
   }
 
   private static func makeMask(
@@ -256,8 +317,11 @@ enum IOSPortraitRetoucher {
     extent: CGRect
   ) -> CIImage {
     let bounded = max(0, min(1, strength))
-    guard bounded > 0 else { return source.cropped(to: extent) }
-    let denoised = source.applyingFilter(
+    let white = CIImage(color: CIColor(red: 1, green: 1, blue: 1, alpha: 1))
+      .cropped(to: extent)
+    let opaqueSource = source.composited(over: white).cropped(to: extent)
+    guard bounded > 0 else { return opaqueSource }
+    let denoised = opaqueSource.applyingFilter(
       "CINoiseReduction",
       parameters: [
         "inputNoiseLevel": 0.008 + bounded * 0.018,
@@ -286,7 +350,7 @@ enum IOSPortraitRetoucher {
     return detailed.applyingFilter(
       "CIBlendWithMask",
       parameters: [
-        kCIInputBackgroundImageKey: source,
+        kCIInputBackgroundImageKey: opaqueSource,
         kCIInputMaskImageKey: mask,
       ]
     ).cropped(to: extent)

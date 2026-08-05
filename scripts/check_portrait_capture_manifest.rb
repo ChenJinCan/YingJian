@@ -32,4 +32,6 @@ puts JSON.generate(
   effect_version: manifest.fetch("effectVersion"),
   execution_environment: manifest.fetch("executionEnvironment"),
   face_count: manifest.fetch("faceCount"),
+  candidate_applicable: manifest.fetch("candidateApplicable"),
+  degradation_reason: manifest.fetch("degradationReason"),
 )

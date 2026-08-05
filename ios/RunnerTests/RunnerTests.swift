@@ -406,6 +406,8 @@ class RunnerTests: XCTestCase {
 
     let result = try PortraitMaskSpike.analyze(sourcePath: sourceURL.path)
     XCTAssertEqual(result["faceCount"] as? Int, 0)
+    XCTAssertEqual(result["candidateApplicable"] as? Bool, false)
+    XCTAssertEqual(result["degradationReason"] as? String, "no_face")
     XCTAssertEqual(result["sourceWidth"] as? Int, 96)
     XCTAssertEqual(result["sourceHeight"] as? Int, 64)
     XCTAssertEqual(result["productionEligible"] as? Bool, false)
@@ -451,7 +453,9 @@ class RunnerTests: XCTestCase {
     let manifest = try XCTUnwrap(
       JSONSerialization.jsonObject(with: manifestData) as? [String: Any]
     )
-    XCTAssertEqual(manifest["schema"] as? Int, 1)
+    XCTAssertEqual(manifest["schema"] as? Int, 2)
+    XCTAssertEqual(manifest["candidateApplicable"] as? Bool, false)
+    XCTAssertEqual(manifest["degradationReason"] as? String, "no_face")
     XCTAssertEqual(manifest["rawSourceSha256"] as? String, sourceHash)
     XCTAssertEqual(manifest["productionEligible"] as? Bool, false)
     XCTAssertTrue(captureRelativePath.hasPrefix("tmp/portrait-mask-spike/"))
@@ -587,6 +591,44 @@ class RunnerTests: XCTestCase {
     XCTAssertLessThanOrEqual(largestOutsideDifference, 3)
   }
 
+  func testPortraitCaptureAndRendererShareOneCandidateIdentity() throws {
+    XCTAssertEqual(
+      PortraitMaskSpike.effectVersion,
+      IOSPortraitRetoucher.effectVersion
+    )
+    XCTAssertEqual(
+      PortraitMaskSpike.candidateKind,
+      IOSPortraitRetoucher.candidateKind
+    )
+
+    let extent = CGRect(x: 0, y: 0, width: 16, height: 12)
+    let source = CIImage(
+      color: CIColor(red: 0.4, green: 0.3, blue: 0.2, alpha: 0.5)
+    ).cropped(to: extent)
+    let mask = CIImage(color: .white).cropped(to: extent)
+    let capture = PortraitMaskSpike.candidate(
+      source: source,
+      mask: mask,
+      strength: 0.35,
+      extent: extent
+    )
+    let renderer = IOSPortraitRetoucher.candidate(
+      source: source,
+      mask: mask,
+      strength: 0.35,
+      extent: extent
+    )
+
+    let captureBytes = try rgbaBytes(capture)
+    XCTAssertEqual(captureBytes, try rgbaBytes(renderer))
+    XCTAssertTrue(
+      stride(from: 3, to: captureBytes.count, by: 4).allSatisfy {
+        captureBytes[$0] == 255
+      },
+      "The shared candidate must normalize transparent inputs onto white"
+    )
+  }
+
   func testProductionPortraitCandidateUsesMaskAndMonotonicStrengths() throws {
     let extent = CGRect(x: 0, y: 0, width: 80, height: 60)
     let source = CIImage(color: CIColor(red: 0.42, green: 0.31, blue: 0.24, alpha: 1))
@@ -676,6 +718,51 @@ class RunnerTests: XCTestCase {
         boundingBox: safeFace,
         hasLandmarks: true
       )
+    )
+    XCTAssertEqual(
+      IOSPortraitSafetyPolicy.evaluate(
+        faceCount: 0,
+        confidence: 0,
+        boundingBox: .zero,
+        hasLandmarks: false
+      ).reason,
+      .noFace
+    )
+    XCTAssertEqual(
+      IOSPortraitSafetyPolicy.evaluate(
+        faceCount: 2,
+        confidence: 0.9,
+        boundingBox: safeFace,
+        hasLandmarks: true
+      ).reason,
+      .multipleFaces
+    )
+    XCTAssertEqual(
+      IOSPortraitSafetyPolicy.evaluate(
+        faceCount: 1,
+        confidence: 0.49,
+        boundingBox: safeFace,
+        hasLandmarks: true
+      ).reason,
+      .lowConfidence
+    )
+    XCTAssertEqual(
+      IOSPortraitSafetyPolicy.evaluate(
+        faceCount: 1,
+        confidence: 0.9,
+        boundingBox: CGRect(x: 0.45, y: 0.45, width: 0.08, height: 0.08),
+        hasLandmarks: true
+      ).reason,
+      .faceTooSmall
+    )
+    XCTAssertEqual(
+      IOSPortraitSafetyPolicy.evaluate(
+        faceCount: 1,
+        confidence: 0.9,
+        boundingBox: safeFace,
+        hasLandmarks: false
+      ).reason,
+      .landmarksUnavailable
     )
     XCTAssertFalse(
       IOSPortraitSafetyPolicy.isEligible(

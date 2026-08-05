@@ -43,9 +43,9 @@ def write_manifest(path, capture_directory, overrides = {})
     ]
   end
   manifest = {
-    "schema" => 1,
+    "schema" => 2,
     "candidateKind" => "vision-landmarks-geometry-roi",
-    "effectVersion" => "ios-geometry-retouch-spike-v1",
+    "effectVersion" => "ios-geometry-retouch-candidate-v2",
     "productionEligible" => false,
     "executionEnvironment" => "physical-device",
     "device" => "iPhone14,8",
@@ -57,6 +57,8 @@ def write_manifest(path, capture_directory, overrides = {})
     "sourceWidth" => 96,
     "sourceHeight" => 64,
     "faceCount" => 0,
+    "candidateApplicable" => false,
+    "degradationReason" => "no_face",
     "defaultStrength" => 0.35,
     "highSafeStrength" => 0.55,
     "outputs" => outputs,
@@ -122,6 +124,8 @@ Dir.mktmpdir("portrait-review-plan-test-", quality_root) do |directory|
   summary = JSON.parse(stdout)
   assert(summary["status"] == "valid", "checker did not return a valid summary")
   assert(summary["execution_environment"] == "physical-device", "checker lost device identity")
+  assert(summary["candidate_applicable"] == false, "checker lost candidate applicability")
+  assert(summary["degradation_reason"] == "no_face", "checker lost degradation reason")
 
   competitor_path = File.join(capture_directory, "competitor-fixed-path-export.jpg")
   intake = {
@@ -193,13 +197,34 @@ Dir.mktmpdir("portrait-review-plan-test-", quality_root) do |directory|
   assert(!status.success? && stderr.include?("productionEligible"),
          "production-eligible claim was accepted from the debug capture")
 
+  write_manifest(
+    manifest_path,
+    capture_directory,
+    "candidateApplicable" => true,
+    "degradationReason" => "no_face",
+    "faceCount" => 1,
+  )
+  _stdout, stderr, status = run("ruby", checker, manifest_path)
+  assert(!status.success? && stderr.include?("must equal none"),
+         "applicable capture with a degradation reason was accepted")
+
+  write_manifest(
+    manifest_path,
+    capture_directory,
+    "candidateApplicable" => false,
+    "degradationReason" => "none",
+  )
+  _stdout, stderr, status = run("ruby", checker, manifest_path)
+  assert(!status.success? && stderr.include?("must explain"),
+         "inapplicable capture without a degradation reason was accepted")
+
   write_manifest(manifest_path, capture_directory)
   default_export = File.join(capture_directory, "yingjian-default-export.jpg")
   FileUtils.cp(competitor_path, default_export)
   write_manifest(manifest_path, capture_directory)
   _stdout, stderr, status = run("ruby", checker, manifest_path)
-  assert(!status.success? && stderr.include?("faceCount is zero"),
-         "no-face capture with a changed default export was accepted")
+  assert(!status.success? && stderr.include?("candidateApplicable is false"),
+         "inapplicable capture with a changed default export was accepted")
   FileUtils.cp(baseline, default_export)
   write_manifest(manifest_path, capture_directory)
 

@@ -1301,6 +1301,8 @@ private enum IOSPhotoPreviewError: Error {
 /// THROWAWAY PROTOTYPE: validates Vision geometry and mask alignment only.
 /// It deliberately does not claim to be a production skin-segmentation engine.
 enum PortraitMaskSpike {
+  static let candidateKind = IOSPortraitRetoucher.candidateKind
+  static let effectVersion = IOSPortraitRetoucher.effectVersion
   private static let maxEdge: CGFloat = 1_600
   private static let maxPixels = 48_000_000
   private static let maxSourceEdge = 12_000
@@ -1367,37 +1369,14 @@ enum PortraitMaskSpike {
     let observations = request.results ?? []
     let width = Int(extent.width)
     let height = Int(extent.height)
-    let candidateMask = try makeMask(width: width, height: height) { graphics in
-      graphics.setFillColor(gray: 1, alpha: 1)
-      for face in observations {
-        graphics.fillEllipse(in: candidateFaceRect(face.boundingBox, size: extent.size))
-      }
-    }
-    let protection = try makeMask(width: width, height: height) { graphics in
-      graphics.setFillColor(gray: 1, alpha: 1)
-      graphics.setStrokeColor(gray: 1, alpha: 1)
-      for face in observations {
-        drawProtectionRegions(face: face, size: extent.size, graphics: graphics)
-      }
-    }
-
-    let candidateImage = CIImage(cgImage: candidateMask)
-      .clampedToExtent()
-      .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 8])
-      .cropped(to: extent)
-    let protectionImage = CIImage(cgImage: protection)
-      .clampedToExtent()
-      .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 3])
-      .cropped(to: extent)
-    let inverseProtection = protectionImage
-      .applyingFilter("CIColorInvert")
-      .cropped(to: extent)
-    let effectiveImage = candidateImage
-      .applyingFilter(
-        "CIMultiplyBlendMode",
-        parameters: [kCIInputBackgroundImageKey: inverseProtection]
-      )
-      .cropped(to: extent)
+    let masks = try IOSPortraitRetoucher.masks(
+      observations: observations,
+      extent: extent
+    )
+    let candidateImage = masks.candidate
+    let protectionImage = masks.protection
+    let effectiveImage = masks.effective
+    let safetyDecision = IOSPortraitSafetyPolicy.evaluate(observations)
 
     let directory = captureRoot
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1431,10 +1410,10 @@ enum PortraitMaskSpike {
         extent: extent,
         to: directory.appendingPathComponent("effective-region-overlay.png")
       )
-      let defaultPreview = candidate(
+      let defaultPreview = IOSPortraitRetoucher.candidate(
         source: proxy,
         mask: effectiveImage,
-        strength: observations.isEmpty ? 0 : 0.35,
+        strength: safetyDecision.applicable ? 0.35 : 0,
         extent: extent
       )
       let defaultPreviewPath = try writePNG(
@@ -1455,7 +1434,7 @@ enum PortraitMaskSpike {
       )
       try FileManager.default.copyItem(at: baselineURL, to: offExportURL)
 
-      if observations.isEmpty {
+      if !safetyDecision.applicable {
         try FileManager.default.copyItem(at: baselineURL, to: defaultExportURL)
         try FileManager.default.copyItem(at: baselineURL, to: highSafeExportURL)
       } else {
@@ -1482,6 +1461,8 @@ enum PortraitMaskSpike {
       let captureRelativePath = "tmp/portrait-mask-spike/\(directory.lastPathComponent)"
       let result: [String: Any] = [
         "faceCount": observations.count,
+        "candidateApplicable": safetyDecision.applicable,
+        "degradationReason": safetyDecision.reason.rawValue,
         "width": width,
         "height": height,
         "sourceWidth": Int(sourceExtent.width),
@@ -1501,9 +1482,9 @@ enum PortraitMaskSpike {
         "defaultPreviewPath": defaultPreviewPath,
         "captureManifestPath": manifestURL.path,
         "captureRelativePath": captureRelativePath,
-        "candidateKind": "vision-landmarks-geometry-roi",
+        "candidateKind": candidateKind,
         "geometryOnly": true,
-        "effectVersion": "ios-geometry-retouch-spike-v1",
+        "effectVersion": effectVersion,
         "defaultStrength": 0.35,
         "highSafeStrength": 0.55,
         "productionEligible": false,
@@ -1517,6 +1498,7 @@ enum PortraitMaskSpike {
         sourceWidth: Int(sourceExtent.width),
         sourceHeight: Int(sourceExtent.height),
         faceCount: observations.count,
+        safetyDecision: safetyDecision,
         baselineURL: baselineURL,
         offExportURL: offExportURL,
         defaultExportURL: defaultExportURL,
@@ -1669,134 +1651,6 @@ enum PortraitMaskSpike {
     )
   }
 
-  private static func makeMask(
-    width: Int,
-    height: Int,
-    drawing: (CGContext) -> Void
-  ) throws -> CGImage {
-    guard let graphics = CGContext(
-      data: nil,
-      width: width,
-      height: height,
-      bitsPerComponent: 8,
-      bytesPerRow: width,
-      space: CGColorSpaceCreateDeviceGray(),
-      bitmapInfo: CGImageAlphaInfo.none.rawValue
-    ) else {
-      throw PortraitMaskSpikeError(code: "maskFailed", message: "Mask buffer could not be created")
-    }
-    graphics.setAllowsAntialiasing(true)
-    graphics.setShouldAntialias(true)
-    graphics.setFillColor(gray: 0, alpha: 1)
-    graphics.fill(CGRect(x: 0, y: 0, width: width, height: height))
-    drawing(graphics)
-    guard let image = graphics.makeImage() else {
-      throw PortraitMaskSpikeError(code: "maskFailed", message: "Mask image could not be created")
-    }
-    return image
-  }
-
-  private static func candidateFaceRect(_ box: CGRect, size: CGSize) -> CGRect {
-    let base = CGRect(
-      x: box.minX * size.width,
-      y: box.minY * size.height,
-      width: box.width * size.width,
-      height: box.height * size.height
-    )
-    return CGRect(
-      x: base.minX - base.width * 0.04,
-      y: base.minY + base.height * 0.02,
-      width: base.width * 1.08,
-      height: base.height * 1.08
-    ).intersection(CGRect(origin: .zero, size: size))
-  }
-
-  private static func drawProtectionRegions(
-    face: VNFaceObservation,
-    size: CGSize,
-    graphics: CGContext
-  ) {
-    guard let landmarks = face.landmarks else { return }
-    let faceWidth = face.boundingBox.width * size.width
-    let closedPadding = max(4, faceWidth * 0.025)
-    let linePadding = max(3, faceWidth * 0.018)
-
-    fillRegion(landmarks.leftEye, face: face, size: size, padding: closedPadding, in: graphics)
-    fillRegion(landmarks.rightEye, face: face, size: size, padding: closedPadding, in: graphics)
-    fillRegion(landmarks.outerLips, face: face, size: size, padding: closedPadding, in: graphics)
-    fillRegion(landmarks.innerLips, face: face, size: size, padding: closedPadding, in: graphics)
-    strokeRegion(landmarks.leftEyebrow, face: face, size: size, width: linePadding * 2, in: graphics)
-    strokeRegion(landmarks.rightEyebrow, face: face, size: size, width: linePadding * 2, in: graphics)
-    strokeRegion(landmarks.nose, face: face, size: size, width: linePadding, in: graphics)
-    strokeRegion(landmarks.noseCrest, face: face, size: size, width: linePadding, in: graphics)
-    fillRegion(landmarks.leftPupil, face: face, size: size, padding: closedPadding, in: graphics)
-    fillRegion(landmarks.rightPupil, face: face, size: size, padding: closedPadding, in: graphics)
-  }
-
-  private static func points(
-    for region: VNFaceLandmarkRegion2D?,
-    face: VNFaceObservation,
-    size: CGSize
-  ) -> [CGPoint] {
-    guard let region else { return [] }
-    return region.normalizedPoints.map { point in
-      VNImagePointForFaceLandmarkPoint(
-        vector_float2(Float(point.x), Float(point.y)),
-        face.boundingBox,
-        Int(size.width),
-        Int(size.height)
-      )
-    }
-  }
-
-  private static func fillRegion(
-    _ region: VNFaceLandmarkRegion2D?,
-    face: VNFaceObservation,
-    size: CGSize,
-    padding: CGFloat,
-    in graphics: CGContext
-  ) {
-    let values = points(for: region, face: face, size: size)
-    guard values.count >= 2 else { return }
-    var minX = values[0].x
-    var minY = values[0].y
-    var maxX = values[0].x
-    var maxY = values[0].y
-    for point in values.dropFirst() {
-      minX = min(minX, point.x)
-      minY = min(minY, point.y)
-      maxX = max(maxX, point.x)
-      maxY = max(maxY, point.y)
-    }
-    let bounds = CGRect(
-      x: minX,
-      y: minY,
-      width: maxX - minX,
-      height: maxY - minY
-    ).insetBy(dx: -padding, dy: -padding)
-    graphics.fillEllipse(in: bounds)
-  }
-
-  private static func strokeRegion(
-    _ region: VNFaceLandmarkRegion2D?,
-    face: VNFaceObservation,
-    size: CGSize,
-    width: CGFloat,
-    in graphics: CGContext
-  ) {
-    let values = points(for: region, face: face, size: size)
-    guard let first = values.first else { return }
-    graphics.setLineWidth(width)
-    graphics.setLineCap(.round)
-    graphics.setLineJoin(.round)
-    graphics.beginPath()
-    graphics.move(to: first)
-    for point in values.dropFirst() {
-      graphics.addLine(to: point)
-    }
-    graphics.strokePath()
-  }
-
   private static func overlay(mask: CIImage, source: CIImage, extent: CGRect) -> CIImage {
     let green = CIImage(color: CIColor(red: 0.05, green: 0.92, blue: 0.45, alpha: 0.55))
       .cropped(to: extent)
@@ -1818,46 +1672,12 @@ enum PortraitMaskSpike {
     strength: Double,
     extent: CGRect
   ) -> CIImage {
-    let bounded = max(0, min(1, strength))
-    guard bounded > 0 else { return source.cropped(to: extent) }
-    let white = CIImage(color: CIColor(red: 1, green: 1, blue: 1, alpha: 1))
-      .cropped(to: extent)
-    let opaqueSource = source.composited(over: white).cropped(to: extent)
-
-    let denoised = opaqueSource.applyingFilter(
-      "CINoiseReduction",
-      parameters: [
-        "inputNoiseLevel": 0.008 + bounded * 0.018,
-        "inputSharpness": 0.55,
-      ]
-    ).cropped(to: extent)
-    let relit = denoised.applyingFilter(
-      "CIHighlightShadowAdjust",
-      parameters: [
-        "inputHighlightAmount": 1 - bounded * 0.08,
-        "inputShadowAmount": bounded * 0.22,
-      ]
-    ).cropped(to: extent)
-    let balanced = relit.applyingFilter(
-      "CIColorControls",
-      parameters: [
-        kCIInputBrightnessKey: bounded * 0.018,
-        kCIInputContrastKey: 1 - bounded * 0.025,
-        kCIInputSaturationKey: 1 - bounded * 0.025,
-      ]
-    ).cropped(to: extent)
-    let detailed = balanced.applyingFilter(
-      "CISharpenLuminance",
-      parameters: [kCIInputSharpnessKey: 0.12 + bounded * 0.08]
-    ).cropped(to: extent)
-    let blended = detailed.applyingFilter(
-      "CIBlendWithMask",
-      parameters: [
-        kCIInputBackgroundImageKey: opaqueSource,
-        kCIInputMaskImageKey: mask,
-      ]
-    ).cropped(to: extent)
-    return blended.composited(over: opaqueSource).cropped(to: extent)
+    IOSPortraitRetoucher.candidate(
+      source: source,
+      mask: mask,
+      strength: strength,
+      extent: extent
+    )
   }
 
   static func fullResolutionCandidates(
@@ -1935,6 +1755,7 @@ enum PortraitMaskSpike {
     sourceWidth: Int,
     sourceHeight: Int,
     faceCount: Int,
+    safetyDecision: IOSPortraitSafetyDecision,
     baselineURL: URL,
     offExportURL: URL,
     defaultExportURL: URL,
@@ -1950,9 +1771,9 @@ enum PortraitMaskSpike {
       ]
     }
     let manifest: [String: Any] = [
-      "schema": 1,
-      "candidateKind": "vision-landmarks-geometry-roi",
-      "effectVersion": "ios-geometry-retouch-spike-v1",
+      "schema": 2,
+      "candidateKind": candidateKind,
+      "effectVersion": effectVersion,
       "productionEligible": false,
       "executionEnvironment": executionEnvironment,
       "device": hardwareIdentifier,
@@ -1968,6 +1789,8 @@ enum PortraitMaskSpike {
       "sourceWidth": sourceWidth,
       "sourceHeight": sourceHeight,
       "faceCount": faceCount,
+      "candidateApplicable": safetyDecision.applicable,
+      "degradationReason": safetyDecision.reason.rawValue,
       "defaultStrength": 0.35,
       "highSafeStrength": 0.55,
       "outputs": [

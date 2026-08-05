@@ -9,6 +9,9 @@ module PortraitCaptureContract
   class ValidationError < StandardError; end
 
   SHA256 = /\A[0-9a-f]{64}\z/
+  DEGRADATION_REASONS = %w[
+    none no_face multiple_faces low_confidence face_too_small landmarks_unavailable
+  ].freeze
   EXPECTED_OUTPUTS = {
     "baselineOriginal" => {
       file: "baseline-original.jpg", variant: "original", render_kind: "source", format: "jpeg"
@@ -41,7 +44,7 @@ module PortraitCaptureContract
 
     manifest = parse_json(manifest_path)
     expect(manifest.is_a?(Hash), "manifest must be a JSON object")
-    expect(manifest["schema"] == 1, "schema must equal 1")
+    expect(manifest["schema"] == 2, "schema must equal 2")
     expect(manifest["productionEligible"] == false, "productionEligible must equal false")
     expect_nonempty(manifest, "candidateKind")
     expect_nonempty(manifest, "effectVersion")
@@ -73,6 +76,22 @@ module PortraitCaptureContract
     expect(source_width <= 48_000_000 / source_height, "source dimensions exceed 48 MP")
     face_count = manifest["faceCount"]
     expect(face_count.is_a?(Integer) && face_count >= 0, "faceCount must be a non-negative integer")
+    candidate_applicable = manifest["candidateApplicable"]
+    expect(candidate_applicable == true || candidate_applicable == false,
+           "candidateApplicable must be a boolean")
+    degradation_reason = manifest["degradationReason"]
+    expect(DEGRADATION_REASONS.include?(degradation_reason),
+           "degradationReason must be one of #{DEGRADATION_REASONS.join(", ")}")
+    if candidate_applicable
+      expect(degradation_reason == "none",
+             "degradationReason must equal none when candidateApplicable is true")
+      expect(face_count == 1, "faceCount must equal 1 when candidateApplicable is true")
+    else
+      expect(degradation_reason != "none",
+             "degradationReason must explain why candidateApplicable is false")
+      expect(face_count.zero?, "faceCount must equal 0 for no_face") if degradation_reason == "no_face"
+      expect(face_count > 1, "faceCount must exceed 1 for multiple_faces") if degradation_reason == "multiple_faces"
+    end
 
     default_strength = number_in_unit_interval(manifest, "defaultStrength")
     high_safe_strength = number_in_unit_interval(manifest, "highSafeStrength")
@@ -124,10 +143,10 @@ module PortraitCaptureContract
     baseline_hash = validated_outputs.fetch("baselineOriginal").fetch("sha256")
     expect(validated_outputs.fetch("offExport").fetch("sha256") == baseline_hash,
            "offExport must be byte-identical to baselineOriginal")
-    if face_count.zero?
+    unless candidate_applicable
       %w[defaultExport highSafeExport].each do |name|
         expect(validated_outputs.fetch(name).fetch("sha256") == baseline_hash,
-               "#{name} must be byte-identical to baselineOriginal when faceCount is zero")
+               "#{name} must be byte-identical to baselineOriginal when candidateApplicable is false")
       end
     end
 
