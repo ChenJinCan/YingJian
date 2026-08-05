@@ -12,6 +12,7 @@ VERIFIER = File.join(ROOT, "scripts", "verify_ios_ipa.rb")
 SHA = "0123456789abcdef0123456789abcdef01234567"
 TEAM = "V86Q54AQQU"
 BUNDLE = "com.babycompany.yingjian"
+DEVICE_UDID = "00008110-001075E03CE1401E"
 
 def assert(condition, message)
   raise message unless condition
@@ -77,6 +78,12 @@ Dir.mktmpdir("yingjian-ipa-verifier-") do |directory|
       "get-task-allow" => false, "beta-reports-active" => true
     }
   )
+  profile = profile.sub(
+    "</dict></plist>",
+    "<key>CreationDate</key><date>2026-08-06T00:00:00Z</date>" \
+      "<key>DeveloperCertificates</key><array><data>AQID</data></array>" \
+      "</dict></plist>"
+  )
   File.write(File.join(bin, "security"), "#!/bin/sh\ncat '#{File.join(directory, 'profile.plist')}'\n")
   File.write(File.join(directory, "profile.plist"), profile)
   File.write(File.join(bin, "codesign"), "#!/bin/sh\nif [ \"$1\" = \"-d\" ]; then cat '#{File.join(directory, 'entitlements.plist')}'; fi\nexit 0\n")
@@ -104,6 +111,37 @@ Dir.mktmpdir("yingjian-ipa-verifier-") do |directory|
   data = JSON.parse(File.read(report))
   assert(data["distribution_profile_verified"] == true, "distribution profile not recorded")
   assert(data["firebase_configuration_verified"] == true, "Firebase verification not recorded")
+
+  profile_mode_profile = profile
+    .sub("<key>get-task-allow</key><false/>", "<key>get-task-allow</key><true/>")
+    .sub(
+      "<key>CreationDate</key>",
+      "<key>ProvisionedDevices</key><array><string>#{DEVICE_UDID}</string></array>" \
+        "<key>CreationDate</key>"
+    )
+  profile_mode_entitlements = entitlements.sub(
+    "<key>get-task-allow</key><false/>",
+    "<key>get-task-allow</key><true/>"
+  )
+  File.write(File.join(directory, "profile.plist"), profile_mode_profile)
+  File.write(File.join(directory, "entitlements.plist"), profile_mode_entitlements)
+  profile_report = File.join(directory, "profile-artifact.json")
+  out, err, status = Open3.capture3(
+    environment,
+    "ruby", VERIFIER, ipa, "--bundle-id", BUNDLE, "--version", "1.2.4",
+    "--build", "112", "--team-id", TEAM, "--source-commit", SHA,
+    "--firebase-config", firebase_config, "--output", profile_report,
+    "--device-evidence-mode", "profile", "--expected-device-udid", DEVICE_UDID,
+    "--test-tool-directory", bin
+  )
+  assert(status.success?, "valid Profile IPA rejected: #{out}#{err}")
+  profile_data = JSON.parse(File.read(profile_report))
+  assert(profile_data["development_profile_verified"] == true,
+         "development profile verification not recorded")
+  assert(profile_data["distribution_profile_verified"] == false,
+         "Profile evidence was mislabeled as distribution-signed")
+  File.write(File.join(directory, "profile.plist"), profile)
+  File.write(File.join(directory, "entitlements.plist"), entitlements)
 
   _out, err, status = Open3.capture3(
     "ruby", VERIFIER, ipa, "--bundle-id", BUNDLE, "--version", "1.2.4",

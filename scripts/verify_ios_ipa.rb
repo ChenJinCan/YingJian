@@ -35,6 +35,40 @@ def parse_plist_data(data, directory, label)
   parse_plist(path, label)
 end
 
+def extract_plist_value(path, key, format, label, optional: false)
+  output, error, status = Open3.capture3(
+    "/usr/bin/plutil", "-extract", key, format, "-o", "-", path
+  )
+  return nil if optional && !status.success?
+  fail_verification("#{label} #{key} could not be extracted: #{error.strip}") unless status.success?
+
+  return output.strip unless format == "json"
+
+  JSON.parse(output)
+rescue JSON::ParserError => error
+  fail_verification("#{label} #{key} could not be decoded: #{error.message}")
+end
+
+def parse_provisioning_profile(data, directory, label)
+  path = File.join(directory, "#{label.gsub(/[^A-Za-z0-9]/, '_')}.plist")
+  File.binwrite(path, data)
+  capture!("/usr/bin/plutil", "-lint", path)
+  all_devices = extract_plist_value(
+    path, "ProvisionsAllDevices", "raw", label, optional: true
+  )
+  profile = {
+    "Entitlements" => extract_plist_value(path, "Entitlements", "json", label),
+    "TeamIdentifier" => extract_plist_value(path, "TeamIdentifier", "json", label),
+    "ExpirationDate" => extract_plist_value(path, "ExpirationDate", "raw", label),
+  }
+  provisioned_devices = extract_plist_value(
+    path, "ProvisionedDevices", "json", label, optional: true
+  )
+  profile["ProvisionedDevices"] = provisioned_devices unless provisioned_devices.nil?
+  profile["ProvisionsAllDevices"] = true if all_devices == "true"
+  profile
+end
+
 def require_nonempty(value, label)
   fail_verification("#{label} is required") if value.to_s.strip.empty?
 
@@ -204,7 +238,11 @@ Dir.mktmpdir("yingjian-ipa-verify-") do |directory|
   end
 
   profile_path = File.join(app_path, "embedded.mobileprovision")
-  profile = parse_plist_data(capture!(security_tool, "cms", "-D", "-i", profile_path), directory, "provisioning profile")
+  profile = parse_provisioning_profile(
+    capture!(security_tool, "cms", "-D", "-i", profile_path),
+    directory,
+    "provisioning profile"
+  )
   profile_entitlements = profile["Entitlements"]
   fail_verification("provisioning profile entitlements are missing") unless profile_entitlements.is_a?(Hash)
   fail_verification("provisioning profile team does not match") unless Array(profile["TeamIdentifier"]).include?(expected_team_id)
@@ -273,7 +311,8 @@ Dir.mktmpdir("yingjian-ipa-verify-") do |directory|
     "sha256" => sha256,
     "signature_verified" => true,
     "team_id" => expected_team_id,
-    "distribution_profile_verified" => true,
+    "distribution_profile_verified" => device_evidence_mode != "profile",
+    "development_profile_verified" => device_evidence_mode == "profile",
     "provisioning_profile_present" => true,
     "firebase_configuration_verified" => true,
     "device_evidence_eligible" => !device_evidence_mode.nil?,
