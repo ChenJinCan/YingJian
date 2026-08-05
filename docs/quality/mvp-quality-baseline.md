@@ -123,7 +123,7 @@ Android runner 仍可用于后续里程碑，但本轮不得自动启动 ADB、�
 
 通用图像与组图清单 schema 2 会用系统 ImageIO 工具实际回查格式、像素尺寸、嵌入色彩配置和方向，不接受只修改扩展名或标签来满足配额。其完整门精确要求 48 张：24 张独立单图，以及 6 组各 4 张组图；不能用额外组图挤占单图，也不能用超额成员掩盖缺组。对应根字段为 `required_assets`、`required_single_assets`、`required_group_sets` 与 `required_members_per_group`。
 
-自然人像使用独立的 `quality/portrait-corpus-manifest.yaml` 合同，不复用上述组图配额。人像门精确要求 48 张、至少 36 张 `portrait_single`，且每张资产必须恰好声明 `portrait_single`、`portrait_multi` 或 `no_face` 中的一个角色；非单人资产只用于多人和负向安全验证。两种清单复用相同的文件、哈希、许可和实际媒体探针。`high_resolution` 必须至少 24 MP，`exif_rotated` 必须具有非 1 的真实方向；所有资产同时受 48 MP、12,000 px 和 100 MB 输入硬门约束。许可证据必须位于被忽略的 `.quality/evidence/` 内，语料和许可证据的符号链接均不得逃逸仓库边界。
+自然人像使用独立的 `quality/portrait-corpus-manifest.yaml` 合同，不复用上述组图配额。人像门精确要求 48 张、至少 36 张 `portrait_single`，且每张资产必须恰好声明 `portrait_single`、`portrait_multi` 或 `no_face` 中的一个角色；非单人资产只用于多人和负向安全验证。两种清单复用相同的文件、哈希、许可和实际媒体探针。`high_resolution` 必须至少 24 MP，`exif_rotated` 必须具有非 1 的真实方向；所有资产同时受 48 MP、12,000 px 和 100 MB 输入硬门约束。许可证据必须位于被忽略的 `.quality/evidence/` 内，语料和许可证据的符号链接均不得逃逸仓库边界。2026-08-05 本机忽略清单实际包含 36 张单人成人、4 张多人和 8 张无人脸资产，角色矩阵与媒体合同均已通过；其中公共许可人像属于工程筛查输入，不构成真实用户同意或正式盲评授权证据。
 
 ## 5. 自动质量门
 
@@ -134,6 +134,13 @@ ruby scripts/run_portrait_engineering_corpus.rb \
   .quality/portrait-corpus-manifest.local.yaml \
   .quality/portrait-engineering-<candidate-id>
 ```
+
+本机 `candidate-engineering-v8` 报告绑定候选
+`ios-geometry-retouch-candidate-v3`、manifest 与 retoucher SHA-256，结果为 48 个资产、
+36 个单人应用、12 个多人/无人脸安全保持、0 个意外结果。对成人年龄纹理、胡须、
+眼镜、侧脸和清晰肤质代表样片的局部放大工程观察中，默认档仅作克制的低频整理，
+高安全档变化更明显；五官、发丝、胡须、永久斑点和背景边缘仍可辨认，未观察到明显
+光晕。该结论只允许把候选带入正式盲评，不能把 `productionEligible` 改为 true。
 
 下列项目任一失败即阻断对应图像链路：
 
@@ -313,7 +320,7 @@ ruby scripts/check_ios_color_detail_semantics.rb \
 
 ### 6.2 自然人像
 
-当前 iOS 工程候选为 `ios-geometry-retouch-candidate-v3`。自动化只冻结三个最低语义：默认效果相对原图可测、高安全强度变化更大、合成细碎肤色纹理能量下降；真实样片仍必须按下表盲评。现有本地 48 张工程语料中只有 10 张单人成人样片，因此不得把工程 corpus 通过写成自然人像质量通过。
+当前 iOS 工程候选为 `ios-geometry-retouch-candidate-v3`。自动化冻结默认效果相对原图可测、高安全强度变化更大、细碎肤色纹理能量下降、36 张单人输入应用以及 12 张多人/无人脸输入安全保持。现有本地人像清单已达到 36 张单人成人工程样片，但公共许可、非匿名人工观察和机器合同仍不等于真实用户授权、竞品同路径结果或五人盲评；因此不得把工程 corpus 通过写成自然人像质量通过。
 
 | 维度 | 观察内容 | 通过门 |
 |---|---|---|
