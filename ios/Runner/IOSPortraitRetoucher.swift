@@ -91,7 +91,7 @@ struct IOSPortraitMasks {
 /// is frozen; Vision geometry never leaves this native boundary.
 enum IOSPortraitRetoucher {
   static let candidateKind = "vision-landmarks-geometry-roi"
-  static let effectVersion = "ios-geometry-retouch-candidate-v2"
+  static let effectVersion = "ios-geometry-retouch-candidate-v3"
   private static let analysisMaxEdge: CGFloat = 1_600
   private static let context = CIContext(options: [.cacheIntermediates: false])
 
@@ -321,11 +321,22 @@ enum IOSPortraitRetoucher {
       .cropped(to: extent)
     let opaqueSource = source.composited(over: white).cropped(to: extent)
     guard bounded > 0 else { return opaqueSource }
-    let denoised = opaqueSource.applyingFilter(
+    let softened = opaqueSource.clampedToExtent().applyingFilter(
+      "CIGaussianBlur",
+      parameters: [kCIInputRadiusKey: 0.8 + bounded * 0.9]
+    ).cropped(to: extent)
+    let textureSmoothed = opaqueSource.applyingFilter(
+      "CIDissolveTransition",
+      parameters: [
+        kCIInputTargetImageKey: softened,
+        kCIInputTimeKey: 0.15 + bounded * 0.45,
+      ]
+    ).cropped(to: extent)
+    let denoised = textureSmoothed.applyingFilter(
       "CINoiseReduction",
       parameters: [
-        "inputNoiseLevel": 0.008 + bounded * 0.018,
-        "inputSharpness": 0.55,
+        "inputNoiseLevel": 0.012 + bounded * 0.032,
+        "inputSharpness": 0.0,
       ]
     ).cropped(to: extent)
     let relit = denoised.applyingFilter(
@@ -343,11 +354,7 @@ enum IOSPortraitRetoucher {
         kCIInputSaturationKey: 1 - bounded * 0.025,
       ]
     ).cropped(to: extent)
-    let detailed = balanced.applyingFilter(
-      "CISharpenLuminance",
-      parameters: [kCIInputSharpnessKey: 0.12 + bounded * 0.08]
-    ).cropped(to: extent)
-    return detailed.applyingFilter(
+    return balanced.applyingFilter(
       "CIBlendWithMask",
       parameters: [
         kCIInputBackgroundImageKey: opaqueSource,

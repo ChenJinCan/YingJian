@@ -906,6 +906,48 @@ class RunnerTests: XCTestCase {
     XCTAssertLessThanOrEqual(largestOutsideDifference, 3)
   }
 
+  func testProductionPortraitCandidateVisiblyReducesFineSkinTexture() throws {
+    let extent = CGRect(x: 0, y: 0, width: 96, height: 96)
+    let source = try XCTUnwrap(
+      CIFilter(
+        name: "CICheckerboardGenerator",
+        parameters: [
+          "inputCenter": CIVector(x: 0, y: 0),
+          "inputColor0": CIColor(red: 0.62, green: 0.43, blue: 0.34),
+          "inputColor1": CIColor(red: 0.68, green: 0.49, blue: 0.40),
+          "inputWidth": 1.0,
+          "inputSharpness": 1.0,
+        ]
+      )?.outputImage?.cropped(to: extent)
+    )
+    let mask = CIImage(color: .white).cropped(to: extent)
+    let defaultImage = IOSPortraitRetoucher.candidate(
+      source: source,
+      mask: mask,
+      strength: 0.35,
+      extent: extent
+    )
+    let highImage = IOSPortraitRetoucher.candidate(
+      source: source,
+      mask: mask,
+      strength: 0.55,
+      extent: extent
+    )
+    let sourceBytes = try rgbaBytes(source)
+    let defaultBytes = try rgbaBytes(defaultImage)
+    let highBytes = try rgbaBytes(highImage)
+
+    let defaultDifference = meanAbsoluteDifference(sourceBytes, defaultBytes)
+    let highDifference = meanAbsoluteDifference(sourceBytes, highBytes)
+    XCTAssertGreaterThanOrEqual(defaultDifference, 1.0)
+    XCTAssertGreaterThan(highDifference, defaultDifference)
+    let sourceTexture = neighborDifference(sourceBytes, width: 96, height: 96)
+    let defaultTexture = neighborDifference(defaultBytes, width: 96, height: 96)
+    let highTexture = neighborDifference(highBytes, width: 96, height: 96)
+    XCTAssertLessThan(defaultTexture, sourceTexture * 0.9)
+    XCTAssertLessThan(highTexture, defaultTexture)
+  }
+
   func testProductionPortraitRetoucherSafelyPreservesImageWithoutFace() throws {
     let extent = CGRect(x: 0, y: 0, width: 48, height: 32)
     let source = CIImage(color: CIColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 1))
@@ -1083,6 +1125,35 @@ class RunnerTests: XCTestCase {
       result + abs(Int(pair.0) - Int(pair.1))
     }
     return Double(total) / Double(left.count)
+  }
+
+  private func neighborDifference(
+    _ bytes: [UInt8],
+    width: Int,
+    height: Int
+  ) -> Double {
+    var total = 0
+    var comparisons = 0
+    for y in 0..<height {
+      for x in 0..<width {
+        let offset = (y * width + x) * 4
+        if x + 1 < width {
+          let right = offset + 4
+          for channel in 0..<3 {
+            total += abs(Int(bytes[offset + channel]) - Int(bytes[right + channel]))
+            comparisons += 1
+          }
+        }
+        if y + 1 < height {
+          let below = offset + width * 4
+          for channel in 0..<3 {
+            total += abs(Int(bytes[offset + channel]) - Int(bytes[below + channel]))
+            comparisons += 1
+          }
+        }
+      }
+    }
+    return Double(total) / Double(comparisons)
   }
 
   private func render(sourceURL: URL, outputURL: URL) throws -> IOSPhotoRenderedFile {
