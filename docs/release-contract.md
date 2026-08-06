@@ -10,7 +10,8 @@ Every application uses the same release boundary:
 3. Use a clean release worktree whose branch exactly matches its upstream.
 4. Build and sign locally. GitHub Actions is not a packaging or upload path.
 5. Verify the frozen MVP acceptance manifest and every referenced evidence
-   digest before packaging.
+   digest before packaging, except for an explicitly authorized owner
+   TestFlight build used to collect that evidence.
 6. Verify the final artifact identity, distribution profile, signed
    entitlements, required resources, Firebase identity, and SHA-256 before any
    upload.
@@ -54,6 +55,14 @@ repository validators for those structured inputs; arbitrary self-declared
 Markdown cannot satisfy the gate. The decision expires after seven days and
 must be regenerated for the exact release source.
 
+When the owner explicitly authorizes a TestFlight upload before final MVP
+acceptance, set `YINGJIAN_OWNER_TESTFLIGHT_AUTHORIZED=1` only on that exact iOS
+build or upload invocation. The preflight then permits only the `build` and
+`upload` stages to proceed without `.quality/mvp-acceptance.yaml`, so the signed
+candidate can be installed and used to collect device and human evidence. This
+runtime authorization is not stored in `.env.testflight`; it does not mark the
+MVP accepted, assign testers, submit App Review, or authorize public release.
+
 The build stage does not require App Store Connect credentials. The upload
 stage requires the ignored API key configuration. Both stages still require
 the current store baseline and exact synchronized source identity.
@@ -92,7 +101,10 @@ ruby scripts/check_release_contract.rb validate-config
 Release wrappers invoke `scripts/release_contract_preflight.sh` before signing
 or building. The preflight also rejects missing/forbidden stage-specific
 environment variables, an incomplete or stale MVP acceptance manifest, dirty
-worktrees, and branches ahead of, behind, or diverged from their upstream.
+worktrees, and branches ahead of, behind, or diverged from their upstream. The
+only acceptance exception is the explicit iOS owner-TestFlight runtime
+authorization described above; all other platforms and stages remain
+fail-closed.
 
 The current MVP execution and validation target is iOS only. Android packaging,
 ADB, emulators, and Play delivery are outside this milestone.

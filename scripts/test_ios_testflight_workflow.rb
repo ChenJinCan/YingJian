@@ -6,6 +6,7 @@ require "open3"
 ROOT = File.expand_path("..", __dir__)
 BUILD_SCRIPT = File.join(ROOT, "scripts", "build_ios_testflight.sh")
 UPLOAD_SCRIPT = File.join(ROOT, "scripts", "upload_ios_testflight.sh")
+PREFLIGHT_SCRIPT = File.join(ROOT, "scripts", "release_contract_preflight.sh")
 
 def assert(condition, message)
   raise message unless condition
@@ -49,5 +50,15 @@ assert(stdout.include?("altool --upload-package") && stdout.include?("--wait"),
        "upload plan does not wait on the uploaded delivery")
 assert(stdout.include?("provider valid only"),
        "upload plan did not state its terminal boundary")
+
+preflight_source = File.read(PREFLIGHT_SCRIPT)
+assert(preflight_source.include?('${YINGJIAN_OWNER_TESTFLIGHT_AUTHORIZED:-0}'),
+       "preflight omitted the explicit owner TestFlight authorization")
+assert(preflight_source.include?('"$PLATFORM" == "ios"'),
+       "acceptance exception is not restricted to iOS")
+assert(preflight_source.include?('"$STAGE" == "build" || "$STAGE" == "upload"'),
+       "acceptance exception is not restricted to build/upload")
+assert(preflight_source.scan("check_mvp_acceptance.rb").length == 1,
+       "default MVP acceptance checker was removed or duplicated")
 
 puts "iOS TestFlight workflow tests passed."
