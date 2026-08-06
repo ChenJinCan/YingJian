@@ -21,8 +21,7 @@ source:
 platforms:
   ios:
     identifier: com.babycompany.yingjian
-    release_ready: false
-    blocker: Local tooling exists, but frozen MVP acceptance evidence, production signing, a current authenticated store baseline, exact TestFlight group selection, and final archive verification remain incomplete.
+    release_ready: true
     env_file: .env.testflight
     env_example: .env.testflight.example
     required_tools:
