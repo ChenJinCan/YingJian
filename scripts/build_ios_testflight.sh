@@ -28,7 +28,7 @@ print_plan() {
 LOCAL-ONLY: build one signed iOS IPA; this command never contacts App Store Connect.
 release_contract_preflight.sh ios $VERSION_VALUE $BUILD_VALUE build
 flutter build ipa --release --build-name $VERSION_VALUE --build-number $BUILD_VALUE --export-options-plist release/ExportOptions.testflight.plist
-Flutter runs with an isolated configuration where Android discovery is disabled.
+Flutter runs with an isolated configuration where Android discovery is disabled. Swift Package Manager migration is disabled for this CocoaPods project.
 verify_ios_ipa.rb <IPA> --bundle-id com.babycompany.yingjian --version $VERSION_VALUE --build $BUILD_VALUE --source-commit <RELEASE_SOURCE_COMMIT> --firebase-config ios/Runner/GoogleService-Info.plist
 EOF
 }
@@ -66,7 +66,10 @@ cleanup_flutter_config() {
   exit "$status"
 }
 trap cleanup_flutter_config EXIT HUP INT TERM
-flutter config --no-enable-android --enable-ios >/dev/null
+flutter config \
+  --no-enable-android \
+  --enable-ios \
+  --no-enable-swift-package-manager >/dev/null
 
 ipa_directory="$ROOT_DIR/build/ios/ipa"
 report_directory="$ROOT_DIR/.release-state/ios"

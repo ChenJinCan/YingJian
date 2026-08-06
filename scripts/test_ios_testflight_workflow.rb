@@ -25,7 +25,13 @@ assert(stdout.include?("flutter build ipa --release --build-name 1.2.4 --build-n
        "build plan omitted the exact Flutter candidate identity")
 assert(stdout.include?("verify_ios_ipa.rb"), "build plan omitted final IPA verification")
 assert(stdout.include?("Android discovery is disabled"), "build plan omitted the iOS-only Flutter boundary")
+assert(stdout.include?("Swift Package Manager migration is disabled"),
+       "build plan omitted the existing CocoaPods project boundary")
 assert(!stdout.include?("upload-package"), "local build plan unexpectedly uploads to Apple")
+
+build_source = File.read(BUILD_SCRIPT)
+assert(build_source.include?("--no-enable-swift-package-manager"),
+       "build wrapper may mutate the CocoaPods project into a partial SPM migration")
 
 _stdout, stderr, status = run(BUILD_SCRIPT, "--dry-run", "1.2", "112")
 assert(!status.success? && stderr.include?("x.y.z"), "build wrapper accepted an invalid version")
