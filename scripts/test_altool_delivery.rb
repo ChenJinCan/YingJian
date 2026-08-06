@@ -16,6 +16,26 @@ Dir.mktmpdir("altool-delivery-") do |dir|
   report = JSON.parse(File.read(output))
   raise "delivery boundary collapsed" unless report["provider_valid"] && !report["test_group_distributed"]
 
+  File.write(input, <<~DELIVERY)
+    Running altool at path '/Applications/Xcode.app/altool'...
+    UPLOAD SUCCEEDED with no errors
+    Delivery UUID: delivery-456
+    {
+      "app-store-attributes": {"processingState": "VALID"},
+      "build-status": "VALID",
+      "bundle-short-version-string": "1.2.4",
+      "bundle-version": "112",
+      "delivery-uuid": "delivery-456",
+      "import-status": "VALID"
+    }
+    {"success-message": "No errors uploading archive."}
+  DELIVERY
+  _out, err, status = Open3.capture3("ruby", checker, input, "--version", "1.2.4", "--build", "112",
+                                     "--source-commit", "a" * 40, "--sha256", "b" * 64, "--output", output)
+  raise "real altool mixed output rejected: #{err}" unless status.success?
+  report = JSON.parse(File.read(output))
+  raise "real altool delivery ID was not preserved" unless report["delivery_id"] == "delivery-456"
+
   File.write(input, JSON.generate("data" => { "deliveryId" => "delivery-123", "status" => "PROCESSING" }))
   _out, err, status = Open3.capture3("ruby", checker, input, "--version", "1.2.4", "--build", "112",
                                      "--source-commit", "a" * 40, "--sha256", "b" * 64, "--output", output)

@@ -10,6 +10,52 @@ def fail_delivery(message)
   exit 1
 end
 
+def parse_json_objects(text)
+  objects = []
+  start_index = nil
+  depth = 0
+  in_string = false
+  escaped = false
+
+  text.each_char.with_index do |character, index|
+    if start_index.nil?
+      next unless character == "{"
+
+      start_index = index
+      depth = 1
+      next
+    end
+
+    if in_string
+      if escaped
+        escaped = false
+      elsif character == "\\"
+        escaped = true
+      elsif character == '"'
+        in_string = false
+      end
+      next
+    end
+
+    case character
+    when '"'
+      in_string = true
+    when "{"
+      depth += 1
+    when "}"
+      depth -= 1
+      next unless depth.zero?
+
+      objects << JSON.parse(text[start_index..index])
+      start_index = nil
+    end
+  end
+
+  raise JSON::ParserError, "no complete JSON object found" if objects.empty?
+
+  objects
+end
+
 begin
 options = {}
 OptionParser.new do |parser|
@@ -21,7 +67,7 @@ OptionParser.new do |parser|
 end.parse!
 input = ARGV.shift
 fail_delivery("one delivery JSON path is required") unless input && ARGV.empty?
-data = JSON.parse(File.read(input))
+data = parse_json_objects(File.read(input))
 
 objects = []
 pairs = []
@@ -41,7 +87,7 @@ end
 visit.call(data)
 
 id_keys = %w[deliveryid deliveryuuid uploadid]
-status_keys = %w[status state deliverystatus uploadstatus]
+status_keys = %w[status state deliverystatus uploadstatus buildstatus importstatus processingstate]
 success_states = %w[COMPLETE COMPLETED SUCCEEDED SUCCESS VALID]
 failure_states = %w[FAILED FAILURE ERROR INVALID REJECTED CANCELLED CANCELED]
 all_states = pairs.select { |key, _value| status_keys.include?(key) }.map { |_key, value| value.to_s.upcase }
