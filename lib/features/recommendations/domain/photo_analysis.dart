@@ -29,6 +29,7 @@ enum PortraitDegradationReason {
   lowConfidence,
   faceTooSmall,
   landmarksUnavailable,
+  backgroundRisk,
   capabilityLocked,
   capabilityUnavailable,
 }
@@ -66,11 +67,24 @@ class LocalPhotoAnalysis {
     this.exposure = ExposureCondition.unknown,
     this.whiteBalance = WhiteBalanceCondition.unknown,
     this.clarity = ClarityCondition.unknown,
-    this.portrait = PortraitApplicability.unavailable,
-    this.portraitReason = PortraitDegradationReason.none,
+    PortraitApplicability portrait = PortraitApplicability.unavailable,
+    PortraitDegradationReason portraitReason = PortraitDegradationReason.none,
+    PortraitApplicability? faceSlim,
+    PortraitDegradationReason? faceSlimReason,
+    int? faceSlimTargetCount,
     this.body = PortraitApplicability.unavailable,
     this.scene = SceneKind.unknown,
-  });
+  }) : assert(
+         faceSlimTargetCount == null ||
+             (faceSlimTargetCount >= 0 && faceSlimTargetCount <= 3),
+       ),
+       portrait = portrait,
+       portraitReason = portraitReason,
+       faceSlim = faceSlim ?? portrait,
+       faceSlimReason = faceSlimReason ?? portraitReason,
+       faceSlimTargetCount =
+           faceSlimTargetCount ??
+           ((faceSlim ?? portrait) == PortraitApplicability.applicable ? 1 : 0);
 
   final String analysisVersion;
   final String capabilityVersion;
@@ -87,6 +101,9 @@ class LocalPhotoAnalysis {
   final ClarityCondition clarity;
   final PortraitApplicability portrait;
   final PortraitDegradationReason portraitReason;
+  final PortraitApplicability faceSlim;
+  final PortraitDegradationReason faceSlimReason;
+  final int faceSlimTargetCount;
   final PortraitApplicability body;
   final SceneKind scene;
 
@@ -119,6 +136,9 @@ class LocalPhotoAnalysis {
     'clarity': clarity.name,
     'portrait': portrait.name,
     'portraitReason': portraitReason.name,
+    'faceSlim': faceSlim.name,
+    'faceSlimReason': faceSlimReason.name,
+    'faceSlimTargetCount': faceSlimTargetCount,
     'body': body.name,
     'scene': scene.name,
   };
@@ -140,6 +160,14 @@ class LocalPhotoAnalysis {
       );
     }
 
+    final faceSlimTargetCount = json['faceSlimTargetCount'];
+    if (faceSlimTargetCount != null &&
+        (faceSlimTargetCount is! num ||
+            faceSlimTargetCount.toInt() != faceSlimTargetCount ||
+            faceSlimTargetCount < 0 ||
+            faceSlimTargetCount > 3)) {
+      throw const FormatException('Invalid faceSlimTargetCount');
+    }
     return LocalPhotoAnalysis(
       analysisVersion: requiredString('analysisVersion'),
       capabilityVersion: requiredString('capabilityVersion'),
@@ -161,6 +189,15 @@ class LocalPhotoAnalysis {
       portraitReason: json['portraitReason'] == null
           ? PortraitDegradationReason.none
           : enumValue('portraitReason', PortraitDegradationReason.values),
+      faceSlim: json['faceSlim'] == null
+          ? null
+          : enumValue('faceSlim', PortraitApplicability.values),
+      faceSlimReason: json['faceSlimReason'] == null
+          ? null
+          : enumValue('faceSlimReason', PortraitDegradationReason.values),
+      faceSlimTargetCount: faceSlimTargetCount == null
+          ? null
+          : (faceSlimTargetCount as num).toInt(),
       body: json['body'] == null
           ? PortraitApplicability.unavailable
           : enumValue('body', PortraitApplicability.values),
@@ -199,6 +236,9 @@ class LocalPhotoAnalysis {
       other.clarity == clarity &&
       other.portrait == portrait &&
       other.portraitReason == portraitReason &&
+      other.faceSlim == faceSlim &&
+      other.faceSlimReason == faceSlimReason &&
+      other.faceSlimTargetCount == faceSlimTargetCount &&
       other.body == body &&
       other.scene == scene;
 
@@ -219,6 +259,9 @@ class LocalPhotoAnalysis {
     clarity,
     portrait,
     portraitReason,
+    faceSlim,
+    faceSlimReason,
+    faceSlimTargetCount,
     body,
     scene,
   );

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
 
 const Object _notProvided = Object();
 
@@ -365,6 +366,7 @@ class AdaptiveCompensation {
     double safeSharedIntensity = 1,
     double skinProtection = 0,
     double portraitStrength = 0,
+    PortraitRetouchRecipe? portraitRecipe,
   }) {
     _validateUnitValue(safeSharedIntensity, 'safeSharedIntensity');
     _validateUnitValue(skinProtection, 'skinProtection');
@@ -374,7 +376,13 @@ class AdaptiveCompensation {
       source: source,
       safeSharedIntensity: safeSharedIntensity,
       skinProtection: skinProtection,
-      portraitStrength: portraitStrength,
+      portraitRecipe:
+          portraitRecipe ??
+          PortraitRetouchRecipe.migrateLegacy(
+            portraitStrength: portraitStrength,
+            faceSlimStrength: 0,
+            bodySlimStrength: 0,
+          ),
     );
   }
 
@@ -383,21 +391,23 @@ class AdaptiveCompensation {
     required this.source,
     required this.safeSharedIntensity,
     required this.skinProtection,
-    required this.portraitStrength,
+    required this.portraitRecipe,
   });
 
   final EditRecipe recipe;
   final AdaptiveCompensationSource source;
   final double safeSharedIntensity;
   final double skinProtection;
-  final double portraitStrength;
+  final PortraitRetouchRecipe portraitRecipe;
+
+  double get portraitStrength => portraitRecipe.textureSmoothing / 100;
 
   Map<String, Object> toJson() => {
     'recipe': recipe.toJson(),
     'source': source.name,
     'safeSharedIntensity': safeSharedIntensity,
     'skinProtection': skinProtection,
-    'portraitStrength': portraitStrength,
+    'portraitRecipe': portraitRecipe.toJson(),
   };
 
   factory AdaptiveCompensation.fromJson(Map<String, Object?> json) {
@@ -414,6 +424,11 @@ class AdaptiveCompensation {
           (json['safeSharedIntensity'] as num?)?.toDouble() ?? 1,
       skinProtection: (json['skinProtection'] as num?)?.toDouble() ?? 0,
       portraitStrength: (json['portraitStrength'] as num?)?.toDouble() ?? 0,
+      portraitRecipe: json['portraitRecipe'] is Map
+          ? PortraitRetouchRecipe.fromJson(
+              Map<String, Object?>.from(json['portraitRecipe']! as Map),
+            )
+          : null,
     );
   }
 
@@ -424,7 +439,7 @@ class AdaptiveCompensation {
       other.source == source &&
       other.safeSharedIntensity == safeSharedIntensity &&
       other.skinProtection == skinProtection &&
-      other.portraitStrength == portraitStrength;
+      other.portraitRecipe == portraitRecipe;
 
   @override
   int get hashCode => Object.hash(
@@ -432,7 +447,7 @@ class AdaptiveCompensation {
     source,
     safeSharedIntensity,
     skinProtection,
-    portraitStrength,
+    portraitRecipe,
   );
 }
 
@@ -774,8 +789,9 @@ class PhotoProject {
       ),
       remainingPhotoOverride: EditRecipe(
         portraitStrength: override.portraitStrength,
-        faceSlimStrength: override.faceSlimStrength,
+        faceSlimRecipe: override.faceSlimRecipe,
         bodySlimStrength: override.bodySlimStrength,
+        portraitRecipe: override.portraitRecipe,
         crop: override.crop,
       ),
     );
@@ -858,12 +874,12 @@ class PhotoProject {
       ),
       // Portrait retouch is deliberately a per-photo semantic adjustment. It
       // must not inherit from or be promoted into the group's shared style.
-      portraitStrength:
-          override?.portraitStrength ?? adaptiveLayer?.portraitStrength ?? 0,
+      portraitStrength: 0,
       // Geometry is also explicit and per-photo. Automatic analysis and group
       // synchronization must never enable it on the user's behalf.
-      faceSlimStrength: override?.faceSlimStrength ?? 0,
+      faceSlimRecipe: override?.faceSlimRecipe,
       bodySlimStrength: override?.bodySlimStrength ?? 0,
+      portraitRecipe: override?.portraitRecipe ?? adaptiveLayer?.portraitRecipe,
       crop: photoOverride != null || photoOverrides.containsKey(photoId)
           ? override!.crop
           : shared.crop,

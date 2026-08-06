@@ -4,15 +4,16 @@ import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_for_platform.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_v2.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_v3.dart';
+import 'package:yingjian/features/editor/domain/image_pipeline_v5.dart';
 
 void main() {
   tearDown(() => debugDefaultTargetPlatformOverride = null);
 
-  test('selects V3 only for the iOS portrait reshape adapter', () {
+  test('selects V5 only for the iOS versioned portrait adapter', () {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     expect(
       imagePipelineForCurrentPlatform(EditRecipe.neutral),
-      isA<ImagePipelineV3>(),
+      isA<ImagePipelineV5>(),
     );
 
     debugDefaultTargetPlatformOverride = TargetPlatform.android;

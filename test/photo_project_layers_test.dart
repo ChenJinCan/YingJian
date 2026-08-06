@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 
 void main() {
@@ -83,9 +84,43 @@ void main() {
     expect(effective.tint, 0);
     expect(effective.saturation, closeTo(0.2, 1e-12));
     expect(effective.clarity, closeTo(0.4, 1e-12));
-    expect(effective.portraitStrength, closeTo(0.35, 1e-12));
+    expect(effective.portraitStrength, 0);
+    expect(effective.portraitRecipe.textureSmoothing, 35);
+    expect(effective.portraitRecipe.skinToneLighting, 35);
     expect(effective.crop, photoCrop);
   });
+
+  test(
+    'project restoration preserves the five-parameter portrait identity',
+    () {
+      final portraitRecipe = PortraitRetouchRecipe(
+        textureSmoothing: 42,
+        skinToneLighting: 31,
+        blemishReduction: 18,
+        faceSlimming: 9,
+        torsoSlimming: 7,
+      );
+      final project = PhotoProject(
+        id: 'project-portrait-v2',
+        createdAt: DateTime.utc(2026, 8, 6),
+        updatedAt: DateTime.utc(2026, 8, 6),
+        photos: const [first],
+        sharedStyle: SharedStyle(recipe: EditRecipe.neutral),
+        photoOverrides: {
+          first.id: PhotoOverride(
+            recipe: EditRecipe(portraitRecipe: portraitRecipe),
+          ),
+        },
+      );
+
+      final restored = PhotoProject.fromJson(project.toJson());
+
+      expect(
+        restored.effectiveRecipeFor(first.id).portraitRecipe,
+        portraitRecipe,
+      );
+    },
+  );
 
   test(
     'portrait retouch and reshape stay with their photo when color edits sync to group',
@@ -149,7 +184,14 @@ void main() {
 
     expect(
       project.effectiveRecipeFor(first.id),
-      EditRecipe(exposure: 0.1, warmth: 0.2, portraitStrength: 0.35),
+      EditRecipe(
+        exposure: 0.1,
+        warmth: 0.2,
+        portraitRecipe: PortraitRetouchRecipe(
+          textureSmoothing: 35,
+          skinToneLighting: 35,
+        ),
+      ),
     );
     expect(
       project.effectiveRecipeFor(second.id),

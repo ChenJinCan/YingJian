@@ -292,20 +292,27 @@ void main() {
           ProjectEditingScope.currentPhoto,
           photoId: 'photo-2',
         );
-        expect(session.editableRecipe.portraitStrength, 0.35);
+        expect(session.editableRecipe.portraitRecipe.textureSmoothing, 35);
         expect(
           session
               .previewRecipeFor('photo-2', session.editableRecipe)
-              .portraitStrength,
-          0.35,
+              .portraitRecipe
+              .textureSmoothing,
+          35,
         );
 
         await session.commitEdit(EditRecipe.neutral);
-        expect(session.effectiveRecipeFor('photo-2').portraitStrength, 0);
+        expect(
+          session.effectiveRecipeFor('photo-2').portraitRecipe.isNeutral,
+          isTrue,
+        );
         expect(session.project?.photoOverrides, contains('photo-2'));
 
         await session.undoEdit();
-        expect(session.effectiveRecipeFor('photo-2').portraitStrength, 0.35);
+        expect(
+          session.effectiveRecipeFor('photo-2').portraitRecipe.textureSmoothing,
+          35,
+        );
         expect(store.savedProject, session.project);
       },
     );

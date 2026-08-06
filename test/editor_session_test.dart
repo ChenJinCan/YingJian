@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/editor/application/editor_session.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
 
 void main() {
   group('EditRecipe', () {
@@ -25,7 +26,11 @@ void main() {
         tint: 0.6,
         saturation: -0.7,
         clarity: 0.8,
-        portraitStrength: 0.35,
+        portraitRecipe: PortraitRetouchRecipe(
+          textureSmoothing: 35,
+          skinToneLighting: 35,
+          blemishReduction: 15,
+        ),
         crop: CropGeometry(
           left: 0.1,
           top: 0.2,

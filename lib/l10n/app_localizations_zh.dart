@@ -191,10 +191,60 @@ class AppLocalizationsZh extends AppLocalizations {
   String get naturalPortraitRetouch => '自然精修';
 
   @override
+  String get oneTapNaturalBeautification => '一键自然美化';
+
+  @override
+  String get applyNaturalBeautification => '应用自然美化';
+
+  @override
+  String get textureSmoothing => '质感磨皮';
+
+  @override
+  String get skinToneLighting => '肤色与面部光线';
+
+  @override
+  String get blemishReduction => '瑕疵减弱';
+
+  @override
   String get faceSlim => '瘦脸';
 
   @override
+  String get faceSlimBackgroundProtected => '为保护背景线条，这张照片暂不提供瘦脸';
+
+  @override
+  String get faceSlimMultipleFaces => '检测到多个人脸：自然精修可用，瘦脸仅支持单人照片';
+
+  @override
+  String get faceSlimUnavailable => '这张照片暂不满足安全瘦脸条件';
+
+  @override
+  String get faceSlimTargetHint => '选择要调整的人脸（按画面从左到右）';
+
+  @override
+  String faceSlimTarget(int number) {
+    return '人脸 $number';
+  }
+
+  @override
   String get bodySlim => '瘦身';
+
+  @override
+  String get portraitTools => '人像';
+
+  @override
+  String get lightAndColorTools => '光色';
+
+  @override
+  String get localPortraitReady => '人像工具已就绪 · 本地处理';
+
+  @override
+  String get portraitToolsUnavailable => '当前照片未通过人像安全检测，仍可继续调整光色';
+
+  @override
+  String get switchToCurrentPhotoForPortrait => '切换到“当前照片”后可使用人像工具';
+
+  @override
+  String get resetCurrentAdjustment => '归零当前调整';
 
   @override
   String get composition => '构图';

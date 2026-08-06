@@ -33,13 +33,16 @@ void main() {
             captured = call;
             return <String, Object>{
               'analysisVersion': 'local-pixels-v1',
-              'capabilityVersion': 'ios-core-image-vision-v8-portrait-reshape',
+              'capabilityVersion': 'ios-core-image-vision-v12-multiface-slim',
               'confidence': 'medium',
               'exposure': 'underexposed',
               'whiteBalance': 'coolCast',
               'clarity': 'clear',
               'portrait': 'applicable',
               'portraitReason': 'none',
+              'faceSlim': 'unsafe',
+              'faceSlimReason': 'backgroundRisk',
+              'faceSlimTargetCount': 2,
               'body': 'applicable',
               'scene': 'people',
             };
@@ -56,13 +59,16 @@ void main() {
       expect(result.usesSafeFallback, isFalse);
       expect(
         result.capabilityVersion,
-        'ios-core-image-vision-v8-portrait-reshape',
+        'ios-core-image-vision-v12-multiface-slim',
       );
       expect(result.exposure.name, 'underexposed');
       expect(result.whiteBalance.name, 'coolCast');
       expect(result.scene.name, 'people');
       expect(result.portrait.name, 'applicable');
       expect(result.portraitReason.name, 'none');
+      expect(result.faceSlim.name, 'unsafe');
+      expect(result.faceSlimReason.name, 'backgroundRisk');
+      expect(result.faceSlimTargetCount, 2);
       expect(result.body.name, 'applicable');
       expect(result.matchesInput(photo), isTrue);
     },

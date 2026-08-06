@@ -20,6 +20,8 @@ enum IOSPortraitSafetyPolicy {
   static let minimumConfidence: Float = 0.5
   private static let minimumFaceDimension: CGFloat = 0.12
   private static let minimumFaceArea: CGFloat = 0.025
+  private static let minimumFacePixelDimension: CGFloat = 48
+  private static let minimumFacePixelArea: CGFloat = 48 * 48
 
   static func isEligible(
     faceCount: Int,
@@ -63,6 +65,37 @@ enum IOSPortraitSafetyPolicy {
     return IOSPortraitSafetyDecision(applicable: true, reason: .none)
   }
 
+  static func evaluate(
+    faceCount: Int,
+    confidence: Float,
+    boundingBox: CGRect,
+    hasLandmarks: Bool,
+    imageSize: CGSize
+  ) -> IOSPortraitSafetyDecision {
+    guard faceCount > 0 else {
+      return IOSPortraitSafetyDecision(applicable: false, reason: .noFace)
+    }
+    guard faceCount == 1 else {
+      return IOSPortraitSafetyDecision(applicable: false, reason: .multipleFaces)
+    }
+    guard confidence >= minimumConfidence else {
+      return IOSPortraitSafetyDecision(applicable: false, reason: .lowConfidence)
+    }
+    let faceWidth = boundingBox.width * imageSize.width
+    let faceHeight = boundingBox.height * imageSize.height
+    guard
+      faceWidth >= minimumFacePixelDimension,
+      faceHeight >= minimumFacePixelDimension,
+      faceWidth * faceHeight >= minimumFacePixelArea
+    else {
+      return IOSPortraitSafetyDecision(applicable: false, reason: .faceTooSmall)
+    }
+    guard hasLandmarks else {
+      return IOSPortraitSafetyDecision(applicable: false, reason: .landmarksUnavailable)
+    }
+    return IOSPortraitSafetyDecision(applicable: true, reason: .none)
+  }
+
   static func evaluate(_ observations: [VNFaceObservation]) -> IOSPortraitSafetyDecision {
     guard let face = observations.first else {
       return IOSPortraitSafetyDecision(applicable: false, reason: .noFace)
@@ -75,8 +108,114 @@ enum IOSPortraitSafetyPolicy {
     )
   }
 
+  static func evaluate(
+    _ observations: [VNFaceObservation],
+    imageSize: CGSize
+  ) -> IOSPortraitSafetyDecision {
+    guard let face = observations.first else {
+      return IOSPortraitSafetyDecision(applicable: false, reason: .noFace)
+    }
+    return evaluate(
+      faceCount: observations.count,
+      confidence: face.confidence,
+      boundingBox: face.boundingBox,
+      hasLandmarks: face.landmarks != nil,
+      imageSize: imageSize
+    )
+  }
+
   static func isEligible(_ observations: [VNFaceObservation]) -> Bool {
     evaluate(observations).applicable
+  }
+
+  static func isEligible(
+    _ observations: [VNFaceObservation],
+    imageSize: CGSize
+  ) -> Bool {
+    evaluate(observations, imageSize: imageSize).applicable
+  }
+}
+
+/// Spike seam for non-geometric retouching only. Unlike the legacy single-face
+/// policy above, this evaluates each detected face independently while keeping
+/// a hard scene limit. It is not used by production rendering until Ticket 20
+/// supplies fixed-image outcome evidence.
+struct IOSNonGeometricFaceDescriptor: Equatable {
+  let confidence: Float
+  let boundingBox: CGRect
+  let hasLandmarks: Bool
+}
+
+enum IOSNonGeometricFaceRejectionReason: String, Equatable {
+  case lowConfidence = "low_confidence"
+  case faceTooSmall = "face_too_small"
+  case landmarksUnavailable = "landmarks_unavailable"
+}
+
+enum IOSMultiFaceNonGeometricSceneReason: String, Equatable {
+  case none
+  case noFace = "no_face"
+  case tooManyFaces = "too_many_faces"
+  case noEligibleFace = "no_eligible_face"
+}
+
+struct IOSMultiFaceNonGeometricSafetyDecision: Equatable {
+  let applicableFaceIndices: [Int]
+  let rejectedFaces: [Int: IOSNonGeometricFaceRejectionReason]
+  let sceneReason: IOSMultiFaceNonGeometricSceneReason
+}
+
+enum IOSMultiFaceNonGeometricSafetyPolicy {
+  static let maximumFaceCount = 3
+  private static let minimumFacePixelDimension: CGFloat = 48
+  private static let minimumFacePixelArea: CGFloat = 48 * 48
+
+  static func evaluate(
+    faces: [IOSNonGeometricFaceDescriptor],
+    imageSize: CGSize
+  ) -> IOSMultiFaceNonGeometricSafetyDecision {
+    guard !faces.isEmpty else {
+      return IOSMultiFaceNonGeometricSafetyDecision(
+        applicableFaceIndices: [],
+        rejectedFaces: [:],
+        sceneReason: .noFace
+      )
+    }
+    guard faces.count <= maximumFaceCount else {
+      return IOSMultiFaceNonGeometricSafetyDecision(
+        applicableFaceIndices: [],
+        rejectedFaces: [:],
+        sceneReason: .tooManyFaces
+      )
+    }
+
+    var applicable: [Int] = []
+    var rejected: [Int: IOSNonGeometricFaceRejectionReason] = [:]
+    for (index, face) in faces.enumerated() {
+      if face.confidence < IOSPortraitSafetyPolicy.minimumConfidence {
+        rejected[index] = .lowConfidence
+        continue
+      }
+      let width = face.boundingBox.width * imageSize.width
+      let height = face.boundingBox.height * imageSize.height
+      if width < minimumFacePixelDimension
+          || height < minimumFacePixelDimension
+          || width * height < minimumFacePixelArea
+      {
+        rejected[index] = .faceTooSmall
+        continue
+      }
+      guard face.hasLandmarks else {
+        rejected[index] = .landmarksUnavailable
+        continue
+      }
+      applicable.append(index)
+    }
+    return IOSMultiFaceNonGeometricSafetyDecision(
+      applicableFaceIndices: applicable,
+      rejectedFaces: rejected,
+      sceneReason: applicable.isEmpty ? .noEligibleFace : .none
+    )
   }
 }
 
@@ -136,7 +275,7 @@ struct IOSFaceSlimGeometry: Equatable {
 }
 
 struct IOSBodySlimGeometry: Equatable {
-  static let maximumShiftRatio: CGFloat = 0.22
+  static let maximumShiftRatio: CGFloat = 0.175
 
   let centerX: CGFloat
   let halfWidth: CGFloat
@@ -183,7 +322,7 @@ struct IOSBodySlimGeometry: Equatable {
 }
 
 enum IOSBodySlimSafetyPolicy {
-  private static let minimumJointConfidence: Float = 0.5
+  private static let minimumJointConfidence: Float = 0.4
   private static let minimumTorsoHeightRatio: CGFloat = 0.12
 
   static func isEligible(
@@ -278,43 +417,138 @@ enum IOSReshapeBackgroundSafetyPolicy {
   }
 }
 
+struct IOSFaceSlimTargetContext {
+  let geometry: IOSFaceSlimGeometry
+  let mask: CIImage
+}
+
 /// Reusable, native-only portrait geometry for one decoded source image.
 /// A missing mask is an intentional safe no-op for ineligible or failed analysis.
 struct IOSPortraitRetouchContext {
   let effectiveMask: CIImage?
-  let faceSlimGeometry: IOSFaceSlimGeometry?
-  let faceMask: CIImage?
+  let faceSlimTargets: [IOSFaceSlimTargetContext]
   let bodySlimGeometry: IOSBodySlimGeometry?
   let personMask: CIImage?
+
+  var faceSlimGeometry: IOSFaceSlimGeometry? { faceSlimTargets.first?.geometry }
+  var faceMask: CIImage? { faceSlimTargets.first?.mask }
 
   init(
     effectiveMask: CIImage?,
     faceSlimGeometry: IOSFaceSlimGeometry? = nil,
     faceMask: CIImage? = nil,
+    faceSlimTargets: [IOSFaceSlimTargetContext]? = nil,
     bodySlimGeometry: IOSBodySlimGeometry? = nil,
     personMask: CIImage? = nil
   ) {
     self.effectiveMask = effectiveMask
-    self.faceSlimGeometry = faceSlimGeometry
-    self.faceMask = faceMask
+    if let faceSlimTargets {
+      self.faceSlimTargets = faceSlimTargets
+    } else if let faceSlimGeometry, let faceMask {
+      self.faceSlimTargets = [
+        IOSFaceSlimTargetContext(geometry: faceSlimGeometry, mask: faceMask)
+      ]
+    } else {
+      self.faceSlimTargets = []
+    }
     self.bodySlimGeometry = bodySlimGeometry
     self.personMask = personMask
   }
 
   static let unavailable = IOSPortraitRetouchContext(
     effectiveMask: nil,
-    faceSlimGeometry: nil,
-    faceMask: nil,
+    faceSlimTargets: [],
     bodySlimGeometry: nil,
     personMask: nil
   )
+}
+
+/// Isolated Ticket 18 candidate. It only weakens compact, locally dark red
+/// variation inside an already protected face mask. Brown details whose red
+/// channel also falls with local luminance are deliberately rejected. The
+/// candidate remains outside the production recipe until fixed crops pass.
+enum IOSBlemishReductionCandidate {
+  static let effectVersion = "ios-local-red-blemish-candidate-v3"
+  private static let evidenceKernel: CIColorKernel? = {
+    let source = """
+    #include <CoreImage/CoreImage.h>
+    using namespace metal;
+
+    [[stitchable]] half4 blemishEvidence(
+      coreimage::sample_h pixel,
+      coreimage::sample_h local
+    ) {
+      half redExcess = pixel.r - (pixel.g + pixel.b) * 0.5;
+      half localRedExcess = local.r - (local.g + local.b) * 0.5;
+      half redLoss = local.r - pixel.r;
+      half redSupport = 1.0 - smoothstep(half(0.03), half(0.09), redLoss);
+      half redness = smoothstep(half(0.015), half(0.06), redExcess - localRedExcess);
+      half evidence = redSupport * redness;
+      return half4(evidence, evidence, evidence, evidence);
+    }
+    """
+    return try? CIKernel.kernels(withMetalString: source)
+      .first(where: { $0.name == "blemishEvidence" }) as? CIColorKernel
+  }()
+
+  static var isAvailable: Bool { evidenceKernel != nil }
+
+  static func applying(
+    to source: CIImage,
+    strength: Double,
+    effectiveFaceMask: CIImage,
+    extent: CGRect
+  ) -> CIImage {
+    let bounded = max(0, min(1, strength))
+    let input = IOSPortraitRetoucher.materialized(
+      source.cropped(to: extent),
+      extent: extent
+    )
+    guard bounded > 0, let evidenceKernel else { return input }
+    let local = input.clampedToExtent().applyingFilter(
+      "CIGaussianBlur",
+      parameters: [kCIInputRadiusKey: 7]
+    ).cropped(to: extent)
+    guard let rawEvidence = evidenceKernel.apply(
+      extent: extent,
+      arguments: [input, local]
+    ) else {
+      return input
+    }
+    let compactEvidence = rawEvidence
+      .applyingFilter("CIMorphologyMaximum", parameters: [kCIInputRadiusKey: 1.5])
+      .clampedToExtent()
+      .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 0.6])
+      .cropped(to: extent)
+    let weakened = input.applyingFilter(
+      "CIDissolveTransition",
+      parameters: [
+        kCIInputTargetImageKey: local,
+        kCIInputTimeKey: 0.55 + bounded * 0.45,
+      ]
+    ).cropped(to: extent)
+    let repairedEvidence = weakened.applyingFilter(
+      "CIBlendWithMask",
+      parameters: [
+        kCIInputBackgroundImageKey: input,
+        kCIInputMaskImageKey: compactEvidence,
+      ]
+    ).cropped(to: extent)
+    return repairedEvidence.applyingFilter(
+      "CIBlendWithMask",
+      parameters: [
+        kCIInputBackgroundImageKey: input,
+        kCIInputMaskImageKey: effectiveFaceMask.cropped(to: extent),
+      ]
+    ).cropped(to: extent)
+  }
 }
 
 /// Deterministic, on-device portrait retouching. Vision geometry and masks
 /// remain inside this native boundary and never cross the Flutter channel.
 enum IOSPortraitRetoucher {
   static let candidateKind = "vision-landmarks-geometry-roi"
-  static let effectVersion = "ios-metal-warp-retouch-candidate-v6"
+  static let effectVersion = "ios-metal-warp-retouch-candidate-v8"
   static let analysisMaxEdge: CGFloat = 768
   private static let context = CIContext(options: [.cacheIntermediates: false])
   private static let localSlimWarpKernel: CIWarpKernel? = {
@@ -381,9 +615,13 @@ enum IOSPortraitRetoucher {
     context: IOSPortraitRetouchContext
   ) -> CIImage {
     let bounded = max(0, min(1, strength))
+    // The product slider intentionally exposes only 0...0.5. Expand that
+    // product range into the kernel's useful range so low values remain
+    // subtle while the explicit maximum is visually distinguishable.
+    let effectiveStrength = min(1, bounded * 1.6)
     let input = source.cropped(to: extent)
     guard
-      bounded > 0,
+      effectiveStrength > 0,
       let geometry = context.faceSlimGeometry,
       geometry.halfWidth > 0,
       geometry.upperY > geometry.lowerY,
@@ -395,7 +633,7 @@ enum IOSPortraitRetoucher {
         halfWidth: geometry.halfWidth,
         lowerY: geometry.lowerY,
         upperY: geometry.upperY,
-        strength: bounded,
+        strength: effectiveStrength,
         shiftRatio: IOSFaceSlimGeometry.maximumShiftRatio
       )
     else {
@@ -408,6 +646,29 @@ enum IOSPortraitRetoucher {
         kCIInputMaskImageKey: faceMask.cropped(to: extent),
       ]
     ).cropped(to: extent)
+  }
+
+  static func applyingFaceSlim(
+    to source: CIImage,
+    strengths: [Double],
+    extent: CGRect,
+    context: IOSPortraitRetouchContext
+  ) -> CIImage {
+    var output = source.cropped(to: extent)
+    for (index, target) in context.faceSlimTargets.enumerated()
+      where strengths.indices.contains(index) && strengths[index] > 0
+    {
+      output = applyingFaceSlim(
+        to: output,
+        strength: strengths[index],
+        extent: extent,
+        context: IOSPortraitRetouchContext(
+          effectiveMask: context.effectiveMask,
+          faceSlimTargets: [target]
+        )
+      )
+    }
+    return output
   }
 
   static func applyingBodySlim(
@@ -500,50 +761,69 @@ enum IOSPortraitRetoucher {
     }
 
     var effectiveMask: CIImage?
-    var faceGeometry: IOSFaceSlimGeometry?
-    var faceMask: CIImage?
+    var faceSlimTargets: [IOSFaceSlimTargetContext] = []
 
     let request = VNDetectFaceLandmarksRequest()
 #if targetEnvironment(simulator)
     request.usesCPUOnly = true
 #endif
     let handler = VNImageRequestHandler(cgImage: proxyImage, orientation: .up)
-    if
-      (try? handler.perform([request])) != nil,
-      let observations = request.results,
-      IOSPortraitSafetyPolicy.isEligible(observations),
-      let proxyMasks = try? masks(observations: observations, extent: proxyExtent)
-    {
-      effectiveMask = proxyMasks.effective
-        .transformed(
-          by: CGAffineTransform(
-            scaleX: extent.width / proxyExtent.width,
-            y: extent.height / proxyExtent.height
-          )
+    if (try? handler.perform([request])) != nil, let observations = request.results {
+      let descriptors = observations.map {
+        IOSNonGeometricFaceDescriptor(
+          confidence: $0.confidence,
+          boundingBox: $0.boundingBox,
+          hasLandmarks: $0.landmarks != nil
         )
-        .cropped(to: extent)
-      faceMask = proxyMasks.candidate
-        .transformed(
-          by: CGAffineTransform(
-            scaleX: extent.width / proxyExtent.width,
-            y: extent.height / proxyExtent.height
-          )
-        )
-        .cropped(to: extent)
-      if
-        let face = observations.first,
-        let proxyGeometry = faceSlimGeometry(face: face, size: proxyExtent.size),
-        IOSReshapeBackgroundSafetyPolicy.isEligible(
-          source: CIImage(cgImage: proxyImage),
-          subjectMask: proxyMasks.candidate,
-          influenceRect: proxyGeometry.influenceRect
-        )
+      }
+      let decision = IOSMultiFaceNonGeometricSafetyPolicy.evaluate(
+        faces: descriptors,
+        imageSize: proxyExtent.size
+      )
+      let eligible = decision.applicableFaceIndices
+        .map { observations[$0] }
+        .sorted { lhs, rhs in
+          let horizontalDelta = lhs.boundingBox.midX - rhs.boundingBox.midX
+          if abs(horizontalDelta) > 0.001 {
+            return horizontalDelta < 0
+          }
+          return lhs.boundingBox.midY > rhs.boundingBox.midY
+        }
+      if !eligible.isEmpty,
+         let proxyMasks = try? masks(observations: eligible, extent: proxyExtent)
       {
-        let geometry = proxyGeometry.scaled(
-          x: extent.width / proxyExtent.width,
-          y: extent.height / proxyExtent.height
+        effectiveMask = proxyMasks.effective
+          .transformed(
+            by: CGAffineTransform(
+              scaleX: extent.width / proxyExtent.width,
+              y: extent.height / proxyExtent.height
+            )
+          )
+          .cropped(to: extent)
+      }
+
+      let scaleX = extent.width / proxyExtent.width
+      let scaleY = extent.height / proxyExtent.height
+      for face in eligible.prefix(IOSMultiFaceNonGeometricSafetyPolicy.maximumFaceCount) {
+        guard
+          let singleFaceMasks = try? masks(observations: [face], extent: proxyExtent),
+          let proxyGeometry = faceSlimGeometry(face: face, size: proxyExtent.size),
+          IOSReshapeBackgroundSafetyPolicy.isEligible(
+            source: CIImage(cgImage: proxyImage),
+            subjectMask: singleFaceMasks.candidate,
+            influenceRect: proxyGeometry.influenceRect
+          )
+        else {
+          continue
+        }
+        faceSlimTargets.append(
+          IOSFaceSlimTargetContext(
+            geometry: proxyGeometry.scaled(x: scaleX, y: scaleY),
+            mask: singleFaceMasks.candidate
+              .transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
+              .cropped(to: extent)
+          )
         )
-        faceGeometry = geometry
       }
     }
 
@@ -554,8 +834,7 @@ enum IOSPortraitRetoucher {
     )
     return IOSPortraitRetouchContext(
       effectiveMask: effectiveMask,
-      faceSlimGeometry: faceGeometry,
-      faceMask: faceMask,
+      faceSlimTargets: faceSlimTargets,
       bodySlimGeometry: body?.geometry,
       personMask: body?.personMask
     )
@@ -648,7 +927,7 @@ enum IOSPortraitRetoucher {
     let torsoHeight = abs(shoulderY - hipY)
     let proxyGeometry = IOSBodySlimGeometry(
       centerX: (shoulders[0].x + shoulders[1].x + hips[0].x + hips[1].x) / 4,
-      halfWidth: max(shoulderWidth * 0.62, hipWidth * 0.72),
+      halfWidth: max(shoulderWidth * 0.90, hipWidth * 1.04),
       lowerY: min(shoulderY, hipY) - torsoHeight * 0.04,
       upperY: max(shoulderY, hipY) + torsoHeight * 0.04
     )
@@ -1081,6 +1360,127 @@ enum IOSPortraitRetoucher {
         kCIInputMaskImageKey: mask,
       ]
     ).cropped(to: extent)
+  }
+
+  static func applyingTextureSmoothing(
+    to source: CIImage,
+    strength: Double,
+    mask: CIImage,
+    extent: CGRect
+  ) -> CIImage {
+    let bounded = max(0, min(1, strength))
+    let input = materialized(source.cropped(to: extent), extent: extent)
+    guard bounded > 0 else { return input }
+    let bilateralReference = input.clampedToExtent().applyingFilter(
+      "CINoiseReduction",
+      parameters: [
+        "inputNoiseLevel": 0.012 + bounded * 0.035,
+        "inputSharpness": 0.18 - bounded * 0.12,
+      ]
+    ).cropped(to: extent)
+    let softened = bilateralReference.clampedToExtent().applyingFilter(
+      "CIGaussianBlur",
+      parameters: [kCIInputRadiusKey: 0.45 + bounded * 0.75]
+    ).cropped(to: extent)
+    let mixed = input.applyingFilter(
+      "CIDissolveTransition",
+      parameters: [
+        kCIInputTargetImageKey: softened,
+        kCIInputTimeKey: 0.12 + bounded * 0.32,
+      ]
+    ).cropped(to: extent)
+    let edgeProtected = input.applyingFilter(
+      "CIBlendWithMask",
+      parameters: [
+        kCIInputBackgroundImageKey: mixed,
+        kCIInputMaskImageKey: permanentEdgeMask(source: input, extent: extent),
+      ]
+    ).cropped(to: extent)
+    return edgeProtected.applyingFilter(
+      "CIBlendWithMask",
+      parameters: [
+        kCIInputBackgroundImageKey: input,
+        kCIInputMaskImageKey: mask.cropped(to: extent),
+      ]
+    ).cropped(to: extent)
+  }
+
+  static func applyingSkinToneLighting(
+    to source: CIImage,
+    strength: Double,
+    mask: CIImage,
+    extent: CGRect
+  ) -> CIImage {
+    let bounded = max(0, min(1, strength))
+    let input = source.cropped(to: extent)
+    guard bounded > 0 else { return input }
+    let toneRadius = min(24, max(6, min(extent.width, extent.height) * 0.015))
+    let localTone = input.clampedToExtent().applyingFilter(
+      "CIGaussianBlur",
+      parameters: [kCIInputRadiusKey: toneRadius]
+    ).cropped(to: extent)
+    let colorBalanced = localTone.applyingFilter(
+      "CIColorBlendMode",
+      parameters: [kCIInputBackgroundImageKey: input]
+    ).cropped(to: extent)
+    let lowFrequencyMix = input.applyingFilter(
+      "CIDissolveTransition",
+      parameters: [
+        kCIInputTargetImageKey: colorBalanced,
+        kCIInputTimeKey: 0.1 + bounded * 0.3,
+      ]
+    ).cropped(to: extent)
+    let relit = lowFrequencyMix.applyingFilter(
+      "CIHighlightShadowAdjust",
+      parameters: [
+        "inputHighlightAmount": 1 - bounded * 0.06,
+        "inputShadowAmount": bounded * 0.2,
+      ]
+    ).applyingFilter(
+      "CIColorControls",
+      parameters: [
+        kCIInputBrightnessKey: bounded * 0.012,
+        kCIInputContrastKey: 1 - bounded * 0.018,
+        kCIInputSaturationKey: 1 - bounded * 0.015,
+      ]
+    ).cropped(to: extent)
+    return relit.applyingFilter(
+      "CIBlendWithMask",
+      parameters: [
+        kCIInputBackgroundImageKey: input,
+        kCIInputMaskImageKey: mask.cropped(to: extent),
+      ]
+    ).cropped(to: extent)
+  }
+
+  private static func permanentEdgeMask(source: CIImage, extent: CGRect) -> CIImage {
+    source
+      .applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: 0])
+      .applyingFilter("CIEdges", parameters: [kCIInputIntensityKey: 4])
+      .applyingFilter(
+        "CIColorMatrix",
+        parameters: [
+          "inputRVector": CIVector(x: 8, y: 0, z: 0, w: 0),
+          "inputGVector": CIVector(x: 0, y: 8, z: 0, w: 0),
+          "inputBVector": CIVector(x: 0, y: 0, z: 8, w: 0),
+          "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+          "inputBiasVector": CIVector(x: -0.25, y: -0.25, z: -0.25, w: 0),
+        ]
+      )
+      .applyingFilter("CIMorphologyMaximum", parameters: [kCIInputRadiusKey: 1])
+      .clampedToExtent()
+      .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 0.35])
+      .cropped(to: extent)
+  }
+
+  /// Core Image's neighborhood filters may request an expanded region from a
+  /// preceding color-blend graph. Freezing that boundary prevents a second
+  /// independent portrait effect from changing image coordinates.
+  static func materialized(_ image: CIImage, extent: CGRect) -> CIImage {
+    guard let rendered = context.createCGImage(image.cropped(to: extent), from: extent) else {
+      return image.cropped(to: extent)
+    }
+    return CIImage(cgImage: rendered).cropped(to: extent)
   }
 }
 

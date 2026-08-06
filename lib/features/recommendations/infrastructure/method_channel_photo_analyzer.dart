@@ -24,7 +24,7 @@ final class MethodChannelPhotoAnalyzer implements PhotoAnalyzer {
       nativeCapabilityVersion ??
       (Platform.isAndroid
           ? 'android-bitmap-face-v1'
-          : 'ios-core-image-vision-v8-portrait-reshape');
+          : 'ios-core-image-vision-v12-multiface-slim');
 
   @override
   PhotoAnalysisEngineIdentity identityFor(ProjectPhoto photo) {
@@ -70,6 +70,15 @@ final class MethodChannelPhotoAnalyzer implements PhotoAnalyzer {
         portraitReason: raw['portraitReason'] == null
             ? PortraitDegradationReason.none
             : _enum(raw['portraitReason'], PortraitDegradationReason.values),
+        faceSlim: raw['faceSlim'] == null
+            ? null
+            : _enum(raw['faceSlim'], PortraitApplicability.values),
+        faceSlimReason: raw['faceSlimReason'] == null
+            ? null
+            : _enum(raw['faceSlimReason'], PortraitDegradationReason.values),
+        faceSlimTargetCount: raw['faceSlimTargetCount'] == null
+            ? null
+            : _boundedTargetCount(raw['faceSlimTargetCount']),
         body: raw['body'] == null
             ? PortraitApplicability.unavailable
             : _enum(raw['body'], PortraitApplicability.values),
@@ -98,5 +107,12 @@ final class MethodChannelPhotoAnalyzer implements PhotoAnalyzer {
       (value) => value.name == raw,
       orElse: () => throw FormatException('Unknown category: $raw'),
     );
+  }
+
+  int _boundedTargetCount(Object? raw) {
+    if (raw is! num || raw.toInt() != raw || raw < 0 || raw > 3) {
+      throw const FormatException('Invalid face slim target count');
+    }
+    return raw.toInt();
   }
 }

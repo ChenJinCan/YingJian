@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
 
@@ -388,9 +389,9 @@ final class LocalRecommendationEngine {
       skinProtection: analysis.portrait == PortraitApplicability.applicable
           ? 1
           : 0,
-      portraitStrength: analysis.portrait == PortraitApplicability.applicable
-          ? 0.35
-          : 0,
+      portraitRecipe: analysis.portrait == PortraitApplicability.applicable
+          ? PortraitRetouchRecipe(textureSmoothing: 35, skinToneLighting: 35)
+          : PortraitRetouchRecipe.neutral,
     );
   }
 

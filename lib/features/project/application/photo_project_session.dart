@@ -690,8 +690,7 @@ class PhotoProjectSession extends ChangeNotifier {
     final stored = project.photoOverrides[photoId]?.recipe;
     if (stored != null) return stored;
     return EditRecipe(
-      portraitStrength:
-          project.adaptiveCompensations[photoId]?.portraitStrength ?? 0,
+      portraitRecipe: project.adaptiveCompensations[photoId]?.portraitRecipe,
     );
   }
 
@@ -701,7 +700,8 @@ class PhotoProjectSession extends ChangeNotifier {
     EditRecipe recipe,
   ) =>
       recipe == EditRecipe.neutral &&
-      (project.adaptiveCompensations[photoId]?.portraitStrength ?? 0) == 0;
+      (project.adaptiveCompensations[photoId]?.portraitRecipe.isNeutral ??
+          true);
 
   PhotoProject _requirePhoto(String photoId) {
     final current = _project;

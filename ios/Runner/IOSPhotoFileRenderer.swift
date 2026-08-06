@@ -39,8 +39,11 @@ struct IOSPhotoFileRenderer {
     let metadata = ImageExportMetadata.sanitize(input.properties)
     let sourceExtent = normalizedInput.extent.integral
     let portraitContext = preparedPortraitContext
-      ?? (pipeline.portraitStrength > 0
-        || pipeline.faceSlimStrength > 0
+      ?? (pipeline.textureSmoothing > 0
+        || pipeline.skinToneLighting > 0
+        || pipeline.blemishReduction > 0
+        || pipeline.portraitStrength > 0
+        || pipeline.faceSlimStrengths.contains(where: { $0 > 0 })
         || pipeline.bodySlimStrength > 0
         ? IOSPortraitRetoucher.prepare(source: normalizedInput, extent: sourceExtent)
         : .unavailable)
@@ -137,6 +140,7 @@ enum ImageExportMetadata {
 }
 
 struct IOSImagePipeline {
+  let schemaVersion: Int
   let exposureEV: Double
   let highlights: Double
   let shadows: Double
@@ -147,7 +151,15 @@ struct IOSImagePipeline {
   let clarity: Double
   let portraitStrength: Double
   let faceSlimStrength: Double
+  let faceSlimStrengths: [Double]
   let bodySlimStrength: Double
+  let textureSmoothing: Int
+  let skinToneLighting: Int
+  let blemishReduction: Int
+  let faceSlimming: Int
+  let torsoSlimming: Int
+  let portraitAnalysisVersion: String
+  let portraitEffectVersion: String
   let crop: CGRect
   let quarterTurns: Int
   let straightenDegrees: Double
@@ -156,7 +168,7 @@ struct IOSImagePipeline {
     guard
       let pipeline = arguments as? [String: Any],
       let schemaVersion = Self.exactInteger(pipeline["schemaVersion"]),
-      (1...3).contains(schemaVersion),
+      (1...5).contains(schemaVersion),
       pipeline["workingColorSpace"] as? String == "srgb",
       let adjustments = pipeline["adjustments"] as? [String: Any],
       let exposureEV = Self.finiteNumber(adjustments["exposureEv"]),
@@ -172,6 +184,7 @@ struct IOSImagePipeline {
       return nil
     }
     self.exposureEV = exposureEV
+    self.schemaVersion = schemaVersion
     self.contrast = contrast
     self.warmth = warmth
     if schemaVersion == 1 {
@@ -182,7 +195,15 @@ struct IOSImagePipeline {
       clarity = 0
       portraitStrength = 0
       faceSlimStrength = 0
+      faceSlimStrengths = [0]
       bodySlimStrength = 0
+      textureSmoothing = 0
+      skinToneLighting = 0
+      blemishReduction = 0
+      faceSlimming = 0
+      torsoSlimming = 0
+      portraitAnalysisVersion = "vision-multiface-v1"
+      portraitEffectVersion = "portrait-core-contract-v2"
       crop = CGRect(x: 0, y: 0, width: 1, height: 1)
       quarterTurns = 0
       straightenDegrees = 0
@@ -200,11 +221,7 @@ struct IOSImagePipeline {
       let quarterTurns = Self.exactInteger(geometry["quarterTurns"]),
       (0...3).contains(quarterTurns),
       let straightenDegrees = Self.finiteNumber(geometry["straightenDegrees"]),
-      (-45.0...45.0).contains(straightenDegrees),
-      let portrait = pipeline["portrait"] as? [String: Any],
-      Self.exactInteger(portrait["recipeVersion"]) == 1,
-      let portraitStrength = Self.finiteNumber(portrait["strength"]),
-      (0.0...1.0).contains(portraitStrength)
+      (-45.0...45.0).contains(straightenDegrees)
     else {
       return nil
     }
@@ -222,23 +239,110 @@ struct IOSImagePipeline {
     self.tint = tint
     self.saturation = saturation
     self.clarity = clarity
-    self.portraitStrength = portraitStrength
-    if schemaVersion == 3 {
+    if schemaVersion >= 4 {
       guard
-        let reshape = pipeline["reshape"] as? [String: Any],
-        Self.exactInteger(reshape["recipeVersion"]) == 1,
-        let faceSlimStrength = Self.finiteNumber(reshape["faceSlimStrength"]),
-        let bodySlimStrength = Self.finiteNumber(reshape["bodySlimStrength"]),
-        (0.0...1.0).contains(faceSlimStrength),
-        (0.0...1.0).contains(bodySlimStrength)
+        pipeline["portrait"] == nil,
+        pipeline["reshape"] == nil,
+        let portraitRecipe = pipeline["portraitRecipeV2"] as? [String: Any],
+        Set(portraitRecipe.keys) == Set([
+          "recipeVersion",
+          "analysisVersion",
+          "effectVersion",
+          "textureSmoothing",
+          "skinToneLighting",
+          "blemishReduction",
+          "faceSlimming",
+          "torsoSlimming",
+        ]),
+        Self.exactInteger(portraitRecipe["recipeVersion"]) == 2,
+        portraitRecipe["analysisVersion"] as? String == "vision-multiface-v1",
+        portraitRecipe["effectVersion"] as? String == "portrait-core-contract-v2",
+        let textureSmoothing = Self.percentage(portraitRecipe["textureSmoothing"]),
+        let skinToneLighting = Self.percentage(portraitRecipe["skinToneLighting"]),
+        let blemishReduction = Self.percentage(portraitRecipe["blemishReduction"]),
+        let faceSlimming = Self.percentage(portraitRecipe["faceSlimming"]),
+        let torsoSlimming = Self.percentage(portraitRecipe["torsoSlimming"])
       else {
         return nil
       }
-      self.faceSlimStrength = faceSlimStrength
-      self.bodySlimStrength = bodySlimStrength
+      portraitStrength = 0
+      if schemaVersion == 5 {
+        guard
+          let faceSlimRecipe = pipeline["faceSlimRecipeV1"] as? [String: Any],
+          Set(faceSlimRecipe.keys) == Set([
+            "recipeVersion",
+            "selectedTargetIndex",
+            "targetStrengths",
+          ]),
+          Self.exactInteger(faceSlimRecipe["recipeVersion"]) == 1,
+          let selectedTargetIndex = Self.exactInteger(
+            faceSlimRecipe["selectedTargetIndex"]
+          ),
+          let rawStrengths = faceSlimRecipe["targetStrengths"] as? [Any],
+          (1...3).contains(rawStrengths.count)
+        else {
+          return nil
+        }
+        let strengths = rawStrengths.compactMap(Self.finiteNumber)
+        guard
+          strengths.count == rawStrengths.count,
+          strengths.allSatisfy({ $0.isFinite && (0.0...1.0).contains($0) }),
+          strengths.indices.contains(selectedTargetIndex)
+        else {
+          return nil
+        }
+        faceSlimStrengths = strengths
+        faceSlimStrength = strengths[selectedTargetIndex]
+      } else {
+        faceSlimStrength = Double(faceSlimming) / 100
+        faceSlimStrengths = [faceSlimStrength]
+      }
+      bodySlimStrength = Double(torsoSlimming) / 100
+      self.textureSmoothing = textureSmoothing
+      self.skinToneLighting = skinToneLighting
+      self.blemishReduction = blemishReduction
+      self.faceSlimming = faceSlimming
+      self.torsoSlimming = torsoSlimming
+      portraitAnalysisVersion = "vision-multiface-v1"
+      portraitEffectVersion = "portrait-core-contract-v2"
     } else {
-      faceSlimStrength = 0
-      bodySlimStrength = 0
+      guard
+        let portrait = pipeline["portrait"] as? [String: Any],
+        Self.exactInteger(portrait["recipeVersion"]) == 1,
+        let portraitStrength = Self.finiteNumber(portrait["strength"]),
+        (0.0...1.0).contains(portraitStrength)
+      else {
+        return nil
+      }
+      self.portraitStrength = portraitStrength
+      textureSmoothing = Int((portraitStrength * 100).rounded())
+      skinToneLighting = Int((portraitStrength * 100).rounded())
+      blemishReduction = 0
+      portraitAnalysisVersion = "vision-multiface-v1"
+      portraitEffectVersion = "portrait-core-contract-v2"
+      if schemaVersion >= 3 {
+        guard
+          let reshape = pipeline["reshape"] as? [String: Any],
+          Self.exactInteger(reshape["recipeVersion"]) == 1,
+          let faceSlimStrength = Self.finiteNumber(reshape["faceSlimStrength"]),
+          let bodySlimStrength = Self.finiteNumber(reshape["bodySlimStrength"]),
+          (0.0...1.0).contains(faceSlimStrength),
+          (0.0...1.0).contains(bodySlimStrength)
+        else {
+          return nil
+        }
+        self.faceSlimStrength = faceSlimStrength
+        faceSlimStrengths = [faceSlimStrength]
+        self.bodySlimStrength = bodySlimStrength
+        faceSlimming = Int((faceSlimStrength * 100).rounded())
+        torsoSlimming = Int((bodySlimStrength * 100).rounded())
+      } else {
+        faceSlimStrength = 0
+        faceSlimStrengths = [0]
+        bodySlimStrength = 0
+        faceSlimming = 0
+        torsoSlimming = 0
+      }
     }
     crop = CGRect(
       x: values[0],
@@ -268,6 +372,13 @@ struct IOSImagePipeline {
     guard let result = finiteNumber(value),
           (-1.0...1.0).contains(result)
     else { return nil }
+    return result
+  }
+
+  private static func percentage(_ value: Any?) -> Int? {
+    guard let result = exactInteger(value), (0...100).contains(result) else {
+      return nil
+    }
     return result
   }
 
@@ -303,14 +414,14 @@ struct IOSImagePipeline {
         context: context
       )
     }
-    if faceSlimStrength > 0 {
+    if faceSlimStrengths.contains(where: { $0 > 0 }) {
       let context = portraitContext ?? IOSPortraitRetoucher.prepare(
         source: opaqueInput,
         extent: extent
       )
       reshapedInput = IOSPortraitRetoucher.applyingFaceSlim(
         to: reshapedInput,
-        strength: faceSlimStrength,
+        strengths: faceSlimStrengths,
         extent: extent,
         context: context
       )
@@ -400,7 +511,32 @@ struct IOSImagePipeline {
         parameters: [kCIInputSharpnessKey: clarity * 0.8]
       ).cropped(to: extent)
     }
-    if portraitStrength > 0 {
+    if schemaVersion >= 4 {
+      if blemishReduction > 0, let mask = portraitContext?.effectiveMask {
+        output = IOSBlemishReductionCandidate.applying(
+          to: output,
+          strength: Double(blemishReduction) / 100,
+          effectiveFaceMask: mask,
+          extent: extent
+        )
+      }
+      if skinToneLighting > 0, let mask = portraitContext?.effectiveMask {
+        output = IOSPortraitRetoucher.applyingSkinToneLighting(
+          to: output,
+          strength: Double(skinToneLighting) / 100,
+          mask: mask,
+          extent: extent
+        )
+      }
+      if textureSmoothing > 0, let mask = portraitContext?.effectiveMask {
+        output = IOSPortraitRetoucher.applyingTextureSmoothing(
+          to: output,
+          strength: Double(textureSmoothing) / 100,
+          mask: mask,
+          extent: extent
+        )
+      }
+    } else if portraitStrength > 0 {
       if let portraitContext {
         output = IOSPortraitRetoucher.applying(
           to: output,

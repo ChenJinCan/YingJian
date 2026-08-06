@@ -15,8 +15,9 @@ list_gates() {
 7. portrait engineering corpus
 8. portrait engineering diagnostic tools
 9. portrait review structure
-10. iOS device evidence contract
-11. release contract
+10. six-capability portrait quality contract
+11. iOS device evidence contract
+12. release contract
 EOF
 }
 
@@ -120,6 +121,8 @@ run_gate "portrait engineering diagnostic tools" \
 
 run_gate "portrait review plan tools" ruby scripts/test_portrait_review_plan_tools.rb
 run_gate "portrait review structure" ruby scripts/test_blind_review_tools.rb
+run_gate "six-capability portrait quality contract" \
+  ruby scripts/test_portrait_core_quality_scores.rb
 
 run_gate "iOS device evidence checker tests" ruby scripts/test_device_evidence.rb
 if [ "$automatic_only" = true ]; then

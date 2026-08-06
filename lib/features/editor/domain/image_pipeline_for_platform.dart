@@ -3,7 +3,7 @@ import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_v1.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_v2.dart';
-import 'package:yingjian/features/editor/domain/image_pipeline_v3.dart';
+import 'package:yingjian/features/editor/domain/image_pipeline_v5.dart';
 
 bool get supportsImagePipelineV2 =>
     defaultTargetPlatform == TargetPlatform.iOS ||
@@ -11,7 +11,7 @@ bool get supportsImagePipelineV2 =>
 
 ImagePipeline imagePipelineForCurrentPlatform(EditRecipe recipe) {
   if (defaultTargetPlatform == TargetPlatform.iOS) {
-    return ImagePipelineV3.fromRecipe(recipe);
+    return ImagePipelineV5.fromRecipe(recipe);
   }
   return supportsImagePipelineV2
       ? ImagePipelineV2.fromRecipe(recipe)

@@ -1,4 +1,6 @@
 import 'package:flutter/foundation.dart';
+import 'package:yingjian/features/editor/domain/face_slim_recipe.dart';
+import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
 
 @immutable
 final class CropGeometry {
@@ -164,7 +166,9 @@ class EditRecipe {
     double clarity = 0,
     double portraitStrength = 0,
     double faceSlimStrength = 0,
+    FaceSlimRecipe? faceSlimRecipe,
     double bodySlimStrength = 0,
+    PortraitRetouchRecipe? portraitRecipe,
     CropGeometry crop = CropGeometry.original,
   }) {
     for (final entry in <String, double>{
@@ -182,6 +186,16 @@ class EditRecipe {
     _validate(portraitStrength, 'portraitStrength', minimum: 0);
     _validate(faceSlimStrength, 'faceSlimStrength', minimum: 0);
     _validate(bodySlimStrength, 'bodySlimStrength', minimum: 0);
+    final resolvedFaceSlimRecipe =
+        faceSlimRecipe ??
+        FaceSlimRecipe(targetStrengths: <double>[faceSlimStrength]);
+    final resolvedPortraitRecipe =
+        portraitRecipe ??
+        PortraitRetouchRecipe.migrateLegacy(
+          portraitStrength: portraitStrength,
+          faceSlimStrength: resolvedFaceSlimRecipe.selectedStrength,
+          bodySlimStrength: bodySlimStrength,
+        );
     return EditRecipe._(
       exposure: exposure,
       highlights: highlights,
@@ -192,8 +206,9 @@ class EditRecipe {
       saturation: saturation,
       clarity: clarity,
       portraitStrength: portraitStrength,
-      faceSlimStrength: faceSlimStrength,
+      faceSlimRecipe: resolvedFaceSlimRecipe,
       bodySlimStrength: bodySlimStrength,
+      portraitRecipe: resolvedPortraitRecipe,
       crop: crop,
     );
   }
@@ -208,8 +223,9 @@ class EditRecipe {
     required this.saturation,
     required this.clarity,
     required this.portraitStrength,
-    required this.faceSlimStrength,
+    required this.faceSlimRecipe,
     required this.bodySlimStrength,
+    required this.portraitRecipe,
     required this.crop,
   });
 
@@ -224,8 +240,10 @@ class EditRecipe {
   final double saturation;
   final double clarity;
   final double portraitStrength;
-  final double faceSlimStrength;
+  final FaceSlimRecipe faceSlimRecipe;
+  double get faceSlimStrength => faceSlimRecipe.selectedStrength;
   final double bodySlimStrength;
+  final PortraitRetouchRecipe portraitRecipe;
   final CropGeometry crop;
 
   bool get isLegacyColorOnly =>
@@ -235,8 +253,9 @@ class EditRecipe {
       saturation == 0 &&
       clarity == 0 &&
       portraitStrength == 0 &&
-      faceSlimStrength == 0 &&
+      faceSlimRecipe.isNeutral &&
       bodySlimStrength == 0 &&
+      portraitRecipe.isNeutral &&
       crop.isOriginal;
 
   bool get hasColorAdjustments =>
@@ -258,28 +277,60 @@ class EditRecipe {
     'tint': tint,
     'saturation': saturation,
     'clarity': clarity,
-    'portraitStrength': portraitStrength,
     'faceSlimStrength': faceSlimStrength,
+    'faceSlimRecipe': faceSlimRecipe.toJson(),
     'bodySlimStrength': bodySlimStrength,
+    'portraitRecipe': portraitRecipe.toJson(),
     'crop': crop.toJson(),
   };
 
-  factory EditRecipe.fromJson(Map<String, Object?> json) => EditRecipe(
-    exposure: (json['exposure'] as num?)?.toDouble() ?? 0,
-    highlights: (json['highlights'] as num?)?.toDouble() ?? 0,
-    shadows: (json['shadows'] as num?)?.toDouble() ?? 0,
-    contrast: (json['contrast'] as num?)?.toDouble() ?? 0,
-    warmth: (json['warmth'] as num?)?.toDouble() ?? 0,
-    tint: (json['tint'] as num?)?.toDouble() ?? 0,
-    saturation: (json['saturation'] as num?)?.toDouble() ?? 0,
-    clarity: (json['clarity'] as num?)?.toDouble() ?? 0,
-    portraitStrength: (json['portraitStrength'] as num?)?.toDouble() ?? 0,
-    faceSlimStrength: (json['faceSlimStrength'] as num?)?.toDouble() ?? 0,
-    bodySlimStrength: (json['bodySlimStrength'] as num?)?.toDouble() ?? 0,
-    crop: json['crop'] is Map<String, Object?>
-        ? CropGeometry.fromJson(json['crop']! as Map<String, Object?>)
-        : CropGeometry.original,
-  );
+  factory EditRecipe.fromJson(Map<String, Object?> json) {
+    final portraitStrength =
+        (json['portraitStrength'] as num?)?.toDouble() ?? 0;
+    final faceSlimStrength =
+        (json['faceSlimStrength'] as num?)?.toDouble() ?? 0;
+    final rawFaceSlimRecipe = json['faceSlimRecipe'];
+    final faceSlimRecipe = rawFaceSlimRecipe == null
+        ? null
+        : rawFaceSlimRecipe is Map
+        ? FaceSlimRecipe.fromJson(Map<String, Object?>.from(rawFaceSlimRecipe))
+        : throw const FormatException('Invalid face slim recipe payload');
+    final bodySlimStrength =
+        (json['bodySlimStrength'] as num?)?.toDouble() ?? 0;
+    final rawPortraitRecipe = json['portraitRecipe'];
+    final portraitRecipe = rawPortraitRecipe == null
+        ? null
+        : rawPortraitRecipe is Map
+        ? PortraitRetouchRecipe.fromJson(
+            Map<String, Object?>.from(rawPortraitRecipe),
+          )
+        : throw const FormatException('Invalid portrait recipe payload');
+    final migratedPortraitRecipe =
+        portraitRecipe ??
+        PortraitRetouchRecipe.migrateLegacy(
+          portraitStrength: portraitStrength,
+          faceSlimStrength: faceSlimStrength,
+          bodySlimStrength: bodySlimStrength,
+        );
+    return EditRecipe(
+      exposure: (json['exposure'] as num?)?.toDouble() ?? 0,
+      highlights: (json['highlights'] as num?)?.toDouble() ?? 0,
+      shadows: (json['shadows'] as num?)?.toDouble() ?? 0,
+      contrast: (json['contrast'] as num?)?.toDouble() ?? 0,
+      warmth: (json['warmth'] as num?)?.toDouble() ?? 0,
+      tint: (json['tint'] as num?)?.toDouble() ?? 0,
+      saturation: (json['saturation'] as num?)?.toDouble() ?? 0,
+      clarity: (json['clarity'] as num?)?.toDouble() ?? 0,
+      portraitStrength: 0,
+      faceSlimStrength: faceSlimStrength,
+      faceSlimRecipe: faceSlimRecipe,
+      bodySlimStrength: bodySlimStrength,
+      portraitRecipe: migratedPortraitRecipe,
+      crop: json['crop'] is Map<String, Object?>
+          ? CropGeometry.fromJson(json['crop']! as Map<String, Object?>)
+          : CropGeometry.original,
+    );
+  }
 
   EditRecipe copyWith({
     double? exposure,
@@ -292,22 +343,48 @@ class EditRecipe {
     double? clarity,
     double? portraitStrength,
     double? faceSlimStrength,
+    FaceSlimRecipe? faceSlimRecipe,
     double? bodySlimStrength,
+    PortraitRetouchRecipe? portraitRecipe,
     CropGeometry? crop,
-  }) => EditRecipe(
-    exposure: exposure ?? this.exposure,
-    highlights: highlights ?? this.highlights,
-    shadows: shadows ?? this.shadows,
-    contrast: contrast ?? this.contrast,
-    warmth: warmth ?? this.warmth,
-    tint: tint ?? this.tint,
-    saturation: saturation ?? this.saturation,
-    clarity: clarity ?? this.clarity,
-    portraitStrength: portraitStrength ?? this.portraitStrength,
-    faceSlimStrength: faceSlimStrength ?? this.faceSlimStrength,
-    bodySlimStrength: bodySlimStrength ?? this.bodySlimStrength,
-    crop: crop ?? this.crop,
-  );
+  }) {
+    final resolvedFaceSlimRecipe =
+        faceSlimRecipe ??
+        (faceSlimStrength == null
+            ? this.faceSlimRecipe
+            : this.faceSlimRecipe.setSelectedStrength(faceSlimStrength));
+    final resolvedPortraitRecipe =
+        portraitRecipe ??
+        this.portraitRecipe.copyWith(
+          textureSmoothing: portraitStrength == null
+              ? null
+              : (portraitStrength * 100).round(),
+          skinToneLighting: portraitStrength == null
+              ? null
+              : (portraitStrength * 100).round(),
+          faceSlimming: faceSlimStrength == null && faceSlimRecipe == null
+              ? null
+              : (resolvedFaceSlimRecipe.selectedStrength * 100).round(),
+          torsoSlimming: bodySlimStrength == null
+              ? null
+              : (bodySlimStrength * 100).round(),
+        );
+    return EditRecipe(
+      exposure: exposure ?? this.exposure,
+      highlights: highlights ?? this.highlights,
+      shadows: shadows ?? this.shadows,
+      contrast: contrast ?? this.contrast,
+      warmth: warmth ?? this.warmth,
+      tint: tint ?? this.tint,
+      saturation: saturation ?? this.saturation,
+      clarity: clarity ?? this.clarity,
+      portraitStrength: portraitStrength ?? this.portraitStrength,
+      faceSlimRecipe: resolvedFaceSlimRecipe,
+      bodySlimStrength: bodySlimStrength ?? this.bodySlimStrength,
+      portraitRecipe: resolvedPortraitRecipe,
+      crop: crop ?? this.crop,
+    );
+  }
 
   static void _validate(double value, String name, {double minimum = -1}) {
     if (!value.isFinite || value < minimum || value > 1) {
@@ -327,8 +404,9 @@ class EditRecipe {
       other.saturation == saturation &&
       other.clarity == clarity &&
       other.portraitStrength == portraitStrength &&
-      other.faceSlimStrength == faceSlimStrength &&
+      other.faceSlimRecipe == faceSlimRecipe &&
       other.bodySlimStrength == bodySlimStrength &&
+      other.portraitRecipe == portraitRecipe &&
       other.crop == crop;
 
   @override
@@ -342,8 +420,9 @@ class EditRecipe {
     saturation,
     clarity,
     portraitStrength,
-    faceSlimStrength,
+    faceSlimRecipe,
     bodySlimStrength,
+    portraitRecipe,
     crop,
   );
 }

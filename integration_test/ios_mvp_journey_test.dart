@@ -161,7 +161,7 @@ void main() {
       find.byKey(const ValueKey('recommendation-use')).hitTestable(),
       findsOneWidget,
     );
-    expect(previewRenderer.portraitStrengths, contains(0.35));
+    expect(previewRenderer.textureSmoothingStrengths, contains(0.35));
 
     final useRecommendation = find.byKey(const ValueKey('recommendation-use'));
     await tester.ensureVisible(useRecommendation);
@@ -175,10 +175,11 @@ void main() {
     expect(
       (await store.loadLatest())
           ?.effectiveRecipeFor(importedPhoto.id)
-          .portraitStrength,
-      0.35,
+          .portraitRecipe
+          .textureSmoothing,
+      35,
     );
-    expect(previewRenderer.portraitStrengths.last, 0.35);
+    expect(previewRenderer.textureSmoothingStrengths.last, 0.35);
     expect(
       find.byKey(const ValueKey('editor-batch-export')).hitTestable(),
       findsOneWidget,
@@ -186,7 +187,7 @@ void main() {
 
     final workspace = find.byKey(const ValueKey('photo-workspace-scroll'));
     final portraitTab = find.byKey(
-      const ValueKey('editor-adjustment-tab-portraitRetouch'),
+      const ValueKey('editor-adjustment-tab-naturalBeautification'),
     );
     expect(portraitTab.hitTestable(), findsOneWidget);
     final exposureTab = find.byKey(
@@ -197,7 +198,7 @@ void main() {
       lessThan(tester.getTopLeft(exposureTab).dx),
     );
     expect(
-      find.byKey(const ValueKey('editor-adjustment-portraitRetouch')),
+      find.byKey(const ValueKey('editor-apply-one-tap-natural-beautification')),
       findsOneWidget,
     );
     final faceSlimTab = find.byKey(
@@ -210,27 +211,82 @@ void main() {
     );
     await tester.tap(portraitTab);
     await tester.pumpAndSettle();
-    final portraitSlider = find.byKey(
-      const ValueKey('editor-adjustment-portraitRetouch'),
+    expect(
+      find.byKey(const ValueKey('editor-adjustment-tab-textureSmoothing')),
+      findsOneWidget,
     );
-    expect(portraitSlider, findsOneWidget);
-    final portraitControl = find.descendant(
-      of: portraitSlider,
-      matching: find.byType(Slider),
+    expect(
+      find.byKey(const ValueKey('editor-adjustment-tab-skinToneLighting')),
+      findsOneWidget,
     );
-    expect(portraitControl, findsOneWidget);
-    await tester.drag(portraitControl, const Offset(90, 0));
+    expect(
+      find.byKey(const ValueKey('editor-adjustment-tab-blemishReduction')),
+      findsOneWidget,
+    );
+    final applyNaturalBeautification = find.byKey(
+      const ValueKey('editor-apply-one-tap-natural-beautification'),
+    );
+    await tester.ensureVisible(applyNaturalBeautification);
     await tester.pumpAndSettle();
+    await tester.tap(applyNaturalBeautification);
+    await tester.pumpAndSettle();
+    var portraitRecipe = (await store.loadLatest())!
+        .effectiveRecipeFor(importedPhoto.id)
+        .portraitRecipe;
+    expect(portraitRecipe.textureSmoothing, 45);
+    expect(portraitRecipe.skinToneLighting, 40);
+    expect(portraitRecipe.blemishReduction, 20);
     expect(
       (await store.loadLatest())
           ?.effectiveRecipeFor(importedPhoto.id)
           .portraitStrength,
-      greaterThan(0),
+      0,
+    );
+
+    final textureSmoothingTab = find.byKey(
+      const ValueKey('editor-adjustment-tab-textureSmoothing'),
+    );
+    await tester.ensureVisible(textureSmoothingTab);
+    await tester.pumpAndSettle();
+    expect(textureSmoothingTab.hitTestable(), findsOneWidget);
+    await tester.tap(textureSmoothingTab);
+    await tester.pumpAndSettle();
+    final textureSlider = find.byKey(
+      const ValueKey('editor-adjustment-textureSmoothing'),
+    );
+    await tester.ensureVisible(textureSlider);
+    await tester.pumpAndSettle();
+    expect(textureSlider, findsOneWidget);
+    final textureControl = find.descendant(
+      of: textureSlider,
+      matching: find.byType(Slider),
+    );
+    expect(textureControl, findsOneWidget);
+    expect(tester.widget<Slider>(textureControl).value, closeTo(0.45, 0.01));
+    await tester.drag(textureControl, const Offset(90, 0));
+    await tester.pumpAndSettle();
+    portraitRecipe = (await store.loadLatest())!
+        .effectiveRecipeFor(importedPhoto.id)
+        .portraitRecipe;
+    expect(portraitRecipe.textureSmoothing, greaterThan(45));
+    expect(
+      find.byKey(const ValueKey('editor-adjustment-section')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('editor-portrait-tool-status')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('editor-reset-current-adjustment')),
+      findsOneWidget,
     );
 
     final bodySlimTab = find.byKey(
       const ValueKey('editor-adjustment-tab-bodySlim'),
     );
+    await tester.ensureVisible(bodySlimTab);
+    await tester.pumpAndSettle();
     expect(bodySlimTab.hitTestable(), findsOneWidget);
     await tester.tap(bodySlimTab);
     await tester.pumpAndSettle();
@@ -249,8 +305,25 @@ void main() {
       greaterThan(0),
     );
 
-    await tester.tap(faceSlimTab);
+    await tester.drag(
+      find.byKey(const ValueKey('editor-adjustment-tabs')),
+      const Offset(180, 0),
+    );
     await tester.pumpAndSettle();
+    final visibleFaceSlimTab = find.byKey(
+      const ValueKey('editor-adjustment-tab-faceSlim'),
+    );
+    expect(visibleFaceSlimTab.hitTestable(), findsOneWidget);
+    await tester.tap(visibleFaceSlimTab);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('editor-face-slim-target-0')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('editor-face-slim-target-1')),
+      findsOneWidget,
+    );
     final faceSlimControl = find.descendant(
       of: find.byKey(const ValueKey('editor-adjustment-faceSlim')),
       matching: find.byType(Slider),
@@ -259,11 +332,18 @@ void main() {
     expect(tester.widget<Slider>(faceSlimControl).max, 0.5);
     await tester.drag(faceSlimControl, const Offset(90, 0));
     await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('editor-face-slim-target-1')),
+    );
+    await tester.pumpAndSettle();
+    await tester.drag(faceSlimControl, const Offset(50, 0));
+    await tester.pumpAndSettle();
     expect(
-      (await store.loadLatest())
-          ?.effectiveRecipeFor(importedPhoto.id)
-          .faceSlimStrength,
-      greaterThan(0),
+      (await store.loadLatest())!
+          .effectiveRecipeFor(importedPhoto.id)
+          .faceSlimRecipe
+          .targetStrengths,
+      everyElement(greaterThan(0)),
     );
 
     await tester.tap(exposureTab);
@@ -299,7 +379,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(exporter.photoIds, ['ios-runtime-photo']);
-    expect(exporter.recipes.single.portraitStrength, greaterThan(0));
+    expect(exporter.recipes.single.portraitStrength, 0);
+    expect(
+      exporter.recipes.single.portraitRecipe.textureSmoothing,
+      greaterThan(45),
+    );
+    expect(exporter.recipes.single.portraitRecipe.skinToneLighting, 40);
+    expect(exporter.recipes.single.portraitRecipe.blemishReduction, 20);
     expect(previewRenderer.backends, contains('ios-core-image'));
     expect(previewRenderer.updateCount, greaterThan(0));
     final exported = exporter.results.single;
@@ -402,12 +488,16 @@ void main() {
       final naturalRecommendation = find.byKey(
         const ValueKey('recommendation-naturalClean'),
       );
+      final naturalRecommendationLabel = find
+          .descendant(of: naturalRecommendation, matching: find.byType(Text))
+          .first;
       await tester.dragUntilVisible(
-        naturalRecommendation,
+        naturalRecommendationLabel,
         workspace,
         const Offset(0, -260),
       );
-      await tester.tap(naturalRecommendation);
+      await tester.pumpAndSettle();
+      await tester.tap(naturalRecommendationLabel);
       await tester.pumpAndSettle();
       final useRecommendation = find.byKey(
         const ValueKey('recommendation-use'),
@@ -518,7 +608,7 @@ final class _NativePreviewProbe implements PhotoPreviewRenderer {
 
   final PhotoPreviewRenderer delegate;
   final List<String> backends = [];
-  final List<double> portraitStrengths = [];
+  final List<double> textureSmoothingStrengths = [];
   int updateCount = 0;
   int disposeCount = 0;
 
@@ -534,7 +624,7 @@ final class _NativePreviewProbe implements PhotoPreviewRenderer {
       maxEdge: maxEdge,
     );
     backends.add(handle.backend);
-    portraitStrengths.add(_portraitStrength(pipeline));
+    textureSmoothingStrengths.add(_textureSmoothingStrength(pipeline));
     return handle;
   }
 
@@ -544,7 +634,7 @@ final class _NativePreviewProbe implements PhotoPreviewRenderer {
     required ImagePipeline pipeline,
   }) async {
     await delegate.update(handle: handle, pipeline: pipeline);
-    portraitStrengths.add(_portraitStrength(pipeline));
+    textureSmoothingStrengths.add(_textureSmoothingStrength(pipeline));
     updateCount += 1;
   }
 
@@ -554,10 +644,10 @@ final class _NativePreviewProbe implements PhotoPreviewRenderer {
     disposeCount += 1;
   }
 
-  double _portraitStrength(ImagePipeline pipeline) {
+  double _textureSmoothingStrength(ImagePipeline pipeline) {
     final arguments = pipeline.toPlatformArguments();
-    final portrait = arguments['portrait']! as Map<String, Object>;
-    return (portrait['strength']! as num).toDouble();
+    final portrait = arguments['portraitRecipeV2']! as Map<String, Object>;
+    return (portrait['textureSmoothing']! as num).toDouble() / 100;
   }
 }
 
@@ -595,7 +685,7 @@ final class _NativeExportProbe implements PhotoExporter {
 
 final class _ApplicablePortraitAnalyzer implements PhotoAnalyzer {
   static const _analysisVersion = 'ios-runtime-fixture-v1';
-  static const _capabilityVersion = 'ios-core-image-vision-v8-portrait-reshape';
+  static const _capabilityVersion = 'ios-core-image-vision-v12-multiface-slim';
   final List<String> photoIds = [];
 
   @override
@@ -624,6 +714,7 @@ final class _ApplicablePortraitAnalyzer implements PhotoAnalyzer {
       clarity: ClarityCondition.clear,
       portrait: PortraitApplicability.applicable,
       portraitReason: PortraitDegradationReason.none,
+      faceSlimTargetCount: 2,
       body: PortraitApplicability.applicable,
       scene: SceneKind.people,
     );

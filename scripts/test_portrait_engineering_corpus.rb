@@ -71,6 +71,20 @@ class PortraitEngineeringCorpusTest < Minitest::Test
 
     PortraitEngineeringCorpus.validate_manifest!(portrait_manifest(assets))
 
+    supplemental = {
+      "id" => "blemish-supplemental-001",
+      "tags" => [
+        "portrait_single",
+        PortraitEngineeringCorpus::SUPPLEMENTAL_TAG,
+      ],
+    }
+    manifest_with_supplement = portrait_manifest(assets + [supplemental])
+    PortraitEngineeringCorpus.validate_manifest!(manifest_with_supplement)
+    assert_equal(
+      48,
+      PortraitEngineeringCorpus.engineering_assets(manifest_with_supplement).length,
+    )
+
     too_few_portraits = assets.map(&:dup)
     too_few_portraits[35] = {
       "id" => "no-face-009",
@@ -162,7 +176,7 @@ class PortraitEngineeringCorpusTest < Minitest::Test
     PortraitEngineeringCorpus.validate_classification!(
       asset_id: "portrait-multi-001",
       tags: ["portrait_multi"],
-      classification: "preserved",
+      classification: "applied",
     )
     PortraitEngineeringCorpus.validate_classification!(
       asset_id: "portrait-001",
@@ -174,10 +188,10 @@ class PortraitEngineeringCorpusTest < Minitest::Test
       PortraitEngineeringCorpus.validate_classification!(
         asset_id: "portrait-multi-001",
         tags: ["portrait_multi"],
-        classification: "applied",
+        classification: "preserved",
       )
     end
-    assert_includes(error.message, "must be safely preserved")
+    assert_includes(error.message, "must apply the portrait candidate")
   end
 
   def test_accepts_a_visible_bounded_and_monotonic_applied_effect

@@ -205,10 +205,65 @@ class AppLocalizationsEn extends AppLocalizations {
   String get naturalPortraitRetouch => 'Natural retouch';
 
   @override
+  String get oneTapNaturalBeautification => 'One-tap natural beautification';
+
+  @override
+  String get applyNaturalBeautification => 'Apply natural beautification';
+
+  @override
+  String get textureSmoothing => 'Texture smoothing';
+
+  @override
+  String get skinToneLighting => 'Skin tone & face lighting';
+
+  @override
+  String get blemishReduction => 'Blemish reduction';
+
+  @override
   String get faceSlim => 'Face slim';
 
   @override
+  String get faceSlimBackgroundProtected =>
+      'Face slimming is unavailable for this photo to protect background lines';
+
+  @override
+  String get faceSlimMultipleFaces =>
+      'Multiple faces detected: natural retouching is available, while face slimming supports single-person photos only';
+
+  @override
+  String get faceSlimUnavailable =>
+      'This photo does not currently meet safe face-slimming conditions';
+
+  @override
+  String get faceSlimTargetHint => 'Choose a face to adjust (left to right)';
+
+  @override
+  String faceSlimTarget(int number) {
+    return 'Face $number';
+  }
+
+  @override
   String get bodySlim => 'Body slim';
+
+  @override
+  String get portraitTools => 'Portrait';
+
+  @override
+  String get lightAndColorTools => 'Light & color';
+
+  @override
+  String get localPortraitReady => 'Portrait tools ready · On-device';
+
+  @override
+  String get portraitToolsUnavailable =>
+      'This photo did not pass portrait safety checks. Light and color tools remain available.';
+
+  @override
+  String get switchToCurrentPhotoForPortrait =>
+      'Switch to Current photo to use portrait tools';
+
+  @override
+  String get resetCurrentAdjustment => 'Reset current adjustment';
 
   @override
   String get composition => 'Composition';

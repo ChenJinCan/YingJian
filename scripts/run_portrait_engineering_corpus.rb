@@ -48,7 +48,7 @@ begin
 rescue PortraitEngineeringCorpus::ContractError => error
   fail_contract(error.message)
 end
-assets = manifest.fetch("assets")
+assets = PortraitEngineeringCorpus.engineering_assets(manifest)
 corpus_root = File.expand_path(manifest.fetch("corpus_root"), repo_root)
 
 renderer_source = File.join(

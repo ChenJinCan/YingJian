@@ -45,6 +45,9 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   bool _preparingRecommendations = false;
   RecommendationPreparation? _recommendationPreparation;
   final Map<String, PortraitApplicability> _portraitApplicabilityByPhotoId = {};
+  final Map<String, PortraitApplicability> _faceSlimApplicabilityByPhotoId = {};
+  final Map<String, PortraitDegradationReason> _faceSlimReasonByPhotoId = {};
+  final Map<String, int> _faceSlimTargetCountByPhotoId = {};
   final Map<String, PortraitApplicability> _bodyApplicabilityByPhotoId = {};
   int _previewRecommendationIndex = -1;
   double? _pendingPhotoStripOffset;
@@ -185,6 +188,9 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     final analyzer = context.read<PhotoAnalyzer>();
     final cache = context.read<PhotoAnalysisCache>();
     final restored = <String, PortraitApplicability>{};
+    final restoredFaceSlim = <String, PortraitApplicability>{};
+    final restoredFaceSlimReason = <String, PortraitDegradationReason>{};
+    final restoredFaceSlimTargetCount = <String, int>{};
     final restoredBody = <String, PortraitApplicability>{};
     var refreshRequired = false;
     for (final photo in project.photos) {
@@ -196,6 +202,9 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         );
         if (analysis != null) {
           restored[photo.id] = analysis.portrait;
+          restoredFaceSlim[photo.id] = analysis.faceSlim;
+          restoredFaceSlimReason[photo.id] = analysis.faceSlimReason;
+          restoredFaceSlimTargetCount[photo.id] = analysis.faceSlimTargetCount;
           restoredBody[photo.id] = analysis.body;
         } else {
           refreshRequired = true;
@@ -210,6 +219,15 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       _portraitApplicabilityByPhotoId
         ..clear()
         ..addAll(restored);
+      _faceSlimApplicabilityByPhotoId
+        ..clear()
+        ..addAll(restoredFaceSlim);
+      _faceSlimReasonByPhotoId
+        ..clear()
+        ..addAll(restoredFaceSlimReason);
+      _faceSlimTargetCountByPhotoId
+        ..clear()
+        ..addAll(restoredFaceSlimTargetCount);
       _bodyApplicabilityByPhotoId
         ..clear()
         ..addAll(restoredBody);
@@ -269,6 +287,18 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           _portraitApplicabilityByPhotoId.addAll({
             for (final entry in preparation.analyses.entries)
               entry.key: entry.value.portrait,
+          });
+          _faceSlimApplicabilityByPhotoId.addAll({
+            for (final entry in preparation.analyses.entries)
+              entry.key: entry.value.faceSlim,
+          });
+          _faceSlimReasonByPhotoId.addAll({
+            for (final entry in preparation.analyses.entries)
+              entry.key: entry.value.faceSlimReason,
+          });
+          _faceSlimTargetCountByPhotoId.addAll({
+            for (final entry in preparation.analyses.entries)
+              entry.key: entry.value.faceSlimTargetCount,
           });
           _bodyApplicabilityByPhotoId.addAll({
             for (final entry in preparation.analyses.entries)
@@ -528,6 +558,9 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       await _session!.removePhoto(photo.id);
       await analysisCache.clearPhoto(projectId: projectId, photoId: photo.id);
       _portraitApplicabilityByPhotoId.remove(photo.id);
+      _faceSlimApplicabilityByPhotoId.remove(photo.id);
+      _faceSlimReasonByPhotoId.remove(photo.id);
+      _faceSlimTargetCountByPhotoId.remove(photo.id);
       _bodyApplicabilityByPhotoId.remove(photo.id);
       final focusPhotoId = _session!.project?.focusPhotoId;
       if (focusPhotoId != null) {
@@ -564,6 +597,9 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       await _session!.deleteProject();
       await analysisCache.clearProject(projectId);
       _portraitApplicabilityByPhotoId.clear();
+      _faceSlimApplicabilityByPhotoId.clear();
+      _faceSlimReasonByPhotoId.clear();
+      _faceSlimTargetCountByPhotoId.clear();
       _bodyApplicabilityByPhotoId.clear();
       await _discardShareFiles();
       _selectedIndex = 0;
@@ -931,6 +967,30 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
               (state) => state == PhotoExportState.notQueued,
             ) ??
             false;
+        final selectedPhoto = photos.isEmpty ? null : photos[_selectedIndex];
+        final portraitApplicable =
+            selectedPhoto != null &&
+            _portraitApplicabilityByPhotoId[selectedPhoto.id] ==
+                PortraitApplicability.applicable;
+        final bodyApplicable =
+            selectedPhoto != null &&
+            _bodyApplicabilityByPhotoId[selectedPhoto.id] ==
+                PortraitApplicability.applicable;
+        final faceSlimApplicable =
+            selectedPhoto != null &&
+            _faceSlimApplicabilityByPhotoId[selectedPhoto.id] ==
+                PortraitApplicability.applicable;
+        final faceSlimReason = selectedPhoto == null
+            ? PortraitDegradationReason.none
+            : _faceSlimReasonByPhotoId[selectedPhoto.id] ??
+                  PortraitDegradationReason.none;
+        final faceSlimTargetCount = selectedPhoto == null
+            ? 0
+            : _faceSlimTargetCountByPhotoId[selectedPhoto.id] ??
+                  (faceSlimApplicable ? 1 : 0);
+        final photoToolsVisible =
+            photos.length == 1 ||
+            session.project?.editingScope == ProjectEditingScope.currentPhoto;
         return Scaffold(
           key: const ValueKey('editor-page'),
           appBar: AppBar(
@@ -1003,18 +1063,12 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                     recommendations: recommendations ?? const [],
                     selectedRecommendationIndex: _previewRecommendationIndex,
                     editorSession: _editorSession,
-                    portraitApplicable:
-                        _portraitApplicabilityByPhotoId[photos[_selectedIndex]
-                                .id] ==
-                            PortraitApplicability.applicable &&
-                        session.project!.editingScope ==
-                            ProjectEditingScope.currentPhoto,
-                    bodyApplicable:
-                        _bodyApplicabilityByPhotoId[photos[_selectedIndex]
-                                .id] ==
-                            PortraitApplicability.applicable &&
-                        session.project!.editingScope ==
-                            ProjectEditingScope.currentPhoto,
+                    portraitApplicable: portraitApplicable,
+                    faceSlimApplicable: faceSlimApplicable,
+                    faceSlimReason: faceSlimReason,
+                    faceSlimTargetCount: faceSlimTargetCount,
+                    bodyApplicable: bodyApplicable,
+                    photoToolsVisible: photoToolsVisible,
                     canSyncCurrentPhoto:
                         session.canSyncCurrentPhotoAdjustmentsToGroup,
                     photoStripController: _photoStripController ??=
@@ -1167,7 +1221,11 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.selectedRecommendationIndex,
     required this.editorSession,
     required this.portraitApplicable,
+    required this.faceSlimApplicable,
+    required this.faceSlimReason,
+    required this.faceSlimTargetCount,
     required this.bodyApplicable,
+    required this.photoToolsVisible,
     required this.canSyncCurrentPhoto,
     required this.photoStripController,
     required this.onSelected,
@@ -1199,7 +1257,11 @@ class _PhotoWorkspace extends StatelessWidget {
   final int selectedRecommendationIndex;
   final EditorSession editorSession;
   final bool portraitApplicable;
+  final bool faceSlimApplicable;
+  final PortraitDegradationReason faceSlimReason;
+  final int faceSlimTargetCount;
   final bool bodyApplicable;
+  final bool photoToolsVisible;
   final bool canSyncCurrentPhoto;
   final ScrollController photoStripController;
   final ValueChanged<int> onSelected;
@@ -1224,10 +1286,15 @@ class _PhotoWorkspace extends StatelessWidget {
     final recommendationFlow =
         flowState == PhotoProjectFlowState.analyzing ||
         flowState == PhotoProjectFlowState.choosingRecommendation;
+    final compactHeight = MediaQuery.sizeOf(context).height < 700;
     return Column(
       children: [
         Expanded(
-          flex: exportSummary == null ? 4 : 3,
+          flex: exportSummary == null
+              ? recommendationFlow || compactHeight
+                    ? 4
+                    : 6
+              : 4,
           child: Padding(
             key: const ValueKey('editor-preview-stage'),
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
@@ -1393,14 +1460,18 @@ class _PhotoWorkspace extends StatelessWidget {
             ),
           ),
         Expanded(
-          flex: exportSummary == null ? 5 : 6,
+          flex: exportSummary == null
+              ? recommendationFlow || compactHeight
+                    ? 6
+                    : 4
+              : 6,
           child: Material(
             color: Theme.of(context).colorScheme.surfaceContainerLow,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
             clipBehavior: Clip.antiAlias,
             child: ListView(
               key: const Key('photo-workspace-scroll'),
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 112),
               children: [
                 Text(
                   context.l10n.photoPositionAndScope(
@@ -1464,7 +1535,11 @@ class _PhotoWorkspace extends StatelessWidget {
                   _AdjustmentToolStrip(
                     enabled: editingEnabled,
                     extended: supportsImagePipelineV2,
+                    photoToolsVisible: photoToolsVisible,
                     portraitAvailable: portraitApplicable,
+                    faceSlimAvailable: faceSlimApplicable,
+                    faceSlimReason: faceSlimReason,
+                    faceSlimTargetCount: faceSlimTargetCount,
                     bodyAvailable: bodyApplicable,
                     recipe: recipe,
                     editorSession: editorSession,
@@ -2066,7 +2141,7 @@ class _BeforeAfterPreviewState extends State<_BeforeAfterPreview> {
           errorBuilder: (context) => Semantics(
             liveRegion: true,
             child: Center(
-              child: Padding(
+              child: SingleChildScrollView(
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -2126,7 +2201,10 @@ enum _AdjustmentParameter {
   tint,
   saturation,
   clarity,
-  portraitRetouch,
+  naturalBeautification,
+  textureSmoothing,
+  skinToneLighting,
+  blemishReduction,
   faceSlim,
   bodySlim,
 }
@@ -2135,7 +2213,11 @@ class _AdjustmentToolStrip extends StatefulWidget {
   const _AdjustmentToolStrip({
     required this.enabled,
     required this.extended,
+    required this.photoToolsVisible,
     required this.portraitAvailable,
+    required this.faceSlimAvailable,
+    required this.faceSlimReason,
+    required this.faceSlimTargetCount,
     required this.bodyAvailable,
     required this.recipe,
     required this.editorSession,
@@ -2144,7 +2226,11 @@ class _AdjustmentToolStrip extends StatefulWidget {
 
   final bool enabled;
   final bool extended;
+  final bool photoToolsVisible;
   final bool portraitAvailable;
+  final bool faceSlimAvailable;
+  final PortraitDegradationReason faceSlimReason;
+  final int faceSlimTargetCount;
   final bool bodyAvailable;
   final EditRecipe recipe;
   final EditorSession editorSession;
@@ -2160,9 +2246,9 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
   @override
   void initState() {
     super.initState();
-    _selected = widget.portraitAvailable
-        ? _AdjustmentParameter.portraitRetouch
-        : widget.bodyAvailable
+    _selected = widget.photoToolsVisible && widget.portraitAvailable
+        ? _AdjustmentParameter.naturalBeautification
+        : widget.photoToolsVisible && widget.bodyAvailable
         ? _AdjustmentParameter.bodySlim
         : _AdjustmentParameter.exposure;
   }
@@ -2170,25 +2256,31 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
   @override
   void didUpdateWidget(covariant _AdjustmentToolStrip oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!oldWidget.portraitAvailable && widget.portraitAvailable) {
-      _selected = _AdjustmentParameter.portraitRetouch;
-    } else if (oldWidget.portraitAvailable &&
-        !widget.portraitAvailable &&
-        (_selected == _AdjustmentParameter.portraitRetouch ||
+    if ((!oldWidget.portraitAvailable || !oldWidget.photoToolsVisible) &&
+        widget.portraitAvailable &&
+        widget.photoToolsVisible) {
+      _selected = _AdjustmentParameter.naturalBeautification;
+    } else if ((oldWidget.portraitAvailable || oldWidget.photoToolsVisible) &&
+        (!widget.portraitAvailable || !widget.photoToolsVisible) &&
+        (_selected == _AdjustmentParameter.naturalBeautification ||
+            _selected == _AdjustmentParameter.textureSmoothing ||
+            _selected == _AdjustmentParameter.skinToneLighting ||
+            _selected == _AdjustmentParameter.blemishReduction ||
             _selected == _AdjustmentParameter.faceSlim)) {
-      _selected = widget.bodyAvailable
+      _selected = widget.photoToolsVisible && widget.bodyAvailable
           ? _AdjustmentParameter.bodySlim
           : _AdjustmentParameter.exposure;
     }
-    if (!oldWidget.bodyAvailable &&
+    if ((!oldWidget.bodyAvailable || !oldWidget.photoToolsVisible) &&
         widget.bodyAvailable &&
+        widget.photoToolsVisible &&
         !widget.portraitAvailable) {
       _selected = _AdjustmentParameter.bodySlim;
-    } else if (oldWidget.bodyAvailable &&
-        !widget.bodyAvailable &&
+    } else if ((oldWidget.bodyAvailable || oldWidget.photoToolsVisible) &&
+        (!widget.bodyAvailable || !widget.photoToolsVisible) &&
         _selected == _AdjustmentParameter.bodySlim) {
-      _selected = widget.portraitAvailable
-          ? _AdjustmentParameter.portraitRetouch
+      _selected = widget.photoToolsVisible && widget.portraitAvailable
+          ? _AdjustmentParameter.naturalBeautification
           : _AdjustmentParameter.exposure;
     }
   }
@@ -2197,12 +2289,18 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
   Widget build(BuildContext context) {
     final parameters = widget.extended
         ? <_AdjustmentParameter>[
-            if (widget.portraitAvailable) _AdjustmentParameter.portraitRetouch,
-            if (widget.portraitAvailable) _AdjustmentParameter.faceSlim,
-            if (widget.bodyAvailable) _AdjustmentParameter.bodySlim,
+            if (widget.photoToolsVisible && widget.portraitAvailable)
+              _AdjustmentParameter.naturalBeautification,
+            if (widget.photoToolsVisible && widget.faceSlimAvailable)
+              _AdjustmentParameter.faceSlim,
+            if (widget.photoToolsVisible && widget.bodyAvailable)
+              _AdjustmentParameter.bodySlim,
             ..._AdjustmentParameter.values.where(
               (parameter) =>
-                  parameter != _AdjustmentParameter.portraitRetouch &&
+                  parameter != _AdjustmentParameter.naturalBeautification &&
+                  parameter != _AdjustmentParameter.textureSmoothing &&
+                  parameter != _AdjustmentParameter.skinToneLighting &&
+                  parameter != _AdjustmentParameter.blemishReduction &&
                   parameter != _AdjustmentParameter.faceSlim &&
                   parameter != _AdjustmentParameter.bodySlim,
             ),
@@ -2212,75 +2310,302 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
             _AdjustmentParameter.contrast,
             _AdjustmentParameter.warmth,
           ];
-    final selected = parameters.contains(_selected)
+    final selected =
+        parameters.contains(_selected) ||
+            (widget.photoToolsVisible &&
+                widget.portraitAvailable &&
+                _isNaturalDetail(_selected))
         ? _selected
         : parameters.first;
+    final effectiveRecipe =
+        selected == _AdjustmentParameter.faceSlim &&
+            widget.faceSlimTargetCount > 0
+        ? widget.recipe.copyWith(
+            faceSlimRecipe: widget.recipe.faceSlimRecipe.withTargetCount(
+              widget.faceSlimTargetCount,
+            ),
+          )
+        : widget.recipe;
+    final selectedLabel = _label(context, selected);
+    final selectedValue = _value(effectiveRecipe, selected);
+    final selectedIsPortrait = _isPortrait(selected);
+    final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.3;
+    final portraitReady =
+        widget.photoToolsVisible &&
+        (widget.portraitAvailable || widget.bodyAvailable);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        Row(
+          children: [
+            Icon(
+              selectedIsPortrait ? Icons.face_retouching_natural : Icons.tune,
+              size: 18,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              selectedIsPortrait
+                  ? context.l10n.portraitTools
+                  : context.l10n.lightAndColorTools,
+              key: const ValueKey('editor-adjustment-section'),
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            if (portraitReady) ...[
+              const Spacer(),
+              Flexible(
+                child: _PortraitToolStatus(
+                  photoToolsVisible: widget.photoToolsVisible,
+                  available: true,
+                ),
+              ),
+            ],
+          ],
+        ),
+        if (!portraitReady) ...[
+          const SizedBox(height: 4),
+          _PortraitToolStatus(
+            photoToolsVisible: widget.photoToolsVisible,
+            available: false,
+          ),
+        ],
+        if (widget.photoToolsVisible &&
+            widget.portraitAvailable &&
+            !widget.faceSlimAvailable) ...[
+          const SizedBox(height: 6),
+          Text(
+            widget.faceSlimReason == PortraitDegradationReason.backgroundRisk
+                ? context.l10n.faceSlimBackgroundProtected
+                : widget.faceSlimReason ==
+                      PortraitDegradationReason.multipleFaces
+                ? context.l10n.faceSlimMultipleFaces
+                : context.l10n.faceSlimUnavailable,
+            key: const ValueKey('editor-face-slim-unavailable'),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+        const SizedBox(height: 8),
         SizedBox(
-          height: 48,
+          height: largeText ? 104 : 64,
           child: ListView.separated(
             key: const ValueKey('editor-adjustment-tabs'),
             scrollDirection: Axis.horizontal,
             itemCount: parameters.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 4),
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
             itemBuilder: (context, index) {
               final parameter = parameters[index];
               final label = _label(context, parameter);
-              final isSelected = parameter == selected;
+              final isSelected =
+                  parameter == selected ||
+                  (parameter == _AdjustmentParameter.naturalBeautification &&
+                      _isNaturalDetail(selected));
               void select() => setState(() => _selected = parameter);
-              return Semantics(
+              return _AdjustmentToolButton(
                 key: ValueKey('editor-adjustment-tab-${parameter.name}'),
-                container: true,
-                excludeSemantics: true,
-                button: true,
                 enabled: widget.enabled,
                 selected: isSelected,
                 label: label,
+                icon: _icon(parameter),
+                largeText: largeText,
                 onTap: widget.enabled ? select : null,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minWidth: 48),
-                  child: ChoiceChip(
-                    label: Text(label),
-                    selected: isSelected,
-                    onSelected: widget.enabled ? (_) => select() : null,
-                  ),
-                ),
               );
             },
           ),
         ),
-        const SizedBox(height: 8),
-        _AdjustmentSlider(
-          key: ValueKey('editor-adjustment-${selected.name}'),
-          enabled: widget.enabled,
-          label: '',
-          semanticLabel: _label(context, selected),
-          value: _value(widget.recipe, selected),
-          minimum:
-              selected == _AdjustmentParameter.portraitRetouch ||
-                  selected == _AdjustmentParameter.faceSlim ||
-                  selected == _AdjustmentParameter.bodySlim
-              ? 0
-              : -1,
-          maximum: selected == _AdjustmentParameter.faceSlim
-              ? 0.5
-              : selected == _AdjustmentParameter.bodySlim
-              ? 0.35
-              : 1,
-          onStart: widget.editorSession.beginAdjustment,
-          onChanged: (value) => widget.editorSession.preview(
-            _copyWith(widget.recipe, selected, value),
+        if (selected == _AdjustmentParameter.naturalBeautification ||
+            _isNaturalDetail(selected)) ...[
+          const SizedBox(height: 8),
+          SizedBox(
+            height: largeText ? 104 : 64,
+            child: ListView.separated(
+              key: const ValueKey('editor-natural-beautification-tabs'),
+              scrollDirection: Axis.horizontal,
+              itemCount: _naturalDetailParameters.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                final parameter = _naturalDetailParameters[index];
+                return _AdjustmentToolButton(
+                  key: ValueKey('editor-adjustment-tab-${parameter.name}'),
+                  enabled: widget.enabled,
+                  selected: parameter == selected,
+                  label: _label(context, parameter),
+                  icon: _icon(parameter),
+                  largeText: largeText,
+                  onTap: widget.enabled
+                      ? () => setState(() => _selected = parameter)
+                      : null,
+                );
+              },
+            ),
           ),
-          onEnd: () {
-            widget.editorSession.commitAdjustment();
-            widget.onRecipeCommitted();
-          },
-        ),
+        ],
+        const SizedBox(height: 8),
+        if (selected == _AdjustmentParameter.naturalBeautification)
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  key: const ValueKey(
+                    'editor-apply-one-tap-natural-beautification',
+                  ),
+                  onPressed: widget.enabled
+                      ? () {
+                          widget.editorSession.apply(
+                            widget.recipe.copyWith(
+                              portraitRecipe: widget.recipe.portraitRecipe
+                                  .copyWith(
+                                    textureSmoothing: 45,
+                                    skinToneLighting: 40,
+                                    blemishReduction: 20,
+                                  ),
+                            ),
+                          );
+                          widget.onRecipeCommitted();
+                        }
+                      : null,
+                  icon: const Icon(Icons.auto_awesome),
+                  label: Text(context.l10n.applyNaturalBeautification),
+                ),
+              ),
+            ],
+          )
+        else
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (selected == _AdjustmentParameter.faceSlim &&
+                  widget.faceSlimTargetCount > 1) ...[
+                Text(
+                  context.l10n.faceSlimTargetHint,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (
+                      var index = 0;
+                      index < widget.faceSlimTargetCount;
+                      index++
+                    )
+                      ChoiceChip(
+                        key: ValueKey('editor-face-slim-target-$index'),
+                        label: Text(context.l10n.faceSlimTarget(index + 1)),
+                        selected:
+                            effectiveRecipe
+                                .faceSlimRecipe
+                                .selectedTargetIndex ==
+                            index,
+                        onSelected: widget.enabled
+                            ? (_) {
+                                widget.editorSession.apply(
+                                  effectiveRecipe.copyWith(
+                                    faceSlimRecipe: effectiveRecipe
+                                        .faceSlimRecipe
+                                        .selectTarget(index),
+                                  ),
+                                );
+                                widget.onRecipeCommitted();
+                              }
+                            : null,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+              ],
+              Row(
+                children: [
+                  Expanded(
+                    child: _AdjustmentSlider(
+                      key: ValueKey('editor-adjustment-${selected.name}'),
+                      enabled: widget.enabled,
+                      label: selectedLabel,
+                      semanticLabel: selectedLabel,
+                      value: selectedValue,
+                      minimum:
+                          selected == _AdjustmentParameter.textureSmoothing ||
+                              selected ==
+                                  _AdjustmentParameter.skinToneLighting ||
+                              selected ==
+                                  _AdjustmentParameter.blemishReduction ||
+                              selected == _AdjustmentParameter.faceSlim ||
+                              selected == _AdjustmentParameter.bodySlim
+                          ? 0
+                          : -1,
+                      maximum: selected == _AdjustmentParameter.faceSlim
+                          ? 0.5
+                          : selected == _AdjustmentParameter.bodySlim
+                          ? 0.35
+                          : 1,
+                      onStart: widget.editorSession.beginAdjustment,
+                      onChanged: (value) => widget.editorSession.preview(
+                        _copyWith(effectiveRecipe, selected, value),
+                      ),
+                      onEnd: () {
+                        widget.editorSession.commitAdjustment();
+                        widget.onRecipeCommitted();
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton.filledTonal(
+                    key: const ValueKey('editor-reset-current-adjustment'),
+                    tooltip: context.l10n.resetCurrentAdjustment,
+                    onPressed: widget.enabled && selectedValue != 0
+                        ? () {
+                            widget.editorSession.apply(
+                              _copyWith(effectiveRecipe, selected, 0),
+                            );
+                            widget.onRecipeCommitted();
+                          }
+                        : null,
+                    icon: const Icon(Icons.restart_alt),
+                  ),
+                ],
+              ),
+            ],
+          ),
       ],
     );
   }
+
+  bool _isPortrait(_AdjustmentParameter parameter) =>
+      parameter == _AdjustmentParameter.naturalBeautification ||
+      parameter == _AdjustmentParameter.textureSmoothing ||
+      parameter == _AdjustmentParameter.skinToneLighting ||
+      parameter == _AdjustmentParameter.blemishReduction ||
+      parameter == _AdjustmentParameter.faceSlim ||
+      parameter == _AdjustmentParameter.bodySlim;
+
+  static const _naturalDetailParameters = <_AdjustmentParameter>[
+    _AdjustmentParameter.textureSmoothing,
+    _AdjustmentParameter.skinToneLighting,
+    _AdjustmentParameter.blemishReduction,
+  ];
+
+  bool _isNaturalDetail(_AdjustmentParameter parameter) =>
+      _naturalDetailParameters.contains(parameter);
+
+  IconData _icon(_AdjustmentParameter parameter) => switch (parameter) {
+    _AdjustmentParameter.exposure => Icons.exposure,
+    _AdjustmentParameter.highlights => Icons.light_mode_outlined,
+    _AdjustmentParameter.shadows => Icons.dark_mode_outlined,
+    _AdjustmentParameter.contrast => Icons.contrast,
+    _AdjustmentParameter.warmth => Icons.thermostat_outlined,
+    _AdjustmentParameter.tint => Icons.colorize_outlined,
+    _AdjustmentParameter.saturation => Icons.water_drop_outlined,
+    _AdjustmentParameter.clarity => Icons.auto_awesome_outlined,
+    _AdjustmentParameter.naturalBeautification => Icons.auto_awesome,
+    _AdjustmentParameter.textureSmoothing => Icons.blur_on_outlined,
+    _AdjustmentParameter.skinToneLighting => Icons.light_mode_outlined,
+    _AdjustmentParameter.blemishReduction => Icons.healing_outlined,
+    _AdjustmentParameter.faceSlim => Icons.face_6_outlined,
+    _AdjustmentParameter.bodySlim => Icons.accessibility_new,
+  };
 
   String _label(BuildContext context, _AdjustmentParameter parameter) =>
       switch (parameter) {
@@ -2292,8 +2617,11 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
         _AdjustmentParameter.tint => context.l10n.tint,
         _AdjustmentParameter.saturation => context.l10n.saturation,
         _AdjustmentParameter.clarity => context.l10n.clarity,
-        _AdjustmentParameter.portraitRetouch =>
-          context.l10n.naturalPortraitRetouch,
+        _AdjustmentParameter.naturalBeautification =>
+          context.l10n.oneTapNaturalBeautification,
+        _AdjustmentParameter.textureSmoothing => context.l10n.textureSmoothing,
+        _AdjustmentParameter.skinToneLighting => context.l10n.skinToneLighting,
+        _AdjustmentParameter.blemishReduction => context.l10n.blemishReduction,
         _AdjustmentParameter.faceSlim => context.l10n.faceSlim,
         _AdjustmentParameter.bodySlim => context.l10n.bodySlim,
       };
@@ -2308,7 +2636,19 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
         _AdjustmentParameter.tint => recipe.tint,
         _AdjustmentParameter.saturation => recipe.saturation,
         _AdjustmentParameter.clarity => recipe.clarity,
-        _AdjustmentParameter.portraitRetouch => recipe.portraitStrength,
+        _AdjustmentParameter.naturalBeautification =>
+          <int>[
+                recipe.portraitRecipe.textureSmoothing,
+                recipe.portraitRecipe.skinToneLighting,
+                recipe.portraitRecipe.blemishReduction,
+              ].reduce((left, right) => left > right ? left : right) /
+              100,
+        _AdjustmentParameter.textureSmoothing =>
+          recipe.portraitRecipe.textureSmoothing / 100,
+        _AdjustmentParameter.skinToneLighting =>
+          recipe.portraitRecipe.skinToneLighting / 100,
+        _AdjustmentParameter.blemishReduction =>
+          recipe.portraitRecipe.blemishReduction / 100,
         _AdjustmentParameter.faceSlim => recipe.faceSlimStrength,
         _AdjustmentParameter.bodySlim => recipe.bodySlimStrength,
       };
@@ -2326,12 +2666,135 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
     _AdjustmentParameter.tint => recipe.copyWith(tint: value),
     _AdjustmentParameter.saturation => recipe.copyWith(saturation: value),
     _AdjustmentParameter.clarity => recipe.copyWith(clarity: value),
-    _AdjustmentParameter.portraitRetouch => recipe.copyWith(
-      portraitStrength: value,
+    _AdjustmentParameter.naturalBeautification => recipe,
+    _AdjustmentParameter.textureSmoothing => recipe.copyWith(
+      portraitRecipe: recipe.portraitRecipe.copyWith(
+        textureSmoothing: (value * 100).round(),
+      ),
+    ),
+    _AdjustmentParameter.skinToneLighting => recipe.copyWith(
+      portraitRecipe: recipe.portraitRecipe.copyWith(
+        skinToneLighting: (value * 100).round(),
+      ),
+    ),
+    _AdjustmentParameter.blemishReduction => recipe.copyWith(
+      portraitRecipe: recipe.portraitRecipe.copyWith(
+        blemishReduction: (value * 100).round(),
+      ),
     ),
     _AdjustmentParameter.faceSlim => recipe.copyWith(faceSlimStrength: value),
     _AdjustmentParameter.bodySlim => recipe.copyWith(bodySlimStrength: value),
   };
+}
+
+class _PortraitToolStatus extends StatelessWidget {
+  const _PortraitToolStatus({
+    required this.photoToolsVisible,
+    required this.available,
+  });
+
+  final bool photoToolsVisible;
+  final bool available;
+
+  @override
+  Widget build(BuildContext context) {
+    final message = !photoToolsVisible
+        ? context.l10n.switchToCurrentPhotoForPortrait
+        : available
+        ? context.l10n.localPortraitReady
+        : context.l10n.portraitToolsUnavailable;
+    return Semantics(
+      key: const ValueKey('editor-portrait-tool-status'),
+      container: true,
+      excludeSemantics: true,
+      label: message,
+      child: Row(
+        children: [
+          Icon(
+            available && photoToolsVisible
+                ? Icons.verified_user_outlined
+                : Icons.info_outline,
+            size: 16,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              message,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AdjustmentToolButton extends StatelessWidget {
+  const _AdjustmentToolButton({
+    super.key,
+    required this.enabled,
+    required this.selected,
+    required this.label,
+    required this.icon,
+    required this.largeText,
+    required this.onTap,
+  });
+
+  final bool enabled;
+  final bool selected;
+  final String label;
+  final IconData icon;
+  final bool largeText;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Semantics(
+      container: true,
+      excludeSemantics: true,
+      button: true,
+      enabled: enabled,
+      selected: selected,
+      label: label,
+      onTap: onTap,
+      child: SizedBox(
+        width: 68,
+        height: largeText ? 104 : 64,
+        child: Material(
+          color: selected
+              ? colors.secondaryContainer
+              : colors.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(16),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icon, size: 22),
+                  const SizedBox(height: 4),
+                  Text(
+                    label,
+                    maxLines: largeText ? 2 : 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _CompositionTools extends StatelessWidget {
@@ -2484,6 +2947,7 @@ class _AdjustmentSlider extends StatelessWidget {
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 48),
             child: Semantics(
+              container: true,
               slider: true,
               enabled: enabled,
               label: semanticLabel,

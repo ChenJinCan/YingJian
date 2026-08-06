@@ -428,17 +428,113 @@ abstract class AppLocalizations {
   /// **'自然精修'**
   String get naturalPortraitRetouch;
 
+  /// No description provided for @oneTapNaturalBeautification.
+  ///
+  /// In zh, this message translates to:
+  /// **'一键自然美化'**
+  String get oneTapNaturalBeautification;
+
+  /// No description provided for @applyNaturalBeautification.
+  ///
+  /// In zh, this message translates to:
+  /// **'应用自然美化'**
+  String get applyNaturalBeautification;
+
+  /// No description provided for @textureSmoothing.
+  ///
+  /// In zh, this message translates to:
+  /// **'质感磨皮'**
+  String get textureSmoothing;
+
+  /// No description provided for @skinToneLighting.
+  ///
+  /// In zh, this message translates to:
+  /// **'肤色与面部光线'**
+  String get skinToneLighting;
+
+  /// No description provided for @blemishReduction.
+  ///
+  /// In zh, this message translates to:
+  /// **'瑕疵减弱'**
+  String get blemishReduction;
+
   /// No description provided for @faceSlim.
   ///
   /// In zh, this message translates to:
   /// **'瘦脸'**
   String get faceSlim;
 
+  /// No description provided for @faceSlimBackgroundProtected.
+  ///
+  /// In zh, this message translates to:
+  /// **'为保护背景线条，这张照片暂不提供瘦脸'**
+  String get faceSlimBackgroundProtected;
+
+  /// No description provided for @faceSlimMultipleFaces.
+  ///
+  /// In zh, this message translates to:
+  /// **'检测到多个人脸：自然精修可用，瘦脸仅支持单人照片'**
+  String get faceSlimMultipleFaces;
+
+  /// No description provided for @faceSlimUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'这张照片暂不满足安全瘦脸条件'**
+  String get faceSlimUnavailable;
+
+  /// No description provided for @faceSlimTargetHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择要调整的人脸（按画面从左到右）'**
+  String get faceSlimTargetHint;
+
+  /// No description provided for @faceSlimTarget.
+  ///
+  /// In zh, this message translates to:
+  /// **'人脸 {number}'**
+  String faceSlimTarget(int number);
+
   /// No description provided for @bodySlim.
   ///
   /// In zh, this message translates to:
   /// **'瘦身'**
   String get bodySlim;
+
+  /// No description provided for @portraitTools.
+  ///
+  /// In zh, this message translates to:
+  /// **'人像'**
+  String get portraitTools;
+
+  /// No description provided for @lightAndColorTools.
+  ///
+  /// In zh, this message translates to:
+  /// **'光色'**
+  String get lightAndColorTools;
+
+  /// No description provided for @localPortraitReady.
+  ///
+  /// In zh, this message translates to:
+  /// **'人像工具已就绪 · 本地处理'**
+  String get localPortraitReady;
+
+  /// No description provided for @portraitToolsUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前照片未通过人像安全检测，仍可继续调整光色'**
+  String get portraitToolsUnavailable;
+
+  /// No description provided for @switchToCurrentPhotoForPortrait.
+  ///
+  /// In zh, this message translates to:
+  /// **'切换到“当前照片”后可使用人像工具'**
+  String get switchToCurrentPhotoForPortrait;
+
+  /// No description provided for @resetCurrentAdjustment.
+  ///
+  /// In zh, this message translates to:
+  /// **'归零当前调整'**
+  String get resetCurrentAdjustment;
 
   /// No description provided for @composition.
   ///

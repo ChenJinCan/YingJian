@@ -83,19 +83,31 @@ void main() {
           );
           expect(store.project?.adaptiveCompensations, hasLength(6));
 
+          final workspace = find.byKey(const Key('photo-workspace-scroll'));
+          final exposureAdjustment = find.byKey(
+            const ValueKey('editor-adjustment-exposure'),
+          );
           await tester.dragUntilVisible(
-            find.text('曝光'),
-            find.byType(ListView).first,
+            exposureAdjustment,
+            workspace,
             const Offset(0, -240),
           );
-          await tester.drag(find.byType(Slider).first, const Offset(70, 0));
+          await tester.drag(workspace, const Offset(0, -96));
+          await tester.pumpAndSettle();
+          await tester.drag(
+            find.descendant(
+              of: exposureAdjustment,
+              matching: find.byType(Slider),
+            ),
+            const Offset(70, 0),
+          );
           await tester.pumpAndSettle();
           final sharedExposure = store.project!.sharedStyle.recipe.exposure;
           expect(sharedExposure, isNot(0));
 
           await tester.dragUntilVisible(
             find.text('仅当前照片'),
-            find.byType(ListView).first,
+            workspace,
             const Offset(0, 320),
           );
           await tester.tap(find.text('仅当前照片'));
@@ -106,13 +118,25 @@ void main() {
           await tester.tap(find.bySemanticsLabel(RegExp(r'^photo-2\.png')));
           await tester.pumpAndSettle();
           await tester.dragUntilVisible(
-            find.text('对比度'),
-            find.byType(ListView).first,
+            find.byKey(const ValueKey('editor-adjustment-tab-contrast')),
+            workspace,
             const Offset(0, -260),
           );
-          await tester.tap(find.text('对比度'));
+          await tester.tap(
+            find.byKey(const ValueKey('editor-adjustment-tab-contrast')),
+          );
           await tester.pumpAndSettle();
-          await tester.drag(find.byType(Slider).first, const Offset(60, 0));
+          final contrastAdjustment = find.byKey(
+            const ValueKey('editor-adjustment-contrast'),
+          );
+          await tester.ensureVisible(contrastAdjustment);
+          await tester.drag(
+            find.descendant(
+              of: contrastAdjustment,
+              matching: find.byType(Slider),
+            ),
+            const Offset(60, 0),
+          );
           await tester.pumpAndSettle();
 
           expect(store.project?.photoOverrides.keys, ['photo-2']);
@@ -124,10 +148,10 @@ void main() {
 
           await tester.dragUntilVisible(
             find.text('批量导出 6 张'),
-            find.byType(ListView).first,
+            workspace,
             const Offset(0, -340),
           );
-          await tester.drag(find.byType(ListView).first, const Offset(0, -90));
+          await tester.drag(workspace, const Offset(0, -90));
           await tester.pumpAndSettle();
           await tester.tap(find.text('批量导出 6 张'));
           await tester.pumpAndSettle();
@@ -220,9 +244,13 @@ void main() {
     expect(find.text('第 1 / 6 张 · 编辑整组'), findsOneWidget);
     expect(find.bySemanticsLabel(RegExp(r'^photo-1\.png')), findsWidgets);
 
+    final workspace = find.byKey(const Key('photo-workspace-scroll'));
+    final exposureAdjustment = find.byKey(
+      const ValueKey('editor-adjustment-exposure'),
+    );
     await tester.dragUntilVisible(
-      find.text('曝光'),
-      find.byType(ListView).first,
+      exposureAdjustment,
+      workspace,
       const Offset(0, -240),
     );
     await tester.pumpAndSettle();
@@ -254,7 +282,7 @@ void main() {
 
     await tester.dragUntilVisible(
       find.text('批量导出 6 张'),
-      find.byType(ListView).first,
+      workspace,
       const Offset(0, -300),
     );
     await tester.pumpAndSettle();

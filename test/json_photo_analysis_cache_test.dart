@@ -44,6 +44,7 @@ void main() {
         clarity: ClarityCondition.clear,
         portrait: PortraitApplicability.applicable,
         portraitReason: PortraitDegradationReason.none,
+        faceSlimTargetCount: 2,
         scene: SceneKind.people,
       );
       final writer = JsonPhotoAnalysisCache(directory: () async => root);

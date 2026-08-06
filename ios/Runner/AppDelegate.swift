@@ -31,6 +31,33 @@ enum IOSPortraitCapabilityPolicy {
     return IOSPortraitCapabilityStatus(applicability: "applicable", reason: "none")
   }
 
+  static func classify(
+    _ decision: IOSMultiFaceNonGeometricSafetyDecision
+  ) -> IOSPortraitCapabilityStatus {
+    if !decision.applicableFaceIndices.isEmpty {
+      return IOSPortraitCapabilityStatus(applicability: "applicable", reason: "none")
+    }
+    switch decision.sceneReason {
+    case .noFace:
+      return IOSPortraitCapabilityStatus(applicability: "unavailable", reason: "noFace")
+    case .tooManyFaces:
+      return IOSPortraitCapabilityStatus(applicability: "unsafe", reason: "multipleFaces")
+    case .noEligibleFace:
+      let reasons = Set(decision.rejectedFaces.values)
+      let reason: String
+      if reasons.contains(.lowConfidence) {
+        reason = "lowConfidence"
+      } else if reasons.contains(.faceTooSmall) {
+        reason = "faceTooSmall"
+      } else {
+        reason = "landmarksUnavailable"
+      }
+      return IOSPortraitCapabilityStatus(applicability: "unsafe", reason: reason)
+    case .none:
+      return IOSPortraitCapabilityStatus(applicability: "unsafe", reason: "capabilityUnavailable")
+    }
+  }
+
   private static func reasonName(_ reason: IOSPortraitDegradationReason) -> String {
     switch reason {
     case .none: return "none"
@@ -586,8 +613,18 @@ enum IOSPortraitCapabilityPolicy {
       try handler.perform([landmarkRequest])
       let observations = landmarkRequest.results ?? []
       faceCount = observations.count
+      let descriptors = observations.map {
+        IOSNonGeometricFaceDescriptor(
+          confidence: $0.confidence,
+          boundingBox: $0.boundingBox,
+          hasLandmarks: $0.landmarks != nil
+        )
+      }
       portraitStatus = IOSPortraitCapabilityPolicy.classify(
-        IOSPortraitSafetyPolicy.evaluate(observations)
+        IOSMultiFaceNonGeometricSafetyPolicy.evaluate(
+          faces: descriptors,
+          imageSize: CGSize(width: visionImage.width, height: visionImage.height)
+        )
       )
     } catch {
       // Vision landmarks can be unavailable for low-information inputs and in
@@ -602,13 +639,18 @@ enum IOSPortraitCapabilityPolicy {
         try handler.perform([rectangleRequest])
         let observations = rectangleRequest.results ?? []
         faceCount = observations.count
-        if let face = observations.first {
-          portraitStatus = IOSPortraitCapabilityPolicy.classify(
-            IOSPortraitSafetyPolicy.evaluate(
-              faceCount: observations.count,
-              confidence: face.confidence,
-              boundingBox: face.boundingBox,
+        if !observations.isEmpty {
+          let descriptors = observations.map {
+            IOSNonGeometricFaceDescriptor(
+              confidence: $0.confidence,
+              boundingBox: $0.boundingBox,
               hasLandmarks: false
+            )
+          }
+          portraitStatus = IOSPortraitCapabilityPolicy.classify(
+            IOSMultiFaceNonGeometricSafetyPolicy.evaluate(
+              faces: descriptors,
+              imageSize: CGSize(width: visionImage.width, height: visionImage.height)
             )
           )
         } else {
@@ -624,16 +666,40 @@ enum IOSPortraitCapabilityPolicy {
         )
       }
     }
-    let bodyApplicable = IOSPortraitRetoucher.bodySlimApplicable(image: visionImage)
+    let imageExtent = CGRect(
+      x: 0,
+      y: 0,
+      width: visionImage.width,
+      height: visionImage.height
+    )
+    let reshapeContext = IOSPortraitRetoucher.prepare(
+      source: CIImage(cgImage: visionImage),
+      extent: imageExtent
+    )
+    let faceSlimTargetCount = reshapeContext.faceSlimTargets.count
+    let faceSlimApplicable = faceSlimTargetCount > 0
+    let faceSlimReason: String
+    if faceSlimApplicable {
+      faceSlimReason = "none"
+    } else if portraitStatus.applicability != "applicable" {
+      faceSlimReason = portraitStatus.reason
+    } else {
+      faceSlimReason = "backgroundRisk"
+    }
+    let bodyApplicable = reshapeContext.bodySlimGeometry != nil
     return [
       "analysisVersion": "local-pixels-v1",
-      "capabilityVersion": "ios-core-image-vision-v8-portrait-reshape",
+      "capabilityVersion": "ios-core-image-vision-v12-multiface-slim",
       "confidence": "medium",
       "exposure": exposure,
       "whiteBalance": whiteBalance,
       "clarity": clarity,
       "portrait": portraitStatus.applicability,
       "portraitReason": portraitStatus.reason,
+      "faceSlim": faceSlimApplicable ? "applicable" :
+        (portraitStatus.applicability == "unavailable" ? "unavailable" : "unsafe"),
+      "faceSlimReason": faceSlimReason,
+      "faceSlimTargetCount": faceSlimTargetCount,
       "body": bodyApplicable ? "applicable" : "unavailable",
       "scene": faceCount == 0 && !bodyApplicable ? "unknown" : "people",
     ]
@@ -1157,7 +1223,10 @@ enum PortraitMaskSpike {
     let candidateImage = masks.candidate
     let protectionImage = masks.protection
     let effectiveImage = masks.effective
-    let safetyDecision = IOSPortraitSafetyPolicy.evaluate(observations)
+    let safetyDecision = IOSPortraitSafetyPolicy.evaluate(
+      observations,
+      imageSize: extent.size
+    )
 
     let directory = captureRoot
       .appendingPathComponent(UUID().uuidString, isDirectory: true)

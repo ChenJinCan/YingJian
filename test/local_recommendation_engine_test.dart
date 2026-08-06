@@ -251,13 +251,22 @@ void main() {
         adaptiveCompensations: recommendation.adaptiveCompensations,
       );
 
-      expect(project.effectiveRecipeFor(photo.id).portraitStrength, 0.35);
-      expect(project.effectiveRecipeFor(secondPhoto.id).portraitStrength, 0);
+      expect(
+        project.effectiveRecipeFor(photo.id).portraitRecipe.textureSmoothing,
+        35,
+      );
+      expect(
+        project.effectiveRecipeFor(secondPhoto.id).portraitRecipe.isNeutral,
+        isTrue,
+      );
 
       final userDisabled = project.copyWith(
         photoOverrides: {photo.id: PhotoOverride(recipe: EditRecipe.neutral)},
       );
-      expect(userDisabled.effectiveRecipeFor(photo.id).portraitStrength, 0);
+      expect(
+        userDisabled.effectiveRecipeFor(photo.id).portraitRecipe.isNeutral,
+        isTrue,
+      );
     },
   );
 

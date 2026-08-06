@@ -31,8 +31,8 @@ fixtures = {
     "path" => File.join(repo_root, "ios/RunnerTests/Fixtures/portrait-front-cc-by-sa.jpg"),
     "sha256" => "f57d7bdb6ae02759571a1f9c4b5df99b4b88c2f24978fafc3e7f61dca887b66c",
     "strength" => 0.5,
-    "minimum" => 0.03,
-    "maximum" => 0.08,
+    "minimum" => 0.075,
+    "maximum" => 0.11,
   },
   "body" => {
     "path" => File.join(repo_root, "ios/RunnerTests/Fixtures/body-standing-unoccluded-pd.jpg"),

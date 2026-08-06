@@ -45,8 +45,10 @@ void main() {
     expect(arguments['sourcePath'], photo.localPath);
     expect(arguments.containsKey('imageBytes'), isFalse);
     final pipeline = arguments['pipeline']! as Map<Object?, Object?>;
-    expect(pipeline['schemaVersion'], 3);
+    expect(pipeline['schemaVersion'], 5);
     expect(pipeline['workingColorSpace'], 'srgb');
+    expect(pipeline['portraitRecipeV2'], isA<Map<Object?, Object?>>());
+    expect(pipeline['faceSlimRecipeV1'], isA<Map<Object?, Object?>>());
     final adjustments = pipeline['adjustments']! as Map<Object?, Object?>;
     expect(adjustments['exposureEv'], 0.5);
     expect(exported.assetId, 'asset-42');

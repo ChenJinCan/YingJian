@@ -25,6 +25,7 @@ expected = [
   "portrait engineering corpus",
   "portrait engineering diagnostic tools",
   "portrait review structure",
+  "six-capability portrait quality contract",
   "iOS device evidence contract",
   "release contract",
 ]

@@ -1,0 +1,156 @@
+schema: 1
+review_id: portrait-core-parity-round-1
+task: portrait_core_parity
+minimum_reviewers: 5
+
+# Copy this file into the ignored .quality directory. The mapping file must
+# preserve the randomized blind-code-to-candidate assignment without exposing
+# it to reviewers. Replace every placeholder with the exact file or value.
+blind_protocol:
+  randomized: true
+  method: seeded_candidate_position_shuffle
+  seed_sha256: replace_with_64_character_lowercase_seed_sha256
+  mapping:
+    file: replace_with_mapping_file_inside_dot_quality
+    sha256: replace_with_64_character_lowercase_mapping_sha256
+
+# Formal rounds should normally use separate improvable and negative/protection
+# items. These compact entries only demonstrate the complete, alias-free schema.
+items:
+  - id: one-tap-001
+    capability: one_tap_natural
+    tags: [improvable, protection, negative_safety]
+    source: {file: replace_with_source_inside_dot_quality, sha256: replace_with_source_sha256}
+    subject:
+      file: replace_with_yingjian_export_inside_dot_quality
+      sha256: replace_with_yingjian_export_sha256
+      source_sha256: replace_with_source_sha256
+      producer: yingjian
+      effect_version: replace_with_exact_effect_version
+      parameters: {preset: replace_with_exact_values}
+      operation_path: replace_with_reproducible_import_to_export_steps
+    competitor:
+      file: replace_with_xingtu_export_inside_dot_quality
+      sha256: replace_with_xingtu_export_sha256
+      source_sha256: replace_with_source_sha256
+      producer: xingtu
+      version: replace_with_installed_xingtu_version
+      app_store_id: "1500526240"
+      bundle_id: com.xt.retouch
+      parameters: {tool: replace_with_exact_tool_and_values}
+      operation_path: replace_with_reproducible_import_to_export_steps
+
+  - id: smoothing-001
+    capability: texture_smoothing
+    tags: [improvable, protection, negative_safety]
+    source: {file: replace_with_source_inside_dot_quality, sha256: replace_with_source_sha256}
+    subject:
+      file: replace_with_yingjian_export_inside_dot_quality
+      sha256: replace_with_yingjian_export_sha256
+      source_sha256: replace_with_source_sha256
+      producer: yingjian
+      effect_version: replace_with_exact_effect_version
+      parameters: {strength: replace_with_exact_value}
+      operation_path: replace_with_reproducible_import_to_export_steps
+    competitor:
+      file: replace_with_xingtu_export_inside_dot_quality
+      sha256: replace_with_xingtu_export_sha256
+      source_sha256: replace_with_source_sha256
+      producer: xingtu
+      version: replace_with_installed_xingtu_version
+      app_store_id: "1500526240"
+      bundle_id: com.xt.retouch
+      parameters: {tool: smoothing, strength: replace_with_exact_value}
+      operation_path: replace_with_reproducible_import_to_export_steps
+
+  - id: skin-light-001
+    capability: skin_tone_lighting
+    tags: [improvable, protection, negative_safety]
+    source: {file: replace_with_source_inside_dot_quality, sha256: replace_with_source_sha256}
+    subject:
+      file: replace_with_yingjian_export_inside_dot_quality
+      sha256: replace_with_yingjian_export_sha256
+      source_sha256: replace_with_source_sha256
+      producer: yingjian
+      effect_version: replace_with_exact_effect_version
+      parameters: {strength: replace_with_exact_value}
+      operation_path: replace_with_reproducible_import_to_export_steps
+    competitor:
+      file: replace_with_xingtu_export_inside_dot_quality
+      sha256: replace_with_xingtu_export_sha256
+      source_sha256: replace_with_source_sha256
+      producer: xingtu
+      version: replace_with_installed_xingtu_version
+      app_store_id: "1500526240"
+      bundle_id: com.xt.retouch
+      parameters: {tool: skin_tone_lighting, strength: replace_with_exact_value}
+      operation_path: replace_with_reproducible_import_to_export_steps
+
+  - id: blemish-001
+    capability: blemish_reduction
+    tags: [improvable, protection, negative_safety]
+    source: {file: replace_with_source_inside_dot_quality, sha256: replace_with_source_sha256}
+    subject:
+      file: replace_with_yingjian_export_inside_dot_quality
+      sha256: replace_with_yingjian_export_sha256
+      source_sha256: replace_with_source_sha256
+      producer: yingjian
+      effect_version: replace_with_exact_effect_version
+      parameters: {strength: replace_with_exact_value}
+      operation_path: replace_with_reproducible_import_to_export_steps
+    competitor:
+      file: replace_with_xingtu_export_inside_dot_quality
+      sha256: replace_with_xingtu_export_sha256
+      source_sha256: replace_with_source_sha256
+      producer: xingtu
+      version: replace_with_installed_xingtu_version
+      app_store_id: "1500526240"
+      bundle_id: com.xt.retouch
+      parameters: {tool: blemish_reduction, strength: replace_with_exact_value}
+      operation_path: replace_with_reproducible_import_to_export_steps
+
+  - id: face-slim-001
+    capability: face_slimming
+    tags: [improvable, protection, negative_safety]
+    source: {file: replace_with_source_inside_dot_quality, sha256: replace_with_source_sha256}
+    subject:
+      file: replace_with_yingjian_export_inside_dot_quality
+      sha256: replace_with_yingjian_export_sha256
+      source_sha256: replace_with_source_sha256
+      producer: yingjian
+      effect_version: replace_with_exact_effect_version
+      parameters: {strength: replace_with_exact_value}
+      operation_path: replace_with_reproducible_import_to_export_steps
+    competitor:
+      file: replace_with_xingtu_export_inside_dot_quality
+      sha256: replace_with_xingtu_export_sha256
+      source_sha256: replace_with_source_sha256
+      producer: xingtu
+      version: replace_with_installed_xingtu_version
+      app_store_id: "1500526240"
+      bundle_id: com.xt.retouch
+      parameters: {tool: face_slimming, strength: replace_with_exact_value}
+      operation_path: replace_with_reproducible_import_to_export_steps
+
+  - id: torso-slim-001
+    capability: torso_slimming
+    tags: [improvable, protection, negative_safety]
+    source: {file: replace_with_source_inside_dot_quality, sha256: replace_with_source_sha256}
+    subject:
+      file: replace_with_yingjian_export_inside_dot_quality
+      sha256: replace_with_yingjian_export_sha256
+      source_sha256: replace_with_source_sha256
+      producer: yingjian
+      effect_version: replace_with_exact_effect_version
+      parameters: {strength: replace_with_exact_value}
+      operation_path: replace_with_reproducible_import_to_export_steps
+    competitor:
+      file: replace_with_xingtu_export_inside_dot_quality
+      sha256: replace_with_xingtu_export_sha256
+      source_sha256: replace_with_source_sha256
+      producer: xingtu
+      version: replace_with_installed_xingtu_version
+      app_store_id: "1500526240"
+      bundle_id: com.xt.retouch
+      parameters: {tool: torso_slimming, strength: replace_with_exact_value}
+      operation_path: replace_with_reproducible_import_to_export_steps

@@ -6,6 +6,7 @@ module PortraitEngineeringCorpus
   REQUIRED_ASSET_COUNT = 48
   MINIMUM_SINGLE_PORTRAIT_COUNT = 36
   PORTRAIT_ROLES = %w[portrait_single portrait_multi no_face].freeze
+  SUPPLEMENTAL_TAG = "portrait_engineering_supplemental"
   EFFECT_METRIC_VERSION = "whole-frame-srgb-rgba8-v1"
   EFFECT_METRIC_VARIANTS = %w[off default high_safe].freeze
   EFFECT_METRIC_FIELDS = %w[
@@ -56,7 +57,7 @@ module PortraitEngineeringCorpus
     unless manifest["portrait_roles"] == PORTRAIT_ROLES
       raise ContractError, "portrait_roles must equal #{PORTRAIT_ROLES.join(", ")}"
     end
-    assets = manifest["assets"]
+    assets = engineering_assets(manifest)
     unless assets.is_a?(Array) && assets.length == REQUIRED_ASSET_COUNT
       raise ContractError, "manifest must contain exactly #{REQUIRED_ASSET_COUNT} assets"
     end
@@ -82,6 +83,15 @@ module PortraitEngineeringCorpus
 
     raise ContractError,
           "manifest must contain at least #{MINIMUM_SINGLE_PORTRAIT_COUNT} portrait_single assets"
+  end
+
+  def engineering_assets(manifest)
+    assets = manifest["assets"]
+    return assets unless assets.is_a?(Array)
+
+    assets.reject do |asset|
+      asset.is_a?(Hash) && Array(asset["tags"]).include?(SUPPLEMENTAL_TAG)
+    end
   end
 
   def classify_hashes(hashes)
@@ -112,11 +122,11 @@ module PortraitEngineeringCorpus
     unless tags.is_a?(Array) && tags.all? { |tag| tag.is_a?(String) }
       raise ContractError, "#{asset_id} tags must be strings"
     end
-    if (tags.include?("no_face") || tags.include?("portrait_multi")) &&
-       classification != "preserved"
+    if tags.include?("no_face") && classification != "preserved"
       raise ContractError, "#{asset_id} must be safely preserved"
     end
-    if tags.include?("portrait_single") && classification != "applied"
+    if (tags.include?("portrait_single") || tags.include?("portrait_multi")) &&
+       classification != "applied"
       raise ContractError, "#{asset_id} must apply the portrait candidate"
     end
   end

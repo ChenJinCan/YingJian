@@ -380,6 +380,70 @@ class RunnerTests: XCTestCase {
     )
   }
 
+  func testPhotoPreviewTextureMatchesFinalJpegFiveParameterPortraitSemantics() throws {
+    let sourceURL = temporaryURL(extension: "jpg")
+    let outputURL = temporaryURL(extension: "jpg")
+    defer { removeTemporaryFiles(sourceURL, outputURL) }
+    try writeStripedJpeg(to: sourceURL, width: 96, height: 64)
+    let extent = CGRect(x: 0, y: 0, width: 96, height: 64)
+    let fullMask = CIImage(color: .white).cropped(to: extent)
+    let portraitContext = IOSPortraitRetouchContext(
+      effectiveMask: fullMask,
+      faceSlimGeometry: IOSFaceSlimGeometry(
+        centerX: 48,
+        halfWidth: 28,
+        lowerY: 20,
+        upperY: 58
+      ),
+      faceMask: fullMask,
+      bodySlimGeometry: IOSBodySlimGeometry(
+        centerX: 48,
+        halfWidth: 38,
+        lowerY: 4,
+        upperY: 60
+      ),
+      personMask: fullMask
+    )
+    let pipeline = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV4(
+        textureSmoothing: 45,
+        skinToneLighting: 40,
+        blemishReduction: 20,
+        faceSlimming: 30,
+        torsoSlimming: 20
+      ))
+    )
+    let neutral = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV4()))
+    let source = try XCTUnwrap(CIImage(contentsOf: sourceURL))
+    let neutralBytes = try rgbaBytes(neutral.applying(to: source, extent: extent))
+
+    let session = try IOSPhotoPreviewSession(
+      sourcePath: sourceURL.path,
+      maxEdge: 2_048,
+      pipeline: pipeline,
+      preparedPortraitContext: portraitContext
+    )
+    defer { session.close() }
+    let previewBuffer = try XCTUnwrap(session.copyPixelBuffer()).takeRetainedValue()
+    let previewBytes = try rgbaBytes(CIImage(cvPixelBuffer: previewBuffer))
+
+    _ = try IOSPhotoFileRenderer(context: imageContext).render(
+      sourcePath: sourceURL.path,
+      pipeline: pipeline,
+      destinationURL: outputURL,
+      preparedPortraitContext: portraitContext
+    )
+    let exported = try XCTUnwrap(
+      CIImage(contentsOf: outputURL, options: [.applyOrientationProperty: true])
+    )
+    let exportedBytes = try rgbaBytes(normalized(exported))
+
+    XCTAssertGreaterThan(meanAbsoluteDifference(neutralBytes, previewBytes), 0.25)
+    XCTAssertEqual(session.width, Int(exported.extent.width))
+    XCTAssertEqual(session.height, Int(exported.extent.height))
+    XCTAssertLessThanOrEqual(meanAbsoluteDifference(previewBytes, exportedBytes), 7.0)
+  }
+
   func testPhotoPreviewSessionReleasesItsBufferAndRejectsRenderingAfterClose() throws {
     let sourceURL = temporaryURL(extension: "jpg")
     defer { removeTemporaryFiles(sourceURL) }
@@ -491,6 +555,146 @@ class RunnerTests: XCTestCase {
     XCTAssertNil(IOSImagePipeline(arguments: booleanReshape))
   }
 
+  func testImagePipelineV4ValidatesFiveParameterPortraitIdentity() {
+    let pipeline = IOSImagePipeline(arguments: pipelineV4(
+      textureSmoothing: 40,
+      skinToneLighting: 30,
+      blemishReduction: 20,
+      faceSlimming: 10,
+      torsoSlimming: 5
+    ))
+    XCTAssertEqual(pipeline?.textureSmoothing, 40)
+    XCTAssertEqual(pipeline?.skinToneLighting, 30)
+    XCTAssertEqual(pipeline?.blemishReduction, 20)
+    XCTAssertEqual(pipeline?.faceSlimming, 10)
+    XCTAssertEqual(pipeline?.torsoSlimming, 5)
+
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV4(textureSmoothing: 101)))
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV4(faceSlimming: 10.5)))
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV4(recipeVersion: 99)))
+    var unknown = pipelineV4()
+    var portrait = unknown["portraitRecipeV2"] as! [String: Any]
+    portrait["futureField"] = 1
+    unknown["portraitRecipeV2"] = portrait
+    XCTAssertNil(IOSImagePipeline(arguments: unknown))
+    var legacyComposite = pipelineV4()
+    legacyComposite["portrait"] = ["recipeVersion": 1, "strength": 0.4]
+    XCTAssertNil(IOSImagePipeline(arguments: legacyComposite))
+    var legacyReshape = pipelineV4()
+    legacyReshape["reshape"] = [
+      "recipeVersion": 1,
+      "faceSlimStrength": 0.2,
+      "bodySlimStrength": 0.1,
+    ]
+    XCTAssertNil(IOSImagePipeline(arguments: legacyReshape))
+  }
+
+  func testImagePipelineV5ValidatesIndependentFaceSlimTargets() {
+    let pipeline = IOSImagePipeline(arguments: pipelineV5(
+      selectedTargetIndex: 1,
+      targetStrengths: [0.2, 0.45]
+    ))
+    XCTAssertEqual(pipeline?.faceSlimStrengths, [0.2, 0.45])
+    XCTAssertEqual(pipeline?.faceSlimStrength, 0.45)
+
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV5(targetStrengths: [])))
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV5(targetStrengths: [0, 0, 0, 0])))
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV5(
+      selectedTargetIndex: 2,
+      targetStrengths: [0, 0]
+    )))
+    var booleanStrength = pipelineV5(targetStrengths: [0.2])
+    var recipe = booleanStrength["faceSlimRecipeV1"] as! [String: Any]
+    recipe["targetStrengths"] = [true]
+    booleanStrength["faceSlimRecipeV1"] = recipe
+    XCTAssertNil(IOSImagePipeline(arguments: booleanStrength))
+  }
+
+  func testImagePipelineV4AppliesExplicitEffectsOnceAndIgnoresLegacyComposite() throws {
+    let extent = CGRect(x: 0, y: 0, width: 48, height: 48)
+    let source = CIImage(color: CIColor(red: 0.62, green: 0.42, blue: 0.34))
+      .cropped(to: extent)
+    let mask = CIImage(color: .white).cropped(to: extent)
+    let context = IOSPortraitRetouchContext(effectiveMask: mask)
+    let expanded = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV4(
+        textureSmoothing: 40,
+        skinToneLighting: 40
+      ))
+    )
+    let relit = IOSPortraitRetoucher.applyingSkinToneLighting(
+      to: source, strength: 0.4, mask: mask, extent: extent
+    )
+    let expected = IOSPortraitRetoucher.applyingTextureSmoothing(
+      to: relit, strength: 0.4, mask: mask, extent: extent
+    )
+
+    XCTAssertEqual(
+      try rgbaBytes(expanded.applying(to: source, extent: extent, portraitContext: context)),
+      try rgbaBytes(expected)
+    )
+  }
+
+  func testImagePipelineV4UsesOnlyExplicitNonGeometricParameters() throws {
+    let extent = CGRect(x: 0, y: 0, width: 48, height: 48)
+    let base = CIImage(color: CIColor(red: 0.62, green: 0.42, blue: 0.34))
+      .cropped(to: extent)
+    let texture = CIImage(color: CIColor(red: 0.78, green: 0.55, blue: 0.46))
+      .cropped(to: CGRect(x: 18, y: 18, width: 4, height: 4))
+    let source = texture.composited(over: base).cropped(to: extent)
+    let mask = CIImage(color: .white).cropped(to: extent)
+    let context = IOSPortraitRetouchContext(effectiveMask: mask)
+    let allExplicitEffectsOff = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV4())
+    )
+    let smoothingOn = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV4(textureSmoothing: 60))
+    )
+
+    XCTAssertEqual(
+      try rgbaBytes(allExplicitEffectsOff.applying(
+        to: source, extent: extent, portraitContext: context
+      )),
+      try rgbaBytes(source),
+      "schema 4 must not retain a hidden legacy portrait result"
+    )
+    XCTAssertNotEqual(
+      try rgbaBytes(smoothingOn.applying(
+        to: source, extent: extent, portraitContext: context
+      )),
+      try rgbaBytes(source)
+    )
+  }
+
+  func testIndependentSkinToneLightingIsMaskedAndRaisesDarkSkinWithoutClipping() throws {
+    let extent = CGRect(x: 0, y: 0, width: 64, height: 32)
+    let source = CIImage(color: CIColor(red: 0.34, green: 0.24, blue: 0.20))
+      .cropped(to: extent)
+    let mask = CIImage(color: .white)
+      .cropped(to: CGRect(x: 0, y: 0, width: 32, height: 32))
+      .composited(over: CIImage(color: .black).cropped(to: extent))
+    let output = IOSPortraitRetoucher.applyingSkinToneLighting(
+      to: source,
+      strength: 0.6,
+      mask: mask,
+      extent: extent
+    )
+    let inputBytes = try rgbaBytes(source)
+    let outputBytes = try rgbaBytes(output)
+
+    XCTAssertGreaterThan(outputBytes[(16 * 64 + 16) * 4], inputBytes[(16 * 64 + 16) * 4])
+    XCTAssertLessThan(outputBytes[(16 * 64 + 16) * 4], 250)
+    for y in 0..<32 {
+      for x in 32..<64 {
+        let offset = (y * 64 + x) * 4
+        XCTAssertEqual(
+          Array(outputBytes[offset..<(offset + 4)]),
+          Array(inputBytes[offset..<(offset + 4)])
+        )
+      }
+    }
+  }
+
   func testFaceSlimInverseMappingIsLocalProtectedAndMonotonic() {
     let geometry = IOSFaceSlimGeometry(
       centerX: 50,
@@ -552,6 +756,59 @@ class RunnerTests: XCTestCase {
       meanAbsoluteDifference(sourceBytes, faceSlimBytes),
       0.25,
       "a safe injected face geometry must visibly affect the production pipeline"
+    )
+  }
+
+  func testPerFaceSlimChangesOnlyTargetsWithNonzeroStrength() throws {
+    let extent = CGRect(x: 0, y: 0, width: 160, height: 80)
+    let source = stripedImage(extent: extent)
+    let leftRect = CGRect(x: 8, y: 0, width: 64, height: 80)
+    let rightRect = CGRect(x: 88, y: 0, width: 64, height: 80)
+    let black = CIImage(color: .black).cropped(to: extent)
+    func mask(_ rect: CGRect) -> CIImage {
+      CIImage(color: .white).cropped(to: rect).composited(over: black)
+    }
+    let context = IOSPortraitRetouchContext(
+      effectiveMask: nil,
+      faceSlimTargets: [
+        IOSFaceSlimTargetContext(
+          geometry: IOSFaceSlimGeometry(
+            centerX: 40,
+            halfWidth: 30,
+            lowerY: 4,
+            upperY: 76
+          ),
+          mask: mask(leftRect)
+        ),
+        IOSFaceSlimTargetContext(
+          geometry: IOSFaceSlimGeometry(
+            centerX: 120,
+            halfWidth: 30,
+            lowerY: 4,
+            upperY: 76
+          ),
+          mask: mask(rightRect)
+        ),
+      ]
+    )
+
+    let output = IOSPortraitRetoucher.applyingFaceSlim(
+      to: source,
+      strengths: [0.5, 0],
+      extent: extent,
+      context: context
+    )
+
+    XCTAssertGreaterThan(
+      meanAbsoluteDifference(
+        try rgbaBytes(source.cropped(to: leftRect)),
+        try rgbaBytes(output.cropped(to: leftRect))
+      ),
+      0.1
+    )
+    XCTAssertEqual(
+      try rgbaBytes(source.cropped(to: rightRect)),
+      try rgbaBytes(output.cropped(to: rightRect))
     )
   }
 
@@ -806,6 +1063,18 @@ class RunnerTests: XCTestCase {
         segmentationAvailable: false
       )
     )
+    XCTAssertTrue(
+      IOSBodySlimSafetyPolicy.isEligible(
+        personCount: 1,
+        leftShoulderConfidence: 0.74,
+        rightShoulderConfidence: 0.51,
+        leftHipConfidence: 0.57,
+        rightHipConfidence: 0.44,
+        torsoHeightRatio: 0.21,
+        segmentationAvailable: true
+      ),
+      "moderate pose confidence remains bounded by segmentation and background gates"
+    )
   }
 
   func testReshapeBackgroundSafetyRejectsDenseHighContrastLines() throws {
@@ -962,6 +1231,8 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(result["clarity"] as? String, "blurred")
     XCTAssertEqual(result["scene"] as? String, "unknown")
     XCTAssertEqual(result["portrait"] as? String, "unavailable")
+    XCTAssertEqual(result["faceSlim"] as? String, "unavailable")
+    XCTAssertEqual(result["faceSlimTargetCount"] as? Int, 0)
     XCTAssertEqual(result["body"] as? String, "unavailable")
     XCTAssertTrue(
       ["noFace", "capabilityUnavailable"].contains(
@@ -980,11 +1251,50 @@ class RunnerTests: XCTestCase {
 
     XCTAssertEqual(
       result["capabilityVersion"] as? String,
-      "ios-core-image-vision-v8-portrait-reshape"
+      "ios-core-image-vision-v12-multiface-slim"
     )
     XCTAssertEqual(result["portrait"] as? String, "applicable")
     XCTAssertEqual(result["portraitReason"] as? String, "none")
+    XCTAssertEqual(result["faceSlim"] as? String, "applicable")
+    XCTAssertEqual(result["faceSlimReason"] as? String, "none")
+    XCTAssertEqual(result["faceSlimTargetCount"] as? Int, 1)
     XCTAssertEqual(result["scene"] as? String, "people")
+  }
+
+  func testLocalAnalysisOrdersAndExposesTwoIndependentFaceSlimTargets() throws {
+    let fixture = URL(fileURLWithPath: #filePath)
+      .deletingLastPathComponent()
+      .appendingPathComponent("Fixtures/portrait-front-cc-by-sa.jpg")
+    let portrait = try XCTUnwrap(UIImage(contentsOfFile: fixture.path))
+    let size = CGSize(width: portrait.size.width * 2, height: portrait.size.height)
+    let image = UIGraphicsImageRenderer(size: size).image { _ in
+      portrait.draw(in: CGRect(origin: .zero, size: portrait.size))
+      portrait.draw(
+        in: CGRect(
+          x: portrait.size.width,
+          y: 0,
+          width: portrait.size.width,
+          height: portrait.size.height
+        )
+      )
+    }
+    let url = FileManager.default.temporaryDirectory
+      .appendingPathComponent("yingjian-multiface-analysis-\(UUID().uuidString).jpg")
+    try XCTUnwrap(image.jpegData(compressionQuality: 0.96)).write(to: url)
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let result = try AppDelegate.analyzePhoto(path: url.path)
+    XCTAssertEqual(result["portrait"] as? String, "applicable")
+    XCTAssertEqual(result["faceSlim"] as? String, "applicable")
+    XCTAssertEqual(result["faceSlimTargetCount"] as? Int, 2)
+
+    let source = try XCTUnwrap(CIImage(contentsOf: url))
+    let context = IOSPortraitRetoucher.prepare(source: source, extent: source.extent)
+    XCTAssertEqual(context.faceSlimTargets.count, 2)
+    XCTAssertLessThan(
+      context.faceSlimTargets[0].geometry.centerX,
+      context.faceSlimTargets[1].geometry.centerX
+    )
   }
 
 #if targetEnvironment(simulator)
@@ -998,7 +1308,7 @@ class RunnerTests: XCTestCase {
 
     XCTAssertEqual(
       result["capabilityVersion"] as? String,
-      "ios-core-image-vision-v8-portrait-reshape"
+      "ios-core-image-vision-v12-multiface-slim"
     )
     XCTAssertEqual(result["body"] as? String, "applicable")
     XCTAssertEqual(result["scene"] as? String, "people")
@@ -1051,6 +1361,29 @@ class RunnerTests: XCTestCase {
         IOSPortraitSafetyDecision(applicable: true, reason: .none)
       ),
       IOSPortraitCapabilityStatus(applicability: "applicable", reason: "none")
+    )
+  }
+
+  func testNonGeometricPortraitCapabilityAllowsUpToThreeEligibleFaces() {
+    XCTAssertEqual(
+      IOSPortraitCapabilityPolicy.classify(
+        IOSMultiFaceNonGeometricSafetyDecision(
+          applicableFaceIndices: [0, 1],
+          rejectedFaces: [:],
+          sceneReason: .none
+        )
+      ),
+      IOSPortraitCapabilityStatus(applicability: "applicable", reason: "none")
+    )
+    XCTAssertEqual(
+      IOSPortraitCapabilityPolicy.classify(
+        IOSMultiFaceNonGeometricSafetyDecision(
+          applicableFaceIndices: [],
+          rejectedFaces: [:],
+          sceneReason: .tooManyFaces
+        )
+      ),
+      IOSPortraitCapabilityStatus(applicability: "unsafe", reason: "multipleFaces")
     )
   }
 
@@ -1899,6 +2232,167 @@ class RunnerTests: XCTestCase {
     )
   }
 
+  func testPortraitPixelSafetyDoesNotPenalizePortraitAspectRatio() {
+    let readableFace = CGRect(
+      x: 0.47,
+      y: 0.73,
+      width: 61.0 / 461.0,
+      height: 61.0 / 768.0
+    )
+
+    XCTAssertTrue(
+      IOSPortraitSafetyPolicy.evaluate(
+        faceCount: 1,
+        confidence: 1,
+        boundingBox: readableFace,
+        hasLandmarks: true,
+        imageSize: CGSize(width: 461, height: 768)
+      ).applicable
+    )
+    XCTAssertEqual(
+      IOSPortraitSafetyPolicy.evaluate(
+        faceCount: 1,
+        confidence: 1,
+        boundingBox: readableFace,
+        hasLandmarks: true,
+        imageSize: CGSize(width: 300, height: 500)
+      ).reason,
+      .faceTooSmall
+    )
+  }
+
+  func testMultiFaceNonGeometricPolicyKeepsEligibleFacesIndependently() {
+    let result = IOSMultiFaceNonGeometricSafetyPolicy.evaluate(
+      faces: [
+        IOSNonGeometricFaceDescriptor(
+          confidence: 0.96,
+          boundingBox: CGRect(x: 0.08, y: 0.25, width: 0.28, height: 0.42),
+          hasLandmarks: true
+        ),
+        IOSNonGeometricFaceDescriptor(
+          confidence: 0.31,
+          boundingBox: CGRect(x: 0.39, y: 0.28, width: 0.24, height: 0.38),
+          hasLandmarks: true
+        ),
+        IOSNonGeometricFaceDescriptor(
+          confidence: 0.91,
+          boundingBox: CGRect(x: 0.68, y: 0.32, width: 0.18, height: 0.29),
+          hasLandmarks: true
+        ),
+      ],
+      imageSize: CGSize(width: 1_200, height: 800)
+    )
+
+    XCTAssertEqual(result.applicableFaceIndices, [0, 2])
+    XCTAssertEqual(result.rejectedFaces, [1: .lowConfidence])
+    XCTAssertEqual(result.sceneReason, .none)
+  }
+
+  func testMultiFaceNonGeometricPolicyFailsClosedForUnsupportedSceneCounts() {
+    let noFaces = IOSMultiFaceNonGeometricSafetyPolicy.evaluate(
+      faces: [],
+      imageSize: CGSize(width: 1_200, height: 800)
+    )
+    XCTAssertEqual(noFaces.sceneReason, .noFace)
+    XCTAssertTrue(noFaces.applicableFaceIndices.isEmpty)
+
+    let face = IOSNonGeometricFaceDescriptor(
+      confidence: 0.99,
+      boundingBox: CGRect(x: 0.1, y: 0.2, width: 0.2, height: 0.3),
+      hasLandmarks: true
+    )
+    let crowd = IOSMultiFaceNonGeometricSafetyPolicy.evaluate(
+      faces: [face, face, face, face],
+      imageSize: CGSize(width: 1_200, height: 800)
+    )
+    XCTAssertEqual(crowd.sceneReason, .tooManyFaces)
+    XCTAssertTrue(crowd.applicableFaceIndices.isEmpty)
+    XCTAssertTrue(crowd.rejectedFaces.isEmpty)
+  }
+
+  func testConservativeBlemishCandidateReducesInflamedSpotButPreservesBrownDetail() throws {
+    XCTAssertTrue(IOSBlemishReductionCandidate.isAvailable)
+    let width = 40
+    let height = 20
+    let skin: [UInt8] = [190, 145, 125, 255]
+    let inflamed: [UInt8] = [188, 82, 72, 255]
+    let brownDetail: [UInt8] = [78, 52, 42, 255]
+    var pixels = [UInt8](repeating: 0, count: width * height * 4)
+    for index in 0..<(width * height) {
+      pixels.replaceSubrange(index * 4..<(index + 1) * 4, with: skin)
+    }
+    for y in 8...10 {
+      for x in 9...11 {
+        pixels.replaceSubrange((y * width + x) * 4..<(y * width + x + 1) * 4, with: inflamed)
+      }
+      for x in 28...30 {
+        pixels.replaceSubrange((y * width + x) * 4..<(y * width + x + 1) * 4, with: brownDetail)
+      }
+    }
+    let source = CIImage(
+      bitmapData: Data(pixels),
+      bytesPerRow: width * 4,
+      size: CGSize(width: width, height: height),
+      format: .RGBA8,
+      colorSpace: sRGB
+    )
+    let mask = CIImage(color: .white).cropped(to: source.extent)
+    let output = IOSBlemishReductionCandidate.applying(
+      to: source,
+      strength: 0.6,
+      effectiveFaceMask: mask,
+      extent: source.extent
+    )
+    let outputPixels = try rgbaBytes(output)
+    let inflamedOffset = (9 * width + 10) * 4
+    let detailOffset = (9 * width + 29) * 4
+    let originalInflamedDistance = zip(inflamed.prefix(3), skin.prefix(3))
+      .reduce(0) { $0 + abs(Int($1.0) - Int($1.1)) }
+    let outputInflamedDistance = (0..<3).reduce(0) {
+      $0 + abs(Int(outputPixels[inflamedOffset + $1]) - Int(skin[$1]))
+    }
+    let detailChange = (0..<3).reduce(0) {
+      $0 + abs(Int(outputPixels[detailOffset + $1]) - Int(brownDetail[$1]))
+    }
+
+    XCTAssertLessThan(outputInflamedDistance, originalInflamedDistance * 4 / 5)
+    XCTAssertLessThanOrEqual(detailChange, 3)
+  }
+
+  func testConservativeBlemishCandidateDoesNotChangePixelsOutsideFaceMask() throws {
+    let width = 40
+    let height = 20
+    let pixels = (0..<(width * height)).flatMap { index -> [UInt8] in
+      let x = index % width
+      return x < width / 2 ? [188, 82, 72, 255] : [190, 145, 125, 255]
+    }
+    let source = CIImage(
+      bitmapData: Data(pixels),
+      bytesPerRow: width * 4,
+      size: CGSize(width: width, height: height),
+      format: .RGBA8,
+      colorSpace: sRGB
+    )
+    let mask = CIImage(color: .white)
+      .cropped(to: CGRect(x: 0, y: 0, width: width / 2, height: height))
+      .composited(over: CIImage(color: .black).cropped(to: source.extent))
+      .cropped(to: source.extent)
+    let output = IOSBlemishReductionCandidate.applying(
+      to: source,
+      strength: 1,
+      effectiveFaceMask: mask,
+      extent: source.extent
+    )
+    let outputPixels = try rgbaBytes(output)
+
+    for y in 0..<height {
+      for x in (width / 2)..<width {
+        let offset = (y * width + x) * 4
+        XCTAssertEqual(Array(outputPixels[offset..<(offset + 4)]), Array(pixels[offset..<(offset + 4)]))
+      }
+    }
+  }
+
   private func pipelineV2(
     schemaVersion: NSNumber = 2,
     exposureEV: Double = 0,
@@ -1938,14 +2432,53 @@ class RunnerTests: XCTestCase {
   }
 
   private func pipelineV3(
+    portraitStrength: Double = 0,
     faceSlimStrength: Double = 0,
     bodySlimStrength: Double = 0
   ) -> [String: Any] {
-    var pipeline = pipelineV2(schemaVersion: 3)
+    var pipeline = pipelineV2(schemaVersion: 3, portraitStrength: portraitStrength)
     pipeline["reshape"] = [
       "recipeVersion": 1,
       "faceSlimStrength": faceSlimStrength,
       "bodySlimStrength": bodySlimStrength,
+    ]
+    return pipeline
+  }
+
+  private func pipelineV4(
+    recipeVersion: NSNumber = 2,
+    textureSmoothing: NSNumber = 0,
+    skinToneLighting: NSNumber = 0,
+    blemishReduction: NSNumber = 0,
+    faceSlimming: NSNumber = 0,
+    torsoSlimming: NSNumber = 0
+  ) -> [String: Any] {
+    var pipeline = pipelineV2()
+    pipeline["schemaVersion"] = 4
+    pipeline.removeValue(forKey: "portrait")
+    pipeline["portraitRecipeV2"] = [
+      "recipeVersion": recipeVersion,
+      "analysisVersion": "vision-multiface-v1",
+      "effectVersion": "portrait-core-contract-v2",
+      "textureSmoothing": textureSmoothing,
+      "skinToneLighting": skinToneLighting,
+      "blemishReduction": blemishReduction,
+      "faceSlimming": faceSlimming,
+      "torsoSlimming": torsoSlimming,
+    ]
+    return pipeline
+  }
+
+  private func pipelineV5(
+    selectedTargetIndex: NSNumber = 0,
+    targetStrengths: [Any] = [0.0]
+  ) -> [String: Any] {
+    var pipeline = pipelineV4()
+    pipeline["schemaVersion"] = 5
+    pipeline["faceSlimRecipeV1"] = [
+      "recipeVersion": 1,
+      "selectedTargetIndex": selectedTargetIndex,
+      "targetStrengths": targetStrengths,
     ]
     return pipeline
   }

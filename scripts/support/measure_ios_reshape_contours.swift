@@ -127,7 +127,7 @@ private enum IOSReshapeContourMetric {
     let rightShoulder = try pose.recognizedPoint(.rightShoulder)
     let leftHip = try pose.recognizedPoint(.leftHip)
     let rightHip = try pose.recognizedPoint(.rightHip)
-    guard [leftShoulder, rightShoulder, leftHip, rightHip].allSatisfy({ $0.confidence >= 0.5 })
+    guard [leftShoulder, rightShoulder, leftHip, rightHip].allSatisfy({ $0.confidence >= 0.4 })
     else {
       throw ReshapeContourMetricError.ineligibleBody
     }

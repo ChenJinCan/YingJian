@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' show SemanticsAction, SemanticsFlag, Tristate;
+import 'dart:ui' show SemanticsFlag, Tristate;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -950,8 +950,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('周末人像.png'), findsOneWidget);
+    final exposureAdjustment = find.byKey(
+      const ValueKey('editor-adjustment-exposure'),
+    );
     await tester.dragUntilVisible(
-      find.text('曝光'),
+      exposureAdjustment,
       find.byKey(const Key('photo-workspace-scroll')),
       const Offset(0, -200),
     );
@@ -959,7 +962,10 @@ void main() {
     expect(find.text('高光'), findsOneWidget);
     expect(find.text('阴影'), findsOneWidget);
     expect(find.text('构图'), findsOneWidget);
-    await tester.drag(find.byType(Slider).first, const Offset(120, 0));
+    await tester.drag(
+      find.descendant(of: exposureAdjustment, matching: find.byType(Slider)),
+      const Offset(120, 0),
+    );
     await tester.pumpAndSettle();
     expect(exporter.exportedRecipe, isNull);
     expect(store.project?.undoHistory, hasLength(1));
@@ -1253,6 +1259,8 @@ void main() {
   testWidgets(
     'applicable portrait exposes one undoable natural retouch control',
     (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
       final semantics = tester.ensureSemantics();
       debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
       final photoFile = File(
@@ -1298,6 +1306,7 @@ void main() {
           disposition: PhotoAnalysisDisposition.ready,
           fallbackReason: AnalysisFallbackReason.none,
           portrait: PortraitApplicability.applicable,
+          faceSlimTargetCount: 2,
           body: PortraitApplicability.applicable,
         ),
       );
@@ -1310,6 +1319,7 @@ void main() {
           photoProjectStore: store,
           photoAnalyzer: _CountingPhotoAnalyzer(
             portrait: PortraitApplicability.applicable,
+            faceSlimTargetCount: 2,
             body: PortraitApplicability.applicable,
           ),
           photoAnalysisCache: cache,
@@ -1320,12 +1330,14 @@ void main() {
       await tester.tap(find.text('开始修图'));
       await tester.pumpAndSettle();
       await tester.dragUntilVisible(
-        find.text('自然精修'),
+        find.byKey(
+          const ValueKey('editor-adjustment-tab-naturalBeautification'),
+        ),
         find.byKey(const Key('photo-workspace-scroll')),
         const Offset(0, -220),
       );
       final portraitTab = find.byKey(
-        const ValueKey('editor-adjustment-tab-portraitRetouch'),
+        const ValueKey('editor-adjustment-tab-naturalBeautification'),
       );
       expect(portraitTab.hitTestable(), findsOneWidget);
       final exposureTab = find.byKey(
@@ -1336,9 +1348,17 @@ void main() {
         lessThan(tester.getTopLeft(exposureTab).dx),
       );
       expect(
-        find.byKey(const ValueKey('editor-adjustment-portraitRetouch')),
+        find.byKey(
+          const ValueKey('editor-apply-one-tap-natural-beautification'),
+        ),
         findsOneWidget,
       );
+      expect(
+        find.byKey(const ValueKey('editor-adjustment-section')),
+        findsOneWidget,
+      );
+      expect(find.text('人像'), findsOneWidget);
+      expect(find.text('人像工具已就绪 · 本地处理'), findsOneWidget);
       final faceSlimTab = find.byKey(
         const ValueKey('editor-adjustment-tab-faceSlim'),
       );
@@ -1349,28 +1369,41 @@ void main() {
       );
       await tester.tap(portraitTab);
       await tester.pumpAndSettle();
-
-      final slider = find.byType(Slider).last;
-      await tester.ensureVisible(slider);
-      await tester.pumpAndSettle();
-      expect(tester.widget<Slider>(slider).min, 0);
-      expect(tester.widget<Slider>(slider).onChanged, isNotNull);
-      final portraitSlider = find.semantics.byPredicate(
-        (node) =>
-            node.label.startsWith('自然精修') && node.flagsCollection.isSlider,
-      );
-      expect(portraitSlider, findsOne);
       expect(
-        portraitSlider.evaluate().single.getSemanticsData().hasAction(
-          SemanticsAction.increase,
-        ),
-        isTrue,
+        find.byKey(const ValueKey('editor-adjustment-tab-textureSmoothing')),
+        findsOneWidget,
       );
-      tester.semantics.increase(portraitSlider);
+      expect(
+        find.byKey(const ValueKey('editor-adjustment-tab-skinToneLighting')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('editor-adjustment-tab-blemishReduction')),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.byKey(
+          const ValueKey('editor-apply-one-tap-natural-beautification'),
+        ),
+      );
       await tester.pumpAndSettle();
+      var portraitRecipe = store.project!
+          .effectiveRecipeFor(photo.id)
+          .portraitRecipe;
+      expect(portraitRecipe.textureSmoothing, 45);
+      expect(portraitRecipe.skinToneLighting, 40);
+      expect(portraitRecipe.blemishReduction, 20);
 
       await tester.tap(faceSlimTab);
       await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('editor-face-slim-target-0')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('editor-face-slim-target-1')),
+        findsOneWidget,
+      );
       final faceSlimSlider = find.semantics.byPredicate(
         (node) => node.label.startsWith('瘦脸') && node.flagsCollection.isSlider,
       );
@@ -1386,6 +1419,21 @@ void main() {
       expect(tester.widget<Slider>(faceSlimControl).max, 0.5);
       await tester.drag(faceSlimControl, const Offset(80, 0));
       await tester.pumpAndSettle();
+      final firstFaceStrength = (await store.loadLatest())!
+          .effectiveRecipeFor(photo.id)
+          .faceSlimRecipe
+          .targetStrengths[0];
+      expect(firstFaceStrength, greaterThan(0));
+      await tester.tap(find.byKey(const ValueKey('editor-face-slim-target-1')));
+      await tester.pumpAndSettle();
+      expect(tester.widget<Slider>(faceSlimControl).value, 0);
+      await tester.drag(faceSlimControl, const Offset(48, 0));
+      await tester.pumpAndSettle();
+      final multiFaceRecipe = (await store.loadLatest())!
+          .effectiveRecipeFor(photo.id)
+          .faceSlimRecipe;
+      expect(multiFaceRecipe.targetStrengths[0], firstFaceStrength);
+      expect(multiFaceRecipe.targetStrengths[1], greaterThan(0));
       expect(
         (await store.loadLatest())
             ?.effectiveRecipeFor(photo.id)
@@ -1413,26 +1461,55 @@ void main() {
         greaterThan(0),
       );
       final recipe = store.project!.effectiveRecipeFor('portrait-photo');
-      expect(recipe.portraitStrength, greaterThan(0));
+      expect(recipe.portraitStrength, 0);
+      expect(recipe.portraitRecipe.textureSmoothing, 45);
       expect(find.text('选择人像'), findsNothing);
 
       await tester.tap(find.text('撤销'));
       await tester.pumpAndSettle();
       expect(store.project!.effectiveRecipeFor(photo.id).bodySlimStrength, 0);
       expect(
-        store.project!.effectiveRecipeFor(photo.id).faceSlimStrength,
+        store.project!
+            .effectiveRecipeFor(photo.id)
+            .faceSlimRecipe
+            .targetStrengths[1],
         greaterThan(0),
       );
       await tester.tap(find.text('撤销'));
       await tester.pumpAndSettle();
       expect(store.project!.effectiveRecipeFor(photo.id).faceSlimStrength, 0);
       expect(
-        store.project!.effectiveRecipeFor(photo.id).portraitStrength,
-        greaterThan(0),
+        store.project!
+            .effectiveRecipeFor(photo.id)
+            .faceSlimRecipe
+            .targetStrengths[0],
+        firstFaceStrength,
       );
       await tester.tap(find.text('撤销'));
       await tester.pumpAndSettle();
-      expect(store.project!.effectiveRecipeFor(photo.id).portraitStrength, 0);
+      expect(
+        store.project!.effectiveRecipeFor(photo.id).faceSlimStrength,
+        firstFaceStrength,
+      );
+      await tester.tap(find.text('撤销'));
+      await tester.pumpAndSettle();
+      expect(store.project!.effectiveRecipeFor(photo.id).faceSlimStrength, 0);
+      expect(
+        store.project!
+            .effectiveRecipeFor(photo.id)
+            .portraitRecipe
+            .textureSmoothing,
+        45,
+      );
+      await tester.tap(find.text('撤销'));
+      await tester.pumpAndSettle();
+      portraitRecipe = store.project!
+          .effectiveRecipeFor(photo.id)
+          .portraitRecipe;
+      expect(portraitRecipe, isNot(equals(recipe.portraitRecipe)));
+      expect(portraitRecipe.textureSmoothing, 0);
+      expect(portraitRecipe.skinToneLighting, 0);
+      expect(portraitRecipe.blemishReduction, 0);
       semantics.dispose();
       debugDefaultTargetPlatformOverride = null;
     },
@@ -1493,6 +1570,8 @@ void main() {
       await cache.commit(staleWrite, canCommit: () => true);
       final analyzer = _CountingPhotoAnalyzer(
         portrait: PortraitApplicability.applicable,
+        faceSlim: PortraitApplicability.unsafe,
+        faceSlimReason: PortraitDegradationReason.backgroundRisk,
         body: PortraitApplicability.applicable,
         capabilityVersion: 'widget-capability-v2',
       );
@@ -1515,22 +1594,29 @@ void main() {
       expect(store.project?.flowState, PhotoProjectFlowState.editing);
       expect(find.byKey(const ValueKey('recommendation-use')), findsNothing);
       await tester.dragUntilVisible(
-        find.text('自然精修'),
+        find.byKey(
+          const ValueKey('editor-adjustment-tab-naturalBeautification'),
+        ),
         find.byKey(const Key('photo-workspace-scroll')),
         const Offset(0, -220),
       );
       expect(
         find
-            .byKey(const ValueKey('editor-adjustment-tab-portraitRetouch'))
+            .byKey(
+              const ValueKey('editor-adjustment-tab-naturalBeautification'),
+            )
             .hitTestable(),
         findsOneWidget,
       );
       expect(
-        find
-            .byKey(const ValueKey('editor-adjustment-tab-faceSlim'))
-            .hitTestable(),
+        find.byKey(const ValueKey('editor-adjustment-tab-faceSlim')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('editor-face-slim-unavailable')),
         findsOneWidget,
       );
+      expect(find.text('为保护背景线条，这张照片暂不提供瘦脸'), findsOneWidget);
       expect(
         find
             .byKey(const ValueKey('editor-adjustment-tab-bodySlim'))
@@ -1603,12 +1689,23 @@ void main() {
       expect(store.project?.editingScope, ProjectEditingScope.currentPhoto);
       expect(find.text('第 1 / 2 张 · 仅当前照片'), findsOneWidget);
 
+      final exposureAdjustment = find.byKey(
+        const ValueKey('editor-adjustment-exposure'),
+      );
       await tester.dragUntilVisible(
-        find.text('曝光'),
+        exposureAdjustment,
         find.byKey(const Key('photo-workspace-scroll')),
         const Offset(0, -240),
       );
-      await tester.drag(find.byType(Slider).first, const Offset(90, 0));
+      await tester.drag(
+        find.byKey(const Key('photo-workspace-scroll')),
+        const Offset(0, -80),
+      );
+      await tester.pumpAndSettle();
+      await tester.drag(
+        find.descendant(of: exposureAdjustment, matching: find.byType(Slider)),
+        const Offset(90, 0),
+      );
       await tester.pumpAndSettle();
 
       expect(store.project?.photoOverrides.containsKey('photo-1'), isTrue);
@@ -2339,11 +2436,17 @@ final class _DeferredAnalysisStateProjectStore
 final class _CountingPhotoAnalyzer implements PhotoAnalyzer {
   _CountingPhotoAnalyzer({
     this.portrait = PortraitApplicability.unavailable,
+    PortraitApplicability? faceSlim,
+    this.faceSlimReason = PortraitDegradationReason.none,
+    this.faceSlimTargetCount,
     this.body = PortraitApplicability.unavailable,
     this.capabilityVersion = 'widget-capability-v1',
-  });
+  }) : faceSlim = faceSlim ?? portrait;
 
   final PortraitApplicability portrait;
+  final PortraitApplicability faceSlim;
+  final PortraitDegradationReason faceSlimReason;
+  final int? faceSlimTargetCount;
   final PortraitApplicability body;
   final String capabilityVersion;
   int calls = 0;
@@ -2373,6 +2476,9 @@ final class _CountingPhotoAnalyzer implements PhotoAnalyzer {
       whiteBalance: WhiteBalanceCondition.warmCast,
       clarity: ClarityCondition.clear,
       portrait: portrait,
+      faceSlim: faceSlim,
+      faceSlimReason: faceSlimReason,
+      faceSlimTargetCount: faceSlimTargetCount,
       body: body,
     );
   }

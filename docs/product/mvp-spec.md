@@ -1,12 +1,12 @@
 # 映见 MVP Spec
 
-> 状态：ready-for-agent；版本：1.2；日期：2026-08-06；核心承诺：一张精修，整组好看；首发平台：iOS / TestFlight；本轮目标：验证“可靠单张质量 + 三套本地推荐 + 整组自适应 + 自然人像与基础塑形 + 批量保真导出”的完整闭环。
+> 状态：ready-for-agent；版本：1.3；日期：2026-08-06；核心承诺：一张精修，整组好看；首发平台：iOS / TestFlight；本轮目标：先证明与醒图同任务可替代的六项人像核心能力，再验证“三套本地推荐 + 整组自适应 + 批量保真导出”的完整闭环。
 
 ## Problem Statement
 
 用户准备发布一张或一组照片时，通常知道自己想要“自然、干净、有氛围、适合发出来”，但不知道应该选择什么工具、滤镜和参数。传统全能编辑器提供大量能力，却把决策和重复劳动留给用户；固定滤镜产品路径很短，但难以修复具体问题；纯生成式 AI 操作简单，却存在等待、成本、身份漂移和不可控修改。
 
-对于人像，用户说的“精修”和“变美”不只指肤色、光影和磨皮，也包括本人显式选择的克制瘦脸与瘦身。只做人像识别或全局色彩，不能构成最低可用的人像修图能力。
+对于人像，用户说的“精修”和“变美”不是一个综合磨皮滑杆。竞品入场能力至少包括：直接给出第一结果的一键自然美化、可独立控制的质感磨皮、肤色与面部光线、自动瑕疵减弱，以及本人显式选择的克制瘦脸与瘦身。只做人像识别、全局色彩、单一磨皮或只有工具入口，都不能构成最低可用的人像修图能力。
 
 对于一组照片，问题更明显：用户需要重复修每一张，又希望其中最重要的照片可以进一步精修。现有映见代码虽已具备部分导入、基础编辑和导出能力，但尚未证明自然人像、瘦脸、瘦身、整组一致性和批量导出的完整用户闭环达到竞品入场基线。
 
@@ -14,7 +14,9 @@
 
 映见让用户先选择结果，再逐步展开工具。
 
-用户无需登录即可导入 1–6 张照片。应用在本地分析照片的基础质量、主体、人脸和光线，为单张或整组生成三套差异明确、可即时预览的本地推荐方案。用户选择一个方向后，可以调整整组强度，也可以进入任意重点照片做基础光色、构图，并分别使用 `自然精修`、`瘦脸`、`瘦身`。三项人像能力相互独立：自然精修改善肤色、面部光线和皮肤纹理；瘦脸只克制调整脸部轮廓；瘦身只克制调整安全可识别的躯干宽度。整组共享审美风格，每张照片保留独立补偿和单张覆盖，最终从原图批量导出。
+用户无需登录即可导入 1–6 张照片。应用在本地分析照片的基础质量、主体、人脸和光线，为单张或整组生成三套差异明确、可即时预览的本地推荐方案。用户选择一个方向后，可以调整整组强度，也可以进入任意重点照片做基础光色、构图和六项人像核心能力。
+
+`一键自然美化`是一项把安全推荐值写入真实子参数的语义操作，不是第四层隐藏效果。它展开后明确显示 `质感磨皮`、`肤色与面部光线`、`瑕疵减弱`；项目只保存这三个非几何参数、最多三张脸各自独立的瘦脸强度、瘦身参数和算法版本。最多三张高置信度人脸可分别计算非几何安全强度和被用户逐脸选择塑形；瘦身仍只面向单个高置信度主体。所有几何参数默认值为 `0`，不由一键自然美化或三套推荐自动开启。整组共享审美风格，每张照片保留独立补偿和单张覆盖，最终从原图批量导出。
 
 默认闭环完全本地执行，不上传照片、不调用图片生成模型、不要求账号，也不依赖云端服务成功。
 
@@ -33,7 +35,7 @@
     ↓
 选择整组方向
     ↓
-整组调整 ⇄ 重点照片光色/构图/自然精修/瘦脸/瘦身
+整组调整 ⇄ 重点照片光色/构图/一键自然美化及精调/瘦脸/瘦身
     ↓
 逐张检查
     ↓
@@ -55,14 +57,16 @@
 
 ### 人像场景成功条件
 
-对满足安全门的单人已有图片，人像 MVP 必须同时满足：
+对满足安全门的已有成人图片，人像 MVP 必须同时满足：
 
-1. `自然精修`、`瘦脸`、`瘦身`按各自适用条件独立出现，不能用一个“人像”总开关混合语义。
-2. 瘦脸和瘦身默认均为 `0`，只在用户主动滑动后改变，不由三套推荐自动开启。
-3. 非零瘦脸产生可见且单调的脸部轮廓收窄，同时保护眼、鼻、嘴和背景。
-4. 非零瘦身产生可见且单调的躯干宽度收窄，同时保护头部、四肢和背景。
-5. 前后对比、撤销/重做、归零、项目恢复、预览和原图导出保持三项能力的独立语义。
-6. 多人、遮挡、低置信度或保护门失败时，对应塑形工具不可用，但基础修图和导出不受阻。
+1. 首层提供 `一键自然美化`、`瘦脸`、`瘦身`；一键结果可展开为 `质感磨皮`、`肤色与面部光线`、`瑕疵减弱`三个真实子参数，不允许隐藏基线效果。
+2. 一键自然美化可以随用户选择推荐方案写入三个非几何参数；瘦脸和瘦身默认均为 `0`，只在用户主动滑动后改变。
+3. 质感磨皮减少粗糙和不均匀但保留毛孔趋势、五官、发际线、胡须和身份纹理；肤色与面部光线改善色偏、暗沉和阴影但不漂白或破坏场景光线。
+4. 瑕疵减弱只处理高置信度、孤立、短期性的小范围痘印和色斑；无法区分痣、雀斑、皱纹、妆容或身份特征时必须跳过。
+5. 非几何能力支持最多三张高置信度成人脸，每张脸独立计算安全上限；低置信度对象独立关闭，不阻断其他人物、基础修图或导出。
+6. 用户可在最多三张可用人脸中逐脸选择并设置独立强度；非零瘦脸只收窄目标脸部轮廓，同时保护其他人脸、眼、鼻、嘴和背景；非零瘦身产生可见且单调的躯干宽度收窄，同时保护头部、四肢和背景。
+7. 前后对比、撤销/重做、归零、项目恢复、预览和原图导出保持五个持久化参数的独立语义；一键自然美化本身作为一次可撤销操作。
+8. 多主体、遮挡、低置信度或保护门失败时，对应塑形工具不可用，但非几何人像能力按脸独立判断，基础修图和导出始终不受阻。
 
 ### MVP 产品验证门
 
@@ -72,7 +76,9 @@
 - 至少 70% 的多图测试用户能正确区分整组调整与单张调整。
 - 至少 60% 的测试用户认为三套推荐比从空白工具列表开始更省事。
 - 固定样片盲评中，映见基础单张结果达到冻结后的最低自然度与保真评分。
-- 固定人像盲评中，自然精修、瘦脸、瘦身分别达到各自质量门；不得用肤质得分替代几何塑形得分。
+- 固定人像盲评中，一键自然美化及其三个子能力、瘦脸、瘦身分别达到各自质量门；不得用综合结果或肤质得分替代任一子能力或几何塑形得分。
+- 六项核心能力分别通过同图竞品门：相对原图的有效样片成对偏好率不低于 65%；与醒图执行同一任务相比，映见胜出或持平不少于 50%；自然度、身份保持和对应保护维度中位数不低于 4/5。
+- 任一明显假面、身份变化、五官漂移、非皮肤误处理或背景变形均为灾难性失败，直接阻断对应能力，不用其他能力高分抵消。
 - 关键图像正确性检查没有方向错误、明显二次压缩、预览/导出裁剪错位或原图覆盖。
 
 这些阈值是首轮验证门，不是已经达到的业务指标。
@@ -122,14 +128,17 @@ MVP_INTERACTION_REJECTABLE_STRUCTURES: web_tool_dashboard,poster_style_mobile,hi
 - 提供曝光、高光、阴影、对比度、色温、色调、饱和度和清晰度/锐度等核心光色能力。
 - 提供裁剪、旋转、水平校正和恢复原始构图。
 - 提供滤镜/配方强度调整。
-- 有人脸时提供自然人像能力：受控的肤色/面部光线修正和纹理保护型轻度磨皮。
-- 单个高置信度成人主体满足安全条件时，提供用户显式控制的轻度瘦脸与躯干瘦身；默认值为 0，不由三套推荐自动改变。
+- 有适用人脸时提供一键自然美化；它把安全推荐值写入质感磨皮、肤色与面部光线、瑕疵减弱三个真实参数，不形成隐藏处理层。
+- 三个非几何子能力均可独立调整、归零和撤销；所有用户参数显示为 `0...100`，`0` 严格关闭。具体推荐值和最高安全值由固定样片校准后冻结，不在实现前拍脑袋写死。
+- 质感磨皮、肤色与面部光线、瑕疵减弱支持最多三张高置信度人脸，按脸独立计算能力安全上限，但首版不为这三项非几何能力提供逐脸不同用户强度；应用不做年龄或性别推断。
+- 瑕疵减弱是 P0，不再是可选增强；首版只做自动、高置信度、保守减弱，不提供手动画笔或点按修复。
+- 最多三张高置信度人脸满足各自安全条件时，提供逐脸选择和独立强度；单个高置信度主体满足条件时提供躯干瘦身。默认值均为 0，不由三套推荐自动改变。
 - MVP 不提供大眼、鼻形、嘴形、下巴长度、头身比、局部身体部位或妆容重塑。
 - 人像检测或引擎不可用时，稳定降级到基础光色与构图，不阻塞导出。
 - 所有参数具有合法范围、默认值、归零、前后对比和撤销语义。
 - 一次连续滑块手势只形成一个撤销步骤。
 
-单张质量若不能通过冻结样片门，不得仅因功能入口存在而宣布“精修完成”。
+六项核心能力中的任一项若不能独立通过冻结样片和同图竞品门，只能进入内部开发候选，不得宣布“竞品入场能力已对齐”，也不得以其他能力替代。
 
 ### P0.5 整组一致性与单张覆盖
 
@@ -196,7 +205,7 @@ MVP_INTERACTION_REJECTABLE_STRUCTURES: web_tool_dashboard,poster_style_mobile,hi
 - 整组/当前照片范围是工作台一级状态，并在参数修改前后保持可见。
 - 默认先展示系统建议调整和常用参数，完整 MVP 工具渐进展开。
 - 前后对比、撤销、重做和重置不隐藏在二级设置中。
-- 自然精修、瘦脸与瘦身是独立工具；只有在各自能力可用且检测到适用主体时出现，失败不会留下不可操作入口。
+- 人像首层固定为一键自然美化、瘦脸、瘦身；进入一键自然美化后展开质感磨皮、肤色与面部光线、瑕疵减弱。只有在各自能力可用且检测到适用对象时出现，失败不会留下不可操作入口。
 - 从当前照片返回整组时保留滚动位置、选中照片和未导出状态。
 
 ### 导出确认与结果
@@ -250,26 +259,31 @@ empty
 22. 作为用户，我希望可以将某张照片恢复到整组风格，以便放弃失败的单张覆盖而不必重来。
 23. 作为用户，我希望调整核心光色参数，以便修正一个大体正确的推荐。
 24. 作为用户，我希望使用裁剪、旋转和水平校正，以免基本构图问题还需要切换应用。
-25. 作为人像用户，我希望获得克制的肤色和面部光线修正，以便人物自然、不像生成或变形。
-26. 作为人像用户，我希望皮肤纹理得到保护，以免磨皮产生塑料感。
-27. 作为人像用户，我希望可以显式、克制地瘦脸，并保护五官和背景不变形。
-28. 作为全身照用户，我希望可以显式、克制地调整躯干宽度，并保护头部、四肢和背景。
-29. 作为使用不支持设备的用户，我希望每项人像能力独立稳定降级，以便基础编辑和导出仍然可用。
-30. 作为用户，我希望每项调整都能归零，以便安全尝试。
-31. 作为用户，我希望一次连续滑动只形成一个撤销步骤，以便撤销符合操作意图。
-32. 作为用户，我希望查看前后对比，以便判断修改是否真的改善照片。
-33. 作为用户，我希望原图始终不被修改，以免使用应用损坏源文件。
-34. 作为用户，我希望导出从原始像素生成，以免得到截图级预览画质。
-35. 作为用户，我希望导出前看到张数、质量和保存位置，以便结果可预期。
-36. 作为批量导出用户，我希望看到逐张进度，以便理解长任务状态。
-37. 作为用户，我希望某张失败时保留其他成功结果，以免重复已完成工作。
-38. 作为用户，我希望失败项被明确标记并可重试，以便只处理真正的问题。
-39. 作为用户，我希望取消尚未执行的导出，以便控制等待、耗电和发热。
-40. 作为用户，我希望导出的方向、尺寸和色彩正确，以便成片符合批准的预览。
-41. 作为用户，我希望导出后使用系统分享，以免应用要求访问社交账号。
-42. 作为无障碍用户，我希望控件和编辑范围被清楚朗读，以便借助辅助技术完成流程。
-43. 作为产品测试人员，我希望默认路径能证明没有创建云端图片任务，以便核心成本合同可执行。
-44. 作为产品团队成员，我希望失败和未验证质量门被明确报告，以免工程完成被误认为 MVP 已验证。
+25. 作为人像用户，我希望一键自然美化直接给出可信的第一结果，以免先理解多个专业参数。
+26. 作为希望继续精调的用户，我希望一键结果展开为真实的磨皮、肤色光线和瑕疵参数，以便理解并修改实际发生的处理。
+27. 作为人像用户，我希望独立控制质感磨皮并保留皮肤纹理，以免综合强度只能在“没效果”和“塑料感”之间选择。
+28. 作为人像用户，我希望独立调整肤色与面部光线，以便改善暗沉和色偏但仍保持本人肤色。
+29. 作为存在痘印或色斑的用户，我希望应用自动、保守地减弱明显瑕疵，以免必须切换其他修图应用。
+30. 作为有痣、雀斑、皱纹、妆容或胡须的用户，我希望无法确定的细节被保留，以免美化改变身份特征。
+31. 作为多人照片用户，我希望最多三张清晰成人脸分别获得安全的非几何改善，以免整张照片因存在多人而完全关闭人像能力。
+32. 作为人像用户，我希望可以显式、克制地瘦脸，并保护五官和背景不变形。
+33. 作为全身照用户，我希望可以显式、克制地调整躯干宽度，并保护头部、四肢和背景。
+34. 作为使用不支持设备或困难输入的用户，我希望每项人像能力独立稳定降级，以便基础编辑和导出仍然可用。
+35. 作为用户，我希望每项调整都能归零，以便安全尝试。
+36. 作为用户，我希望一次连续滑动或一次一键美化只形成一个撤销步骤，以便撤销符合操作意图。
+37. 作为用户，我希望查看前后对比，以便判断修改是否真的改善照片。
+38. 作为用户，我希望原图始终不被修改，以免使用应用损坏源文件。
+39. 作为用户，我希望导出从原始像素生成，以免得到截图级预览画质。
+40. 作为用户，我希望导出前看到张数、质量和保存位置，以便结果可预期。
+41. 作为批量导出用户，我希望看到逐张进度，以便理解长任务状态。
+42. 作为用户，我希望某张失败时保留其他成功结果，以免重复已完成工作。
+43. 作为用户，我希望失败项被明确标记并可重试，以便只处理真正的问题。
+44. 作为用户，我希望取消尚未执行的导出，以便控制等待、耗电和发热。
+45. 作为用户，我希望导出的方向、尺寸和色彩正确，以便成片符合批准的预览。
+46. 作为用户，我希望导出后使用系统分享，以免应用要求访问社交账号。
+47. 作为无障碍用户，我希望控件和编辑范围被清楚朗读，以便借助辅助技术完成流程。
+48. 作为产品测试人员，我希望默认路径能证明没有创建云端图片任务，以便核心成本合同可执行。
+49. 作为产品团队成员，我希望每项能力的竞品质量门分别报告，以免工程完成或综合高分被误认为能力已对齐。
 
 ## Implementation Decisions
 
@@ -311,12 +325,16 @@ empty
 ### Portrait quality
 
 - Natural portrait quality is a release gate, not a checkbox based on API availability.
-- The MVP supports conservative texture-preserving smoothing, face/skin light-color correction, explicit face slimming and explicit torso slimming.
+- The MVP core package is one-tap natural beautification, independently controllable texture-preserving smoothing, skin tone and face lighting, conservative automatic blemish reduction, explicit face slimming and explicit torso slimming.
+- One-tap natural beautification is a semantic command that writes the three non-geometric child parameters. It is not persisted or rendered as an additional hidden effect.
+- The project persists five actual portrait parameters plus declared analysis/effect versions: smoothing, skin-light correction, blemish reduction, face slimming and torso slimming. Every parameter uses user semantics `0...100`, and `0` strictly disables that effect.
+- Non-geometric processing supports up to three high-confidence faces with per-face safety caps and one photo-level user strength per parameter. Face slimming separately supports deterministic per-face selection and independent strengths for up to three eligible faces; the app does not infer age or sex.
 - Face/body geometry defaults to zero, remains outside automatic recommendations, and is exposed only when landmark, segmentation and background-safety gates pass.
 - Eye, nose, mouth, chin-length, head/body-ratio, localized body-part reshaping, beautification presets and makeup are excluded.
-- A system/self-built candidate and at least one commercial candidate are compared on the same licensed corpus unless evidence eliminates a candidate earlier.
+- Apple system capabilities, self-built processing and license-compatible open on-device models are evaluated first. A commercial candidate is only a fallback when the same fixed corpus proves that these candidates cannot reach the frozen quality floor.
 - Failure or license unavailability degrades to base editing and never prevents project access or export.
 - Natural skin/light/texture quality is governed by [Natural Portrait Retouch Vertical Slice Spec](natural-portrait-retouch-vertical-slice-spec.md); face/body geometry, applicability and protection gates are governed separately by [Portrait Reshape Vertical Slice Spec](portrait-reshape-vertical-slice-spec.md). Each capability must freeze its own candidate before product integration.
+- When goals conflict, the order is identity and facial-feature preservation, non-skin/background protection, real skin texture, visible natural improvement, then support for more difficult inputs.
 
 ### Export and failure behavior
 
@@ -366,6 +384,8 @@ Existing editor session, photo project session, importer, store and method-chann
 - On iOS, every non-neutral adjustment requires a parameter-specific direction, visible-strength and clipping contract over the frozen corpus plus blinded review; contrast, warmth, selective tone, saturation, tint, and clarity contracts are frozen, and neutral pixel tolerance is not evidence of retouch quality.
 - Use blinded human review in addition to automation for skin naturalness, texture preservation, recommendation quality and group coherence.
 - Compare candidate engines using identical inputs, parameter levels, devices and scoring rubrics.
+- Before production integration, run two isolated effect Spikes: multi-face skin/feature/background protection for up to three faces, and blemish-versus-identity-detail discrimination plus local repair. Compare system, self-built and license-compatible open candidates at the same observable seam.
+- For every one of the six core abilities, compare the same input and task anonymously against the frozen direct competitor path. Require at least 65% paired preference over the original on improvable samples and at least 50% win-or-tie against the competitor; report every ability and protected subset separately.
 - Do not claim quality parity based only on screenshots or one favorable sample.
 
 ### Native and performance tests
@@ -405,7 +425,10 @@ Target users complete the primary journey without coaching. Observe whether they
 - Preview and export apply the same declared recipe semantics.
 - Export uses the original input and never overwrites it.
 - Fixed samples pass orientation, dimensions, crop, color and compression checks.
-- The frozen natural-portrait and group-coherence review thresholds are met.
+- One-tap natural beautification expands to the exact three saved non-geometric parameters and produces no hidden residual effect when they are all zero.
+- Texture smoothing, skin-light correction and blemish reduction each meet their frozen quality and protection thresholds, including the multi-face and identity-detail subsets.
+- Every one of the six core portrait abilities independently passes the same-image competitor gate; aggregate scores cannot compensate for a failed ability.
+- The frozen group-coherence review thresholds are met.
 - Applicable single-person samples prove visible, bounded face slimming and torso slimming independently; feature, limb and background protection gates pass.
 - Reopening and exporting a project does not accumulate repeated compression.
 
@@ -434,6 +457,7 @@ Target users complete the primary journey without coaching. Observe whether they
 - Text, fonts, stickers, templates, collages and creator marketplaces.
 - Manual brushes, complex local masks, layers, curves, channels and RAW workflows.
 - Advanced facial-feature reshaping, localized body-part editing and makeup; the bounded face/torso slimming defined by the portrait-reshape vertical slice remains in scope.
+- Teeth or eye-white brightening, dedicated eye-bag/nasolabial removal, child-specific portrait effects, and manual blemish/healing brushes.
 - Automatic social publishing, community and content feeds.
 - Store submission, test distribution and public release.
 
@@ -448,13 +472,15 @@ Target users complete the primary journey without coaching. Observe whether they
 1. Freeze the quality corpus, supported image contract, device matrix and measurable budgets.
 2. Build a throwaway interaction prototype for the complete single/group journey and test comprehension.
 3. Prove the Flutter-to-native preview/export vertical slice on iOS; retain the Android adapter as deferred, non-blocking work.
-4. Compare natural-retouch candidates behind the same capability boundary and freeze the minimum quality gate.
-5. Prove explicit face slimming and torso slimming separately, including landmark/pose/segmentation applicability and background-protection gates.
-6. Implement the single-photo base editor on the proven rendering path.
-7. Add deterministic analysis and three local recommendations.
-8. Add shared style, per-photo compensation and single-photo overrides.
-9. Complete bounded batch export, recovery and quality verification.
-10. Run uncoached usability testing and physical-device Profile/Release gates.
+4. Prove the multi-face non-geometric protection Spike and the conservative blemish-reduction Spike before changing production portrait UI or recipes.
+5. Freeze texture smoothing, skin-light correction and blemish reduction as three independently controllable effects, then define one-tap natural beautification as a semantic recipe operation over them.
+6. Prove explicit face slimming and torso slimming separately, including landmark/pose/segmentation applicability and background-protection gates.
+7. Run the six same-image competitor gates and freeze only candidates that meet their own result contract.
+8. Implement the single-photo base editor on the proven rendering path.
+9. Add deterministic analysis and three local recommendations.
+10. Add shared style, per-photo compensation and single-photo overrides.
+11. Complete bounded batch export, recovery and quality verification.
+12. Run uncoached usability testing and physical-device Profile/Release gates.
 
 Interaction prototype and rendering Spike may proceed in parallel after the baseline is frozen. Production feature expansion must not outrun failed image-quality or architecture gates.
 
@@ -465,6 +491,8 @@ Pause product implementation and revisit the corresponding decision if:
 - the native vertical slice cannot meet the frozen interaction or memory budget;
 - preview and original-resolution export cannot maintain the same recipe semantics;
 - no portrait candidate reaches the naturalness floor within acceptable license and privacy constraints;
+- multi-face protection cannot independently close low-confidence faces, or blemish reduction cannot distinguish temporary blemishes from identity details at a useful strength;
+- any of the six core portrait abilities fails its own same-image competitor gate; another ability's score cannot waive this stop condition;
 - face slimming or torso slimming cannot meet the frozen feature/body/background protection gates at a visibly useful strength;
 - users repeatedly mistake group and single-photo scope;
 - three recommendations do not reduce decision effort in uncoached testing;

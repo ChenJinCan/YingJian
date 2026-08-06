@@ -193,7 +193,7 @@ class PortraitEngineeringDiagnosticTest
     assets = manifest.fetch("assets").map.with_index do |asset, index|
       asset_directory = File.join(directory, "run", asset.fetch("id"))
       FileUtils.mkdir_p(asset_directory)
-      applied = index < 36
+      applied = index < 40
       bytes = {
         "baseline" => fixture_bytes.fetch("baseline"),
         "off" => fixture_bytes.fetch("baseline"),
@@ -232,7 +232,7 @@ class PortraitEngineeringDiagnosticTest
         "strengths" => { "default" => 0.35, "high-safe" => 0.55, "off" => 0 },
       },
       "asset_count" => 48,
-      "counts" => { "applied" => 36, "preserved" => 12 },
+      "counts" => { "applied" => 40, "preserved" => 8 },
       "assets" => assets,
     }
     report_path = File.join(directory, "run", "engineering-report.json")
