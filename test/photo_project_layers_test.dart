@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
+import 'package:yingjian/features/editor/domain/quality_enhancement_recipe.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 
 void main() {
@@ -121,6 +122,38 @@ void main() {
       );
     },
   );
+
+  test('quality enhancement stays with one photo and survives restoration', () {
+    final qualityRecipe = QualityEnhancementRecipe(
+      noiseReduction: 28,
+      lowLightRecovery: 32,
+      hazeRemoval: 18,
+      detailSharpening: 16,
+    );
+    final project = PhotoProject(
+      id: 'project-quality-v1',
+      createdAt: DateTime.utc(2026, 8, 7),
+      updatedAt: DateTime.utc(2026, 8, 7),
+      photos: const [first, second],
+      sharedStyle: SharedStyle(recipe: EditRecipe.neutral),
+      photoOverrides: {
+        first.id: PhotoOverride(
+          recipe: EditRecipe(qualityEnhancementRecipe: qualityRecipe),
+        ),
+      },
+    );
+
+    final restored = PhotoProject.fromJson(project.toJson());
+
+    expect(
+      restored.effectiveRecipeFor(first.id).qualityEnhancementRecipe,
+      qualityRecipe,
+    );
+    expect(
+      restored.effectiveRecipeFor(second.id).qualityEnhancementRecipe,
+      QualityEnhancementRecipe.neutral,
+    );
+  });
 
   test(
     'portrait retouch and reshape stay with their photo when color edits sync to group',
@@ -295,7 +328,7 @@ void main() {
     expect(restored.exportStates[first.id], PhotoExportState.queued);
     expect(restored.editingScope, ProjectEditingScope.currentPhoto);
     expect(restored.undoHistory, project.undoHistory);
-    expect(project.toJson()['schemaVersion'], 6);
+    expect(project.toJson()['schemaVersion'], 7);
   });
 
   test('version three project migrates to a safe scope with empty history', () {
@@ -342,7 +375,7 @@ void main() {
 
       expect(restored.effectiveRecipeFor(first.id).faceSlimStrength, 0);
       expect(restored.effectiveRecipeFor(first.id).bodySlimStrength, 0);
-      expect(restored.toJson()['schemaVersion'], 6);
+      expect(restored.toJson()['schemaVersion'], 7);
     },
   );
 

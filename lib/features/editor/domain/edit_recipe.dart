@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:yingjian/features/editor/domain/face_slim_recipe.dart';
 import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
+import 'package:yingjian/features/editor/domain/quality_enhancement_recipe.dart';
 
 @immutable
 final class CropGeometry {
@@ -169,6 +170,8 @@ class EditRecipe {
     FaceSlimRecipe? faceSlimRecipe,
     double bodySlimStrength = 0,
     PortraitRetouchRecipe? portraitRecipe,
+    QualityEnhancementRecipe qualityEnhancementRecipe =
+        QualityEnhancementRecipe.neutral,
     CropGeometry crop = CropGeometry.original,
   }) {
     for (final entry in <String, double>{
@@ -209,6 +212,7 @@ class EditRecipe {
       faceSlimRecipe: resolvedFaceSlimRecipe,
       bodySlimStrength: bodySlimStrength,
       portraitRecipe: resolvedPortraitRecipe,
+      qualityEnhancementRecipe: qualityEnhancementRecipe,
       crop: crop,
     );
   }
@@ -226,6 +230,7 @@ class EditRecipe {
     required this.faceSlimRecipe,
     required this.bodySlimStrength,
     required this.portraitRecipe,
+    required this.qualityEnhancementRecipe,
     required this.crop,
   });
 
@@ -244,6 +249,7 @@ class EditRecipe {
   double get faceSlimStrength => faceSlimRecipe.selectedStrength;
   final double bodySlimStrength;
   final PortraitRetouchRecipe portraitRecipe;
+  final QualityEnhancementRecipe qualityEnhancementRecipe;
   final CropGeometry crop;
 
   bool get isLegacyColorOnly =>
@@ -256,6 +262,7 @@ class EditRecipe {
       faceSlimRecipe.isNeutral &&
       bodySlimStrength == 0 &&
       portraitRecipe.isNeutral &&
+      qualityEnhancementRecipe.isNeutral &&
       crop.isOriginal;
 
   bool get hasColorAdjustments =>
@@ -281,6 +288,7 @@ class EditRecipe {
     'faceSlimRecipe': faceSlimRecipe.toJson(),
     'bodySlimStrength': bodySlimStrength,
     'portraitRecipe': portraitRecipe.toJson(),
+    'qualityEnhancementRecipe': qualityEnhancementRecipe.toJson(),
     'crop': crop.toJson(),
   };
 
@@ -312,6 +320,16 @@ class EditRecipe {
           faceSlimStrength: faceSlimStrength,
           bodySlimStrength: bodySlimStrength,
         );
+    final rawQualityEnhancementRecipe = json['qualityEnhancementRecipe'];
+    final qualityEnhancementRecipe = rawQualityEnhancementRecipe == null
+        ? QualityEnhancementRecipe.neutral
+        : rawQualityEnhancementRecipe is Map
+        ? QualityEnhancementRecipe.fromJson(
+            Map<String, Object?>.from(rawQualityEnhancementRecipe),
+          )
+        : throw const FormatException(
+            'Invalid quality enhancement recipe payload',
+          );
     return EditRecipe(
       exposure: (json['exposure'] as num?)?.toDouble() ?? 0,
       highlights: (json['highlights'] as num?)?.toDouble() ?? 0,
@@ -326,6 +344,7 @@ class EditRecipe {
       faceSlimRecipe: faceSlimRecipe,
       bodySlimStrength: bodySlimStrength,
       portraitRecipe: migratedPortraitRecipe,
+      qualityEnhancementRecipe: qualityEnhancementRecipe,
       crop: json['crop'] is Map<String, Object?>
           ? CropGeometry.fromJson(json['crop']! as Map<String, Object?>)
           : CropGeometry.original,
@@ -346,6 +365,7 @@ class EditRecipe {
     FaceSlimRecipe? faceSlimRecipe,
     double? bodySlimStrength,
     PortraitRetouchRecipe? portraitRecipe,
+    QualityEnhancementRecipe? qualityEnhancementRecipe,
     CropGeometry? crop,
   }) {
     final resolvedFaceSlimRecipe =
@@ -382,6 +402,8 @@ class EditRecipe {
       faceSlimRecipe: resolvedFaceSlimRecipe,
       bodySlimStrength: bodySlimStrength ?? this.bodySlimStrength,
       portraitRecipe: resolvedPortraitRecipe,
+      qualityEnhancementRecipe:
+          qualityEnhancementRecipe ?? this.qualityEnhancementRecipe,
       crop: crop ?? this.crop,
     );
   }
@@ -407,6 +429,7 @@ class EditRecipe {
       other.faceSlimRecipe == faceSlimRecipe &&
       other.bodySlimStrength == bodySlimStrength &&
       other.portraitRecipe == portraitRecipe &&
+      other.qualityEnhancementRecipe == qualityEnhancementRecipe &&
       other.crop == crop;
 
   @override
@@ -423,6 +446,7 @@ class EditRecipe {
     faceSlimRecipe,
     bodySlimStrength,
     portraitRecipe,
+    qualityEnhancementRecipe,
     crop,
   );
 }

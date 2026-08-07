@@ -188,6 +188,27 @@ class AppLocalizationsZh extends AppLocalizations {
   String get clarity => '清晰度';
 
   @override
+  String get qualityImprovement => '画质改善';
+
+  @override
+  String get applyQualityImprovement => '一键改善画质';
+
+  @override
+  String get noiseReduction => '去噪';
+
+  @override
+  String get lowLightRecovery => '暗光提亮';
+
+  @override
+  String get hazeRemoval => '去灰';
+
+  @override
+  String get detailSharpening => '细节锐化';
+
+  @override
+  String get qualityTools => '画质';
+
+  @override
   String get naturalPortraitRetouch => '自然精修';
 
   @override

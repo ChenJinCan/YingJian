@@ -14,7 +14,9 @@
 
 映见让用户先选择结果，再逐步展开工具。
 
-用户无需登录即可导入 1–6 张照片。应用在本地分析照片的基础质量、主体、人脸和光线，为单张或整组生成三套差异明确、可即时预览的本地推荐方案。用户选择一个方向后，可以调整整组强度，也可以进入任意重点照片做基础光色、构图和六项人像核心能力。
+用户无需登录即可导入 1–6 张照片。应用在本地分析照片的基础质量、主体、人脸和光线，为单张或整组生成三套差异明确、可即时预览的本地推荐方案。用户选择一个方向后，可以调整整组强度，也可以进入任意重点照片做基础光色、构图、画质改善和六项人像核心能力。
+
+重点照片提供本地“画质改善”入口。它把去噪、暗光提亮、去灰和细节锐化的安全推荐值写入四个真实参数，用户可以独立调整、归零和撤销；首版只改善已有像素，不执行超分辨率、生成式细节重建或人脸生成修复。
 
 `一键自然美化`是一项把安全推荐值写入真实子参数的语义操作，不是第四层隐藏效果。它展开后明确显示 `质感磨皮`、`肤色与面部光线`、`瑕疵减弱`；项目只保存这三个非几何参数、最多三张脸各自独立的瘦脸强度、瘦身参数和算法版本。最多三张高置信度人脸可分别计算非几何安全强度和被用户逐脸选择塑形；瘦身仍只面向单个高置信度主体。所有几何参数默认值为 `0`，不由一键自然美化或三套推荐自动开启。整组共享审美风格，每张照片保留独立补偿和单张覆盖，最终从原图批量导出。
 
@@ -128,6 +130,9 @@ MVP_INTERACTION_REJECTABLE_STRUCTURES: web_tool_dashboard,poster_style_mobile,hi
 - 提供曝光、高光、阴影、对比度、色温、色调、饱和度和清晰度/锐度等核心光色能力。
 - 提供裁剪、旋转、水平校正和恢复原始构图。
 - 提供滤镜/配方强度调整。
+- 提供画质改善结果入口，并展开为去噪、暗光提亮、去灰和细节锐化四个真实参数；四项均为 `0...100`，`0` 严格关闭，一键只写入可见参数且形成一次可撤销操作。
+- 去噪必须降低细碎亮度/色彩噪声但不过度抹平边缘；暗光提亮优先恢复暗部可读性并保护高光；去灰提高低对比画面的层次但不得明显压黑或过饱和；细节锐化只做克制边缘增强，不制造明显白边、黑边或噪声放大。
+- 四项效果必须由同一版本化本地管线执行，项目恢复、预览和原图导出保持相同参数语义；不适用或无法安全改善时允许保持原图，不阻断其他编辑或导出。
 - 有适用人脸时提供一键自然美化；它把安全推荐值写入质感磨皮、肤色与面部光线、瑕疵减弱三个真实参数，不形成隐藏处理层。
 - 三个非几何子能力均可独立调整、归零和撤销；所有用户参数显示为 `0...100`，`0` 严格关闭。具体推荐值和最高安全值由固定样片校准后冻结，不在实现前拍脑袋写死。
 - 质感磨皮、肤色与面部光线、瑕疵减弱支持最多三张高置信度人脸，按脸独立计算能力安全上限，但首版不为这三项非几何能力提供逐脸不同用户强度；应用不做年龄或性别推断。
@@ -425,6 +430,7 @@ Target users complete the primary journey without coaching. Observe whether they
 - Preview and export apply the same declared recipe semantics.
 - Export uses the original input and never overwrites it.
 - Fixed samples pass orientation, dimensions, crop, color and compression checks.
+- Quality improvement keeps zero values pixel-equivalent, preserves preview/export semantics, and passes frozen noise, low-light, haze and edge-protection fixtures.
 - One-tap natural beautification expands to the exact three saved non-geometric parameters and produces no hidden residual effect when they are all zero.
 - Texture smoothing, skin-light correction and blemish reduction each meet their frozen quality and protection thresholds, including the multi-face and identity-detail subsets.
 - Every one of the six core portrait abilities independently passes the same-image competitor gate; aggregate scores cannot compensate for a failed ability.
@@ -456,6 +462,7 @@ Target users complete the primary journey without coaching. Observe whether they
 - Real-time camera, Live Photo, video, audio and live-stream beautification.
 - Text, fonts, stickers, templates, collages and creator marketplaces.
 - Manual brushes, complex local masks, layers, curves, channels and RAW workflows.
+- Super-resolution, generative detail reconstruction, model-based face restoration and severe motion-deblur recovery; bounded local denoise, low-light recovery, dehaze and detail sharpening remain in scope.
 - Advanced facial-feature reshaping, localized body-part editing and makeup; the bounded face/torso slimming defined by the portrait-reshape vertical slice remains in scope.
 - Teeth or eye-white brightening, dedicated eye-bag/nasolabial removal, child-specific portrait effects, and manual blemish/healing brushes.
 - Automatic social publishing, community and content feeds.

@@ -4,16 +4,16 @@ import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_for_platform.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_v2.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_v3.dart';
-import 'package:yingjian/features/editor/domain/image_pipeline_v5.dart';
+import 'package:yingjian/features/editor/domain/image_pipeline_v6.dart';
 
 void main() {
   tearDown(() => debugDefaultTargetPlatformOverride = null);
 
-  test('selects V5 only for the iOS versioned portrait adapter', () {
+  test('selects V6 only for the iOS versioned quality adapter', () {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     expect(
       imagePipelineForCurrentPlatform(EditRecipe.neutral),
-      isA<ImagePipelineV5>(),
+      isA<ImagePipelineV6>(),
     );
 
     debugDefaultTargetPlatformOverride = TargetPlatform.android;

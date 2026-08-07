@@ -11,6 +11,7 @@ import 'package:yingjian/features/editor/application/photo_preview_renderer.dart
 import 'package:yingjian/features/editor/application/photo_sharer.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_for_platform.dart';
+import 'package:yingjian/features/editor/domain/quality_enhancement_recipe.dart';
 import 'package:yingjian/features/editor/presentation/native_photo_preview.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
@@ -2201,6 +2202,11 @@ enum _AdjustmentParameter {
   tint,
   saturation,
   clarity,
+  qualityImprovement,
+  noiseReduction,
+  lowLightRecovery,
+  hazeRemoval,
+  detailSharpening,
   naturalBeautification,
   textureSmoothing,
   skinToneLighting,
@@ -2289,6 +2295,8 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
   Widget build(BuildContext context) {
     final parameters = widget.extended
         ? <_AdjustmentParameter>[
+            if (widget.photoToolsVisible)
+              _AdjustmentParameter.qualityImprovement,
             if (widget.photoToolsVisible && widget.portraitAvailable)
               _AdjustmentParameter.naturalBeautification,
             if (widget.photoToolsVisible && widget.faceSlimAvailable)
@@ -2298,6 +2306,11 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
             ..._AdjustmentParameter.values.where(
               (parameter) =>
                   parameter != _AdjustmentParameter.naturalBeautification &&
+                  parameter != _AdjustmentParameter.qualityImprovement &&
+                  parameter != _AdjustmentParameter.noiseReduction &&
+                  parameter != _AdjustmentParameter.lowLightRecovery &&
+                  parameter != _AdjustmentParameter.hazeRemoval &&
+                  parameter != _AdjustmentParameter.detailSharpening &&
                   parameter != _AdjustmentParameter.textureSmoothing &&
                   parameter != _AdjustmentParameter.skinToneLighting &&
                   parameter != _AdjustmentParameter.blemishReduction &&
@@ -2312,6 +2325,7 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
           ];
     final selected =
         parameters.contains(_selected) ||
+            (widget.photoToolsVisible && _isQualityDetail(_selected)) ||
             (widget.photoToolsVisible &&
                 widget.portraitAvailable &&
                 _isNaturalDetail(_selected))
@@ -2329,6 +2343,7 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
     final selectedLabel = _label(context, selected);
     final selectedValue = _value(effectiveRecipe, selected);
     final selectedIsPortrait = _isPortrait(selected);
+    final selectedIsQuality = _isQuality(selected);
     final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.3;
     final portraitReady =
         widget.photoToolsVisible &&
@@ -2339,13 +2354,19 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
         Row(
           children: [
             Icon(
-              selectedIsPortrait ? Icons.face_retouching_natural : Icons.tune,
+              selectedIsPortrait
+                  ? Icons.face_retouching_natural
+                  : selectedIsQuality
+                  ? Icons.auto_fix_high_outlined
+                  : Icons.tune,
               size: 18,
             ),
             const SizedBox(width: 8),
             Text(
               selectedIsPortrait
                   ? context.l10n.portraitTools
+                  : selectedIsQuality
+                  ? context.l10n.qualityTools
                   : context.l10n.lightAndColorTools,
               key: const ValueKey('editor-adjustment-section'),
               style: Theme.of(context).textTheme.titleSmall,
@@ -2398,6 +2419,8 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
               final label = _label(context, parameter);
               final isSelected =
                   parameter == selected ||
+                  (parameter == _AdjustmentParameter.qualityImprovement &&
+                      _isQualityDetail(selected)) ||
                   (parameter == _AdjustmentParameter.naturalBeautification &&
                       _isNaturalDetail(selected));
               void select() => setState(() => _selected = parameter);
@@ -2440,8 +2463,58 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
             ),
           ),
         ],
+        if (selected == _AdjustmentParameter.qualityImprovement ||
+            _isQualityDetail(selected)) ...[
+          const SizedBox(height: 8),
+          SizedBox(
+            height: largeText ? 104 : 64,
+            child: ListView.separated(
+              key: const ValueKey('editor-quality-improvement-tabs'),
+              scrollDirection: Axis.horizontal,
+              itemCount: _qualityDetailParameters.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                final parameter = _qualityDetailParameters[index];
+                return _AdjustmentToolButton(
+                  key: ValueKey('editor-adjustment-tab-${parameter.name}'),
+                  enabled: widget.enabled,
+                  selected: parameter == selected,
+                  label: _label(context, parameter),
+                  icon: _icon(parameter),
+                  largeText: largeText,
+                  onTap: widget.enabled
+                      ? () => setState(() => _selected = parameter)
+                      : null,
+                );
+              },
+            ),
+          ),
+        ],
         const SizedBox(height: 8),
-        if (selected == _AdjustmentParameter.naturalBeautification)
+        if (selected == _AdjustmentParameter.qualityImprovement)
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  key: const ValueKey('editor-apply-quality-improvement'),
+                  onPressed: widget.enabled
+                      ? () {
+                          widget.editorSession.apply(
+                            widget.recipe.copyWith(
+                              qualityEnhancementRecipe:
+                                  QualityEnhancementRecipe.safeAutomatic,
+                            ),
+                          );
+                          widget.onRecipeCommitted();
+                        }
+                      : null,
+                  icon: const Icon(Icons.auto_fix_high_outlined),
+                  label: Text(context.l10n.applyQualityImprovement),
+                ),
+              ),
+            ],
+          )
+        else if (selected == _AdjustmentParameter.naturalBeautification)
           Row(
             children: [
               Expanded(
@@ -2532,6 +2605,7 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
                                   _AdjustmentParameter.skinToneLighting ||
                               selected ==
                                   _AdjustmentParameter.blemishReduction ||
+                              _isQualityDetail(selected) ||
                               selected == _AdjustmentParameter.faceSlim ||
                               selected == _AdjustmentParameter.bodySlim
                           ? 0
@@ -2581,6 +2655,20 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
       parameter == _AdjustmentParameter.faceSlim ||
       parameter == _AdjustmentParameter.bodySlim;
 
+  bool _isQuality(_AdjustmentParameter parameter) =>
+      parameter == _AdjustmentParameter.qualityImprovement ||
+      _isQualityDetail(parameter);
+
+  static const _qualityDetailParameters = <_AdjustmentParameter>[
+    _AdjustmentParameter.noiseReduction,
+    _AdjustmentParameter.lowLightRecovery,
+    _AdjustmentParameter.hazeRemoval,
+    _AdjustmentParameter.detailSharpening,
+  ];
+
+  bool _isQualityDetail(_AdjustmentParameter parameter) =>
+      _qualityDetailParameters.contains(parameter);
+
   static const _naturalDetailParameters = <_AdjustmentParameter>[
     _AdjustmentParameter.textureSmoothing,
     _AdjustmentParameter.skinToneLighting,
@@ -2599,6 +2687,11 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
     _AdjustmentParameter.tint => Icons.colorize_outlined,
     _AdjustmentParameter.saturation => Icons.water_drop_outlined,
     _AdjustmentParameter.clarity => Icons.auto_awesome_outlined,
+    _AdjustmentParameter.qualityImprovement => Icons.auto_fix_high_outlined,
+    _AdjustmentParameter.noiseReduction => Icons.grain_outlined,
+    _AdjustmentParameter.lowLightRecovery => Icons.nights_stay_outlined,
+    _AdjustmentParameter.hazeRemoval => Icons.filter_drama_outlined,
+    _AdjustmentParameter.detailSharpening => Icons.details_outlined,
     _AdjustmentParameter.naturalBeautification => Icons.auto_awesome,
     _AdjustmentParameter.textureSmoothing => Icons.blur_on_outlined,
     _AdjustmentParameter.skinToneLighting => Icons.light_mode_outlined,
@@ -2617,6 +2710,12 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
         _AdjustmentParameter.tint => context.l10n.tint,
         _AdjustmentParameter.saturation => context.l10n.saturation,
         _AdjustmentParameter.clarity => context.l10n.clarity,
+        _AdjustmentParameter.qualityImprovement =>
+          context.l10n.qualityImprovement,
+        _AdjustmentParameter.noiseReduction => context.l10n.noiseReduction,
+        _AdjustmentParameter.lowLightRecovery => context.l10n.lowLightRecovery,
+        _AdjustmentParameter.hazeRemoval => context.l10n.hazeRemoval,
+        _AdjustmentParameter.detailSharpening => context.l10n.detailSharpening,
         _AdjustmentParameter.naturalBeautification =>
           context.l10n.oneTapNaturalBeautification,
         _AdjustmentParameter.textureSmoothing => context.l10n.textureSmoothing,
@@ -2636,6 +2735,22 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
         _AdjustmentParameter.tint => recipe.tint,
         _AdjustmentParameter.saturation => recipe.saturation,
         _AdjustmentParameter.clarity => recipe.clarity,
+        _AdjustmentParameter.qualityImprovement =>
+          <int>[
+                recipe.qualityEnhancementRecipe.noiseReduction,
+                recipe.qualityEnhancementRecipe.lowLightRecovery,
+                recipe.qualityEnhancementRecipe.hazeRemoval,
+                recipe.qualityEnhancementRecipe.detailSharpening,
+              ].reduce((left, right) => left > right ? left : right) /
+              100,
+        _AdjustmentParameter.noiseReduction =>
+          recipe.qualityEnhancementRecipe.noiseReduction / 100,
+        _AdjustmentParameter.lowLightRecovery =>
+          recipe.qualityEnhancementRecipe.lowLightRecovery / 100,
+        _AdjustmentParameter.hazeRemoval =>
+          recipe.qualityEnhancementRecipe.hazeRemoval / 100,
+        _AdjustmentParameter.detailSharpening =>
+          recipe.qualityEnhancementRecipe.detailSharpening / 100,
         _AdjustmentParameter.naturalBeautification =>
           <int>[
                 recipe.portraitRecipe.textureSmoothing,
@@ -2666,6 +2781,27 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
     _AdjustmentParameter.tint => recipe.copyWith(tint: value),
     _AdjustmentParameter.saturation => recipe.copyWith(saturation: value),
     _AdjustmentParameter.clarity => recipe.copyWith(clarity: value),
+    _AdjustmentParameter.qualityImprovement => recipe,
+    _AdjustmentParameter.noiseReduction => recipe.copyWith(
+      qualityEnhancementRecipe: recipe.qualityEnhancementRecipe.copyWith(
+        noiseReduction: (value * 100).round(),
+      ),
+    ),
+    _AdjustmentParameter.lowLightRecovery => recipe.copyWith(
+      qualityEnhancementRecipe: recipe.qualityEnhancementRecipe.copyWith(
+        lowLightRecovery: (value * 100).round(),
+      ),
+    ),
+    _AdjustmentParameter.hazeRemoval => recipe.copyWith(
+      qualityEnhancementRecipe: recipe.qualityEnhancementRecipe.copyWith(
+        hazeRemoval: (value * 100).round(),
+      ),
+    ),
+    _AdjustmentParameter.detailSharpening => recipe.copyWith(
+      qualityEnhancementRecipe: recipe.qualityEnhancementRecipe.copyWith(
+        detailSharpening: (value * 100).round(),
+      ),
+    ),
     _AdjustmentParameter.naturalBeautification => recipe,
     _AdjustmentParameter.textureSmoothing => recipe.copyWith(
       portraitRecipe: recipe.portraitRecipe.copyWith(

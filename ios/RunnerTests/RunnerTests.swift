@@ -610,6 +610,157 @@ class RunnerTests: XCTestCase {
     XCTAssertNil(IOSImagePipeline(arguments: booleanStrength))
   }
 
+  func testImagePipelineV6ValidatesIndependentQualityEnhancementParameters() {
+    let pipeline = IOSImagePipeline(arguments: pipelineV6(
+      noiseReduction: 30,
+      lowLightRecovery: 40,
+      hazeRemoval: 25,
+      detailSharpening: 20
+    ))
+    XCTAssertEqual(pipeline?.noiseReduction, 30)
+    XCTAssertEqual(pipeline?.lowLightRecovery, 40)
+    XCTAssertEqual(pipeline?.hazeRemoval, 25)
+    XCTAssertEqual(pipeline?.detailSharpening, 20)
+
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV6(noiseReduction: 101)))
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV6(lowLightRecovery: 20.5)))
+    var unknown = pipelineV6()
+    var recipe = unknown["qualityEnhancementRecipeV1"] as! [String: Any]
+    recipe["futureField"] = 1
+    unknown["qualityEnhancementRecipeV1"] = recipe
+    XCTAssertNil(IOSImagePipeline(arguments: unknown))
+  }
+
+  func testImagePipelineV6NeutralIsPixelEquivalentToV5() throws {
+    let v5 = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV5()))
+    let v6 = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV6()))
+    let source = stripedImage(extent: CGRect(x: 0, y: 0, width: 64, height: 64))
+
+    XCTAssertEqual(
+      try rgbaBytes(v6.applying(to: source, extent: source.extent)),
+      try rgbaBytes(v5.applying(to: source, extent: source.extent))
+    )
+  }
+
+  func testImagePipelineV6LowLightRecoveryLiftsDarkTonesConservatively() throws {
+    let neutral = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV6()))
+    let improved = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV6(lowLightRecovery: 60))
+    )
+    let pixels: [UInt8] = [31, 31, 31, 255, 220, 220, 220, 255]
+    let source = CIImage(
+      bitmapData: Data(pixels),
+      bytesPerRow: 8,
+      size: CGSize(width: 2, height: 1),
+      format: .RGBA8,
+      colorSpace: sRGB
+    )
+    let baseline = try rgbaBytes(neutral.applying(to: source, extent: source.extent))
+    let output = try rgbaBytes(improved.applying(to: source, extent: source.extent))
+
+    XCTAssertGreaterThan(output[0], baseline[0])
+    XCTAssertLessThanOrEqual(abs(Int(output[4]) - Int(baseline[4])), 4)
+  }
+
+  func testImagePipelineV6HazeRemovalIncreasesLowContrastSeparation() throws {
+    let neutral = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV6()))
+    let improved = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV6(hazeRemoval: 60)))
+    let pixels: [UInt8] = [105, 110, 115, 255, 155, 160, 165, 255]
+    let source = CIImage(
+      bitmapData: Data(pixels),
+      bytesPerRow: 8,
+      size: CGSize(width: 2, height: 1),
+      format: .RGBA8,
+      colorSpace: sRGB
+    )
+    let baseline = try rgbaBytes(neutral.applying(to: source, extent: source.extent))
+    let output = try rgbaBytes(improved.applying(to: source, extent: source.extent))
+
+    XCTAssertGreaterThan(Int(output[4]) - Int(output[0]), Int(baseline[4]) - Int(baseline[0]))
+  }
+
+  func testImagePipelineV6NoiseReductionSuppressesAlternatingLumaNoise() throws {
+    let neutral = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV6()))
+    let improved = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV6(noiseReduction: 70)))
+    let pixels = (0..<(64 * 64)).flatMap { index -> [UInt8] in
+      let value: UInt8 = index % 2 == 0 ? 95 : 145
+      return [value, value, value, 255]
+    }
+    let source = CIImage(
+      bitmapData: Data(pixels),
+      bytesPerRow: 64 * 4,
+      size: CGSize(width: 64, height: 64),
+      format: .RGBA8,
+      colorSpace: sRGB
+    )
+    let baseline = try rgbaBytes(neutral.applying(to: source, extent: source.extent))
+    let output = try rgbaBytes(improved.applying(to: source, extent: source.extent))
+
+    XCTAssertLessThan(meanHorizontalLumaDifference(output, width: 64),
+                      meanHorizontalLumaDifference(baseline, width: 64))
+  }
+
+  func testImagePipelineV6DetailSharpeningChangesASoftEdgeWithoutResizing() throws {
+    let neutral = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV6()))
+    let improved = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV6(detailSharpening: 60))
+    )
+    let width = 64
+    let pixels = (0..<(width * width)).flatMap { index -> [UInt8] in
+      let x = index % width
+      let value = UInt8(80 + min(96, max(0, (x - 20) * 4)))
+      return [value, value, value, 255]
+    }
+    let source = CIImage(
+      bitmapData: Data(pixels),
+      bytesPerRow: width * 4,
+      size: CGSize(width: width, height: width),
+      format: .RGBA8,
+      colorSpace: sRGB
+    )
+    let baseline = try rgbaBytes(neutral.applying(to: source, extent: source.extent))
+    let outputImage = improved.applying(to: source, extent: source.extent)
+    let output = try rgbaBytes(outputImage)
+
+    XCTAssertEqual(outputImage.extent, source.extent)
+    XCTAssertGreaterThan(meanAbsoluteDifference(baseline, output), 0.01)
+  }
+
+  func testImagePipelineV6PreviewAndFinalJpegShareQualitySemantics() throws {
+    let sourceURL = temporaryURL(extension: "jpg")
+    let outputURL = temporaryURL(extension: "jpg")
+    defer { removeTemporaryFiles(sourceURL, outputURL) }
+    try writeStripedJpeg(to: sourceURL, width: 96, height: 64)
+    let pipeline = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV6(
+      noiseReduction: 28,
+      lowLightRecovery: 32,
+      hazeRemoval: 18,
+      detailSharpening: 16
+    )))
+    let session = try IOSPhotoPreviewSession(
+      sourcePath: sourceURL.path,
+      maxEdge: 2_048,
+      pipeline: pipeline
+    )
+    defer { session.close() }
+    let previewBuffer = try XCTUnwrap(session.copyPixelBuffer()).takeRetainedValue()
+    let previewBytes = try rgbaBytes(CIImage(cvPixelBuffer: previewBuffer))
+
+    _ = try IOSPhotoFileRenderer(context: imageContext).render(
+      sourcePath: sourceURL.path,
+      pipeline: pipeline,
+      destinationURL: outputURL
+    )
+    let exported = try XCTUnwrap(
+      CIImage(contentsOf: outputURL, options: [.applyOrientationProperty: true])
+    )
+    let exportedBytes = try rgbaBytes(normalized(exported))
+
+    XCTAssertEqual(session.width, Int(exported.extent.width))
+    XCTAssertEqual(session.height, Int(exported.extent.height))
+    XCTAssertLessThanOrEqual(meanAbsoluteDifference(previewBytes, exportedBytes), 7.0)
+  }
+
   func testImagePipelineV4AppliesExplicitEffectsOnceAndIgnoresLegacyComposite() throws {
     let extent = CGRect(x: 0, y: 0, width: 48, height: 48)
     let source = CIImage(color: CIColor(red: 0.62, green: 0.42, blue: 0.34))
@@ -2481,6 +2632,34 @@ class RunnerTests: XCTestCase {
       "targetStrengths": targetStrengths,
     ]
     return pipeline
+  }
+
+  private func pipelineV6(
+    noiseReduction: NSNumber = 0,
+    lowLightRecovery: NSNumber = 0,
+    hazeRemoval: NSNumber = 0,
+    detailSharpening: NSNumber = 0
+  ) -> [String: Any] {
+    var pipeline = pipelineV5()
+    pipeline["schemaVersion"] = 6
+    pipeline["qualityEnhancementRecipeV1"] = [
+      "recipeVersion": 1,
+      "noiseReduction": noiseReduction,
+      "lowLightRecovery": lowLightRecovery,
+      "hazeRemoval": hazeRemoval,
+      "detailSharpening": detailSharpening,
+    ]
+    return pipeline
+  }
+
+  private func meanHorizontalLumaDifference(_ bytes: [UInt8], width: Int) -> Double {
+    var total = 0
+    var count = 0
+    for offset in stride(from: 4, to: bytes.count, by: 4) where (offset / 4) % width != 0 {
+      total += abs(Int(bytes[offset]) - Int(bytes[offset - 4]))
+      count += 1
+    }
+    return Double(total) / Double(count)
   }
 
   private func firstPixel(_ image: CIImage) throws -> [Int] {

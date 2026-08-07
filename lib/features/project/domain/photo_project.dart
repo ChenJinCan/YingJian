@@ -645,9 +645,9 @@ class PhotoProject {
   }
 
   static const maxPhotoCount = 6;
-  // V6 persists explicit per-photo portrait geometry controls. Older recipes
-  // migrate with both values at zero through EditRecipe.fromJson.
-  static const schemaVersion = 6;
+  // V7 persists explicit per-photo quality enhancement controls. Older
+  // recipes migrate with all four values at zero through EditRecipe.fromJson.
+  static const schemaVersion = 7;
 
   final String id;
   final DateTime createdAt;
@@ -792,6 +792,7 @@ class PhotoProject {
         faceSlimRecipe: override.faceSlimRecipe,
         bodySlimStrength: override.bodySlimStrength,
         portraitRecipe: override.portraitRecipe,
+        qualityEnhancementRecipe: override.qualityEnhancementRecipe,
         crop: override.crop,
       ),
     );
@@ -880,6 +881,11 @@ class PhotoProject {
       faceSlimRecipe: override?.faceSlimRecipe,
       bodySlimStrength: override?.bodySlimStrength ?? 0,
       portraitRecipe: override?.portraitRecipe ?? adaptiveLayer?.portraitRecipe,
+      // Quality restoration is a deliberate per-photo correction, like
+      // portrait retouch. It must never be copied across a group implicitly.
+      qualityEnhancementRecipe:
+          override?.qualityEnhancementRecipe ??
+          EditRecipe.neutral.qualityEnhancementRecipe,
       crop: photoOverride != null || photoOverrides.containsKey(photoId)
           ? override!.crop
           : shared.crop,

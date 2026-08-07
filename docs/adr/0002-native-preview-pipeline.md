@@ -17,6 +17,8 @@ Flutter 业务层只认识版本化 `ImagePipelineV1`/`ImagePipelineV2` 和两�
 - `PhotoPreviewRenderer`：从应用自有原图路径创建纹理预览、更新配方、释放会话；
 - `PhotoExporter`：从原图路径按同一配方语义执行高清导出。
 
+当前 iOS 生产写入版本为 `ImagePipelineV6`：V3–V5 依次保留人像塑形、五参数人像和多人脸选择合同，V6 新增 `qualityEnhancementRecipeV1`，只包含去噪、暗光提亮、去灰和细节锐化四个 `0...100` 整数。旧版本按原语义读取，缺少 V6 字段的项目迁移为四项全零。
+
 通道只传文件路径、最大预览边长、版本化参数、纹理 ID 和状态，不传图片字节。`ImagePipelineV1` 固定 sRGB 工作空间、曝光 EV、对比和色温语义；`ImagePipelineV2` 在不重解释 V1 的前提下增加高光、阴影、色调、饱和度、清晰度、规范化裁剪、90° 旋转与水平校正。双端对裁剪起点和宽高使用相同的 half-up 像素对齐，保证仅平移同尺寸裁剪时 Texture 尺寸不漂移。后端未知版本、越界参数或尚未冻结的非零人像强度必须拒绝。
 
 ### Android Adapter
@@ -32,6 +34,7 @@ Flutter 业务层只认识版本化 `ImagePipelineV1`/`ImagePipelineV2` 和两�
 
 - 高清导出解析同一版本化管线并使用 Core Image。
 - 原生预览通过 Core Image 与 `FlutterTexture` 提供，和导出共享参数语义；MethodChannel 或能力不可用时走兼容预览。
+- V6 画质改善依次执行受控 Core Image 去噪、暗部定向曲线、低幅度对比/饱和恢复和亮度锐化；每项零值直接绕过，未知字段、非整数或越界值 fail closed。
 
 ## 取舍
 

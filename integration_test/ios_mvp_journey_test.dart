@@ -185,11 +185,53 @@ void main() {
       findsOneWidget,
     );
 
+    final qualityTab = find.byKey(
+      const ValueKey('editor-adjustment-tab-qualityImprovement'),
+    );
+    expect(qualityTab.hitTestable(), findsOneWidget);
+    await tester.tap(qualityTab);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('editor-adjustment-tab-noiseReduction')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('editor-adjustment-tab-lowLightRecovery')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('editor-adjustment-tab-hazeRemoval')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('editor-adjustment-tab-detailSharpening')),
+      findsOneWidget,
+    );
+    final applyQualityImprovement = find.byKey(
+      const ValueKey('editor-apply-quality-improvement'),
+    );
+    await tester.ensureVisible(applyQualityImprovement);
+    await tester.pumpAndSettle();
+    expect(applyQualityImprovement.hitTestable(), findsOneWidget);
+    await tester.tap(applyQualityImprovement);
+    await tester.pumpAndSettle();
+    final qualityRecipe = (await store.loadLatest())!
+        .effectiveRecipeFor(importedPhoto.id)
+        .qualityEnhancementRecipe;
+    expect(qualityRecipe.noiseReduction, 28);
+    expect(qualityRecipe.lowLightRecovery, 32);
+    expect(qualityRecipe.hazeRemoval, 18);
+    expect(qualityRecipe.detailSharpening, 16);
+
     final workspace = find.byKey(const ValueKey('photo-workspace-scroll'));
     final portraitTab = find.byKey(
       const ValueKey('editor-adjustment-tab-naturalBeautification'),
     );
+    await tester.ensureVisible(portraitTab);
+    await tester.pumpAndSettle();
     expect(portraitTab.hitTestable(), findsOneWidget);
+    await tester.tap(portraitTab);
+    await tester.pumpAndSettle();
     final exposureTab = find.byKey(
       const ValueKey('editor-adjustment-tab-exposure'),
     );
@@ -332,9 +374,7 @@ void main() {
     expect(tester.widget<Slider>(faceSlimControl).max, 0.5);
     await tester.drag(faceSlimControl, const Offset(90, 0));
     await tester.pumpAndSettle();
-    await tester.tap(
-      find.byKey(const ValueKey('editor-face-slim-target-1')),
-    );
+    await tester.tap(find.byKey(const ValueKey('editor-face-slim-target-1')));
     await tester.pumpAndSettle();
     await tester.drag(faceSlimControl, const Offset(50, 0));
     await tester.pumpAndSettle();
@@ -346,6 +386,9 @@ void main() {
       everyElement(greaterThan(0)),
     );
 
+    await tester.ensureVisible(exposureTab);
+    await tester.pumpAndSettle();
+    expect(exposureTab.hitTestable(), findsOneWidget);
     await tester.tap(exposureTab);
     await tester.pumpAndSettle();
     final exposureSlider = find.byKey(
@@ -376,9 +419,18 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('editor-batch-export')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('export-confirm')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    for (
+      var attempt = 0;
+      attempt < 300 && exporter.results.isEmpty;
+      attempt++
+    ) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
 
     expect(exporter.photoIds, ['ios-runtime-photo']);
+    expect(exporter.errors, isEmpty);
+    expect(exporter.results, hasLength(1));
     expect(exporter.recipes.single.portraitStrength, 0);
     expect(
       exporter.recipes.single.portraitRecipe.textureSmoothing,
@@ -669,6 +721,7 @@ final class _NativeExportProbe implements PhotoExporter {
   final List<String> photoIds = [];
   final List<EditRecipe> recipes = [];
   final List<ExportedPhoto> results = [];
+  final List<Object> errors = [];
 
   @override
   Future<ExportedPhoto> export({
@@ -677,9 +730,14 @@ final class _NativeExportProbe implements PhotoExporter {
   }) async {
     photoIds.add(photo.id);
     recipes.add(recipe);
-    final exported = await delegate.export(photo: photo, recipe: recipe);
-    results.add(exported);
-    return exported;
+    try {
+      final exported = await delegate.export(photo: photo, recipe: recipe);
+      results.add(exported);
+      return exported;
+    } on Object catch (error) {
+      errors.add(error);
+      rethrow;
+    }
   }
 }
 

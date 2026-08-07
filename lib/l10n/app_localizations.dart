@@ -422,6 +422,48 @@ abstract class AppLocalizations {
   /// **'清晰度'**
   String get clarity;
 
+  /// No description provided for @qualityImprovement.
+  ///
+  /// In zh, this message translates to:
+  /// **'画质改善'**
+  String get qualityImprovement;
+
+  /// No description provided for @applyQualityImprovement.
+  ///
+  /// In zh, this message translates to:
+  /// **'一键改善画质'**
+  String get applyQualityImprovement;
+
+  /// No description provided for @noiseReduction.
+  ///
+  /// In zh, this message translates to:
+  /// **'去噪'**
+  String get noiseReduction;
+
+  /// No description provided for @lowLightRecovery.
+  ///
+  /// In zh, this message translates to:
+  /// **'暗光提亮'**
+  String get lowLightRecovery;
+
+  /// No description provided for @hazeRemoval.
+  ///
+  /// In zh, this message translates to:
+  /// **'去灰'**
+  String get hazeRemoval;
+
+  /// No description provided for @detailSharpening.
+  ///
+  /// In zh, this message translates to:
+  /// **'细节锐化'**
+  String get detailSharpening;
+
+  /// No description provided for @qualityTools.
+  ///
+  /// In zh, this message translates to:
+  /// **'画质'**
+  String get qualityTools;
+
   /// No description provided for @naturalPortraitRetouch.
   ///
   /// In zh, this message translates to:

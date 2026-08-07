@@ -202,6 +202,27 @@ class AppLocalizationsEn extends AppLocalizations {
   String get clarity => 'Clarity';
 
   @override
+  String get qualityImprovement => 'Quality improvement';
+
+  @override
+  String get applyQualityImprovement => 'Improve quality';
+
+  @override
+  String get noiseReduction => 'Noise reduction';
+
+  @override
+  String get lowLightRecovery => 'Low-light recovery';
+
+  @override
+  String get hazeRemoval => 'Dehaze';
+
+  @override
+  String get detailSharpening => 'Detail sharpening';
+
+  @override
+  String get qualityTools => 'Quality';
+
+  @override
   String get naturalPortraitRetouch => 'Natural retouch';
 
   @override

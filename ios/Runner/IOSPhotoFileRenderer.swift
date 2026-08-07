@@ -160,6 +160,10 @@ struct IOSImagePipeline {
   let torsoSlimming: Int
   let portraitAnalysisVersion: String
   let portraitEffectVersion: String
+  let noiseReduction: Int
+  let lowLightRecovery: Int
+  let hazeRemoval: Int
+  let detailSharpening: Int
   let crop: CGRect
   let quarterTurns: Int
   let straightenDegrees: Double
@@ -168,7 +172,7 @@ struct IOSImagePipeline {
     guard
       let pipeline = arguments as? [String: Any],
       let schemaVersion = Self.exactInteger(pipeline["schemaVersion"]),
-      (1...5).contains(schemaVersion),
+      (1...6).contains(schemaVersion),
       pipeline["workingColorSpace"] as? String == "srgb",
       let adjustments = pipeline["adjustments"] as? [String: Any],
       let exposureEV = Self.finiteNumber(adjustments["exposureEv"]),
@@ -204,6 +208,10 @@ struct IOSImagePipeline {
       torsoSlimming = 0
       portraitAnalysisVersion = "vision-multiface-v1"
       portraitEffectVersion = "portrait-core-contract-v2"
+      noiseReduction = 0
+      lowLightRecovery = 0
+      hazeRemoval = 0
+      detailSharpening = 0
       crop = CGRect(x: 0, y: 0, width: 1, height: 1)
       quarterTurns = 0
       straightenDegrees = 0
@@ -266,7 +274,7 @@ struct IOSImagePipeline {
         return nil
       }
       portraitStrength = 0
-      if schemaVersion == 5 {
+      if schemaVersion >= 5 {
         guard
           let faceSlimRecipe = pipeline["faceSlimRecipeV1"] as? [String: Any],
           Set(faceSlimRecipe.keys) == Set([
@@ -343,6 +351,34 @@ struct IOSImagePipeline {
         faceSlimming = 0
         torsoSlimming = 0
       }
+    }
+    if schemaVersion >= 6 {
+      guard
+        let qualityRecipe = pipeline["qualityEnhancementRecipeV1"] as? [String: Any],
+        Set(qualityRecipe.keys) == Set([
+          "recipeVersion",
+          "noiseReduction",
+          "lowLightRecovery",
+          "hazeRemoval",
+          "detailSharpening",
+        ]),
+        Self.exactInteger(qualityRecipe["recipeVersion"]) == 1,
+        let noiseReduction = Self.percentage(qualityRecipe["noiseReduction"]),
+        let lowLightRecovery = Self.percentage(qualityRecipe["lowLightRecovery"]),
+        let hazeRemoval = Self.percentage(qualityRecipe["hazeRemoval"]),
+        let detailSharpening = Self.percentage(qualityRecipe["detailSharpening"])
+      else {
+        return nil
+      }
+      self.noiseReduction = noiseReduction
+      self.lowLightRecovery = lowLightRecovery
+      self.hazeRemoval = hazeRemoval
+      self.detailSharpening = detailSharpening
+    } else {
+      noiseReduction = 0
+      lowLightRecovery = 0
+      hazeRemoval = 0
+      detailSharpening = 0
     }
     crop = CGRect(
       x: values[0],
@@ -505,10 +541,54 @@ struct IOSImagePipeline {
         ]
       ).cropped(to: extent)
     }
+    if noiseReduction > 0 {
+      let strength = Double(noiseReduction) / 100
+      output = output.applyingFilter(
+        "CINoiseReduction",
+        parameters: [
+          "inputNoiseLevel": 0.025 + strength * 0.075,
+          "inputSharpness": 0.0,
+        ]
+      ).cropped(to: extent)
+    }
+    if lowLightRecovery > 0 {
+      let dimension = 32
+      if let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) {
+        output = output.applyingFilter(
+          "CIColorCubeWithColorSpace",
+          parameters: [
+            "inputCubeDimension": dimension,
+            "inputCubeData": Self.shadowCubeData(
+              dimension: dimension,
+              shadows: Double(lowLightRecovery) / 100 * 0.65
+            ),
+            "inputColorSpace": colorSpace,
+          ]
+        ).cropped(to: extent)
+      }
+    }
+    if hazeRemoval > 0 {
+      let strength = Double(hazeRemoval) / 100
+      output = output.applyingFilter(
+        "CIColorControls",
+        parameters: [
+          kCIInputContrastKey: 1 + strength * 0.18,
+          kCIInputSaturationKey: 1 + strength * 0.05,
+        ]
+      ).cropped(to: extent)
+    }
     if clarity != 0 {
       output = output.applyingFilter(
         "CISharpenLuminance",
         parameters: [kCIInputSharpnessKey: clarity * 0.8]
+      ).cropped(to: extent)
+    }
+    if detailSharpening > 0 {
+      output = output.applyingFilter(
+        "CISharpenLuminance",
+        parameters: [
+          kCIInputSharpnessKey: Double(detailSharpening) / 100 * 0.5,
+        ]
       ).cropped(to: extent)
     }
     if schemaVersion >= 4 {
