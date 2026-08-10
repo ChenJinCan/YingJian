@@ -1,592 +1,175 @@
 # 映见 MVP 图像质量与工程基线
 
-> 状态：iOS 首发合同已冻结，样片与 iOS 物理设备证据仍阻断；日期：2026-08-05。
+> 状态：合同已冻结，最终竞品、真人与 iOS 物理设备证据仍为 `acceptance-pending`；日期：2026-08-10。
 
-## 1. 目的
+本文件是 MVP 图像合同、质量阈值、人工量表和设备预算的唯一规范源。它决定冻结候选能否通过最终验收，不阻断功能先实现并在 iOS Simulator 收敛。实施时序见[功能优先工作流](../agents/development-validation-workflow.md)，当前证据状态见[候选状态快照](../product/mvp-session-handoff-2026-08-10.md)。
 
-本基线决定映见何时可以从“编辑演示”进入生产 MVP 实现。任何图像引擎、商业人像 SDK、推荐配方和导出实现都必须在同一输入、同一设备级别和同一评分规则下比较。
+## 图像 I/O 合同
 
-本文件不宣称当前代码已经达到目标。自动检查、真实样片盲评和 Profile/Release 物理设备证据缺一不可。
-
-## 2. 当前事实
-
-| 项目 | 当前事实 | 判定 |
-|---|---|---|
-| Flutter | 3.44.8 / Dart 3.12.2 | 已确认 |
-| iOS 最低系统 | 15.0 | 已确认 |
-| Android | min API 24，compile/target API 36 | 已有工程基线；本轮 MVP 验证延期且不阻断 iOS |
-| 当前预览 | iOS Core Image Texture、Android GLES3 Texture；Flutter 矩阵仅兼容降级 | 目标接缝已实现，真机质量未验证 |
-| iOS 照片输入 | 系统 PHPicker 读取当前文件表示，原生临时文件复制到应用自有只读副本后立即清理 | 32 MP JPEG/PNG Simulator 真实 UI 与源 SHA 一致；真机授权仍未验证 |
-| iOS 导出 | Core Image 从原图输出 sRGB JPEG 95 并应用安全元数据策略 | 模拟器测试通过，真机未验证 |
-| Android 导出 | API 28+ 单 Bitmap 原位分块变换；API 24–27 分块方向解码到单输出 Bitmap；JPEG 95 | 模拟器真实文件/48 MP 通过，真机内存门未验证 |
-| 当前物理设备 | iPhone 14 Plus 已配对但当前锁屏阻止测试启动 | iOS 三档物理验证阻断 |
-| 授权质量样片 | 本机忽略目录已有 48 资产工程语料，完整机器门通过；其中 10 张真实授权单人图用于人像候选观察，4 张多人图为授权人像技术合成，24 张组图为格式/曝光/白平衡/裁剪工程变体 | 图像合同工程输入已齐；竞品、真人盲评和真实拍摄组图仍阻断主观质量冻结 |
-
-## 3. 冻结图像合同
-
-规范性决策见 ADR 0001。摘要如下：
-
-- 项目支持 1–6 张照片。
-- iOS 首发必须支持 JPEG、无动画 PNG 和 HEIC/HEIF；Android 的既有格式合同保留到后续里程碑。
-- 上限为 48 MP、最长边 12,000 px、100 MB。
-- 预览标准最长边 2,048 px，低档设备可降至 1,280 px。
-- MVP 输出为 sRGB JPEG，质量 95。
-- 导出从只读原始输入重新渲染，不能连续重编码。
+- 项目包含 1–6 张照片。
+- iOS 首发支持 JPEG、无动画 PNG 和 HEIC/HEIF。
+- 单项上限为 48 MP、最长边 12,000 px、100 MB。
+- 标准预览最长边 2,048 px，低档设备可降至 1,280 px。
+- MVP 输出为 sRGB JPEG、质量 95；导出从只读原图重放有效配方，不连续重编码。
+- 除裁剪外保留原始像素尺度，并正确处理 EXIF 方向和 Display P3 → sRGB 转换。
 - 默认移除 GPS、MakerNote、人脸区域和应用内部信息，保留可用拍摄时间。
-- iOS 的 Display P3 输入必须通过固定样片到 sRGB JPEG 的生产文件渲染回归；已有 Android 与跨端报告仅作历史工程证据，不属于本轮完成门，因此仍不得宣传跨平台广色域保真。
-
-“原画质导出”在产品文案中的可验证含义是“原像素尺寸高质量导出”，不是有损 JPEG 与源文件逐字节相同。
-
-## 4. 样片基准集
-
-### 4.1 最低规模
-
-完整门禁至少包含 48 个独立资产：
-
-- 24 张单图样片。
-- 6 组 × 4 张组图样片，共 24 张。
-- 格式、方向和色彩变体可与上述内容复用，但必须在清单中作为独立资产固定哈希。
-
-### 4.2 内容配额
-
-| 标签 | 最低数量 | 主要验证 |
-|---|---:|---|
-| `portrait_single` | 8 | 单人自然度、肤色、纹理、侧脸和遮挡 |
-| `portrait_multi` | 4 | 多人脸选择、强度一致和局部失败 |
-| `no_face` | 8 | 风景、食物、宠物、建筑和通用配方回退 |
-| `low_light` | 4 | 噪点、阴影、肤色和过度提亮 |
-| `backlit` | 4 | 高光保护、面部补偿和动态范围 |
-| `mixed_light` | 4 | 白平衡、局部偏色和组图补偿 |
-| `group_member` | 24 | 六组不同曝光、白平衡、构图和人物位置 |
-| `exif_rotated` | 4 | 八种 EXIF 方向中的高风险方向 |
-| `jpeg` | 12 | 主输入和导出闭环 |
-| `png` | 4 | 截图、透明合成和方向 |
-| `heic` | 4 | iOS 与 Android API 28+ 解码 |
-| `srgb` | 12 | 保证色彩闭环 |
-| `display_p3` | 4 | P3 识别与 sRGB 转换 |
-| `high_resolution` | 4 | 24–48 MP 内存和导出时间 |
-
-单张可以拥有多个标签，但不得用复制同一文件的方式满足数量。
-
-### 4.3 来源与隐私
-
-- 允许：团队自摄并取得书面同意、明确允许测试和内部再分发的图库许可、明确允许此用途的生成样片。
-- 禁止：真实用户照片、社交媒体下载图、来源不明的人脸、带客户标识的图像、无法证明授权的竞品截图。
-- 每个资产必须记录来源类型、权利依据、是否允许仓库分发、同意/许可证引用和 SHA-256。
-- 本地原始样片保存在被 Git 忽略的 `.quality/corpus/`；仓库只提交清单、哈希、匿名标签和评分结果。
-- 入库前移除 GPS 和非必要身份元数据；人像盲评使用匿名样片 ID。
-
-### 4.4 当前状态
-
-`quality/corpus-manifest.yaml` 保留可提交的空清单合同，干净 checkout 的完整检查仍应失败。本机忽略的 `.quality/corpus-manifest.local.yaml` 已于 2026-08-05 固定 48 个有许可证据和 SHA-256 的资产，并通过完整检查：24 个单图、6 组各 4 个组图，覆盖 JPEG/PNG/HEIC、sRGB/Display P3、EXIF 非 1 方向和 24–32 MP。工程语料包含格式与光色变体以及明确标注的多人技术合成，只用于图像合同、回退和候选工程筛查；不能代替竞品同路径输出、至少 5 人盲评、真实拍摄组图或物理设备性能证据。
-
-`scripts/run_ios_file_render_corpus.rb` 会直接编译应用生产使用的
-`IOSPhotoFileRenderer.swift`、`IOSImagePipeline` 和人像依赖，而不是复制一套测试算法。
-它把清单内全部 48 个只读源文件以中性 V2 配方重新渲染为最终 JPEG，并逐张检查：
-源 SHA-256 前后不变、EXIF 方向归一后的原像素尺寸、JPEG、sRGB、Orientation=1、无 GPS/设备身份元数据。
-报告同时绑定清单、生产渲染源码、人像源码和探针源码哈希，并标记
-`engineering_only=true`。本机首轮 48/48 通过，覆盖 38 JPEG、6 PNG、4 HEIC、
-37 sRGB、11 Display P3、4 个真实 EXIF 旋转和 20 个高分辨率资产；canonical 空清单仍 fail closed。
-`scripts/run_android_file_render_corpus.rb` 会构建本地 Debug app/test APK，把同一批只读源图挂载到应用私有缓存，并由专用 instrumentation 逐张调用生产 `AndroidPhotoExporter`。最终 MediaStore JPEG 会先回拷到应用私有证据目录、回查后删除，再由宿主拉取到 `.quality`；报告绑定语料、生产 Kotlin 源码、instrumentation、宿主运行器、源码提交和模拟器 build fingerprint。本机 API 35 arm64 模拟器首轮同为 48/48 通过，且 canonical 空清单 fail closed。
-
-已有双端结果证明当前生产文件渲染的格式、尺寸、源只读和隐私合同，但不证明预览帧率、峰值内存、物理设备耗时或主观质量。本轮只继续采集 iOS 证据；Android 模拟器与跨端结果保留但不计入 iOS MVP 完成门。
-
-2026-08-05 的 iPhone 17 Pro Simulator 真实系统 PHPicker 检查发现，旧的通用
-`image_picker_ios` 路径会把 4562×7027 JPEG 从 17,261,705 字节重编码为
-6,442,163 字节，虽然像素尺寸未变，仍违反“应用自有原始输入不得先被重编码”的合同。
-iOS 生产入口现改为原生 PHPicker `.current` 文件表示，只通过 MethodChannel 返回路径和名称。
-修复后同一 JPEG 的应用副本与源文件大小均为 17,261,705 字节，SHA-256 均为
-`653d56ec72b9d695163cc489f7ecc438d495670d69d741653c7b56409f54444f`；
-4562×7027 PNG 也以 4,759,419 字节和
-`6b04890a2f9c29fbb4174df50bfa3545ea36e39853b0904d0e0b460aceff3238`
-保持一致。成功、失败与用户取消后，`tmp/yingjian-photo-picker` 均无请求文件或子目录残留。
-这些是 Debug/Simulator 工程证据，不替代真实 iPhone 的授权、iCloud 原件下载、HEIC/Live Photo
-边界或 Profile/Release 内存与耗时证据。
-
-本机完整门命令为：
-
-```sh
-ruby scripts/check_image_quality_corpus.rb .quality/corpus-manifest.local.yaml
-ruby scripts/run_ios_file_render_corpus.rb \
-  .quality/corpus-manifest.local.yaml \
-  .quality/ios-file-render-<source-id>
-```
-
-Android runner 仍可用于后续里程碑，但本轮不得自动启动 ADB、模拟器或 Android 语料任务。
-
-清单条目使用以下结构；`evidence_ref` 指向本机被忽略的许可或同意证据，不提交个人资料：
-
-```yaml
-- id: portrait-001
-  file: portraits/portrait-001.jpg
-  sha256: 64位小写十六进制
-  tags: [portrait_single, jpeg, srgb]
-  media:
-    format: jpeg
-    width: 4032
-    height: 3024
-    color_space: srgb
-    orientation: 1
-  license:
-    source_type: team_capture
-    rights_basis: written_consent_for_internal_testing
-    redistributable: false
-    evidence_ref: .quality/evidence/portrait-001-consent.pdf
-```
-
-通用图像与组图清单 schema 2 会用系统 ImageIO 工具实际回查格式、像素尺寸、嵌入色彩配置和方向，不接受只修改扩展名或标签来满足配额。其完整门精确要求 48 张：24 张独立单图，以及 6 组各 4 张组图；不能用额外组图挤占单图，也不能用超额成员掩盖缺组。对应根字段为 `required_assets`、`required_single_assets`、`required_group_sets` 与 `required_members_per_group`。
-
-自然人像使用独立的 `quality/portrait-corpus-manifest.yaml` 合同，不复用上述组图配额。人像门精确要求 48 张、至少 36 张 `portrait_single`，且每张资产必须恰好声明 `portrait_single`、`portrait_multi` 或 `no_face` 中的一个角色；非单人资产只用于多人和负向安全验证。两种清单复用相同的文件、哈希、许可和实际媒体探针。`high_resolution` 必须至少 24 MP，`exif_rotated` 必须具有非 1 的真实方向；所有资产同时受 48 MP、12,000 px 和 100 MB 输入硬门约束。许可证据必须位于被忽略的 `.quality/evidence/` 内，语料和许可证据的符号链接均不得逃逸仓库边界。2026-08-05 本机忽略清单实际包含 36 张单人成人、4 张多人和 8 张无人脸资产，角色矩阵与媒体合同均已通过；其中公共许可人像属于工程筛查输入，不构成真实用户同意或正式盲评授权证据。
-
-## 5. 自动质量门
-
-六项竞品入场能力使用独立、按能力报告的同图质量合同：一键自然美化、质感磨皮、
-肤色与面部光线、瑕疵减弱、瘦脸、瘦身。执行步骤、盲码随机化、醒图身份冻结、评分表
-和阈值见 `docs/quality/portrait-core-parity-workflow.md`；结构自测由
-`scripts/test_portrait_core_quality_scores.rb` 执行。该工具会校验源图、映见结果、醒图结果、
-盲码映射和评分完整性，并使任一单项失败返回非零；它不生成真实结果，也不能把工程样片
-或模拟分数冒充五人正式盲评。
-
-本地授权语料补齐后，以下命令直接编译生产 `IOSPortraitRetoucher` 源码，重新生成关闭、默认和高安全档，并验证单人输入确实应用候选、无人脸/多人负例严格安全保持、三档不存在半生效状态、所有输出保持方向规范化后的原像素尺寸且为 sRGB JPEG。报告绑定语料 manifest、候选身份和 retoucher 源码 SHA-256，只是工程安全回归，不替代竞品同路径结果、五人盲评或物理设备证据：
-
-```sh
-ruby scripts/run_portrait_engineering_corpus.rb \
-  .quality/portrait-corpus-manifest.local.yaml \
-  .quality/portrait-engineering-<candidate-id>
-```
-
-本机工程报告绑定候选
-`ios-geometry-retouch-candidate-v5`、manifest、retoucher、renderer、runner 与合同校验器
-及共享指标实现 SHA-256，结果为 48 个资产、
-36 个单人应用、12 个多人/无人脸安全保持、0 个意外结果。对成人年龄纹理、胡须、
-眼镜、侧脸和清晰肤质代表样片的关闭/默认/高安全局部放大工程观察中，默认档仅作
-克制的低频整理，高安全档变化更明显；五官、发丝、胡须、嘴唇、深皱纹、永久斑点
-和背景边缘仍可辨认，未观察到明显黑边、光晕或轮廓过锐。该结论只允许把候选带入
-正式盲评，不能把 `productionEligible` 改为 true。
-
-`candidate-engineering-v13` 不再把“JPEG 哈希不同”当作单人候选已产生有效变化。
-运行器先从规范化源图独立编码 baseline，再要求候选强度 0 的 off 与 baseline 文件哈希
-完全相同；随后把 baseline/off/default/high-safe 最终 sRGB JPEG 解码为最长边 512 px 的
-RGBA8 代理，记录全图 RGB 平均绝对差、任一通道差至少 2 个码值的像素比例，以及
-最大通道差的 p99。单人默认档必须同时达到 `0.10`、`2%`、`4/255` 的工程可见下限；
-高安全档的平均差与变化像素比例必须严格高于默认档，其相对 baseline 的 RGB 变化向量
-与默认档余弦相似度不得低于 `0.95`，且默认档变化像素至少 `95%` 仍须在高安全档变化。
-默认/高安全档还分别受 `3/255 + 30% + p99 48/255` 与
-`4/255 + 35% + p99 64/255` 的全图变化上限；多人和无人脸 baseline/off/default/high-safe
-必须逐像素零差。当前 36 张单人默认档实测最低/中位/最高 RGB
-平均绝对差为 `0.129/0.424/1.944`，变化像素比例为 `2.16%/7.32%/23.99%`；
-高安全档全部严格更强，方向余弦最低/中位/最高为 `0.981/0.993/0.997`，默认变化像素
-保留比例为 `97.80%/99.95%/100%`，12 张负向输入为零变化。该门只淘汰几乎无效、
-强度反序、方向/区域突变或超出全图变化预算的结果；它不能定位背景、五官或边缘上的
-局部泄漏，也不能衡量“更好看”、自然度、身份保持、肤色、公平性或局部 halo，因此
-仍不能替代保护区域回归、正式匿名盲评和物理设备检查。
-
-在正式竞品同路径和物理设备输入尚未齐备时，可从同一工程报告生成本地候选诊断包：
-
-```sh
-ruby scripts/build_portrait_engineering_diagnostic.rb \
-  .quality/candidate-engineering-v13/engineering-report.json \
-  .quality/portrait-corpus-manifest.local.yaml \
-  .quality/portrait-diagnostic-v13 \
-  --seed candidate-engineering-v13
-```
-
-生成器逐项回查 manifest 原图 SHA、方向规范化后的尺寸、sRGB JPEG、报告源码身份和
-实际规范化像素差，并用与报告相同的共享 Swift 指标实现从最终 JPEG 重算全部数值；
-所有参与者图片会清除元数据并限制为最长边 2048 px 的 PNG，资产
-和候选身份只保存在独立 key 中。HTML 和 key 都明确标记这是
-`local-desktop-engineering`、非物理设备且 `freeze_eligible=false`。该包用于集中放大
-检查纹理与边界，不能提交给正式评分器，也不能代替竞品、五名评审或真机证据。
-
-下列项目任一失败即阻断对应图像链路：
-
-1. **中性恒等性**：中性配方不得产生可见色偏、尺寸变化或重复压缩。
-2. **方向**：所有支持的 EXIF 方向预览和导出一致，输出像素方向正确。
-3. **尺寸**：除裁剪外，导出保持原始像素宽高；不得导出预览尺寸。
-4. **裁剪坐标**：预览代理图和原图导出使用相同规范化坐标。
-5. **确定性**：同一输入、配方和引擎版本得到稳定结果。
-6. **原图只读**：源文件内容哈希在完整会话后不变。
-7. **项目恢复**：保存、退出、恢复和导出不累积额外处理或重复压缩。
-8. **元数据**：GPS、MakerNote 和内部编辑数据不出现在结果；拍摄时间按合同保留。
-9. **部分失败**：一张损坏图不影响其他照片编辑和已完成导出。
-10. **iOS 同义性**：同一配方的 iOS Texture 预览与原图导出保持相同方向、色彩趋势、构图和安全降级。
-
-确定性光色操作使用数值或感知容差；人像自然度和审美推荐不能只用像素 Golden 判定。
-
-### 5.1 已保留的双端中性导出证据（非本轮阻断门）
-
-`neutral-export-v1` 只验证同一原图经 iOS 与 Android 生产文件渲染器执行中性配方后，解码、方向归一、sRGB 转换和 JPEG 95 导出的差异受控。它不验证非中性参数强度、人像自然度、推荐审美、预览帧率或设备性能，也不得用于替代盲评。
-
-比较器将两端最终 JPEG 按方向归一并在显式 sRGB 中缩至最长边 512 px。48 张资产逐张满足以下硬门：
-
-| 指标 | `neutral-export-v1` 上限/下限 |
-|---|---:|
-| RGB 平均绝对误差 | ≤ 1/255 |
-| RGB 均方根误差 | ≤ 2/255 |
-| 单通道最大绝对误差 | ≤ 32/255 |
-| 亮度平均绝对误差 | ≤ 1/255 |
-| 任一通道平均偏差绝对值 | ≤ 1/255 |
-| 每像素最大通道误差 p95 / p99 | ≤ 3/255 / 4/255 |
-| 最大通道误差超过 4 / 8 码值的像素比例 | ≤ 1% / 0.5% |
-| PSNR | ≥ 42 dB；完全相同时允许为空 |
-
-阈值以 8-bit 码值和稀疏异常比例冻结，不以一次观测的精确最大值回填；完全相同像素比例只记录，不作为 JPEG 跨实现门禁。执行：
-
-```sh
-ruby scripts/run_cross_platform_render_comparison.rb \
-  .quality/ios-file-render-<source-commit> \
-  .quality/android-file-render-<source-commit> \
-  .quality/cross-platform-neutral-<source-commit>
-
-ruby scripts/check_cross_platform_render_tolerance.rb \
-  .quality/cross-platform-neutral-<source-commit>/observation-report.json
-```
-
-非中性 V2 配方另行验证：曝光、对比度和色温等可比较数值强度；高光、阴影、饱和度、色调、清晰度因平台算法不同，至少锁定方向、单调性、安全范围和视觉盲评，不能套用中性逐像素容差后宣称画质等价。
-
-### 5.2 已保留的双端曝光语义证据（非本轮阻断门）
-
-`exposure-semantic-v1` 使用同一 48 张语料分别执行 `-0.5 EV / 0 EV / +0.5 EV`，对两端生产最终 JPEG 在 sRGB、最长边 512 px 上测量平均亮度和黑白 clipping。每张照片必须满足：
-
-- 两个相邻档位的平均亮度增量均不小于 `4/255`；
-- iOS 与 Android 对应亮度增量的绝对差不超过 `1/255`；
-- 三个档位的黑、白 clipping 比例跨端绝对差均不超过 `1%`。
-
-该门锁定“曝光方向可见且双端强度一致”，不评价某张照片应自动选择多少曝光，也不允许用 `+0.5 EV` 工程探针替代推荐配方盲评。Android CPU 导出与 GLES 预览的曝光/对比度/色温基础矩阵必须在显式线性光域计算；CPU 可使用按配方预计算的通道查找表，但查找表结果必须与同一线性公式一致。
-
-```sh
-ruby scripts/check_exposure_semantic_alignment.rb \
-  .quality/ios-render-semantic-<source>/observation-report.json \
-  .quality/android-render-semantic-<source>/observation-report.json
-```
-
-### 5.3 iOS 对比度语义门
-
-`ios-contrast-semantic-v1` 使用 iOS 生产文件渲染器对同一 48 张语料执行
-`-0.35 / 0 / +0.35`。实现必须使用端点固定、中灰锚定的软曲线，不允许用线性光域
-`0.5` 作为硬矩阵轴心而大面积压黑。自动合同由两类互补证据组成：
-
-- 原生灰阶 ramp 经公开 `IOSImagePipeline` 验证：正对比度使暗部下降、亮部上升，负对比度方向相反，中灰保持在 2 个码值内，正档纯黑不得超过 10%；
-- 48 张最终 sRGB JPEG 的负/正档相对中性档，逐张 RGB 平均绝对差均不得低于 `3/255`；
-- 任一负/正档相对中性档的新增纯黑比例不得超过 `1.5%`，新增纯白比例不得超过 `5%`。白色上限覆盖明确的高键白背景工程样片，不代表主体高光自然度已经通过；主体观感仍由盲评阻断。
-
-全局亮度标准差、边缘能量或“各通道距 0.5 的均值”受照片内容分布影响，不能作为每张
-彩色照片都必须严格单调的对比度真值。报告仍保留这些观测量，但冻结门只使用灰阶响应、
-可见差异和新增 clipping。执行：
-
-```sh
-ruby scripts/run_render_semantic_trend.rb ios contrast \
-  .quality/ios-file-render-contrast-negative \
-  .quality/ios-file-render-neutral \
-  .quality/ios-file-render-contrast-positive \
-  .quality/ios-render-semantic-contrast
-
-ruby scripts/check_ios_contrast_semantics.rb \
-  .quality/ios-render-semantic-contrast/observation-report.json
-```
-
-### 5.4 iOS 色温语义门
-
-`ios-warmth-semantic-v1` 使用 iOS 生产文件渲染器对同一 48 张语料执行
-`-0.4 / 0 / +0.4`。每张最终 sRGB JPEG 必须满足：
-
-- 以 `mean(red) - mean(blue)` 定义的有限色温方向，冷→中性和中性→暖两个步长均不小于 `3/255`；
-- 两个相邻档位的 RGB 平均绝对差均不小于 `1/255`；
-- 负/正档相对中性档的平均亮度漂移均不超过 `2/255`；
-- 新增纯黑和新增纯白比例均不超过 `0.5%`。
-
-该门只锁定色温方向、可见强度和基础安全，不证明肤色偏好、混合光修复或自动白平衡推荐正确；
-这些仍需要自然人像与混合光盲评。执行：
-
-```sh
-ruby scripts/check_ios_warmth_semantics.rb \
-  .quality/ios-render-semantic-warmth/observation-report.json
-```
-
-### 5.5 iOS 高光与阴影语义门
-
-`ios-selective-tone-semantic-v1` 使用 iOS 生产文件渲染器分别执行高光和阴影的
-`-0.4 / 0 / +0.4`。两项都使用 sRGB 32³ color-cube 的亮度选择性软曲线：高光在亮部权重更高，
-阴影在暗部权重更高，纯黑与纯白端点固定。原生灰阶回归必须证明双向变化以及目标亮度区域的
-选择性；48 张最终 JPEG 每项还必须满足：
-
-- 负档→中性和中性→正档的平均亮度步长均不小于 `1/255`；
-- 两个相邻档位的 RGB 平均绝对差均不小于 `1/255`；
-- 高光新增纯黑 ≤ `0.5%`、新增纯白 ≤ `1%`；
-- 阴影新增纯黑 ≤ `1.5%`、新增纯白 ≤ `0.5%`。
-
-旧实现把正高光传入系统滤镜的无效区间，48/48 正档均与中性完全相同；旧阴影滤镜还会让
-高键样片新增纯白约 `5%`。这两种行为都被当前合同拒绝。执行：
-
-```sh
-ruby scripts/check_ios_selective_tone_semantics.rb \
-  .quality/ios-render-semantic-highlights/observation-report.json \
-  .quality/ios-render-semantic-shadows/observation-report.json
-```
-
-### 5.6 iOS 饱和度、色调与清晰度语义门
-
-`ios-color-detail-semantic-v1` 按参数使用不同指标：
-
-- 饱和度 `-0.35 / 0 / +0.35`：有色样片的平均色度相邻步长 ≥ `3/255`、RGB 平均绝对差 ≥ `1/255`；中性色度低于 `1/255` 的样片允许安全不变，但不得凭空染色；平均亮度漂移 ≤ `5/255`，新增黑白 clipping 均 ≤ `0.5%`。
-- 色调 `-0.4 / 0 / +0.4`：以 `(mean(red)+mean(blue))/2-mean(green)` 定义洋红–绿色对手轴，相邻步长 ≥ `4/255`、RGB 平均绝对差 ≥ `2/255`；平均亮度漂移 ≤ `5/255`，新增黑白 clipping 均 ≤ `1%`。
-- 清晰度 `-0.25 / 0 / +0.25`：平均边缘能量必须严格递增，两个相邻档位的逐像素最大通道差 p95 均 ≥ `1/255`；平均亮度漂移 ≤ `1/255`，新增黑白 clipping 均 ≤ `0.5%`。
-
-这些机器门锁定方向、最低可见强度和安全范围；辉光、过锐、噪声放大、肤质损害仍由盲评判断。
-
-```sh
-ruby scripts/check_ios_color_detail_semantics.rb \
-  .quality/ios-render-semantic-saturation/observation-report.json \
-  .quality/ios-render-semantic-tint/observation-report.json \
-  .quality/ios-render-semantic-clarity/observation-report.json
-```
-
-### 5.7 iOS Texture 预览与导出同义性
-
-`ios-preview-export-semantic-v1` 直接实例化生产 `IOSPhotoPreviewSession`，读取其
-`FlutterTexture.copyPixelBuffer()` 返回的真实 CVPixelBuffer，并与同一源文件、同一 V2 配方经
-`IOSPhotoFileRenderer` 产生的最终 JPEG 比较。固定非对称彩色样片同时应用曝光、高光、阴影、
-对比度、色温、规范化裁剪和 90° 旋转；方向归一后的尺寸必须相同，RGBA 平均绝对差不得超过
-4 个 8-bit 码值。该容差包含最终 JPEG 95 的有损编码，不应用来放宽前述参数方向门。
-
-原生会话还必须证明：初始帧可读、配方更新产生新帧、`close()` 后 CVPixelBuffer 不再可读且继续
-渲染被拒绝。Flutter 生命周期回归覆盖暂停/恢复、内存压力、失败重试，以及暂停后迟到的 Texture
-立即释放。本门证明模拟器内的真实 Core Image/CVPixelBuffer 路径和状态语义，不替代 Profile/Release
-物理设备上的首帧、连续滑杆帧率、内存、前后台和温控证据。
-
-### 5.8 iOS 画质改善固定样片工程门
-
-`ios-quality-enhancement-engineering-v1` 直接编译生产 `IOSImagePipeline`，在完整 48 张固定语料的
-最长边 2,048 px 代理图上分别执行去噪 28、暗光提亮 32、去灰 18 和细节锐化 16。所有效果均从
-中性配方独立执行，不允许互相掩盖；强度 0 必须逐像素等价。自动门至少锁定：
-
-- 去噪的局部高频残差不高于中性档 90%，同时保留不少于 50% 的全图边缘能量；
-- 标记为 `low_light` 的样片平均亮度提升不少于 `2/255`，新增黑白 clipping 均不超过 `0.5%`；
-- 去灰逐张提高亮度标准差至少 `0.0005`，新增黑白 clipping 均不超过 `0.5%`；
-- 细节锐化逐张提高边缘能量至少 1%，新增黑白 clipping 均不超过 `0.5%`。
-
-固定样片门曾发现系统线性对比度滤镜在低光样片上把约 6% 像素压成纯黑；生产去灰现改用
-端点固定的软对比度 color cube，再施加克制饱和度。该机器门防止方向、零值和裁切回归，但不替代
-噪点观感、锐化光晕、纹理自然度与竞品同图盲评。执行：
-
-```sh
-ruby scripts/test_quality_enhancement_corpus.rb
-ruby scripts/run_quality_enhancement_corpus.rb \
-  .quality/corpus-manifest.local.yaml \
-  .quality/quality-enhancement-engineering-<source>
-```
-
-### 5.9 iOS 滤镜与八色 HSL 固定样片工程门
-
-`ios-basic-editing-engineering-v1` 直接编译生产 V10 `IOSImagePipeline`，从完整 48 张语料中按
-单人、多人、无人脸、风景、食物、宠物、低光、逆光、混合光、组内成员、EXIF 旋转和 Display P3
-选取 12 张互不重复的固定样片，在最长边 1,024 px 的代理图上验证：
-
-- 12 套冻结滤镜均以强度 60 独立执行，相对中性档 RGB 平均绝对差不得低于 `1/255`；
-- 每套滤镜新增纯黑不超过 `0.5%`、新增纯白不超过 `1%`；
-- 红、橙、黄、绿、青、蓝、紫、洋红八个 HSL 通道分别执行色相 `+20`、饱和度 `+25`、明度
-  `+15`，每项新增黑白 clipping 均不超过 `0.5%`；
-- 每个通道在 12 张语料中必须至少存在一张可测结果：色相 RGB 差 ≥ `0.0007`、饱和度色度提升
-  ≥ `0.0005`、明度提升 ≥ `0.0015`；
-- 中性滤镜强度 0 必须与中性配方逐像素等价。
-
-首轮真实低光测量发现线性对比度实现会使电影、黑白和风景滤镜分别产生约 45%、44% 和 23%
-的纯黑像素。生产滤镜现把饱和度与色调曲线拆开，并用保持纯黑/纯白端点的 color cube 执行
-亮度和对比塑形；修复后同一低光样片所有滤镜的纯黑比例约为 `0.03%`。该门锁定滤镜身份、
-八色通道可操作性和基础裁切安全，不替代风格审美、肤色偏好或竞品同图盲评。执行：
-
-```sh
-ruby scripts/test_basic_editing_corpus.rb
-ruby scripts/run_basic_editing_corpus.rb \
-  .quality/corpus-manifest.local.yaml \
-  .quality/basic-editing-engineering-<source>
-```
-
-### 5.10 iOS 构图固定样片工程门
-
-`ios-composition-engineering-v1` 使用与基础编辑门相同的 12 张多场景固定样片，直接执行生产 V10
-`IOSImagePipeline`，锁定裁剪、90° 旋转、水平/垂直翻转、水平校正和双向透视的坐标与边界语义：
-
-- 全部构图参数为 0 时必须逐像素等价；
-- 水平、垂直翻转必须产生可测变化，连续执行两次后的 RGB 平均绝对差不超过 `0.002`；
-- `[0.12, 0.08, 0.88, 0.92]` 归一化裁剪必须得到声明的像素对齐尺寸，且输出与按顶边坐标
-  直接取样的区域平均差不超过 `1/255`；
-- 顺时针 90° 必须交换宽高，连续四次后的 RGB 平均绝对差不超过 `0.002`；
-- `±5°` 水平校正、水平/垂直 `±15` 透视必须保持画布尺寸并产生可测变化；新增白色边界比例
-  不得超过 `16%`；
-- 翻转、双向透视、裁剪、旋转和校正组合执行后尺寸必须有效，纯白比例不得超过 `20%`。
-
-原生 Simulator 回归还对同一非对称 JPEG 同时执行上述组合配方，直接比较真实
-`IOSPhotoPreviewSession` Texture 与 `IOSPhotoFileRenderer` 最终 JPEG；尺寸必须相同，平均通道误差不超过
-4 个 8-bit 码值。该门证明生产坐标、方向和预览/导出同义性，不替代真人构图偏好或物理设备上的
-触控精度。执行：
-
-```sh
-ruby scripts/test_composition_corpus.rb
-ruby scripts/run_composition_corpus.rb \
-  .quality/corpus-manifest.local.yaml \
-  .quality/composition-engineering-<source>
-```
-
-### 5.11 iOS 基础光色统一固定样片工程门
-
-`ios-basic-tone-engineering-v1` 直接编译当前生产 V10 `IOSImagePipeline`，对完整 48 张固定语料在
-最长边 512 px 的代理图上分别执行曝光 `±0.5`、对比度 `±0.35`、色温/高光/阴影/色调 `±0.4`、
-饱和度 `±0.35` 和清晰度 `±0.25`。它沿用 5.2–5.6 已冻结的方向、最低可见强度、亮度漂移与
-裁切阈值，并额外要求八项全部显式为 0 时逐像素等价。该门替代依赖历史 V2 导出目录的当前性
-证明，但不改变各参数原有质量定义。
-
-门禁首轮发现两项生产问题：高键样片的正对比度新增约 `5.13%` 纯白，清晰度在高反差样片新增
-约 `1.44%` 纯黑。对比度曲线现增加第二层端点衰减，在中间调保持可见变化的同时把新增黑/白
-裁切都降到约 `0.012%`；清晰度现按原始亮度生成中间调权重，在近黑和近白区域淡出，把新增
-黑/白裁切降到约 `0.018% / 0.032%`。原生回归同时锁定黑白端点、灰阶对比方向，以及包含全部
-八项光色的 Texture 预览与最终 JPEG 同图语义。执行：
-
-```sh
-ruby scripts/test_basic_tone_corpus.rb
-ruby scripts/run_basic_tone_corpus.rb \
-  .quality/corpus-manifest.local.yaml \
-  .quality/basic-tone-engineering-<source>
-```
-
-### 5.12 iOS 局部与背景固定样片工程门
-
-`ios-semantic-editing-engineering-v1` 直接编译生产 V10 `IOSImagePipeline`，从通用语料中固定选择
-12 张覆盖单人、多人、无人脸、风景、食物、宠物、暗光、逆光、混合光、组图、EXIF 方向和
-Display P3 的真实输入。每张输入使用同一张带软边的确定性主体蒙版，分别验证主体/背景光色、
-背景虚化、纯白背景、用户图片背景、画笔局部光色、传统消除以及主体蒙版添加/擦除。
-
-该门要求空局部蒙版、空消除蒙版和全零语义处理逐像素等价；所有核心操作必须在目标区域可见，
-受保护区域平均变化不高于 `0.0005`；背景虚化和传统消除至少在 12 张中的 9 张达到 `1/255`
-的 P95 可见差异。另有原生回归锁定局部画笔与消除的 Texture 预览/最终 JPEG 同图语义。
-确定性软边蒙版用于隔离验证像素算子和保护边界，不替代 Vision 人物分割、发丝/半透明 Alpha
-质量或真人自然度盲评；这些仍由候选阶段的同图人工门验证。执行：
-
-```sh
-ruby scripts/test_semantic_editing_corpus.rb
-ruby scripts/run_semantic_editing_corpus.rb \
-  .quality/corpus-manifest.local.yaml \
-  .quality/semantic-editing-engineering-<source>
-```
-
-### 5.13 iOS 整组一致性固定样片工程门
-
-`ios-group-consistency-engineering-v1` 使用清单中 6 组各 4 张同场景输入，直接执行生产 V10
-`IOSImagePipeline`。固定共享层为强度 0.8 的克制光色、电影滤镜 45 和蓝色 HSL；实际管线必须收到
-滤镜强度 36、蓝色饱和度 -9.6。每张照片再根据与生产分析器相同的亮度和红蓝轴阈值独立加入
-曝光/白平衡补偿，并以逐张曝光 +0.08 验证单张覆盖层。
-
-自动门要求：
-
-- 共享层在 24 张输入上均达到至少 `1/255` 的 P95 可见差，单张覆盖也必须逐张可见；
-- 共享强度 0 时，即使保存了滤镜身份，也必须与中性配方逐像素等价；
-- 逐张补偿的参数、方向与生产分析合同一致；无补偿时逐像素等价，有补偿时必须产生对应亮度或色温轴变化；
-- 相对输入新增纯黑、纯白均不得超过 2%；
-- 每组共享结果和自适应结果的亮度范围都不得比输入扩大超过 0.005，且至少 2/6 组的自适应结果
-  必须把亮度范围收窄 0.01 以上。
-
-这条机器门证明三层配方确实进入同一生产像素管线，并阻止机械复制、滤镜丢失、单张覆盖冻结
-共享风格等回归。它不判断审美方向、同一人物肤色连续性或用户是否理解“整组/当前照片”；这些仍按
-6.4 的真人盲评和范围理解门验收。执行：
-
-```sh
-ruby scripts/test_group_consistency_corpus.rb
-ruby scripts/run_group_consistency_corpus.rb \
-  .quality/corpus-manifest.local.yaml \
-  .quality/group-consistency-engineering-<source>
-```
-
-## 6. 人工盲评量表
-
-每张候选结果由至少 3 名评审在校准显示环境下匿名评分。使用 1–5 分：
-
-- 1：不可接受，存在明显伤害或任务失败。
-- 2：较差，需要重新处理。
-- 3：最低可用，存在可见但不阻断的问题。
-- 4：自然可靠，可以直接发布。
-- 5：明显优秀，优于常用替代方案。
-
-### 6.1 单张基础质量
-
-| 维度 | 观察内容 | 通过门 |
+
+产品文案中的“原画质导出”只能解释为“原像素尺寸高质量导出”，不表示有损 JPEG 与源文件逐字节相同。
+
+规范性决策见 [ADR 0001](../adr/0001-mvp-image-io-contract.md) 和 [ADR 0002](../adr/0002-native-preview-pipeline.md)。
+
+## 固定工程样片
+
+### 通用语料
+
+完整自动门使用至少 48 个独立资产：
+
+- 24 张单图。
+- 6 组 × 4 张组图。
+- 覆盖单人、多人、无人脸、低照度、逆光、混合光、风景、食物、宠物和组图成员。
+- 覆盖 JPEG、PNG、HEIC、sRGB、Display P3、非 1 EXIF 方向和 24–48 MP 输入。
+
+### 人像语料
+
+独立人像清单固定为 48 张：
+
+- 至少 36 张 `portrait_single` 成人单人图。
+- 至少 4 张 `portrait_multi` 多人图。
+- 至少 8 张 `no_face` 安全负样片。
+- 单人子集覆盖深浅肤色、侧脸、眼镜、胡须、妆容、雀斑/痣、皱纹、遮挡和不同清晰度。
+
+### 来源、隐私与清单
+
+- 每个资产记录稳定 ID、角色、组、格式、色彩、方向、像素、来源、作者、许可、许可证据和 SHA-256。
+- 样片与许可证据存放在被 Git 忽略的 `.quality/`；仓库只提交清单结构和校验器。
+- 未经授权的用户照片不得进入固定语料、仓库、日志、截图或共享评审包。
+- 公共许可或技术合成素材可以支持工程回归，但不能代替真实用户同意、正式盲评授权或真实组图体验。
+- 完整模式缺少资产、哈希、许可、角色或媒体探针时必须失败。
+
+## 自动工程门
+
+自动门只证明确定性正确性和安全边界，不判断“更好看”。任一失败都阻断对应功能进入候选。
+
+### 所有图像链路
+
+1. 中性配方不得产生可见色偏、尺寸变化或额外处理。
+2. 支持的 EXIF 方向在预览和导出中一致。
+3. 除裁剪外保持原始像素尺寸，不导出预览代理图。
+4. 裁剪、旋转、翻转、校正和透视使用同一规范化坐标语义。
+5. 同一输入、配方和引擎版本得到稳定结果。
+6. 完整会话后原图内容哈希不变。
+7. 保存、恢复和再次导出不累积效果或重复压缩。
+8. 输出移除禁止元数据并按合同保留拍摄时间。
+9. 单项损坏、取消或失败不破坏其他照片和已完成结果。
+10. iOS Texture 预览与最终导出保持方向、色彩趋势、构图、强度和安全降级同义。
+
+### 分能力门
+
+| 能力 | 自动门必须证明 | 不能由自动门证明 |
 |---|---|---|
-| 曝光与动态范围 | 主体清晰，高光不过曝，阴影不过度抬升 | 中位数 ≥ 4，任何样片不得为 1 |
-| 白平衡与色彩 | 无不必要偏色，色彩符合配方意图 | 中位数 ≥ 4 |
-| 细节与噪点 | 不出现光晕、断层、过锐或噪点放大 | 中位数 ≥ 4 |
-| 构图与方向 | 裁剪和水平线正确，无坐标漂移 | 必须全部通过 |
-| 预览/导出一致 | 结果趋势、裁剪和强度一致 | 必须全部通过 |
+| 基础光色 | 正负方向、最低可见强度、裁切预算、中性恒等 | 审美偏好 |
+| 构图 | 坐标、尺寸、可逆变换、边界预算、预览/导出同义 | 真人构图偏好与触控精度 |
+| 滤镜/HSL | 身份、强度、通道方向、中性恒等、裁切预算 | 风格是否好看 |
+| 画质改善 | 去噪、暗光、去灰、锐化方向与边缘保护 | 不同真实照片上的主观改善 |
+| 自然人像 | 关闭恒等、默认可见、高安全更强、负样片安全、保护区 | 自然度、身份感和“更好看” |
+| 塑形 | 目标位移可见且单调、非目标/五官/背景保护 | 真人比例自然度 |
+| 局部/背景 | 空蒙版恒等、目标区可见、保护区稳定、预览/导出同义 | 发丝 Alpha 和复杂背景自然度 |
+| 整组一致性 | 共享层、逐张补偿和单张覆盖确实独立进入生产管线 | 审美一致性和范围理解 |
 
-### 6.2 自然人像
+具体参数、fixture、数值容差和生产源码身份由对应 `scripts/test_*`、`scripts/run_*` 与结构化报告维护；文档不复制每轮运行日志和历史实测值。
 
-当前 iOS 工程候选为 `ios-geometry-retouch-candidate-v5`。自动化锁定默认效果相对原图可测、高安全强度变化更大、面部阴影优先提亮且高光/背景受保护、局部红黄肤色差收敛且整体肤色保持、细碎纹理能量下降、高对比永久边缘至少保持合成源边缘的 90%、36 张单人输入应用以及 12 张多人/无人脸输入安全保持。v5 的 36 张单人默认档全图 RGB 平均绝对差最低/中位/最高为 `0.131/0.433/1.957`，变化像素比例为 `2.32%/7.96%/25.63%`；高安全档为 `0.188/0.661/2.791` 与 `2.67%/8.40%/26.75%`，方向余弦最低 `0.983`，12 张负向输入保持零变化。现有本地人像清单已达到 36 张单人成人工程样片，但机器合同仍不等于竞品同路径结果、五人盲评或物理设备质量证据；因此不得把工程 corpus 通过写成自然人像审美质量通过。
+主要入口：
 
-同一 v5 的六项生产像素窄测试已在实体 iPhone 14 Plus / iOS 26.5.2 上通过，覆盖肤色均匀、阴影提亮、高光/背景、纹理、永久边缘和无脸保持。它只证明 Development 测试路径可在该设备执行；没有冻结提交、Profile/Release 帧率/内存、真实高分辨率输入和最终产物回查，不能填入三档设备证据清单。
+```sh
+ruby scripts/check_image_quality_corpus.rb
+ruby scripts/test_ios_file_render_corpus.rb
+ruby scripts/test_portrait_engineering_corpus.rb
+bash scripts/run_ios_mvp_engineering_gate.sh --automatic
+```
 
-| 维度 | 观察内容 | 通过门 |
+## 六项人像竞品门
+
+以下能力分别报告，其他能力或综合分不能抵消单项失败：
+
+1. 一键自然美化。
+2. 质感磨皮。
+3. 肤色与面部光线。
+4. 瑕疵减弱。
+5. 瘦脸。
+6. 瘦身。
+
+正式评审要求：
+
+- 使用同一原图、同一物理 iPhone、同一任务和最终导出。
+- 绑定映见源码/IPA、竞品 App Store 身份与实际版本、操作路径、参数和文件哈希。
+- 结果匿名随机化，评审者看不到产品名称和处理方式。
+- 至少 48 个独立 item，其中至少 36 个人像和 12 个安全负样片。
+- 至少五名评审者完成全部必填评分。
+- 可改善样片相对原图成对偏好率每项至少 65%。
+- 相对醒图的胜出或持平比例每项至少 50%。
+- 任何身份改变、五官漂移、身体比例异常或背景明显弯曲均为灾难性失败；灾难性错误必须为 0。
+
+完整盲码、评分和检查流程见[六项人像竞品工作流](portrait-core-parity-workflow.md)与[匿名评审工作流](blind-review-workflow.md)。当前竞品实机结果在正式证据生成前一律为 `数据缺失`。
+
+## 人工盲评量表
+
+统一使用 1–5 分：1 为不可接受，3 为最低可用，4 为自然可靠可发布，5 为明显优秀。
+
+### 单张基础质量
+
+| 维度 | 通过门 |
+|---|---|
+| 曝光与动态范围 | 中位数 ≥ 4，任何样片不得为 1 |
+| 白平衡与色彩 | 中位数 ≥ 4 |
+| 细节与噪点 | 中位数 ≥ 4 |
+| 构图与方向 | 全部通过 |
+| 预览/导出一致 | 全部通过 |
+
+### 自然人像
+
+| 维度 | 通过门 |
+|---|---|
+| 身份保持 | 全部通过 |
+| 肤色自然 | 中位数 ≥ 4 |
+| 纹理保护 | 中位数 ≥ 4 |
+| 头发、眼镜、遮挡和多人边缘 | 中位数 ≥ 3.5 |
+| 默认强度克制 | 中位数 ≥ 4 |
+
+### 人像塑形
+
+- 瘦脸与瘦身分别证明从低到高安全强度可见且单调。
+- 眼鼻嘴、头部、四肢、身份、非目标人物和背景必须全部通过。
+- 默认 0、归零、撤销/重做、恢复和预览/导出同义必须全部通过。
+- 两项相对原图的可改善样片偏好率分别至少 65%。
+
+### 整组一致性
+
+| 维度 | 通过门 |
+|---|---|
+| 共同风格 | 每组中位数 ≥ 4 |
+| 逐张正确性 | 每组不得出现 1 |
+| 同一人物肤色连续性 | 每组中位数 ≥ 4 |
+| 场景差异保留 | 每组中位数 ≥ 3.5 |
+
+## 物理设备矩阵
+
+设备可以替换，但芯片、内存和系统级别不能只覆盖旗舰机。
+
+| 档位 | 目标级别 | 必测输入 |
 |---|---|---|
-| 身份保持 | 五官、脸型和人物特征未被意外改变 | 必须全部通过 |
-| 肤色自然 | 不灰、不黄、不泛红，不跨区域突变 | 中位数 ≥ 4 |
-| 纹理保护 | 毛孔和真实细节存在，无塑料皮肤 | 中位数 ≥ 4 |
-| 边缘质量 | 头发、眼镜、遮挡和多人边缘无明显破坏 | 中位数 ≥ 3.5 |
-| 克制程度 | 默认强度自然，不需要用户先撤销伤害 | 中位数 ≥ 4 |
+| 低 | iPhone 11 / A13 / 4 GB / iOS 15 | 12 MP、人像、六张组图 |
+| 中 | iPhone 13 或 14 / 4–6 GB / 当前支持系统 | 12/24 MP、P3、HEIC、组图 |
+| 高 | iPhone 15 Pro 或更新 Pro / 8 GB 级 | 48 MP、多人、批量导出 |
 
-### 6.3 人像塑形
+模拟器、Debug 和桌面运行不计入物理矩阵。三档必须绑定同一冻结候选；Android 设备矩阵延期到后续里程碑。
 
-瘦脸与瘦身是 MVP 的两项独立质量门，不属于自然人像磨皮的强度档。两项能力默认关闭，仅在用户显式操作且各自安全分析通过后生效；不适用输入必须保持原图。具体自动位移预算和完成定义以 `docs/product/portrait-reshape-vertical-slice-spec.md` 为准。
+设备证据还必须覆盖 PhotoKit、分享成功/取消/失败、权限、前后台、低内存、离线、取消、恢复、最终输出回查、VoiceOver 和温控。执行格式见[设备证据工作流](device-evidence-workflow.md)。
 
-| 维度 | 观察内容 | 通过门 |
-|---|---|---|
-| 轮廓有效 | 低强度到高安全强度的脸宽/躯干宽度可见且单调收窄 | 两项分别全部通过 |
-| 身份与比例 | 眼鼻嘴、头部、四肢长度和人物身份未被意外改变 | 必须全部通过 |
-| 背景保护 | 门框、墙线、家具和高对比长边无可见弯曲 | 必须全部通过 |
-| 交互语义 | 默认 0、独立归零、撤销/重做、恢复和前后对比正确 | 必须全部通过 |
-| 预览/导出一致 | Texture 预览与原图导出的形变方向、范围和强度一致 | 必须全部通过 |
-| 主观改善 | 可改善样片相对原图的成对偏好率 | 瘦脸、瘦身分别 ≥ 65% |
+## 性能预算
 
-肤质自然度、全图像素差或检测 API 可用不能替代上述几何门。任何五官漂移、身体比例异常或背景弯曲均为灾难性失败。
+使用冻结样片、Profile/Release 或精确 TestFlight build，记录 p50/p95，不使用单次最好值。
 
-### 6.4 整组一致性
-
-| 维度 | 观察内容 | 通过门 |
-|---|---|---|
-| 共同风格 | 色彩倾向、对比和质感属于同一方向 | 每组中位数 ≥ 4 |
-| 逐张正确性 | 单张没有因复制参数出现欠曝或偏色 | 每组不得出现 1 |
-| 肤色连续性 | 同一人物跨照片肤色自然且稳定 | 每组中位数 ≥ 4 |
-| 差异保留 | 夜景、逆光等场景特征没有被强行抹平 | 每组中位数 ≥ 3.5 |
-
-## 7. 竞品对照规则
-
-第一轮只固定醒图和 Berry：醒图代表单张精修基线，Berry 代表低决策审美基线。
-
-正式人像评审使用单轮七槽 schema 2：原图、映见关闭/默认/高安全导出、映见默认预览、醒图固定路径导出和 Berry 固定路径导出。两款竞品必须来自与映见采集相同的 iPhone 和系统，以 privacy-safe 轮次设备 ID 绑定同一设备证据，并分别绑定固定 App Store/bundle 身份、实际版本、参数、操作路径、文件哈希和不同的规范化像素；source plan 同时绑定 48 样片 manifest 及逐项内部评审授权证据。至少五名评审者必须对每项六个非原图盲码全部评分，不能只填写映见。旧单竞品 schema 1 只能用于历史诊断，不能通过 MVP 冻结门。
-
-- 使用同一原始样片和同一台设备显示结果。
-- 记录竞品应用版本、设备、系统、操作路径、所用预设/参数、是否会员、导出尺寸和文件大小。
-- 醒图选择最接近“自然可发布”的一键结果，并允许不超过 60 秒的基础微调。
-- Berry 选择最接近目标方向的现有滤镜和强度，不额外补充其没有的深度工具。
-- 映见分别记录三套推荐的首选结果和允许不超过 60 秒的微调结果。
-- 评审看不到产品名称和处理方式。
-- 竞品结果只建立比较基线，不进入映见训练、生产资源或商店素材。
-
-当前竞品实机结果为 `数据缺失`，不得宣称映见已达到或超过竞品。
-
-## 8. 物理设备矩阵
-
-设备档位是采购/借测目标，具体型号可以替换，但芯片、内存和系统级别不得只覆盖旗舰机。
-
-| 平台 | 档位 | 目标级别 | 必测输入 |
-|---|---|---|---|
-| iOS | 低 | iPhone 11 / A13 / 4 GB / iOS 15 | 12 MP、人像、六张组图 |
-| iOS | 中 | iPhone 13 或 14 / 4–6 GB / 当前支持系统 | 12/24 MP、P3、HEIC、组图 |
-| iOS | 高 | iPhone 15 Pro 或更新 Pro / 8 GB 级 | 48 MP、多人、批量导出 |
-
-模拟器、Debug 和桌面运行只用于开发，不计入矩阵证据。当前 iOS 三个物理档位均为 `未验证`。Android 低/中/高档位延期到后续里程碑，不影响本轮 iOS MVP 与 TestFlight 判定。
-
-## 9. 性能预算
-
-以下为 Phase 0 继续投入门，均使用冻结样片、Profile 或 Release 和物理设备；记录 p50/p95，不用单次最好值。
-
-| 指标 | 低档门 | 中档门 | 高档门 |
+| 指标 | 低档 | 中档 | 高档 |
 |---|---:|---:|---:|
 | 单张首次可用预览 | ≤ 4.0 s | ≤ 2.5 s | ≤ 1.8 s |
 | 六张三方案全部可检查 | ≤ 12 s | ≤ 8 s | ≤ 6 s |
@@ -600,47 +183,20 @@ ruby scripts/run_group_consistency_corpus.rb \
 
 - Flutter UI 不得出现超过 100 ms 的主线程阻塞。
 - 峰值附加内存不得超过设备物理内存的 25%，且不得超过 512 MB。
-- 连续完成三轮六张导出不得崩溃、被系统杀死或产生不可恢复项目。
-- 设备过热或内存压力时可以降低预览分辨率和并发，但不得降低最终输出尺寸。
+- 连续三轮六张导出不得崩溃、被系统杀死或产生不可恢复项目。
+- 温控或内存压力时可以降低预览分辨率和并发，不得降低最终输出尺寸。
 
-预算可以在技术 Spike 后调整一次，但必须保存原始测量、解释变更，并同步更新 Spec；不能因为当前实现未达到而静默放宽。
+预算只能基于保存的真实测量和显式 Spec 变更调整，不能因当前实现未达到而静默放宽。
 
-## 10. Phase 0 退出条件
+## 最终接受条件
 
-- [x] 产品闭环和竞品角色已冻结。
-- [x] 图像输入、预览、输出、色彩和元数据合同已冻结。
-- [x] 样片配额、权利要求和机器清单格式已冻结。
-- [x] 自动门和人工盲评量表已冻结。
-- [x] 设备档位和性能预算已冻结。
-- [ ] 48 个合法样片及哈希已补齐。
-- [ ] 醒图与 Berry 同样片结果已采集。
-- [ ] iOS 低/中/高三档物理设备或获批替代矩阵已落实。
-- [ ] Flutter → 原生预览 → 原图导出 Spike 已达到预算。
-- [ ] 人像候选已通过盲评并形成采用/降级 ADR。
+只有同一冻结候选同时具备以下证据，才能标记为 `physical-accepted`：
 
-未勾选项完成前，Phase 0 状态为 `blocked-by-evidence`，可以制作交互原型和技术 Spike，但不能进入大规模生产功能实现或宣称 MVP 图像质量成立。
+- 完整自动工程门通过。
+- 三档 iOS 物理设备和性能预算通过。
+- 六项人像竞品门分别通过。
+- 单张、整组和安全负样片人工量表通过。
+- 五名目标用户无引导主旅程通过。
+- 结构化接受报告、人工签字、源码、IPA 和所有证据哈希一致。
 
-## 11. 验证命令
-
-```sh
-ruby scripts/check_image_quality_corpus.rb --allow-incomplete
-ruby scripts/check_image_quality_corpus.rb
-ruby scripts/test_image_quality_corpus.rb
-ruby scripts/test_ios_file_render_corpus.rb
-ruby scripts/test_portrait_engineering_corpus.rb
-ruby scripts/test_portrait_review_plan_tools.rb
-ruby scripts/test_blind_review_tools.rb
-ruby scripts/test_usability_evidence.rb
-ruby scripts/test_build_usability_evidence.rb
-ruby scripts/check_device_evidence.rb --allow-incomplete
-ruby scripts/test_device_evidence.rb
-scripts/test_ios_mvp_integration.sh <booted-ios-simulator-id>
-ruby scripts/test_ios_mvp_engineering_gate.rb
-scripts/run_ios_mvp_engineering_gate.sh <booted-ios-simulator-id>
-```
-
-第一条只检查当前清单结构，第二条是完整门禁；在样片缺失时第二条必须失败。
-最后一条从正式首页路由进入编辑器，在 iOS Flutter 运行时同时执行单图原生纵切和六图最高行为旅程。单图纵切只以确定性 `PhotoSource` 代替系统相册选择界面，选择之后使用生产 `AppOwnedPhotoImporter`、原生 `yingjian/photo_input` 检查与 `JsonPhotoProjectStore`，验证应用私有副本、SHA-256、尺寸、方向、色彩空间、输入格式、相对路径快照和全新 Store/Widget 树恢复；随后继续使用生产 `MethodChannelPhotoPreviewRenderer` 与 `MethodChannelPhotoExporter`，验证 `ios-core-image` FlutterTexture 创建、曝光手势触发的配方更新、原图 JPEG 渲染、Simulator PhotoKit 保存、分享 JPEG 文件头/尺寸、Texture 释放和外部源 PNG 字节不变。运行器只预授权 Simulator `photos-add` 以避免系统弹窗，不替换上述生产 Adapter 或原生实现。六图旅程覆盖安全分析回退、三套推荐、整组调整、第二张单张覆盖、六张批量导出、单项失败、仅重试失败项及全部原始输入字节不变，故障注入与多图保存边界继续使用确定性替身。关键范围、照片、推荐、参数、项目恢复与失败重试均使用稳定 `ValueKey`，不依赖屏幕坐标或本地化文案。运行器结束时会恢复正常 `lib/main.dart` 构建目标，避免 Flutter 的临时 test listener 污染后续 Xcode 验证。它是 Simulator/Debug 工程证据，不证明系统相册选择 UI，也不能代替 Profile/Release 物理设备矩阵、真实高分辨率 PhotoKit 压力或真人范围理解。
-一键工程门要求本地通用语料、人像语料、iOS 三档设备证据和一个已启动的 iOS Simulator；默认路径可以分别通过 `YINGJIAN_IMAGE_CORPUS_MANIFEST`、`YINGJIAN_PORTRAIT_CORPUS_MANIFEST` 和 `YINGJIAN_IOS_DEVICE_EVIDENCE` 覆盖。它串行执行源码卫生、Flutter 静态/单元测试、iOS 原生测试、iOS Runtime 主旅程、普通 `lib/main.dart` Simulator 完整构建与非白屏启动、两套语料、设备证据和发布合同，命令清单不包含延期平台任务。普通启动门会在 integration harness 恢复配置后重新执行非 `--config-only` 构建，安装并启动产物，并对排除系统状态栏后的内容区做非白屏检查，防止把测试 Runner 或配置占位产物误认成可运行 App。缺少任一真实输入时必须失败，且不会把工程通过升级为真人评审或交付通过。
-匿名包构建、评分表字段和人像冻结门见[本地匿名图片评审工作流](blind-review-workflow.md)。
-iOS 三档 Profile/Release 原始测量、产物回查和生命周期门见[物理设备性能与生命周期证据工作流](device-evidence-workflow.md)。
+任何缺失项都标记为 `acceptance-pending`，不得用 Simulator、单张截图、历史 build 或工程 corpus 结果代替。

@@ -26,6 +26,10 @@
 
 使用单一上下文：根目录 `CONTEXT.md` 维护领域词汇，难以逆转的重要决策记录在 `docs/adr/`。详见 `docs/agents/domain.md`。
 
+### Development cadence
+
+后续开发统一遵循“完整实现功能切片 → 自动化与 iOS Simulator 集中验证 → 冻结候选 → 最终真机验收”的时序；不得把每次小改动都变成一次真机流程。详见 `docs/agents/development-validation-workflow.md`。
+
 ## 仓库与工具链
 
 - `lib/`：Flutter UI、交互、编辑状态、配方和任务编排。
@@ -41,6 +45,7 @@
 - `ios/`、`android/`：平台工程以及未来的原生图像处理桥接。
 - `test/`：单元和 Widget 行为测试。
 - `docs/`：产品、架构、质量和发布契约。
+- `docs/README.md`：按任务类型选择最少必要文档的总路由。
 - `docs/architecture/flutter-foundation.md`：Flutter 分层、依赖方向和 Module seam 的基准说明。
 - `docs/architecture/cross-app-foundation-audit.md`：与三款现有应用逐项对照后的采用/拒绝决定。
 - `docs/product/`：竞品基线、产品上下文和当前 MVP 交付合同。
@@ -80,8 +85,8 @@ ruby scripts/check_release_contract.rb validate-config
 
 - debug-only、test-only、assert-only 或非 Debug 构建不可用的 API，不得无保护进入生产路径。
 - Flutter 的 `debugNeedsPaint`、`debugNeedsLayout` 等 debug-only framework member 必须用短路的 `kDebugMode && ...` 保护，或在求值前返回；`kReleaseMode` 不能替代该保护，因为 Profile 既不是 Debug 也不是 Release。
-- 设备敏感生产路径变更后，运行窄回归测试并在受影响平台执行 Profile 或 Release 冒烟。
-- iOS 渲染、分享、插件、签名和生命周期差异需要物理设备证据，才能宣称真机问题完成。
+- 设备敏感生产路径变更后，先运行窄回归测试；相关功能切片完整后再进行 Simulator 与 Profile/Release 构建验证，物理设备执行证据集中到冻结候选阶段。
+- iOS 渲染、分享、插件、签名和生命周期差异仍需要物理设备证据才能完成最终验收。若任务明确针对仅在真机出现的问题，则必须在宣称该问题修复前做针对性真机验证。
 - Review 时搜索变更的生产源码是否新增 debug-only API；`debugPrint` 等安全工具不自动构成违规，应依据 API 契约判断。
 
 ## 图像、隐私与 AI 成本
@@ -99,13 +104,13 @@ ruby scripts/check_release_contract.rb validate-config
 
 - 测试公开行为接缝，不耦合内部 Widget、Shader 或供应商实现对象。
 - 图像处理使用固定样片、固定参数和明确数值容差；主观人像质量另以盲评补充。
-- UI 行为用 Widget 测试；算法和配方使用单元/黄金样片测试；完整导入、预览、撤销、导出路径再使用集成或真机验证。
+- UI 行为用 Widget 测试；算法和配方使用单元/黄金样片测试；功能切片完整后在 iOS Simulator 运行正式导航与集成路径，冻结候选后再做最终真机验证。
 - 每个新增的用户可见 Flutter 页面、Screen 或 Route，都必须在同一变更中新增或扩展 `integration_test`；Widget 测试不能替代此门禁。
 - 集成测试必须通过正式导航或路由入口进入页面，验证稳定的页面标识，执行至少一个主要交互，并断言可见状态或导航结果；纯展示页面至少验证内容契约以及返回或关闭行为。
 - 必要时为测试增加稳定的 `ValueKey` 或 `Semantics` 标识，不得只依赖本地化文案、屏幕坐标或 Widget 顺序。
 - 测试必须接入仓库现有 integration-test runner，并在受支持目标上运行最窄用例。测试缺失、被跳过或失败时，新增页面不得视为完成；技术上确实受阻时，必须记录具体阻塞并取得用户对后续补测的明确批准。
-- Debug 或模拟器结果不能代替 Profile/Release 真机性能证据。
-- 用户可见 UI 变更必须检查布局、加载、空态、错误态、取消、无障碍和关键交互；无法取得截图或真机证据时明确标记未验证。
+- Debug 或模拟器结果可以证明工程与交互验证通过，但不能代替冻结候选的 Profile/Release 真机性能证据。
+- 用户可见 UI 变更必须在切片级 Simulator 验证中检查布局、加载、空态、错误态、取消、无障碍和关键交互；最终真机视觉与交互证据在候选阶段集中采集。
 - 完成前运行最窄相关测试、`flutter analyze`、必要的完整测试，并检查 `git diff --check`。
 
 ## Git 与变更边界
@@ -118,43 +123,21 @@ ruby scripts/check_release_contract.rb validate-config
 
 ## 本地发布与候选完整性
 
-- Android APK/AAB 和 Apple archive/IPA 必须在本机完成构建与签名。没有逐次明确授权时，不得创建或触发 GitHub Actions 打包、签名、TestFlight 或商店上传工作流。
-- 每个 checkout/worktree 在改版本、构建或上传前，必须包含 schema 2 的 `release/release-policy.yaml`，且 `identity.version_rule` 为 `reuse_testing_else_patch_public`。
-- 先从已认证商店读取公开版本、最新上传营销版本和该平台所有版本列车中的最高 build；基线超过 30 分钟即失效。
-- 如果最新上传营销版本高于公开版本，继续使用该测试版本，只把平台全局 build 加一；两者相等时才把 patch 版本加一，同时使用全局下一 build。营销版本变化不能重置 build。
-- 正式候选只能从干净、已推送并与 upstream 完全同步的 release worktree 构建。没有远程分支、ahead、behind、diverged 或源码提交不匹配都应阻断。
-- 构建前冻结平台、track、公开基线、源码完整 SHA、版本、build 和获准终止阶段。
-- 构建后单独验证包名/Bundle ID、版本、build、配置、必要资源、数据 schema/记录数量、源码提交和 SHA-256；源码身份不能代替产物身份。
-- 当前任一平台 `release_ready: false` 时，表示签名、商店记录或产物验证链尚未完成，禁止绕过校验器发布。
-- Firebase 原生配置、公开隐私/支持 URL、Apple App Privacy 与 Google Play Data Safety 均为独立发布门禁；缺失时预检必须失败。
-
-发布前入口：
-
-```sh
-RELEASE_PUBLIC_VERSION=... \
-RELEASE_REMOTE_LATEST_VERSION=... \
-RELEASE_REMOTE_LATEST_BUILD=... \
-RELEASE_BASELINE_VERIFIED_AT=... \
-RELEASE_SOURCE_COMMIT=... \
-bash scripts/release_contract_preflight.sh ios <version> <build>
-```
-
-Android 将平台参数改为 `android`。运行该命令不代表获准构建或上传。
+- 构建、签名和上传必须在本机执行；每次 TestFlight、商店上传或提交都需要用户明确授权。
+- 发布任务开始前必须读取 [`docs/release-contract.md`](docs/release-contract.md)，并通过 schema 2 发布合同、30 分钟内商店基线、全平台连续 build、干净且与 upstream 同步的源码身份和最终产物身份检查。
+- `release_ready: false`、缺少签名/环境文件、候选证据不完整或版本/build 不合法时必须停止，不得削弱预检。
+- 源码提交、版本/build、Bundle ID、签名、配置、资源和产物 SHA-256 是独立证据；任一缺失都不能称为候选完成。
 
 ## 商店与交付状态边界
 
-- 以下状态必须分别报告：本地构建、已上传、provider processing、provider valid、测试组分发、真实测试者可达、已提交审核、审核中、已批准、公开可用。
-- 成功上传不等于候选可测试；必须轮询同一 build/upload ID 到 provider 终态。仍在处理时继续只读查询，不得因等待超时另传新 build。
-- 测试轨道没有活跃测试者或不可安装时，不能称为“可供内部测试”。
-- App Review 或 Play 生产提交前，需检查完整 locale × device 素材矩阵、出口合规/加密、年龄分级、社交声明、审核说明和账号、候选选择与发布模式。
-- Managed publishing 以及 Apple 手动/自动发布属于独立的公开发布控制；提交审核前必须说明批准后是否会自动公开，并取得相应授权。
+- 分别报告本地构建、已上传、provider processing、provider valid、测试组分发、真实测试者可达、已提交审核、审核中、已批准和公开可用。
+- 上传成功不是测试者可达；轮询同一 build 到终态并验证测试组和实际安装。
+- 审核与公开发布是新的授权阶段。提交前按 [`docs/release-contract.md`](docs/release-contract.md) 检查素材、合规、审核信息和批准后的公开方式。
 
 ## Apple 订阅与法律元数据保护
 
-- App Store 必须保留有效的隐私政策 URL，应用内也必须可访问；如果未来提供自动续订订阅，应用和商店元数据都必须提供有效的 Terms of Use 与 Privacy Policy。
-- 隐私 URL、User Privacy Choices、App Privacy 问卷、Terms URL/法律页脚、自定义 EULA 及地区、订阅产品/组名称、描述、周期、价格、试用和优惠都是受保护字段。
-- 普通文案、关键词、截图、版本说明或“更新商店元数据”的请求，不授权修改任何受保护字段，也不授权切换 Apple 标准/自定义 EULA。
-- 修改受保护字段前必须按 locale 获取最新远程快照并记录 EULA 模式，只上传明确字段白名单，之后逐字段重新读取验证。发现缺失或不一致时作为单独 blocker 报告，不得顺手修复。
+- 隐私、Terms、EULA、App Privacy、订阅和地区字段属于受保护元数据；普通文案、截图或版本说明请求不授权修改这些字段。
+- 修改前读取 [`docs/legal/store-privacy-checklist.md`](docs/legal/store-privacy-checklist.md)，按 locale 获取最新远程快照，只上传明确白名单并逐字段回读。
 
 ## Agent 工作流
 
@@ -162,6 +145,7 @@ Android 将平台参数改为 `android`。运行该命令不代表获准构建�
 2. 检查工作树和相邻实现，确认已有修改和真实行为。
 3. 把需求转成可观察验收标准和测试计划。
 4. 实施最小且完整的改动，保持层级边界和隐私约束。
-5. 运行与风险相称的自动化、静态检查、Profile/Release 和真机验证。
-6. UI 变更检查重要状态并保留本地、Git 忽略的视觉证据。
-7. 报告行为变化、验证证据、已知基线、未验证项及交付状态；不得把合同测试通过描述成已构建、已上传或已发布。
+5. 先运行窄自动化与静态检查；功能切片完整后，再集中运行 iOS Simulator 集成验证。
+6. 本轮功能全部实现且自动工程门通过后冻结候选；只有此时才集中执行 Profile/Release、TestFlight 和真机设备验收。仅真机缺陷任务可提前做针对性设备验证。
+7. UI 变更在 Simulator 阶段检查重要状态并保留本地、Git 忽略的视觉证据；冻结候选再采集最终真机证据。
+8. 分别报告功能实现、模拟器验证、候选冻结和真机验收状态；不得把其中任一项笼统描述成已构建、已上传或已发布。
