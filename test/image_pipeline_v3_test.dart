@@ -4,16 +4,16 @@ import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_for_platform.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_v2.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_v3.dart';
-import 'package:yingjian/features/editor/domain/image_pipeline_v6.dart';
+import 'package:yingjian/features/editor/domain/image_pipeline_v10.dart';
 
 void main() {
   tearDown(() => debugDefaultTargetPlatformOverride = null);
 
-  test('selects V6 only for the iOS versioned quality adapter', () {
+  test('selects V9 only for the iOS versioned semantic editing adapter', () {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     expect(
       imagePipelineForCurrentPlatform(EditRecipe.neutral),
-      isA<ImagePipelineV6>(),
+      isA<ImagePipelineV10>(),
     );
 
     debugDefaultTargetPlatformOverride = TargetPlatform.android;

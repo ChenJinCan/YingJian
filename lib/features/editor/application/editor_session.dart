@@ -36,6 +36,15 @@ class EditorSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Changes only the active portrait editing target. Target focus is UI
+  /// state until an actual parameter adjustment commits the resulting recipe.
+  void selectPortraitTarget(EditRecipe nextRecipe) {
+    if (nextRecipe == _recipe) return;
+    _adjustmentStart = null;
+    _recipe = nextRecipe;
+    notifyListeners();
+  }
+
   void beginAdjustment() {
     _adjustmentStart ??= _recipe;
   }

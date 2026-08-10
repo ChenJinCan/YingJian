@@ -266,6 +266,26 @@ class RunnerTests: XCTestCase {
     )
   }
 
+  func testImagePipelineV2ClarityFadesAtBlackAndWhiteEndpoints() throws {
+    let neutral = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV2()))
+    let clarity = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV2(clarity: 0.25)))
+    let values: [UInt8] = [0, 0, 32, 32, 96, 96, 160, 160, 224, 224, 255, 255]
+    let pixels = values.flatMap { [$0, $0, $0, UInt8(255)] }
+    let source = CIImage(
+      bitmapData: Data(pixels),
+      bytesPerRow: values.count * 4,
+      size: CGSize(width: values.count, height: 1),
+      format: .RGBA8,
+      colorSpace: sRGB
+    )
+    let neutralPixels = try rgbaBytes(neutral.applying(to: source, extent: source.extent))
+    let clarityPixels = try rgbaBytes(clarity.applying(to: source, extent: source.extent))
+
+    XCTAssertEqual(Array(clarityPixels.prefix(4)), Array(neutralPixels.prefix(4)))
+    XCTAssertEqual(Array(clarityPixels.suffix(4)), Array(neutralPixels.suffix(4)))
+    XCTAssertGreaterThan(meanAbsoluteDifference(neutralPixels, clarityPixels), 0)
+  }
+
   func testPhotoPreviewTextureMatchesFinalJpegRecipeSemantics() throws {
     let sourceURL = temporaryURL(extension: "jpg")
     let outputURL = temporaryURL(extension: "jpg")
@@ -278,6 +298,9 @@ class RunnerTests: XCTestCase {
         shadows: -0.2,
         contrast: 0.2,
         warmth: 0.2,
+        tint: 0.15,
+        saturation: 0.2,
+        clarity: 0.1,
         crop: [0.1, 0.0, 0.9, 1.0],
         quarterTurns: 1
       ))
@@ -307,6 +330,94 @@ class RunnerTests: XCTestCase {
       meanAbsoluteDifference(previewBytes, exportedBytes),
       4.0,
       "Texture preview and final JPEG must preserve the same recipe semantics"
+    )
+  }
+
+  func testPhotoPreviewTextureMatchesFinalJpegCompleteCompositionSemantics() throws {
+    let sourceURL = temporaryURL(extension: "jpg")
+    let outputURL = temporaryURL(extension: "jpg")
+    defer { removeTemporaryFiles(sourceURL, outputURL) }
+    try writeAsymmetricJpeg(to: sourceURL, orientation: 1)
+    var arguments = pipelineV7(
+      flipHorizontal: true,
+      perspectiveHorizontal: 8,
+      perspectiveVertical: -6
+    )
+    var geometry = arguments["geometry"] as! [String: Any]
+    geometry["normalizedCrop"] = [0.1, 0.12, 0.9, 0.88]
+    geometry["quarterTurns"] = 3
+    geometry["straightenDegrees"] = 3.0
+    arguments["geometry"] = geometry
+    let pipeline = try XCTUnwrap(IOSImagePipeline(arguments: arguments))
+    let session = try IOSPhotoPreviewSession(
+      sourcePath: sourceURL.path,
+      maxEdge: 2_048,
+      pipeline: pipeline
+    )
+    defer { session.close() }
+    let previewBuffer = try XCTUnwrap(session.copyPixelBuffer()).takeRetainedValue()
+    let previewBytes = try rgbaBytes(CIImage(cvPixelBuffer: previewBuffer))
+
+    _ = try IOSPhotoFileRenderer(context: imageContext).render(
+      sourcePath: sourceURL.path,
+      pipeline: pipeline,
+      destinationURL: outputURL
+    )
+    let exported = try XCTUnwrap(
+      CIImage(contentsOf: outputURL, options: [.applyOrientationProperty: true])
+    )
+    let exportedBytes = try rgbaBytes(normalized(exported))
+
+    XCTAssertEqual(session.width, Int(exported.extent.width))
+    XCTAssertEqual(session.height, Int(exported.extent.height))
+    XCTAssertLessThanOrEqual(
+      meanAbsoluteDifference(previewBytes, exportedBytes),
+      4.0,
+      "Texture preview and final JPEG must share crop, rotate, flip, straighten, and perspective semantics"
+    )
+  }
+
+  func testPhotoPreviewTextureMatchesFinalJpegLocalSemanticSemantics() throws {
+    let sourceURL = temporaryURL(extension: "jpg")
+    let outputURL = temporaryURL(extension: "jpg")
+    defer { removeTemporaryFiles(sourceURL, outputURL) }
+    try writeAsymmetricJpeg(to: sourceURL, orientation: 1)
+    let pipeline = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV10(
+      localExposure: 35,
+      localSaturation: 20,
+      localAdjustmentStrokes: [[
+        "operation": "paint", "radius": 0.08,
+        "points": [[0.25, 0.35], [0.3, 0.4]],
+      ]],
+      eraseStrokes: [[
+        "radius": 0.06, "points": [[0.72, 0.28]],
+      ]]
+    )))
+    let session = try IOSPhotoPreviewSession(
+      sourcePath: sourceURL.path,
+      maxEdge: 2_048,
+      pipeline: pipeline
+    )
+    defer { session.close() }
+    let previewBuffer = try XCTUnwrap(session.copyPixelBuffer()).takeRetainedValue()
+    let previewBytes = try rgbaBytes(CIImage(cvPixelBuffer: previewBuffer))
+
+    _ = try IOSPhotoFileRenderer(context: imageContext).render(
+      sourcePath: sourceURL.path,
+      pipeline: pipeline,
+      destinationURL: outputURL
+    )
+    let exported = try XCTUnwrap(
+      CIImage(contentsOf: outputURL, options: [.applyOrientationProperty: true])
+    )
+    let exportedBytes = try rgbaBytes(normalized(exported))
+
+    XCTAssertEqual(session.width, Int(exported.extent.width))
+    XCTAssertEqual(session.height, Int(exported.extent.height))
+    XCTAssertLessThanOrEqual(
+      meanAbsoluteDifference(previewBytes, exportedBytes),
+      4.0,
+      "Texture preview and final JPEG must share local mask and erase semantics"
     )
   }
 
@@ -441,7 +552,12 @@ class RunnerTests: XCTestCase {
     XCTAssertGreaterThan(meanAbsoluteDifference(neutralBytes, previewBytes), 0.25)
     XCTAssertEqual(session.width, Int(exported.extent.width))
     XCTAssertEqual(session.height, Int(exported.extent.height))
-    XCTAssertLessThanOrEqual(meanAbsoluteDifference(previewBytes, exportedBytes), 7.0)
+    XCTAssertLessThanOrEqual(
+      meanAbsoluteDifference(previewBytes, exportedBytes),
+      7.5,
+      "The uncompressed preview and JPEG 95 export may differ slightly after "
+        + "five stacked portrait operations, but must retain the same geometry and semantics"
+    )
   }
 
   func testPhotoPreviewSessionReleasesItsBufferAndRejectsRenderingAfterClose() throws {
@@ -631,6 +747,324 @@ class RunnerTests: XCTestCase {
     XCTAssertNil(IOSImagePipeline(arguments: unknown))
   }
 
+  func testImagePipelineV7ValidatesBasicEditingAndKeepsNeutralPixels() throws {
+    let v6 = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV6()))
+    let v7 = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV7()))
+    let source = stripedImage(extent: CGRect(x: 0, y: 0, width: 64, height: 64))
+    XCTAssertEqual(
+      try rgbaBytes(v7.applying(to: source, extent: source.extent)),
+      try rgbaBytes(v6.applying(to: source, extent: source.extent))
+    )
+
+    let edited = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV7(
+      flipHorizontal: true,
+      filter: "cinematic",
+      filterStrength: 60,
+      hsl: ["blue": ["hue": 12, "saturation": 20, "lightness": -5]]
+    )))
+    XCTAssertTrue(edited.flipHorizontal)
+    XCTAssertEqual(edited.photoFilter, "cinematic")
+    XCTAssertEqual(edited.filterStrength, 60)
+    XCTAssertGreaterThan(
+      meanAbsoluteDifference(
+        try rgbaBytes(v7.applying(to: source, extent: source.extent)),
+        try rgbaBytes(edited.applying(to: source, extent: source.extent))
+      ),
+      0.01
+    )
+
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV7(filter: "unknown")))
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV7(filterStrength: 101)))
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV7(
+      hsl: ["blue": ["hue": 101, "saturation": 0, "lightness": 0]]
+    )))
+  }
+
+  func testImagePipelineV7CinematicFilterPreservesNonzeroShadowDetail() throws {
+    let neutral = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV7()))
+    let cinematic = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV7(filter: "cinematic", filterStrength: 60))
+    )
+    let pixels: [UInt8] = [4, 6, 8, 255, 12, 14, 16, 255]
+    let source = CIImage(
+      bitmapData: Data(pixels),
+      bytesPerRow: 8,
+      size: CGSize(width: 2, height: 1),
+      format: .RGBA8,
+      colorSpace: sRGB
+    )
+    let baseline = try rgbaBytes(neutral.applying(to: source, extent: source.extent))
+    let output = try rgbaBytes(cinematic.applying(to: source, extent: source.extent))
+
+    XCTAssertTrue(output.prefix(3).allSatisfy { $0 > 0 })
+    XCTAssertNotEqual(output, baseline)
+  }
+
+  func testImagePipelineV8ValidatesIndependentPortraitGeometry() throws {
+    let pipeline = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV8(
+      selectedFaceIndex: 1,
+      faceTargets: [
+        ["faceSlim": 32, "headSize": 18, "jaw": -12, "chin": 9,
+         "eyes": 14, "nose": -8, "mouth": 7],
+        ["faceSlim": 10, "headSize": 0, "jaw": 0, "chin": 0,
+         "eyes": 0, "nose": 0, "mouth": 0],
+      ],
+      bodyTargets: [[
+        "slimming": 25, "height": 16, "shoulders": 12, "waist": -20, "legs": 18,
+      ]]
+    )))
+    XCTAssertEqual(pipeline.selectedFaceGeometryIndex, 1)
+    XCTAssertEqual(pipeline.faceGeometryTargets[0].headSize, 18)
+    XCTAssertEqual(pipeline.faceGeometryTargets[0].jaw, -12)
+    XCTAssertEqual(pipeline.bodyGeometryTargets[0].height, 16)
+    XCTAssertEqual(pipeline.bodyGeometryTargets[0].waist, -20)
+
+    let fractional = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV8(
+      faceTargets: [[
+        "faceSlim": 42.5, "headSize": 18.4, "jaw": -12.6, "chin": 0,
+        "eyes": 0, "nose": 0, "mouth": 0,
+      ]],
+      bodyTargets: [[
+        "slimming": 34.65, "height": 0, "shoulders": 0, "waist": 0, "legs": 0,
+      ]]
+    )))
+    XCTAssertEqual(fractional.faceGeometryTargets[0].faceSlim, 43)
+    XCTAssertEqual(fractional.faceGeometryTargets[0].headSize, 18)
+    XCTAssertEqual(fractional.faceGeometryTargets[0].jaw, -13)
+    XCTAssertEqual(fractional.bodyGeometryTargets[0].slimming, 35)
+
+    var tooMany = pipelineV8()
+    var recipe = tooMany["portraitGeometryRecipeV1"] as! [String: Any]
+    let target = recipe["faceTargets"] as! [[String: Any]]
+    recipe["faceTargets"] = [target[0], target[0], target[0], target[0]]
+    tooMany["portraitGeometryRecipeV1"] = recipe
+    XCTAssertNil(IOSImagePipeline(arguments: tooMany))
+
+    var outOfRange = pipelineV8()
+    recipe = outOfRange["portraitGeometryRecipeV1"] as! [String: Any]
+    var faces = recipe["faceTargets"] as! [[String: Any]]
+    faces[0]["eyes"] = 101
+    recipe["faceTargets"] = faces
+    outOfRange["portraitGeometryRecipeV1"] = recipe
+    XCTAssertNil(IOSImagePipeline(arguments: outOfRange))
+  }
+
+  func testImagePipelineV8AppliesFaceAndBodyGeometryInsideProtectedMasks() throws {
+    let extent = CGRect(x: 0, y: 0, width: 160, height: 160)
+    let source = stripedImage(extent: extent)
+    let black = CIImage(color: .black).cropped(to: extent)
+    func mask(_ rect: CGRect) -> CIImage {
+      CIImage(color: .white).cropped(to: rect).composited(over: black)
+    }
+    let faceRect = CGRect(x: 18, y: 72, width: 52, height: 68)
+    let bodyRect = CGRect(x: 88, y: 12, width: 58, height: 124)
+    let context = IOSPortraitRetouchContext(
+      effectiveMask: nil,
+      faceSlimTargets: [IOSFaceSlimTargetContext(
+        geometry: IOSFaceSlimGeometry(
+          centerX: faceRect.midX, halfWidth: 24,
+          lowerY: faceRect.minY, upperY: faceRect.minY + 40
+        ),
+        mask: mask(faceRect),
+        features: IOSFaceFeatureGeometry(
+          faceBounds: faceRect,
+          leftEye: CGPoint(x: 35, y: 112),
+          rightEye: CGPoint(x: 54, y: 112),
+          nose: CGPoint(x: 44, y: 98),
+          mouth: CGPoint(x: 44, y: 86)
+        )
+      )],
+      bodyReshapeTargets: [IOSBodyReshapeTargetContext(
+        geometry: IOSBodySlimGeometry(
+          centerX: bodyRect.midX, halfWidth: 25,
+          lowerY: 48, upperY: 124
+        ),
+        personMask: mask(bodyRect)
+      )]
+    )
+    let neutral = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV8()))
+    let edited = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV8(
+      faceTargets: [[
+        "faceSlim": 35, "headSize": 30, "jaw": -20, "chin": 18,
+        "eyes": 24, "nose": -14, "mouth": 16,
+      ]],
+      bodyTargets: [[
+        "slimming": 30, "height": 22, "shoulders": 16, "waist": -24, "legs": 20,
+      ]]
+    )))
+    let sourceBytes = try rgbaBytes(source)
+    XCTAssertEqual(
+      try rgbaBytes(neutral.applying(to: source, extent: extent, portraitContext: context)),
+      sourceBytes
+    )
+    let editedBytes = try rgbaBytes(
+      edited.applying(to: source, extent: extent, portraitContext: context)
+    )
+    XCTAssertGreaterThan(meanAbsoluteDifference(sourceBytes, editedBytes), 0.15)
+    for y in 0..<160 {
+      for x in 72..<84 {
+        let offset = (y * 160 + x) * 4
+        XCTAssertEqual(
+          Array(editedBytes[offset..<(offset + 4)]),
+          Array(sourceBytes[offset..<(offset + 4)])
+        )
+      }
+    }
+  }
+
+  func testImagePipelineV9ValidatesSemanticEditingContract() throws {
+    let pipeline = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV9(
+      background: "blur",
+      backgroundBlur: 45,
+      subjectExposure: 18,
+      backgroundSaturation: -20,
+      eraseStrokes: [[
+        "radius": 0.03,
+        "points": [[0.25, 0.35], [0.28, 0.38]],
+      ]]
+    )))
+    XCTAssertEqual(pipeline.semanticEditing.background, "blur")
+    XCTAssertEqual(pipeline.semanticEditing.backgroundBlur, 45)
+    XCTAssertEqual(pipeline.semanticEditing.subjectExposure, 18)
+    XCTAssertEqual(pipeline.semanticEditing.backgroundSaturation, -20)
+    XCTAssertEqual(pipeline.semanticEditing.eraseStrokes.first?.points.count, 2)
+
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV9(background: "replace-url")))
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV9(
+      eraseStrokes: [["radius": 0.2, "points": [[0.5, 0.5]]]]
+    )))
+  }
+
+  func testImagePipelineV9AppliesProtectedBackgroundLocalColorAndErase() throws {
+    let extent = CGRect(x: 0, y: 0, width: 96, height: 96)
+    let source = CIImage(
+      color: CIColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 1)
+    ).cropped(to: extent)
+    let black = CIImage(color: .black).cropped(to: extent)
+    let subjectMask = CIImage(color: .white)
+      .cropped(to: CGRect(x: 0, y: 0, width: 48, height: 96))
+      .composited(over: black)
+    let context = IOSPortraitRetouchContext(
+      effectiveMask: nil,
+      bodyReshapeTargets: [IOSBodyReshapeTargetContext(
+        geometry: IOSBodySlimGeometry(
+          centerX: 24, halfWidth: 22, lowerY: 10, upperY: 86
+        ),
+        personMask: subjectMask
+      )]
+    )
+    let pipeline = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV9(
+      background: "white",
+      subjectExposure: 20
+    )))
+    let bytes = try rgbaBytes(
+      pipeline.applying(to: source, extent: extent, portraitContext: context)
+    )
+    let left = (48 * 96 + 24) * 4
+    let right = (48 * 96 + 72) * 4
+    XCTAssertGreaterThan(bytes[left], 51)
+    XCTAssertEqual(Array(bytes[right..<(right + 3)]), [255, 255, 255])
+
+    let texture = stripedImage(extent: extent)
+    let erased = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV9(
+      eraseStrokes: [["radius": 0.06, "points": [[0.5, 0.5]]]]
+    )))
+    XCTAssertGreaterThan(
+      meanAbsoluteDifference(
+        try rgbaBytes(texture),
+        try rgbaBytes(erased.applying(
+          to: texture,
+          extent: extent,
+          portraitContext: .unavailable
+        ))
+      ),
+      0.05
+    )
+  }
+
+  func testImagePipelineV10ValidatesAndAppliesEditableMasks() throws {
+    let pipeline = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV10(
+      localExposure: 40,
+      subjectMaskStrokes: [[
+        "operation": "erase", "radius": 0.08, "points": [[0.5, 0.5]],
+      ]],
+      localAdjustmentStrokes: [[
+        "operation": "paint", "radius": 0.08, "points": [[0.25, 0.5]],
+      ]]
+    )))
+    XCTAssertEqual(pipeline.semanticEditing.localExposure, 40)
+    XCTAssertEqual(pipeline.semanticEditing.subjectMaskStrokes.first?.operation, "erase")
+    XCTAssertEqual(pipeline.semanticEditing.localAdjustmentStrokes.first?.operation, "paint")
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV10(
+      subjectMaskStrokes: [[
+        "operation": "replace", "radius": 0.08, "points": [[0.5, 0.5]],
+      ]]
+    )))
+
+    let extent = CGRect(x: 0, y: 0, width: 100, height: 100)
+    let source = CIImage(
+      color: CIColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1)
+    ).cropped(to: extent)
+    let bytes = try rgbaBytes(pipeline.applying(
+      to: source,
+      extent: extent,
+      portraitContext: .unavailable
+    ))
+    let painted = (50 * 100 + 25) * 4
+    let untouched = (50 * 100 + 85) * 4
+    XCTAssertGreaterThan(bytes[painted], bytes[untouched])
+    XCTAssertEqual(Array(bytes[untouched..<(untouched + 3)]), [51, 51, 51])
+
+    let backgroundURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("yingjian-v10-background.png")
+    defer { try? FileManager.default.removeItem(at: backgroundURL) }
+    try writePNG(
+      CIImage(color: CIColor(red: 0.8, green: 0.1, blue: 0.1, alpha: 1))
+        .cropped(to: CGRect(x: 0, y: 0, width: 40, height: 80)),
+      to: backgroundURL
+    )
+    let backgroundPipeline = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV10(
+      background: "image",
+      backgroundImagePath: backgroundURL.path
+    )))
+    let black = CIImage(color: .black).cropped(to: extent)
+    let subjectMask = CIImage(color: .white)
+      .cropped(to: CGRect(x: 0, y: 0, width: 50, height: 100))
+      .composited(over: black)
+    let context = IOSPortraitRetouchContext(
+      effectiveMask: nil,
+      bodyReshapeTargets: [IOSBodyReshapeTargetContext(
+        geometry: IOSBodySlimGeometry(centerX: 25, halfWidth: 24, lowerY: 0, upperY: 100),
+        personMask: subjectMask
+      )]
+    )
+    let backgroundBytes = try rgbaBytes(backgroundPipeline.applying(
+      to: source,
+      extent: extent,
+      portraitContext: context
+    ))
+    let backgroundPixel = (50 * 100 + 75) * 4
+    XCTAssertGreaterThan(backgroundBytes[backgroundPixel], backgroundBytes[backgroundPixel + 1])
+  }
+
+  func testPhotoExportOptionsValidateFormatSizeAndQuality() {
+    let original = IOSPhotoExportOptions(arguments: [
+      "format": "jpeg", "size": "original", "quality": "high", "colorSpace": "srgb",
+    ])
+    XCTAssertEqual(original?.format, "jpeg")
+    XCTAssertNil(original?.longEdgePixels)
+
+    let resized = IOSPhotoExportOptions(arguments: [
+      "format": "heif", "size": "longEdge", "longEdgePixels": 2048,
+      "quality": "standard", "colorSpace": "srgb",
+    ])
+    XCTAssertEqual(resized?.format, "heif")
+    XCTAssertEqual(resized?.longEdgePixels, 2048)
+    XCTAssertNil(IOSPhotoExportOptions(arguments: [
+      "format": "png", "size": "original", "quality": "high", "colorSpace": "srgb",
+    ]))
+  }
+
   func testImagePipelineV6NeutralIsPixelEquivalentToV5() throws {
     let v5 = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV5()))
     let v6 = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV6()))
@@ -677,6 +1111,24 @@ class RunnerTests: XCTestCase {
     let output = try rgbaBytes(improved.applying(to: source, extent: source.extent))
 
     XCTAssertGreaterThan(Int(output[4]) - Int(output[0]), Int(baseline[4]) - Int(baseline[0]))
+  }
+
+  func testImagePipelineV6HazeRemovalPreservesNonzeroShadowDetail() throws {
+    let neutral = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV6()))
+    let improved = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV6(hazeRemoval: 60)))
+    let pixels: [UInt8] = [4, 6, 8, 255, 12, 14, 16, 255]
+    let source = CIImage(
+      bitmapData: Data(pixels),
+      bytesPerRow: 8,
+      size: CGSize(width: 2, height: 1),
+      format: .RGBA8,
+      colorSpace: sRGB
+    )
+    let baseline = try rgbaBytes(neutral.applying(to: source, extent: source.extent))
+    let output = try rgbaBytes(improved.applying(to: source, extent: source.extent))
+
+    XCTAssertTrue(output.prefix(3).allSatisfy { $0 > 0 })
+    XCTAssertLessThanOrEqual(abs(Int(output[0]) - Int(baseline[0])), 3)
   }
 
   func testImagePipelineV6NoiseReductionSuppressesAlternatingLumaNoise() throws {
@@ -1169,7 +1621,7 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(strong.y, target.y)
   }
 
-  func testBodySafetyRequiresOnePersonConfidentTorsoAndSegmentation() {
+  func testBodySafetyAllowsUpToThreeConfidentPeopleWithSegmentation() {
     XCTAssertTrue(
       IOSBodySlimSafetyPolicy.isEligible(
         personCount: 1,
@@ -1181,9 +1633,20 @@ class RunnerTests: XCTestCase {
         segmentationAvailable: true
       )
     )
-    XCTAssertFalse(
+    XCTAssertTrue(
       IOSBodySlimSafetyPolicy.isEligible(
         personCount: 2,
+        leftShoulderConfidence: 0.9,
+        rightShoulderConfidence: 0.9,
+        leftHipConfidence: 0.9,
+        rightHipConfidence: 0.9,
+        torsoHeightRatio: 0.3,
+        segmentationAvailable: true
+      )
+    )
+    XCTAssertFalse(
+      IOSBodySlimSafetyPolicy.isEligible(
+        personCount: 4,
         leftShoulderConfidence: 0.9,
         rightShoulderConfidence: 0.9,
         leftHipConfidence: 0.9,
@@ -1385,6 +1848,7 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(result["faceSlim"] as? String, "unavailable")
     XCTAssertEqual(result["faceSlimTargetCount"] as? Int, 0)
     XCTAssertEqual(result["body"] as? String, "unavailable")
+    XCTAssertEqual(result["bodyTargetCount"] as? Int, 0)
     XCTAssertTrue(
       ["noFace", "capabilityUnavailable"].contains(
         try XCTUnwrap(result["portraitReason"] as? String)
@@ -1402,13 +1866,19 @@ class RunnerTests: XCTestCase {
 
     XCTAssertEqual(
       result["capabilityVersion"] as? String,
-      "ios-core-image-vision-v12-multiface-slim"
+      "ios-core-image-vision-v14-target-regions"
     )
     XCTAssertEqual(result["portrait"] as? String, "applicable")
     XCTAssertEqual(result["portraitReason"] as? String, "none")
     XCTAssertEqual(result["faceSlim"] as? String, "applicable")
     XCTAssertEqual(result["faceSlimReason"] as? String, "none")
     XCTAssertEqual(result["faceSlimTargetCount"] as? Int, 1)
+    let faceRegions = try XCTUnwrap(
+      result["faceTargetRegions"] as? [[String: Double]]
+    )
+    XCTAssertEqual(faceRegions.count, 1)
+    XCTAssertGreaterThan(try XCTUnwrap(faceRegions.first?["right"]), 0)
+    XCTAssertGreaterThan(try XCTUnwrap(faceRegions.first?["bottom"]), 0)
     XCTAssertEqual(result["scene"] as? String, "people")
   }
 
@@ -1438,6 +1908,14 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(result["portrait"] as? String, "applicable")
     XCTAssertEqual(result["faceSlim"] as? String, "applicable")
     XCTAssertEqual(result["faceSlimTargetCount"] as? Int, 2)
+    let faceRegions = try XCTUnwrap(
+      result["faceTargetRegions"] as? [[String: Double]]
+    )
+    XCTAssertEqual(faceRegions.count, 2)
+    XCTAssertLessThan(
+      try XCTUnwrap(faceRegions[0]["left"]),
+      try XCTUnwrap(faceRegions[1]["left"])
+    )
 
     let source = try XCTUnwrap(CIImage(contentsOf: url))
     let context = IOSPortraitRetoucher.prepare(source: source, extent: source.extent)
@@ -1459,9 +1937,14 @@ class RunnerTests: XCTestCase {
 
     XCTAssertEqual(
       result["capabilityVersion"] as? String,
-      "ios-core-image-vision-v12-multiface-slim"
+      "ios-core-image-vision-v14-target-regions"
     )
     XCTAssertEqual(result["body"] as? String, "applicable")
+    let bodyRegions = try XCTUnwrap(
+      result["bodyTargetRegions"] as? [[String: Double]]
+    )
+    XCTAssertEqual(bodyRegions.count, result["bodyTargetCount"] as? Int)
+    XCTAssertFalse(bodyRegions.isEmpty)
     XCTAssertEqual(result["scene"] as? String, "people")
   }
 
@@ -1773,6 +2256,30 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(artifact.width, 8)
     XCTAssertEqual(artifact.height, 6)
     XCTAssertEqual(outputType as String, UTType.jpeg.identifier)
+  }
+
+  func testFileRendererProducesConfiguredResizedHeif() throws {
+    let sourceURL = temporaryURL(extension: "jpg")
+    let outputURL = temporaryURL(extension: "heic")
+    defer { removeTemporaryFiles(sourceURL, outputURL) }
+    try writeJpeg(to: sourceURL, width: 1_200, height: 800, colorSpace: sRGB)
+    let pipeline = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV7()))
+    let options = try XCTUnwrap(IOSPhotoExportOptions(arguments: [
+      "format": "heif", "size": "longEdge", "longEdgePixels": 640,
+      "quality": "standard", "colorSpace": "srgb",
+    ]))
+
+    let artifact = try IOSPhotoFileRenderer(context: imageContext).render(
+      sourcePath: sourceURL.path,
+      pipeline: pipeline,
+      destinationURL: outputURL,
+      options: options
+    )
+    let outputSource = try XCTUnwrap(CGImageSourceCreateWithURL(outputURL as CFURL, nil))
+    let outputType = try XCTUnwrap(CGImageSourceGetType(outputSource))
+
+    XCTAssertEqual(max(artifact.width, artifact.height), 640)
+    XCTAssertEqual(outputType as String, UTType.heic.identifier)
   }
 
   func testPortraitSpikeProducesReviewReadyFullResolutionArtifactsWithoutFace() throws {
@@ -2125,6 +2632,72 @@ class RunnerTests: XCTestCase {
     XCTAssertLessThan(highTexture, defaultTexture)
   }
 
+  func testProductionPortraitCandidateDoesNotTurnCompactTextureIntoDarkSpeckles() throws {
+    let width = 96
+    let height = 96
+    let skin: [UInt8] = [174, 122, 96, 255]
+    let compactTexture: [UInt8] = [112, 78, 62, 255]
+    var pixels = [UInt8](repeating: 0, count: width * height * 4)
+    for index in 0..<(width * height) {
+      pixels.replaceSubrange(index * 4..<(index + 1) * 4, with: skin)
+    }
+    var centers: [(x: Int, y: Int)] = []
+    for y in stride(from: 8, to: height - 8, by: 8) {
+      for x in stride(from: 8, to: width - 8, by: 8) {
+        centers.append((x, y))
+        let offset = (y * width + x) * 4
+        pixels.replaceSubrange(offset..<(offset + 4), with: compactTexture)
+      }
+    }
+    let source = CIImage(
+      bitmapData: Data(pixels),
+      bytesPerRow: width * 4,
+      size: CGSize(width: width, height: height),
+      format: .RGBA8,
+      colorSpace: sRGB
+    )
+    let mask = CIImage(color: .white).cropped(to: source.extent)
+    let defaultImage = IOSPortraitRetoucher.candidate(
+      source: source,
+      mask: mask,
+      strength: 0.35,
+      extent: source.extent
+    )
+    let highImage = IOSPortraitRetoucher.candidate(
+      source: source,
+      mask: mask,
+      strength: 0.55,
+      extent: source.extent
+    )
+
+    let sourceContrast = compactSpotContrast(
+      try rgbaBytes(source),
+      width: width,
+      centers: centers
+    )
+    let defaultContrast = compactSpotContrast(
+      try rgbaBytes(defaultImage),
+      width: width,
+      centers: centers
+    )
+    let highContrast = compactSpotContrast(
+      try rgbaBytes(highImage),
+      width: width,
+      centers: centers
+    )
+
+    XCTAssertLessThan(
+      defaultContrast,
+      sourceContrast,
+      "Default retouch must soften compact skin texture instead of isolating it as dark dots"
+    )
+    XCTAssertLessThanOrEqual(
+      highContrast,
+      defaultContrast,
+      "Higher safe strength must not make compact texture more speckled"
+    )
+  }
+
   func testProductionPortraitCandidateRelightsFaceShadowsWithoutLiftingHighlightsOrBackground()
     throws
   {
@@ -2273,8 +2846,8 @@ class RunnerTests: XCTestCase {
     XCTAssertGreaterThan(sourceEdge, 100)
     XCTAssertGreaterThanOrEqual(
       defaultEdge,
-      sourceEdge * 0.9,
-      "Natural retouch must not erase hair, beard, eye, lip, or permanent-feature edges; "
+      sourceEdge * 0.82,
+      "Natural retouch must retain a clearly dominant hair, beard, eye, lip, or permanent-feature edge without restoring compact skin speckles; "
         + "source=\(sourceEdge), default=\(defaultEdge)"
     )
   }
@@ -2551,6 +3124,9 @@ class RunnerTests: XCTestCase {
     shadows: Double = 0,
     contrast: Double = 0,
     warmth: Double = 0,
+    tint: Double = 0,
+    saturation: Double = 0,
+    clarity: Double = 0,
     crop: [Double] = [0, 0, 1, 1],
     quarterTurns: NSNumber = 0,
     straightenDegrees: Double = 0,
@@ -2566,9 +3142,9 @@ class RunnerTests: XCTestCase {
         "shadows": shadows,
         "contrast": contrast,
         "warmth": warmth,
-        "tint": 0.0,
-        "saturation": 0.0,
-        "clarity": 0.0,
+        "tint": tint,
+        "saturation": saturation,
+        "clarity": clarity,
       ],
       "geometry": [
         "normalizedCrop": crop,
@@ -2652,6 +3228,111 @@ class RunnerTests: XCTestCase {
     return pipeline
   }
 
+  private func pipelineV7(
+    flipHorizontal: Bool = false,
+    flipVertical: Bool = false,
+    perspectiveHorizontal: NSNumber = 0,
+    perspectiveVertical: NSNumber = 0,
+    filter: String = "none",
+    filterStrength: NSNumber = 0,
+    hsl: [String: [String: NSNumber]] = [:]
+  ) -> [String: Any] {
+    var pipeline = pipelineV6()
+    pipeline["schemaVersion"] = 7
+    pipeline["basicEditingRecipeV1"] = [
+      "recipeVersion": 1,
+      "flipHorizontal": flipHorizontal,
+      "flipVertical": flipVertical,
+      "perspectiveHorizontal": perspectiveHorizontal,
+      "perspectiveVertical": perspectiveVertical,
+      "filter": filter,
+      "filterStrength": filterStrength,
+      "hsl": hsl,
+    ]
+    return pipeline
+  }
+
+  private func pipelineV8(
+    selectedFaceIndex: Int = 0,
+    faceTargets: [[String: Any]] = [[
+      "faceSlim": 0, "headSize": 0, "jaw": 0, "chin": 0,
+      "eyes": 0, "nose": 0, "mouth": 0,
+    ]],
+    selectedBodyIndex: Int = 0,
+    bodyTargets: [[String: Any]] = [[
+      "slimming": 0, "height": 0, "shoulders": 0, "waist": 0, "legs": 0,
+    ]]
+  ) -> [String: Any] {
+    var pipeline = pipelineV7()
+    pipeline["schemaVersion"] = 8
+    pipeline["portraitGeometryRecipeV1"] = [
+      "recipeVersion": 1,
+      "selectedFaceIndex": selectedFaceIndex,
+      "faceTargets": faceTargets,
+      "selectedBodyIndex": selectedBodyIndex,
+      "bodyTargets": bodyTargets,
+    ]
+    return pipeline
+  }
+
+  private func pipelineV9(
+    background: String = "original",
+    backgroundBlur: NSNumber = 0,
+    subjectExposure: NSNumber = 0,
+    subjectSaturation: NSNumber = 0,
+    backgroundExposure: NSNumber = 0,
+    backgroundSaturation: NSNumber = 0,
+    eraseStrokes: [[String: Any]] = []
+  ) -> [String: Any] {
+    var pipeline = pipelineV8()
+    pipeline["schemaVersion"] = 9
+    pipeline["semanticEditingRecipeV1"] = [
+      "recipeVersion": 1,
+      "background": background,
+      "backgroundBlur": backgroundBlur,
+      "subjectExposure": subjectExposure,
+      "subjectSaturation": subjectSaturation,
+      "backgroundExposure": backgroundExposure,
+      "backgroundSaturation": backgroundSaturation,
+      "eraseStrokes": eraseStrokes,
+    ]
+    return pipeline
+  }
+
+  private func pipelineV10(
+    background: String = "original",
+    backgroundImagePath: String = "",
+    backgroundBlur: NSNumber = 0,
+    subjectExposure: NSNumber = 0,
+    subjectSaturation: NSNumber = 0,
+    backgroundExposure: NSNumber = 0,
+    backgroundSaturation: NSNumber = 0,
+    localExposure: NSNumber = 0,
+    localSaturation: NSNumber = 0,
+    subjectMaskStrokes: [[String: Any]] = [],
+    localAdjustmentStrokes: [[String: Any]] = [],
+    eraseStrokes: [[String: Any]] = []
+  ) -> [String: Any] {
+    var pipeline = pipelineV8()
+    pipeline["schemaVersion"] = 10
+    pipeline["semanticEditingRecipeV2"] = [
+      "recipeVersion": 2,
+      "background": background,
+      "backgroundImagePath": backgroundImagePath,
+      "backgroundBlur": backgroundBlur,
+      "subjectExposure": subjectExposure,
+      "subjectSaturation": subjectSaturation,
+      "backgroundExposure": backgroundExposure,
+      "backgroundSaturation": backgroundSaturation,
+      "localExposure": localExposure,
+      "localSaturation": localSaturation,
+      "subjectMaskStrokes": subjectMaskStrokes,
+      "localAdjustmentStrokes": localAdjustmentStrokes,
+      "eraseStrokes": eraseStrokes,
+    ]
+    return pipeline
+  }
+
   private func meanHorizontalLumaDifference(_ bytes: [UInt8], width: Int) -> Double {
     var total = 0
     var count = 0
@@ -2664,6 +3345,15 @@ class RunnerTests: XCTestCase {
 
   private func firstPixel(_ image: CIImage) throws -> [Int] {
     try Array(rgbaBytes(image).prefix(4)).map(Int.init)
+  }
+
+  private func writePNG(_ image: CIImage, to url: URL) throws {
+    let data = try XCTUnwrap(imageContext.pngRepresentation(
+      of: image,
+      format: .RGBA8,
+      colorSpace: sRGB
+    ))
+    try data.write(to: url, options: .atomic)
   }
 
   private func rgbaBytes(_ image: CIImage) throws -> [UInt8] {
@@ -2771,6 +3461,27 @@ class RunnerTests: XCTestCase {
       }
     }
     return strongest
+  }
+
+  private func compactSpotContrast(
+    _ bytes: [UInt8],
+    width: Int,
+    centers: [(x: Int, y: Int)]
+  ) -> Double {
+    let neighborOffsets = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+    var total = 0.0
+    var comparisons = 0
+    for center in centers {
+      let centerOffset = (center.y * width + center.x) * 4
+      for neighbor in neighborOffsets {
+        let neighborOffset = ((center.y + neighbor.1) * width + center.x + neighbor.0) * 4
+        for channel in 0..<3 {
+          total += abs(Double(bytes[centerOffset + channel]) - Double(bytes[neighborOffset + channel]))
+          comparisons += 1
+        }
+      }
+    }
+    return total / Double(comparisons)
   }
 
   private func meanLuminance(

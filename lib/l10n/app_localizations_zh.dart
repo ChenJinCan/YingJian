@@ -233,7 +233,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get faceSlimBackgroundProtected => '为保护背景线条，这张照片暂不提供瘦脸';
 
   @override
-  String get faceSlimMultipleFaces => '检测到多个人脸：自然精修可用，瘦脸仅支持单人照片';
+  String get faceSlimMultipleFaces => '检测到多个人脸，请选择要调整的人物';
 
   @override
   String get faceSlimUnavailable => '这张照片暂不满足安全瘦脸条件';
@@ -250,10 +250,156 @@ class AppLocalizationsZh extends AppLocalizations {
   String get bodySlim => '瘦身';
 
   @override
+  String get headSize => '小头';
+
+  @override
+  String get jaw => '下颌';
+
+  @override
+  String get chin => '下巴';
+
+  @override
+  String get eyes => '眼睛';
+
+  @override
+  String get nose => '鼻子';
+
+  @override
+  String get mouth => '嘴型';
+
+  @override
+  String get heightAdjustment => '增高';
+
+  @override
+  String get shoulders => '肩宽';
+
+  @override
+  String get waist => '腰围';
+
+  @override
+  String get legs => '长腿';
+
+  @override
+  String get bodyTargetHint => '选择要调整的人物（按画面从左到右）';
+
+  @override
+  String bodyTarget(int number) {
+    return '人物 $number';
+  }
+
+  @override
+  String get semanticTools => '主体与局部';
+
+  @override
+  String get mobileToolRetouch => '精修';
+
+  @override
+  String get semanticToolsLocalReady => '主体分割已就绪 · 本地处理';
+
+  @override
+  String get refineSubjectMask => '修整主体边缘';
+
+  @override
+  String get subjectMask => '主体蒙版';
+
+  @override
+  String get localAdjustment => '局部光色';
+
+  @override
+  String get localExposure => '局部曝光';
+
+  @override
+  String get localSaturation => '局部饱和度';
+
+  @override
+  String get paintMask => '涂抹';
+
+  @override
+  String get eraseMask => '擦除';
+
+  @override
+  String get maskBrushHint => '在画面上涂抹需要生效的区域；切换擦除可恢复该区域。绿色为添加，红色为擦除。';
+
+  @override
+  String get clearMask => '清空蒙版';
+
+  @override
+  String get semanticSubjectUnavailable => '未识别到可用主体；仍可使用消除笔';
+
+  @override
+  String get backgroundTreatment => '背景处理';
+
+  @override
+  String get backgroundOriginal => '原背景';
+
+  @override
+  String get backgroundBlur => '背景虚化';
+
+  @override
+  String get backgroundWhite => '白色背景';
+
+  @override
+  String get backgroundBlack => '黑色背景';
+
+  @override
+  String get backgroundWarm => '暖色背景';
+
+  @override
+  String get backgroundCool => '冷色背景';
+
+  @override
+  String get backgroundImage => '图片背景';
+
+  @override
+  String get backgroundImageImportFailed => '背景图片无法导入，请换一张重试。';
+
+  @override
+  String get subjectExposure => '主体明暗';
+
+  @override
+  String get subjectSaturation => '主体饱和';
+
+  @override
+  String get backgroundExposure => '背景明暗';
+
+  @override
+  String get backgroundSaturation => '背景饱和';
+
+  @override
+  String get eraseBrush => '消除笔';
+
+  @override
+  String get eraseBrushHint => '在要移除的区域上涂抹；使用周围纹理进行本地修补';
+
+  @override
+  String get brushSize => '笔刷大小';
+
+  @override
+  String get clearEraseStrokes => '清除全部消除笔画';
+
+  @override
+  String get clear => '清除';
+
+  @override
+  String get apply => '应用';
+
+  @override
   String get portraitTools => '人像';
 
   @override
   String get lightAndColorTools => '光色';
+
+  @override
+  String get groupStyleIntensity => '整组风格';
+
+  @override
+  String get groupStyleIntensityHint => '调整整组共享效果强度，同时保留每张照片的独立补偿。';
+
+  @override
+  String get primaryRecommendation => '主推荐';
+
+  @override
+  String get alternativeRecommendation => '备选';
 
   @override
   String get localPortraitReady => '人像工具已就绪 · 本地处理';
@@ -286,10 +432,25 @@ class AppLocalizationsZh extends AppLocalizations {
   String get cropSquare => '1:1';
 
   @override
+  String get freeCrop => '自由裁剪';
+
+  @override
+  String get freeCropHint => '拖动裁剪框的角点，保留想要的画面';
+
+  @override
+  String get applyCrop => '应用裁剪';
+
+  @override
   String get cropFourThree => '4:3';
 
   @override
+  String get cropThreeFour => '3:4';
+
+  @override
   String get cropSixteenNine => '16:9';
+
+  @override
+  String get cropNineSixteen => '9:16';
 
   @override
   String get resetComposition => '恢复原始构图';
@@ -440,17 +601,71 @@ class AppLocalizationsZh extends AppLocalizations {
   String get photoStatusQueued => '待导出';
 
   @override
+  String get photoStatusExporting => '导出中';
+
+  @override
+  String get photoStatusExported => '已导出';
+
+  @override
+  String get photoStatusExportFailed => '导出失败';
+
+  @override
+  String get photoStatusExportCancelled => '已取消导出';
+
+  @override
   String batchExportPhotos(int count) {
     return '批量导出 $count 张';
   }
 
   @override
   String exportConfirmationMessage(int count) {
-    return '将从每张只读原图生成 JPEG（sRGB，质量 95），共 $count 张，并保存到系统相册。';
+    return '将从 $count 张只读原图重新执行全部效果并保存到系统相册。';
   }
 
   @override
+  String get exportPhotoPlan => '本次照片';
+
+  @override
+  String get exportWillExport => '将导出';
+
+  @override
+  String get exportWithSafeFallback => '将以安全回退导出';
+
+  @override
+  String get exportProcessingEstimate => '预计逐张本地处理，可取消尚未开始的照片。';
+
+  @override
   String get startExport => '开始导出';
+
+  @override
+  String get exportFormat => '格式';
+
+  @override
+  String get exportFormatJpeg => 'JPEG';
+
+  @override
+  String get exportFormatHeif => 'HEIF';
+
+  @override
+  String get exportSize => '输出尺寸';
+
+  @override
+  String get exportSizeOriginal => '原像素尺寸';
+
+  @override
+  String get exportQuality => '画质';
+
+  @override
+  String get exportQualityHigh => '高画质';
+
+  @override
+  String get exportQualityStandard => '标准';
+
+  @override
+  String get exportQualityCompact => '节省空间';
+
+  @override
+  String get exportColorSpaceNotice => '首版统一以 sRGB 输出；原图不会被覆盖。';
 
   @override
   String get syncCurrentAdjustments => '同步当前调整到整组';
@@ -496,4 +711,94 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get continueEditing => '继续编辑';
+
+  @override
+  String get flipHorizontal => '水平翻转';
+
+  @override
+  String get flipVertical => '垂直翻转';
+
+  @override
+  String get perspectiveHorizontal => '水平透视';
+
+  @override
+  String get perspectiveVertical => '垂直透视';
+
+  @override
+  String get filterAndHsl => '滤镜与 HSL';
+
+  @override
+  String get filterStrength => '滤镜强度';
+
+  @override
+  String get hslHue => '色相';
+
+  @override
+  String get hslSaturation => '饱和度';
+
+  @override
+  String get hslLightness => '明度';
+
+  @override
+  String get hslRed => '红';
+
+  @override
+  String get hslOrange => '橙';
+
+  @override
+  String get hslYellow => '黄';
+
+  @override
+  String get hslGreen => '绿';
+
+  @override
+  String get hslCyan => '青';
+
+  @override
+  String get hslBlue => '蓝';
+
+  @override
+  String get hslPurple => '紫';
+
+  @override
+  String get hslMagenta => '洋红';
+
+  @override
+  String get filterNone => '原图';
+
+  @override
+  String get filterClean => '清透';
+
+  @override
+  String get filterPortrait => '人像';
+
+  @override
+  String get filterCinematic => '电影';
+
+  @override
+  String get filterFilm => '胶片';
+
+  @override
+  String get filterWarmSun => '暖阳';
+
+  @override
+  String get filterCoolAir => '冷空气';
+
+  @override
+  String get filterVivid => '鲜明';
+
+  @override
+  String get filterFaded => '褪色';
+
+  @override
+  String get filterNoir => '黑白';
+
+  @override
+  String get filterFood => '美食';
+
+  @override
+  String get filterLandscape => '风景';
+
+  @override
+  String get filterNight => '夜景';
 }

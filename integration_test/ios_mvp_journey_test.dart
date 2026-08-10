@@ -8,8 +8,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
+import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline.dart';
+import 'package:yingjian/features/editor/domain/semantic_editing_recipe.dart';
 import 'package:yingjian/features/editor/infrastructure/method_channel_photo_exporter.dart';
 import 'package:yingjian/features/editor/infrastructure/method_channel_photo_preview_renderer.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
@@ -152,6 +154,18 @@ void main() {
       'media/ios-runtime-photo.png',
     );
     expect(find.text('自然干净'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('recommendation-preview-naturalClean')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('recommendation-preview-atmosphericColor')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('recommendation-preview-texturedStyle')),
+      findsOneWidget,
+    );
     expect(find.byKey(const ValueKey('editor-preview-stage')), findsOneWidget);
     expect(
       find.byKey(const ValueKey('editor-bottom-command-bar')),
@@ -161,7 +175,9 @@ void main() {
       find.byKey(const ValueKey('recommendation-use')).hitTestable(),
       findsOneWidget,
     );
-    expect(previewRenderer.textureSmoothingStrengths, contains(0.35));
+    expect(previewRenderer.textureSmoothingStrengths, contains(0.45));
+    expect(previewRenderer.maxEdges.where((edge) => edge == 384), hasLength(3));
+    expect(previewRenderer.maxEdges, contains(2048));
 
     final useRecommendation = find.byKey(const ValueKey('recommendation-use'));
     await tester.ensureVisible(useRecommendation);
@@ -177,14 +193,29 @@ void main() {
           ?.effectiveRecipeFor(importedPhoto.id)
           .portraitRecipe
           .textureSmoothing,
-      35,
+      45,
     );
-    expect(previewRenderer.textureSmoothingStrengths.last, 0.35);
+    expect(
+      (await store.loadLatest())
+          ?.effectiveRecipeFor(importedPhoto.id)
+          .portraitRecipe
+          .blemishReduction,
+      20,
+    );
+    expect(previewRenderer.textureSmoothingStrengths.last, 0.45);
     expect(
       find.byKey(const ValueKey('editor-batch-export')).hitTestable(),
       findsOneWidget,
     );
 
+    final qualityCategory = find.byKey(
+      const ValueKey('editor-tool-category-quality'),
+    );
+    await Scrollable.ensureVisible(tester.element(qualityCategory));
+    await tester.pumpAndSettle();
+    expect(qualityCategory.hitTestable(), findsOneWidget);
+    await tester.tap(qualityCategory);
+    await tester.pumpAndSettle();
     final qualityTab = find.byKey(
       const ValueKey('editor-adjustment-tab-qualityImprovement'),
     );
@@ -224,6 +255,13 @@ void main() {
     expect(qualityRecipe.detailSharpening, 16);
 
     final workspace = find.byKey(const ValueKey('photo-workspace-scroll'));
+    final retouchCategory = find.byKey(
+      const ValueKey('editor-tool-category-retouch'),
+    );
+    await Scrollable.ensureVisible(tester.element(retouchCategory));
+    await tester.pumpAndSettle();
+    await tester.tap(retouchCategory);
+    await tester.pumpAndSettle();
     final portraitTab = find.byKey(
       const ValueKey('editor-adjustment-tab-naturalBeautification'),
     );
@@ -232,13 +270,6 @@ void main() {
     expect(portraitTab.hitTestable(), findsOneWidget);
     await tester.tap(portraitTab);
     await tester.pumpAndSettle();
-    final exposureTab = find.byKey(
-      const ValueKey('editor-adjustment-tab-exposure'),
-    );
-    expect(
-      tester.getTopLeft(portraitTab).dx,
-      lessThan(tester.getTopLeft(exposureTab).dx),
-    );
     expect(
       find.byKey(const ValueKey('editor-apply-one-tap-natural-beautification')),
       findsOneWidget,
@@ -247,10 +278,6 @@ void main() {
       const ValueKey('editor-adjustment-tab-faceSlim'),
     );
     expect(faceSlimTab.hitTestable(), findsOneWidget);
-    expect(
-      tester.getTopLeft(faceSlimTab).dx,
-      lessThan(tester.getTopLeft(exposureTab).dx),
-    );
     await tester.tap(portraitTab);
     await tester.pumpAndSettle();
     expect(
@@ -332,10 +359,34 @@ void main() {
     expect(bodySlimTab.hitTestable(), findsOneWidget);
     await tester.tap(bodySlimTab);
     await tester.pumpAndSettle();
+    final bodyTargetSelector = find.byKey(
+      const ValueKey('editor-body-target-selector'),
+    );
+    await tester.dragUntilVisible(
+      bodyTargetSelector,
+      workspace,
+      const Offset(0, -180),
+    );
+    await tester.pumpAndSettle();
+    expect(bodyTargetSelector, findsOneWidget);
+    final secondBodyOverlay = find.byKey(
+      const ValueKey('portrait-target-overlay-1'),
+    );
+    expect(secondBodyOverlay, findsOneWidget);
+    expect(tester.getSize(secondBodyOverlay).width, greaterThanOrEqualTo(44));
+    expect(tester.getSize(secondBodyOverlay).height, greaterThanOrEqualTo(44));
+    await tester.tap(secondBodyOverlay);
+    await tester.pumpAndSettle();
     final bodySlimControl = find.descendant(
       of: find.byKey(const ValueKey('editor-adjustment-bodySlim')),
       matching: find.byType(Slider),
     );
+    await tester.dragUntilVisible(
+      bodySlimControl,
+      workspace,
+      const Offset(0, -180),
+    );
+    await tester.pumpAndSettle();
     expect(bodySlimControl, findsOneWidget);
     expect(tester.widget<Slider>(bodySlimControl).max, 0.35);
     await tester.drag(bodySlimControl, const Offset(70, 0));
@@ -346,15 +397,11 @@ void main() {
           .bodySlimStrength,
       greaterThan(0),
     );
-
-    await tester.drag(
-      find.byKey(const ValueKey('editor-adjustment-tabs')),
-      const Offset(180, 0),
-    );
-    await tester.pumpAndSettle();
     final visibleFaceSlimTab = find.byKey(
       const ValueKey('editor-adjustment-tab-faceSlim'),
     );
+    await tester.ensureVisible(visibleFaceSlimTab);
+    await tester.pumpAndSettle();
     expect(visibleFaceSlimTab.hitTestable(), findsOneWidget);
     await tester.tap(visibleFaceSlimTab);
     await tester.pumpAndSettle();
@@ -366,15 +413,48 @@ void main() {
       find.byKey(const ValueKey('editor-face-slim-target-1')),
       findsOneWidget,
     );
+    final faceTargetSelector = find.byKey(
+      const ValueKey('editor-face-target-selector'),
+    );
+    await tester.dragUntilVisible(
+      faceTargetSelector,
+      workspace,
+      const Offset(0, -180),
+    );
+    await tester.pumpAndSettle();
+    expect(faceTargetSelector, findsOneWidget);
     final faceSlimControl = find.descendant(
       of: find.byKey(const ValueKey('editor-adjustment-faceSlim')),
       matching: find.byType(Slider),
     );
+    await tester.dragUntilVisible(
+      faceSlimControl,
+      workspace,
+      const Offset(0, -180),
+    );
+    await tester.pumpAndSettle();
     expect(faceSlimControl, findsOneWidget);
+    expect(faceSlimControl.hitTestable(), findsOneWidget);
     expect(tester.widget<Slider>(faceSlimControl).max, 0.5);
     await tester.drag(faceSlimControl, const Offset(90, 0));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('editor-face-slim-target-1')));
+    final secondFaceTarget = find.byKey(
+      const ValueKey('portrait-target-overlay-1'),
+    );
+    await tester.dragUntilVisible(
+      secondFaceTarget,
+      workspace,
+      const Offset(0, 180),
+    );
+    await tester.pumpAndSettle();
+    expect(secondFaceTarget.hitTestable(), findsOneWidget);
+    await tester.tap(secondFaceTarget);
+    await tester.pumpAndSettle();
+    await tester.dragUntilVisible(
+      faceSlimControl,
+      workspace,
+      const Offset(0, -180),
+    );
     await tester.pumpAndSettle();
     await tester.drag(faceSlimControl, const Offset(50, 0));
     await tester.pumpAndSettle();
@@ -385,7 +465,16 @@ void main() {
           .targetStrengths,
       everyElement(greaterThan(0)),
     );
-
+    final colorCategory = find.byKey(
+      const ValueKey('editor-tool-category-color'),
+    );
+    await Scrollable.ensureVisible(tester.element(colorCategory));
+    await tester.pumpAndSettle();
+    await tester.tap(colorCategory);
+    await tester.pumpAndSettle();
+    final exposureTab = find.byKey(
+      const ValueKey('editor-adjustment-tab-exposure'),
+    );
     await tester.ensureVisible(exposureTab);
     await tester.pumpAndSettle();
     expect(exposureTab.hitTestable(), findsOneWidget);
@@ -411,6 +500,119 @@ void main() {
       isNot(0),
     );
 
+    final compositionCategory = find.byKey(
+      const ValueKey('editor-tool-category-composition'),
+    );
+    await tester.dragUntilVisible(
+      compositionCategory,
+      workspace,
+      const Offset(0, 280),
+    );
+    await tester.pumpAndSettle();
+    expect(compositionCategory.hitTestable(), findsOneWidget);
+    await tester.tap(compositionCategory);
+    await tester.pumpAndSettle();
+    final composition = find.byKey(const ValueKey('editor-composition-tools'));
+    expect(composition, findsOneWidget);
+    final freeCrop = find.byKey(const ValueKey('editor-free-crop'));
+    await tester.ensureVisible(freeCrop);
+    await tester.tap(freeCrop);
+    await tester.pumpAndSettle();
+    final cropCanvas = find.byKey(const ValueKey('free-crop-canvas'));
+    expect(cropCanvas, findsOneWidget);
+    await tester.drag(cropCanvas, const Offset(36, 28));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('free-crop-apply')));
+    await tester.pumpAndSettle();
+    final crop = (await store.loadLatest())!
+        .effectiveRecipeFor(importedPhoto.id)
+        .crop;
+    expect(crop.left, greaterThan(0));
+    expect(crop.top, greaterThan(0));
+    final filterCategory = find.byKey(
+      const ValueKey('editor-tool-category-filters'),
+    );
+    await tester.dragUntilVisible(
+      filterCategory,
+      workspace,
+      const Offset(0, 300),
+    );
+    await tester.pumpAndSettle();
+    expect(filterCategory.hitTestable(), findsOneWidget);
+    await tester.tap(filterCategory);
+    await tester.pumpAndSettle();
+    final filterTools = find.byKey(const ValueKey('editor-filter-hsl-tools'));
+    expect(filterTools, findsOneWidget);
+    final cinematicFilter = find.byKey(
+      const ValueKey('editor-filter-cinematic'),
+    );
+    await tester.ensureVisible(cinematicFilter);
+    expect(cinematicFilter.hitTestable(), findsOneWidget);
+    await tester.tap(cinematicFilter);
+    await tester.pumpAndSettle();
+    expect(
+      (await store.loadLatest())!
+          .effectiveRecipeFor(importedPhoto.id)
+          .basicEditingRecipe
+          .filter
+          .name,
+      'cinematic',
+    );
+    await tester.tap(find.byKey(const ValueKey('editor-hsl-blue')));
+    await tester.pumpAndSettle();
+    final blueSaturation = find.descendant(
+      of: find.byKey(const ValueKey('editor-hsl-blue-saturation')),
+      matching: find.byType(Slider),
+    );
+    await tester.drag(blueSaturation, const Offset(70, 0));
+    await tester.pumpAndSettle();
+    final basicEditing = (await store.loadLatest())!
+        .effectiveRecipeFor(importedPhoto.id)
+        .basicEditingRecipe;
+    expect(basicEditing.filter.name, 'cinematic');
+    expect(basicEditing.filterStrength, 70);
+    expect(basicEditing.hsl.values.single.saturation, greaterThan(0));
+
+    final semanticCategory = find.byKey(
+      const ValueKey('editor-tool-category-semantic'),
+    );
+    await Scrollable.ensureVisible(tester.element(semanticCategory));
+    await tester.pumpAndSettle();
+    await tester.tap(semanticCategory);
+    await tester.pumpAndSettle();
+    final whiteBackground = find.byKey(
+      const ValueKey('editor-background-white'),
+    );
+    await Scrollable.ensureVisible(tester.element(whiteBackground));
+    await tester.pumpAndSettle();
+    await tester.tap(whiteBackground);
+    await tester.pumpAndSettle();
+    final localExposureSlider = find.descendant(
+      of: find.byKey(const ValueKey('editor-local-exposure')),
+      matching: find.byType(Slider),
+    );
+    await tester.ensureVisible(localExposureSlider);
+    await tester.pumpAndSettle();
+    await tester.drag(localExposureSlider, const Offset(55, 0));
+    await tester.pumpAndSettle();
+    final localBrush = find.byKey(
+      const ValueKey('editor-open-local-adjustment-brush'),
+    );
+    await tester.ensureVisible(localBrush);
+    await tester.pumpAndSettle();
+    await tester.tap(localBrush);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('local-mask-canvas')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('local-mask-apply')));
+    await tester.pumpAndSettle();
+    final semanticEditing = (await store.loadLatest())!
+        .effectiveRecipeFor(importedPhoto.id)
+        .semanticEditingRecipe;
+    expect(semanticEditing.background, BackgroundTreatment.white);
+    expect(semanticEditing.localExposure, greaterThan(0));
+    expect(semanticEditing.localAdjustmentStrokes, isNotEmpty);
+
     await tester.dragUntilVisible(
       find.byKey(const ValueKey('editor-batch-export')),
       workspace,
@@ -418,11 +620,21 @@ void main() {
     );
     await tester.tap(find.byKey(const ValueKey('editor-batch-export')));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('export-size')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('2048 px').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('export-quality')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('标准').last);
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('export-confirm')));
     await tester.pump();
+    // Vision/Core Image cold starts on the iOS simulator can exceed 30 seconds
+    // once portrait, semantic masks, filters, and geometry are combined.
     for (
       var attempt = 0;
-      attempt < 300 && exporter.results.isEmpty;
+      attempt < 900 && exporter.results.isEmpty && exporter.errors.isEmpty;
       attempt++
     ) {
       await tester.pump(const Duration(milliseconds: 100));
@@ -431,6 +643,9 @@ void main() {
     expect(exporter.photoIds, ['ios-runtime-photo']);
     expect(exporter.errors, isEmpty);
     expect(exporter.results, hasLength(1));
+    expect(exporter.options.single.size, PhotoExportSize.longEdge);
+    expect(exporter.options.single.longEdgePixels, 2048);
+    expect(exporter.options.single.quality, PhotoExportQuality.standard);
     expect(exporter.recipes.single.portraitStrength, 0);
     expect(
       exporter.recipes.single.portraitRecipe.textureSmoothing,
@@ -448,6 +663,15 @@ void main() {
     final shareFile = File(sharePath!);
     expect(await shareFile.exists(), isTrue);
     expect((await shareFile.readAsBytes()).take(2), [0xff, 0xd8]);
+    final exportSummaryCard = find.byKey(const ValueKey('export-summary-card'));
+    for (
+      var attempt = 0;
+      attempt < 200 && exportSummaryCard.evaluate().isEmpty;
+      attempt++
+    ) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(exportSummaryCard, findsOneWidget);
     expect(find.text('已保存 1 张 · 失败 0 张 · 取消 0 张'), findsWidgets);
     expect(await source.readAsBytes(), sourceBytes);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -566,6 +790,50 @@ void main() {
       expect(store.project?.sharedStyle.family, SharedStyleFamily.naturalClean);
       expect(store.project?.adaptiveCompensations, hasLength(6));
 
+      final groupIntensity = find.byKey(
+        const ValueKey('editor-group-style-intensity'),
+      );
+      await tester.fling(workspace, const Offset(0, 1000), 2000);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(groupIntensity);
+      await tester.drag(groupIntensity, const Offset(-70, 0));
+      await tester.pumpAndSettle();
+      expect(store.project!.sharedStyle.intensity, lessThan(1));
+
+      final groupFilters = find.byKey(
+        const ValueKey('editor-tool-category-filters'),
+      );
+      await tester.ensureVisible(groupFilters);
+      await tester.tap(groupFilters);
+      await tester.pumpAndSettle();
+      final groupCinematic = find.byKey(
+        const ValueKey('editor-filter-cinematic'),
+      );
+      await tester.ensureVisible(groupCinematic);
+      await tester.tap(groupCinematic);
+      await tester.pumpAndSettle();
+      expect(
+        store.project!.sharedStyle.recipe.basicEditingRecipe.filter,
+        PhotoFilter.cinematic,
+      );
+      expect(
+        store.project!.photos.map(
+          (photo) => store.project!
+              .effectiveRecipeFor(photo.id)
+              .basicEditingRecipe
+              .filter,
+        ),
+        everyElement(PhotoFilter.cinematic),
+      );
+      final groupColor = find.byKey(
+        const ValueKey('editor-tool-category-color'),
+      );
+      await Scrollable.ensureVisible(tester.element(groupColor));
+      await tester.pumpAndSettle();
+      expect(groupColor.hitTestable(), findsOneWidget);
+      await tester.tap(groupColor);
+      await tester.pumpAndSettle();
+
       final exposureSlider = find.byKey(
         const ValueKey('editor-adjustment-exposure'),
       );
@@ -574,10 +842,21 @@ void main() {
         workspace,
         const Offset(0, -260),
       );
-      await tester.drag(exposureSlider, const Offset(70, 0));
+      await Scrollable.ensureVisible(
+        tester.element(exposureSlider),
+        alignment: 0.5,
+      );
+      await tester.pumpAndSettle();
+      expect(exposureSlider.hitTestable(), findsOneWidget);
+      final exposureControl = find.descendant(
+        of: exposureSlider,
+        matching: find.byType(Slider),
+      );
+      final exposureBefore = store.project!.sharedStyle.recipe.exposure;
+      await tester.drag(exposureControl, const Offset(70, 0));
       await tester.pumpAndSettle();
       final sharedExposure = store.project!.sharedStyle.recipe.exposure;
-      expect(sharedExposure, isNot(0));
+      expect(sharedExposure, isNot(exposureBefore));
 
       final currentPhotoScope = find.byKey(
         const ValueKey('editor-scope-currentPhoto'),
@@ -589,6 +868,18 @@ void main() {
       );
       await tester.tap(currentPhotoScope);
       await tester.pumpAndSettle();
+      for (final category in <String>[
+        'composition',
+        'color',
+        'filters',
+        'quality',
+        'semantic',
+      ]) {
+        expect(
+          find.byKey(ValueKey('editor-tool-category-$category')),
+          findsOneWidget,
+        );
+      }
       await tester.tap(
         find.byKey(const ValueKey('editor-photo-ios-runtime-photo-2')),
       );
@@ -600,6 +891,9 @@ void main() {
       final contrastSlider = find.byKey(
         const ValueKey('editor-adjustment-contrast'),
       );
+      await tester.ensureVisible(contrastSlider);
+      await tester.pumpAndSettle();
+      expect(contrastSlider.hitTestable(), findsOneWidget);
       await tester.drag(contrastSlider, const Offset(60, 0));
       await tester.pumpAndSettle();
 
@@ -645,6 +939,10 @@ void main() {
       );
       expect(exporter.photoIds.last, 'ios-runtime-photo-4');
       expect(exporter.photoIds, hasLength(7));
+      expect(
+        exporter.recipes.map((recipe) => recipe.basicEditingRecipe.filter),
+        everyElement(PhotoFilter.cinematic),
+      );
       for (final photo in photos) {
         expect(
           await File(photo.localPath).readAsBytes(),
@@ -661,6 +959,7 @@ final class _NativePreviewProbe implements PhotoPreviewRenderer {
   final PhotoPreviewRenderer delegate;
   final List<String> backends = [];
   final List<double> textureSmoothingStrengths = [];
+  final List<int> maxEdges = [];
   int updateCount = 0;
   int disposeCount = 0;
 
@@ -676,6 +975,7 @@ final class _NativePreviewProbe implements PhotoPreviewRenderer {
       maxEdge: maxEdge,
     );
     backends.add(handle.backend);
+    maxEdges.add(maxEdge);
     textureSmoothingStrengths.add(_textureSmoothingStrength(pipeline));
     return handle;
   }
@@ -714,7 +1014,7 @@ final class _SelectedPhotoSource implements PhotoSource {
   }
 }
 
-final class _NativeExportProbe implements PhotoExporter {
+final class _NativeExportProbe implements ConfigurablePhotoExporter {
   _NativeExportProbe({required this.delegate});
 
   final PhotoExporter delegate;
@@ -722,16 +1022,35 @@ final class _NativeExportProbe implements PhotoExporter {
   final List<EditRecipe> recipes = [];
   final List<ExportedPhoto> results = [];
   final List<Object> errors = [];
+  final List<PhotoExportOptions> options = [];
 
   @override
   Future<ExportedPhoto> export({
     required ProjectPhoto photo,
     required EditRecipe recipe,
+  }) => exportWithOptions(
+    photo: photo,
+    recipe: recipe,
+    options: PhotoExportOptions.defaults,
+  );
+
+  @override
+  Future<ExportedPhoto> exportWithOptions({
+    required ProjectPhoto photo,
+    required EditRecipe recipe,
+    required PhotoExportOptions options,
   }) async {
     photoIds.add(photo.id);
     recipes.add(recipe);
+    this.options.add(options);
     try {
-      final exported = await delegate.export(photo: photo, recipe: recipe);
+      final exported = delegate is ConfigurablePhotoExporter
+          ? await (delegate as ConfigurablePhotoExporter).exportWithOptions(
+              photo: photo,
+              recipe: recipe,
+              options: options,
+            )
+          : await delegate.export(photo: photo, recipe: recipe);
       results.add(exported);
       return exported;
     } on Object catch (error) {
@@ -773,7 +1092,26 @@ final class _ApplicablePortraitAnalyzer implements PhotoAnalyzer {
       portrait: PortraitApplicability.applicable,
       portraitReason: PortraitDegradationReason.none,
       faceSlimTargetCount: 2,
+      faceTargetRegions: const [
+        NormalizedTargetRegion(left: 0.12, top: 0.18, right: 0.38, bottom: 0.5),
+        NormalizedTargetRegion(left: 0.62, top: 0.18, right: 0.88, bottom: 0.5),
+      ],
       body: PortraitApplicability.applicable,
+      bodyTargetCount: 2,
+      bodyTargetRegions: const [
+        NormalizedTargetRegion(
+          left: 0.05,
+          top: 0.34,
+          right: 0.44,
+          bottom: 0.92,
+        ),
+        NormalizedTargetRegion(
+          left: 0.56,
+          top: 0.34,
+          right: 0.95,
+          bottom: 0.92,
+        ),
+      ],
       scene: SceneKind.people,
     );
   }
@@ -784,6 +1122,7 @@ final class _FailOnceRecordingExporter implements PhotoExporter {
 
   final String failOncePhotoId;
   final List<String> photoIds = [];
+  final List<EditRecipe> recipes = [];
   bool _failed = false;
 
   @override
@@ -792,6 +1131,7 @@ final class _FailOnceRecordingExporter implements PhotoExporter {
     required EditRecipe recipe,
   }) async {
     photoIds.add(photo.id);
+    recipes.add(recipe);
     if (photo.id == failOncePhotoId && !_failed) {
       _failed = true;
       throw StateError('injected iOS runtime export failure');

@@ -1,7 +1,10 @@
 import 'package:flutter/foundation.dart';
+import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/face_slim_recipe.dart';
 import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
+import 'package:yingjian/features/editor/domain/portrait_geometry_recipe.dart';
 import 'package:yingjian/features/editor/domain/quality_enhancement_recipe.dart';
+import 'package:yingjian/features/editor/domain/semantic_editing_recipe.dart';
 
 @immutable
 final class CropGeometry {
@@ -172,6 +175,9 @@ class EditRecipe {
     PortraitRetouchRecipe? portraitRecipe,
     QualityEnhancementRecipe qualityEnhancementRecipe =
         QualityEnhancementRecipe.neutral,
+    BasicEditingRecipe basicEditingRecipe = BasicEditingRecipe.neutral,
+    PortraitGeometryRecipe? portraitGeometryRecipe,
+    SemanticEditingRecipe semanticEditingRecipe = SemanticEditingRecipe.neutral,
     CropGeometry crop = CropGeometry.original,
   }) {
     for (final entry in <String, double>{
@@ -189,15 +195,38 @@ class EditRecipe {
     _validate(portraitStrength, 'portraitStrength', minimum: 0);
     _validate(faceSlimStrength, 'faceSlimStrength', minimum: 0);
     _validate(bodySlimStrength, 'bodySlimStrength', minimum: 0);
-    final resolvedFaceSlimRecipe =
+    final legacyFaceSlimRecipe =
         faceSlimRecipe ??
         FaceSlimRecipe(targetStrengths: <double>[faceSlimStrength]);
+    final resolvedPortraitGeometryRecipe =
+        portraitGeometryRecipe ??
+        PortraitGeometryRecipe.migrateLegacy(
+          faceSlimStrengths: legacyFaceSlimRecipe.targetStrengths,
+          selectedFaceIndex: legacyFaceSlimRecipe.selectedTargetIndex,
+          bodySlimStrength: bodySlimStrength,
+        );
+    final resolvedFaceSlimRecipe =
+        faceSlimRecipe != null || portraitGeometryRecipe == null
+        ? legacyFaceSlimRecipe
+        : FaceSlimRecipe(
+            targetStrengths: resolvedPortraitGeometryRecipe.faceTargets
+                .map((target) => target.faceSlim / 100)
+                .toList(),
+            selectedTargetIndex:
+                resolvedPortraitGeometryRecipe.selectedFaceIndex,
+          );
+    final resolvedBodySlimStrength = portraitGeometryRecipe == null
+        ? bodySlimStrength
+        : resolvedPortraitGeometryRecipe
+                  .bodyTargets[resolvedPortraitGeometryRecipe.selectedBodyIndex]
+                  .slimming /
+              100;
     final resolvedPortraitRecipe =
         portraitRecipe ??
         PortraitRetouchRecipe.migrateLegacy(
           portraitStrength: portraitStrength,
           faceSlimStrength: resolvedFaceSlimRecipe.selectedStrength,
-          bodySlimStrength: bodySlimStrength,
+          bodySlimStrength: resolvedBodySlimStrength,
         );
     return EditRecipe._(
       exposure: exposure,
@@ -210,9 +239,12 @@ class EditRecipe {
       clarity: clarity,
       portraitStrength: portraitStrength,
       faceSlimRecipe: resolvedFaceSlimRecipe,
-      bodySlimStrength: bodySlimStrength,
+      bodySlimStrength: resolvedBodySlimStrength,
       portraitRecipe: resolvedPortraitRecipe,
       qualityEnhancementRecipe: qualityEnhancementRecipe,
+      basicEditingRecipe: basicEditingRecipe,
+      portraitGeometryRecipe: resolvedPortraitGeometryRecipe,
+      semanticEditingRecipe: semanticEditingRecipe,
       crop: crop,
     );
   }
@@ -231,6 +263,9 @@ class EditRecipe {
     required this.bodySlimStrength,
     required this.portraitRecipe,
     required this.qualityEnhancementRecipe,
+    required this.basicEditingRecipe,
+    required this.portraitGeometryRecipe,
+    required this.semanticEditingRecipe,
     required this.crop,
   });
 
@@ -250,6 +285,9 @@ class EditRecipe {
   final double bodySlimStrength;
   final PortraitRetouchRecipe portraitRecipe;
   final QualityEnhancementRecipe qualityEnhancementRecipe;
+  final BasicEditingRecipe basicEditingRecipe;
+  final PortraitGeometryRecipe portraitGeometryRecipe;
+  final SemanticEditingRecipe semanticEditingRecipe;
   final CropGeometry crop;
 
   bool get isLegacyColorOnly =>
@@ -263,6 +301,9 @@ class EditRecipe {
       bodySlimStrength == 0 &&
       portraitRecipe.isNeutral &&
       qualityEnhancementRecipe.isNeutral &&
+      basicEditingRecipe.isNeutral &&
+      portraitGeometryRecipe.isNeutral &&
+      semanticEditingRecipe.isNeutral &&
       crop.isOriginal;
 
   bool get hasColorAdjustments =>
@@ -289,6 +330,9 @@ class EditRecipe {
     'bodySlimStrength': bodySlimStrength,
     'portraitRecipe': portraitRecipe.toJson(),
     'qualityEnhancementRecipe': qualityEnhancementRecipe.toJson(),
+    'basicEditingRecipe': basicEditingRecipe.toJson(),
+    'portraitGeometryRecipe': portraitGeometryRecipe.toJson(),
+    'semanticEditingRecipe': semanticEditingRecipe.toJson(),
     'crop': crop.toJson(),
   };
 
@@ -330,6 +374,34 @@ class EditRecipe {
         : throw const FormatException(
             'Invalid quality enhancement recipe payload',
           );
+    final rawBasicEditingRecipe = json['basicEditingRecipe'];
+    final basicEditingRecipe = rawBasicEditingRecipe == null
+        ? BasicEditingRecipe.neutral
+        : rawBasicEditingRecipe is Map
+        ? BasicEditingRecipe.fromJson(
+            Map<String, Object?>.from(rawBasicEditingRecipe),
+          )
+        : throw const FormatException('Invalid basic editing recipe payload');
+    final rawPortraitGeometryRecipe = json['portraitGeometryRecipe'];
+    final portraitGeometryRecipe = rawPortraitGeometryRecipe == null
+        ? null
+        : rawPortraitGeometryRecipe is Map
+        ? PortraitGeometryRecipe.fromJson(
+            Map<String, Object?>.from(rawPortraitGeometryRecipe),
+          )
+        : throw const FormatException(
+            'Invalid portrait geometry recipe payload',
+          );
+    final rawSemanticEditingRecipe = json['semanticEditingRecipe'];
+    final semanticEditingRecipe = rawSemanticEditingRecipe == null
+        ? SemanticEditingRecipe.neutral
+        : rawSemanticEditingRecipe is Map
+        ? SemanticEditingRecipe.fromJson(
+            Map<String, Object?>.from(rawSemanticEditingRecipe),
+          )
+        : throw const FormatException(
+            'Invalid semantic editing recipe payload',
+          );
     return EditRecipe(
       exposure: (json['exposure'] as num?)?.toDouble() ?? 0,
       highlights: (json['highlights'] as num?)?.toDouble() ?? 0,
@@ -345,6 +417,9 @@ class EditRecipe {
       bodySlimStrength: bodySlimStrength,
       portraitRecipe: migratedPortraitRecipe,
       qualityEnhancementRecipe: qualityEnhancementRecipe,
+      basicEditingRecipe: basicEditingRecipe,
+      portraitGeometryRecipe: portraitGeometryRecipe,
+      semanticEditingRecipe: semanticEditingRecipe,
       crop: json['crop'] is Map<String, Object?>
           ? CropGeometry.fromJson(json['crop']! as Map<String, Object?>)
           : CropGeometry.original,
@@ -366,13 +441,55 @@ class EditRecipe {
     double? bodySlimStrength,
     PortraitRetouchRecipe? portraitRecipe,
     QualityEnhancementRecipe? qualityEnhancementRecipe,
+    BasicEditingRecipe? basicEditingRecipe,
+    PortraitGeometryRecipe? portraitGeometryRecipe,
+    SemanticEditingRecipe? semanticEditingRecipe,
     CropGeometry? crop,
   }) {
+    var resolvedGeometry =
+        portraitGeometryRecipe ?? this.portraitGeometryRecipe;
     final resolvedFaceSlimRecipe =
-        faceSlimRecipe ??
-        (faceSlimStrength == null
-            ? this.faceSlimRecipe
-            : this.faceSlimRecipe.setSelectedStrength(faceSlimStrength));
+        portraitGeometryRecipe != null &&
+            faceSlimRecipe == null &&
+            faceSlimStrength == null
+        ? FaceSlimRecipe(
+            targetStrengths: resolvedGeometry.faceTargets
+                .map((target) => target.faceSlim / 100)
+                .toList(),
+            selectedTargetIndex: resolvedGeometry.selectedFaceIndex,
+          )
+        : faceSlimRecipe ??
+              (faceSlimStrength == null
+                  ? this.faceSlimRecipe
+                  : this.faceSlimRecipe.setSelectedStrength(faceSlimStrength));
+    if (faceSlimRecipe != null || faceSlimStrength != null) {
+      resolvedGeometry = resolvedGeometry.withFaceTargetCount(
+        resolvedFaceSlimRecipe.targetStrengths.length,
+      );
+      final targets = resolvedGeometry.faceTargets.toList();
+      for (var index = 0; index < targets.length; index++) {
+        targets[index] = targets[index].copyWith(
+          faceSlim: resolvedFaceSlimRecipe.targetStrengths[index] * 100,
+        );
+      }
+      resolvedGeometry = resolvedGeometry.copyWith(
+        faceTargets: targets,
+        selectedFaceIndex: resolvedFaceSlimRecipe.selectedTargetIndex,
+      );
+    }
+    final resolvedBodySlimStrength =
+        bodySlimStrength ??
+        (portraitGeometryRecipe == null
+            ? this.bodySlimStrength
+            : resolvedGeometry
+                      .bodyTargets[resolvedGeometry.selectedBodyIndex]
+                      .slimming /
+                  100);
+    if (bodySlimStrength != null) {
+      resolvedGeometry = resolvedGeometry.updateSelectedBody(
+        (target) => target.copyWith(slimming: bodySlimStrength * 100),
+      );
+    }
     final resolvedPortraitRecipe =
         portraitRecipe ??
         this.portraitRecipe.copyWith(
@@ -400,10 +517,14 @@ class EditRecipe {
       clarity: clarity ?? this.clarity,
       portraitStrength: portraitStrength ?? this.portraitStrength,
       faceSlimRecipe: resolvedFaceSlimRecipe,
-      bodySlimStrength: bodySlimStrength ?? this.bodySlimStrength,
+      bodySlimStrength: resolvedBodySlimStrength,
       portraitRecipe: resolvedPortraitRecipe,
       qualityEnhancementRecipe:
           qualityEnhancementRecipe ?? this.qualityEnhancementRecipe,
+      basicEditingRecipe: basicEditingRecipe ?? this.basicEditingRecipe,
+      portraitGeometryRecipe: resolvedGeometry,
+      semanticEditingRecipe:
+          semanticEditingRecipe ?? this.semanticEditingRecipe,
       crop: crop ?? this.crop,
     );
   }
@@ -430,6 +551,9 @@ class EditRecipe {
       other.bodySlimStrength == bodySlimStrength &&
       other.portraitRecipe == portraitRecipe &&
       other.qualityEnhancementRecipe == qualityEnhancementRecipe &&
+      other.basicEditingRecipe == basicEditingRecipe &&
+      other.portraitGeometryRecipe == portraitGeometryRecipe &&
+      other.semanticEditingRecipe == semanticEditingRecipe &&
       other.crop == crop;
 
   @override
@@ -447,6 +571,9 @@ class EditRecipe {
     bodySlimStrength,
     portraitRecipe,
     qualityEnhancementRecipe,
+    basicEditingRecipe,
+    portraitGeometryRecipe,
+    semanticEditingRecipe,
     crop,
   );
 }

@@ -1,6 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
+import 'package:yingjian/features/editor/domain/portrait_geometry_recipe.dart';
+import 'package:yingjian/features/editor/domain/semantic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/quality_enhancement_recipe.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 
@@ -39,6 +42,149 @@ void main() {
     expect(firstRecipe.contrast, closeTo(0.3, 1e-12));
     expect(firstRecipe.warmth, closeTo(-0.1, 1e-12));
     expect(project.effectiveRecipeFor(second.id), EditRecipe(exposure: 0.2));
+  });
+
+  test('group filter and HSL propagate while geometry stays per photo', () {
+    final groupBasic = BasicEditingRecipe(
+      flipHorizontal: true,
+      perspectiveHorizontal: 12,
+      filter: PhotoFilter.cinematic,
+      filterStrength: 62,
+      hsl: {HslChannel.blue: HslAdjustment(saturation: -18, lightness: 8)},
+    );
+    final project = PhotoProject(
+      id: 'project-group-look',
+      createdAt: DateTime.utc(2026, 8, 9),
+      updatedAt: DateTime.utc(2026, 8, 9),
+      photos: const [first, second],
+      sharedStyle: SharedStyle(
+        recipe: EditRecipe(basicEditingRecipe: groupBasic),
+      ),
+      photoOverrides: {
+        first.id: PhotoOverride(
+          recipe: EditRecipe(
+            basicEditingRecipe: BasicEditingRecipe(
+              flipVertical: true,
+              filter: PhotoFilter.none,
+            ),
+          ),
+          overridesBasicLook: true,
+        ),
+      },
+    );
+
+    final firstEffective = project.effectiveRecipeFor(first.id);
+    final secondEffective = project.effectiveRecipeFor(second.id);
+    expect(firstEffective.basicEditingRecipe.filter, PhotoFilter.none);
+    expect(firstEffective.basicEditingRecipe.flipVertical, isTrue);
+    expect(secondEffective.basicEditingRecipe.filter, PhotoFilter.cinematic);
+    expect(secondEffective.basicEditingRecipe.filterStrength, 62);
+    expect(
+      secondEffective.basicEditingRecipe.hsl[HslChannel.blue],
+      HslAdjustment(saturation: -18, lightness: 8),
+    );
+    expect(secondEffective.basicEditingRecipe.flipHorizontal, isFalse);
+    expect(secondEffective.basicEditingRecipe.perspectiveHorizontal, 0);
+
+    final baseline = project.photoOverrideBaselineFor(second.id);
+    expect(baseline.basicEditingRecipe.filter, PhotoFilter.cinematic);
+    expect(baseline.basicEditingRecipe.flipHorizontal, isFalse);
+  });
+
+  test('group intensity still reaches photos with color-only overrides', () {
+    final sharedBasic = BasicEditingRecipe(
+      filter: PhotoFilter.cinematic,
+      filterStrength: 60,
+      hsl: {HslChannel.blue: HslAdjustment(saturation: -20)},
+    );
+    final project = PhotoProject(
+      id: 'project-group-strength',
+      createdAt: DateTime.utc(2026, 8, 9),
+      updatedAt: DateTime.utc(2026, 8, 9),
+      photos: const [first, second],
+      sharedStyle: SharedStyle(
+        intensity: 0.8,
+        recipe: EditRecipe(basicEditingRecipe: sharedBasic),
+      ),
+      photoOverrides: {
+        first.id: PhotoOverride(
+          recipe: EditRecipe(exposure: 0.1),
+          overridesBasicLook: false,
+        ),
+      },
+    );
+
+    expect(
+      project.effectiveRecipeFor(first.id).basicEditingRecipe.filterStrength,
+      48,
+    );
+    expect(
+      project
+          .copyWith(
+            sharedStyle: SharedStyle(
+              intensity: 0.4,
+              recipe: EditRecipe(basicEditingRecipe: sharedBasic),
+            ),
+          )
+          .effectiveRecipeFor(first.id)
+          .basicEditingRecipe
+          .filterStrength,
+      24,
+    );
+  });
+
+  test('per-photo flip and perspective keep following the group look', () {
+    final sharedBasic = BasicEditingRecipe(
+      filter: PhotoFilter.film,
+      filterStrength: 50,
+      hsl: {HslChannel.orange: HslAdjustment(lightness: 12)},
+    );
+    final project = PhotoProject(
+      id: 'project-independent-basic-geometry',
+      createdAt: DateTime.utc(2026, 8, 9),
+      updatedAt: DateTime.utc(2026, 8, 9),
+      photos: const [first, second],
+      sharedStyle: SharedStyle(
+        intensity: 0.8,
+        recipe: EditRecipe(basicEditingRecipe: sharedBasic),
+      ),
+      photoOverrides: {
+        first.id: PhotoOverride(
+          recipe: EditRecipe(
+            basicEditingRecipe: BasicEditingRecipe(
+              flipHorizontal: true,
+              perspectiveVertical: -8,
+              filter: PhotoFilter.film,
+              filterStrength: 40,
+              hsl: {HslChannel.orange: HslAdjustment(lightness: 9.6)},
+            ),
+          ),
+          overridesBasicLook: false,
+        ),
+      },
+    );
+
+    final effective = project.effectiveRecipeFor(first.id).basicEditingRecipe;
+    expect(effective.flipHorizontal, isTrue);
+    expect(effective.perspectiveVertical, -8);
+    expect(effective.filter, PhotoFilter.film);
+    expect(effective.filterStrength, 40);
+
+    final changed = project.copyWith(
+      sharedStyle: SharedStyle(
+        intensity: 0.4,
+        recipe: EditRecipe(
+          basicEditingRecipe: sharedBasic.copyWith(filter: PhotoFilter.clean),
+        ),
+      ),
+    );
+    final changedEffective = changed
+        .effectiveRecipeFor(first.id)
+        .basicEditingRecipe;
+    expect(changedEffective.flipHorizontal, isTrue);
+    expect(changedEffective.perspectiveVertical, -8);
+    expect(changedEffective.filter, PhotoFilter.clean);
+    expect(changedEffective.filterStrength, 20);
   });
 
   test('effective recipe preserves every V2 adjustment and photo geometry', () {
@@ -155,6 +301,69 @@ void main() {
     );
   });
 
+  test('multi-target face and body geometry stays with one photo', () {
+    final geometry = PortraitGeometryRecipe(
+      faceTargets: [FaceGeometryTarget(eyes: 18), FaceGeometryTarget(jaw: -12)],
+      bodyTargets: [BodyGeometryTarget(height: 15, waist: -10)],
+    );
+    final project = PhotoProject(
+      id: 'project-geometry-v1',
+      createdAt: DateTime.utc(2026, 8, 9),
+      updatedAt: DateTime.utc(2026, 8, 9),
+      photos: const [first, second],
+      photoOverrides: {
+        first.id: PhotoOverride(
+          recipe: EditRecipe(portraitGeometryRecipe: geometry),
+        ),
+      },
+    );
+
+    final restored = PhotoProject.fromJson(project.toJson());
+
+    expect(
+      restored.effectiveRecipeFor(first.id).portraitGeometryRecipe,
+      geometry,
+    );
+    expect(
+      restored.effectiveRecipeFor(second.id).portraitGeometryRecipe,
+      PortraitGeometryRecipe.neutral,
+    );
+  });
+
+  test('semantic editing stays with one photo and survives restoration', () {
+    final semantic = SemanticEditingRecipe(
+      background: BackgroundTreatment.blur,
+      backgroundBlur: 35,
+      subjectExposure: 12,
+    );
+    final project = PhotoProject(
+      id: 'project-semantic-v1',
+      createdAt: DateTime.utc(2026, 8, 9),
+      updatedAt: DateTime.utc(2026, 8, 9),
+      photos: const [first, second],
+      photoOverrides: {
+        first.id: PhotoOverride(
+          recipe: EditRecipe(semanticEditingRecipe: semantic),
+        ),
+      },
+    );
+
+    expect(
+      project.effectiveRecipeFor(first.id).semanticEditingRecipe,
+      semantic,
+    );
+    expect(
+      project.effectiveRecipeFor(second.id).semanticEditingRecipe,
+      SemanticEditingRecipe.neutral,
+    );
+    expect(
+      PhotoProject.fromJson(
+        project.toJson(),
+      ).effectiveRecipeFor(first.id).semanticEditingRecipe,
+      semantic,
+    );
+  });
+
   test(
     'portrait retouch and reshape stay with their photo when color edits sync to group',
     () {
@@ -267,6 +476,37 @@ void main() {
     },
   );
 
+  test('group sync rejects a photo look that cannot preserve its strength', () {
+    final project = PhotoProject(
+      id: 'project-filter-overflow',
+      createdAt: DateTime.utc(2026, 8, 9),
+      updatedAt: DateTime.utc(2026, 8, 9),
+      photos: const [first, second],
+      sharedStyle: SharedStyle(
+        intensity: 0.5,
+        recipe: EditRecipe(
+          basicEditingRecipe: BasicEditingRecipe(
+            filter: PhotoFilter.clean,
+            filterStrength: 40,
+          ),
+        ),
+      ),
+      photoOverrides: {
+        first.id: PhotoOverride(
+          recipe: EditRecipe(
+            basicEditingRecipe: BasicEditingRecipe(
+              filter: PhotoFilter.film,
+              filterStrength: 70,
+            ),
+          ),
+          overridesBasicLook: true,
+        ),
+      },
+    );
+
+    expect(project.planPhotoAdjustmentsToGroup(first.id), isNull);
+  });
+
   test('rejects scoped history that only changes sync-only fields', () {
     expect(
       () => PhotoProject(
@@ -328,8 +568,59 @@ void main() {
     expect(restored.exportStates[first.id], PhotoExportState.queued);
     expect(restored.editingScope, ProjectEditingScope.currentPhoto);
     expect(restored.undoHistory, project.undoHistory);
-    expect(project.toJson()['schemaVersion'], 7);
+    expect(project.toJson()['schemaVersion'], 9);
   });
+
+  test(
+    'version eight basic override flag migrates to the split look model',
+    () {
+      final project = PhotoProject(
+        id: 'version-eight-basic-look',
+        createdAt: DateTime.utc(2026, 8, 9),
+        updatedAt: DateTime.utc(2026, 8, 9),
+        photos: const [first],
+        sharedStyle: SharedStyle(
+          recipe: EditRecipe(
+            basicEditingRecipe: BasicEditingRecipe(
+              filter: PhotoFilter.cinematic,
+              filterStrength: 60,
+            ),
+          ),
+        ),
+        photoOverrides: {
+          first.id: PhotoOverride(
+            recipe: EditRecipe(
+              basicEditingRecipe: BasicEditingRecipe(
+                flipHorizontal: true,
+                filter: PhotoFilter.cinematic,
+                filterStrength: 60,
+              ),
+            ),
+            overridesBasicLook: false,
+          ),
+        },
+      );
+      final json = project.toJson()..['schemaVersion'] = 8;
+      final rawOverrides = json['photoOverrides']! as Map<String, Object>;
+      final rawOverride = Map<String, Object>.from(
+        rawOverrides[first.id]! as Map<String, Object>,
+      );
+      rawOverride['overridesBasicEditing'] = rawOverride.remove(
+        'overridesBasicLook',
+      )!;
+      rawOverrides[first.id] = rawOverride;
+
+      final restored = PhotoProject.fromJson(json);
+
+      expect(restored.photoOverrides[first.id]!.overridesBasicLook, isFalse);
+      final effective = restored
+          .effectiveRecipeFor(first.id)
+          .basicEditingRecipe;
+      expect(effective.flipHorizontal, isTrue);
+      expect(effective.filter, PhotoFilter.cinematic);
+      expect(restored.toJson()['schemaVersion'], 9);
+    },
+  );
 
   test('version three project migrates to a safe scope with empty history', () {
     final restored = PhotoProject.fromJson({
@@ -375,7 +666,7 @@ void main() {
 
       expect(restored.effectiveRecipeFor(first.id).faceSlimStrength, 0);
       expect(restored.effectiveRecipeFor(first.id).bodySlimStrength, 0);
-      expect(restored.toJson()['schemaVersion'], 7);
+      expect(restored.toJson()['schemaVersion'], 9);
     },
   );
 

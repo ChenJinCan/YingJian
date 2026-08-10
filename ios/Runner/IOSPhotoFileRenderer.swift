@@ -14,6 +14,52 @@ struct IOSPhotoRenderedFile {
   let metadata: [String: Any]
 }
 
+struct IOSPhotoExportOptions {
+  let format: String
+  let longEdgePixels: Int?
+  let compressionQuality: Double
+
+  static let defaults = IOSPhotoExportOptions(
+    format: "jpeg",
+    longEdgePixels: nil,
+    compressionQuality: 0.95
+  )
+
+  init(format: String, longEdgePixels: Int?, compressionQuality: Double) {
+    self.format = format
+    self.longEdgePixels = longEdgePixels
+    self.compressionQuality = compressionQuality
+  }
+
+  init?(arguments: Any?) {
+    guard
+      let values = arguments as? [String: Any],
+      let format = values["format"] as? String,
+      ["jpeg", "heif"].contains(format),
+      let size = values["size"] as? String,
+      ["original", "longEdge"].contains(size),
+      let quality = values["quality"] as? String,
+      let compressionQuality = ["high": 0.95, "standard": 0.86, "compact": 0.74][quality],
+      values["colorSpace"] as? String == "srgb"
+    else { return nil }
+    let longEdge = values["longEdgePixels"] as? NSNumber
+    if size == "longEdge" {
+      guard
+        let longEdge,
+        CFGetTypeID(longEdge) != CFBooleanGetTypeID(),
+        longEdge.doubleValue.rounded(.towardZero) == longEdge.doubleValue,
+        (640...16384).contains(longEdge.intValue)
+      else { return nil }
+      longEdgePixels = longEdge.intValue
+    } else {
+      guard longEdge == nil else { return nil }
+      longEdgePixels = nil
+    }
+    self.format = format
+    self.compressionQuality = compressionQuality
+  }
+}
+
 /// Renders one app-owned source file through the same production pipeline used
 /// before PhotoKit persistence. Keeping this seam independent from PhotoKit
 /// makes the final JPEG contract directly inspectable without weakening the
@@ -25,6 +71,7 @@ struct IOSPhotoFileRenderer {
     sourcePath: String,
     pipeline: IOSImagePipeline,
     destinationURL: URL,
+    options: IOSPhotoExportOptions = .defaults,
     preparedPortraitContext: IOSPortraitRetouchContext? = nil
   ) throws -> IOSPhotoRenderedFile {
     guard let input = CIImage(
@@ -45,28 +92,55 @@ struct IOSPhotoFileRenderer {
         || pipeline.portraitStrength > 0
         || pipeline.faceSlimStrengths.contains(where: { $0 > 0 })
         || pipeline.bodySlimStrength > 0
+        || pipeline.faceGeometryTargets.contains(where: {
+          $0.headSize != 0 || $0.jaw != 0 || $0.chin != 0 || $0.eyes != 0
+            || $0.nose != 0 || $0.mouth != 0
+        })
+        || pipeline.bodyGeometryTargets.contains(where: {
+          $0.height != 0 || $0.shoulders != 0 || $0.waist != 0 || $0.legs != 0
+        })
+        || pipeline.semanticEditing != .neutral
         ? IOSPortraitRetoucher.prepare(source: normalizedInput, extent: sourceExtent)
         : .unavailable)
-    let output = pipeline
+    var output = pipeline
       .applying(
         to: normalizedInput,
         extent: sourceExtent,
         portraitContext: portraitContext
       )
       .settingProperties(metadata)
+    if let longEdge = options.longEdgePixels {
+      let currentLongEdge = max(output.extent.width, output.extent.height)
+      if currentLongEdge > CGFloat(longEdge) {
+        let scale = CGFloat(longEdge) / currentLongEdge
+        output = output.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+      }
+    }
     let outputExtent = output.extent.integral
     guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
       throw IOSPhotoFileRenderError.renderFailed
     }
     do {
-      try context.writeJPEGRepresentation(
-        of: output,
-        to: destinationURL,
-        colorSpace: colorSpace,
-        options: [
-          kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.95
-        ]
-      )
+      let representationOptions = [
+        kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption:
+          options.compressionQuality
+      ]
+      if options.format == "heif" {
+        try context.writeHEIFRepresentation(
+          of: output,
+          to: destinationURL,
+          format: .RGBA8,
+          colorSpace: colorSpace,
+          options: representationOptions
+        )
+      } else {
+        try context.writeJPEGRepresentation(
+          of: output,
+          to: destinationURL,
+          colorSpace: colorSpace,
+          options: representationOptions
+        )
+      }
     } catch {
       try? FileManager.default.removeItem(at: destinationURL)
       throw IOSPhotoFileRenderError.renderFailed
@@ -139,6 +213,325 @@ enum ImageExportMetadata {
   }
 }
 
+struct IOSEraseStroke: Equatable {
+  let radius: Double
+  let points: [CGPoint]
+}
+
+struct IOSMaskStroke: Equatable {
+  let operation: String
+  let radius: Double
+  let points: [CGPoint]
+}
+
+struct IOSSemanticEditingParameters: Equatable {
+  let background: String
+  let backgroundImagePath: String
+  let backgroundBlur: Int
+  let subjectExposure: Int
+  let subjectSaturation: Int
+  let backgroundExposure: Int
+  let backgroundSaturation: Int
+  let localExposure: Int
+  let localSaturation: Int
+  let subjectMaskStrokes: [IOSMaskStroke]
+  let localAdjustmentStrokes: [IOSMaskStroke]
+  let eraseStrokes: [IOSEraseStroke]
+
+  static let neutral = IOSSemanticEditingParameters(
+    background: "original", backgroundImagePath: "", backgroundBlur: 0,
+    subjectExposure: 0, subjectSaturation: 0,
+    backgroundExposure: 0, backgroundSaturation: 0,
+    localExposure: 0, localSaturation: 0,
+    subjectMaskStrokes: [], localAdjustmentStrokes: [],
+    eraseStrokes: []
+  )
+}
+
+enum IOSSemanticEditor {
+  static func applying(
+    to source: CIImage,
+    parameters: IOSSemanticEditingParameters,
+    subjectMask: CIImage?,
+    extent: CGRect
+  ) -> CIImage {
+    var output = applyingEraseStrokes(
+      to: source.cropped(to: extent),
+      strokes: parameters.eraseStrokes,
+      extent: extent
+    )
+    let foregroundMask = applyingMaskStrokes(
+      to: subjectMask,
+      strokes: parameters.subjectMaskStrokes,
+      extent: extent
+    )
+    if parameters.localExposure != 0 || parameters.localSaturation != 0,
+       !parameters.localAdjustmentStrokes.isEmpty,
+       let localMask = applyingMaskStrokes(
+         to: nil,
+         strokes: parameters.localAdjustmentStrokes,
+         extent: extent
+       )
+    {
+      output = applyingLocalColor(
+        to: output,
+        exposure: parameters.localExposure,
+        saturation: parameters.localSaturation,
+        mask: localMask,
+        extent: extent
+      )
+    }
+    guard let foregroundMask else { return output }
+    let backgroundMask = foregroundMask
+      .applyingFilter("CIColorInvert")
+      .cropped(to: extent)
+
+    if parameters.subjectExposure != 0 || parameters.subjectSaturation != 0 {
+      output = applyingLocalColor(
+        to: output,
+        exposure: parameters.subjectExposure,
+        saturation: parameters.subjectSaturation,
+        mask: foregroundMask,
+        extent: extent
+      )
+    }
+    if parameters.backgroundExposure != 0 || parameters.backgroundSaturation != 0 {
+      output = applyingLocalColor(
+        to: output,
+        exposure: parameters.backgroundExposure,
+        saturation: parameters.backgroundSaturation,
+        mask: backgroundMask,
+        extent: extent
+      )
+    }
+
+    let replacement: CIImage?
+    switch parameters.background {
+    case "blur":
+      let radius = 2 + Double(parameters.backgroundBlur) / 100 * 28
+      replacement = output.clampedToExtent().applyingFilter(
+        "CIGaussianBlur",
+        parameters: [kCIInputRadiusKey: radius]
+      ).cropped(to: extent)
+    case "white":
+      replacement = CIImage(color: .white).cropped(to: extent)
+    case "black":
+      replacement = CIImage(color: .black).cropped(to: extent)
+    case "warm":
+      replacement = CIImage(
+        color: CIColor(red: 0.94, green: 0.86, blue: 0.78, alpha: 1)
+      ).cropped(to: extent)
+    case "cool":
+      replacement = CIImage(
+        color: CIColor(red: 0.78, green: 0.87, blue: 0.94, alpha: 1)
+      ).cropped(to: extent)
+    case "image":
+      replacement = aspectFillBackground(
+        path: parameters.backgroundImagePath,
+        extent: extent
+      )
+    default:
+      replacement = nil
+    }
+    guard let replacement else { return output }
+    return replacement.applyingFilter(
+      "CIBlendWithMask",
+      parameters: [
+        kCIInputBackgroundImageKey: output,
+        kCIInputMaskImageKey: backgroundMask,
+      ]
+    ).cropped(to: extent)
+  }
+
+  private static func aspectFillBackground(
+    path: String,
+    extent: CGRect
+  ) -> CIImage? {
+    guard !path.isEmpty,
+          FileManager.default.fileExists(atPath: path),
+          let image = CIImage(
+            contentsOf: URL(fileURLWithPath: path),
+            options: [.applyOrientationProperty: true]
+          ),
+          image.extent.width > 0,
+          image.extent.height > 0
+    else { return nil }
+    let scale = max(
+      extent.width / image.extent.width,
+      extent.height / image.extent.height
+    )
+    let scaled = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+    let translation = CGAffineTransform(
+      translationX: extent.midX - scaled.extent.midX,
+      y: extent.midY - scaled.extent.midY
+    )
+    return scaled.transformed(by: translation).cropped(to: extent)
+  }
+
+  private static func applyingLocalColor(
+    to input: CIImage,
+    exposure: Int,
+    saturation: Int,
+    mask: CIImage,
+    extent: CGRect
+  ) -> CIImage {
+    var adjusted = input
+    if exposure != 0 {
+      adjusted = adjusted.applyingFilter(
+        "CIExposureAdjust",
+        parameters: [kCIInputEVKey: Double(exposure) / 100]
+      ).cropped(to: extent)
+    }
+    if saturation != 0 {
+      adjusted = adjusted.applyingFilter(
+        "CIColorControls",
+        parameters: [kCIInputSaturationKey: 1 + Double(saturation) / 100 * 0.8]
+      ).cropped(to: extent)
+    }
+    return adjusted.applyingFilter(
+      "CIBlendWithMask",
+      parameters: [
+        kCIInputBackgroundImageKey: input,
+        kCIInputMaskImageKey: mask,
+      ]
+    ).cropped(to: extent)
+  }
+
+  static func applyingMaskStrokes(
+    to baseMask: CIImage?,
+    strokes: [IOSMaskStroke],
+    extent: CGRect
+  ) -> CIImage? {
+    guard baseMask != nil || !strokes.isEmpty else { return nil }
+    var mask = (baseMask ?? CIImage(color: .black).cropped(to: extent))
+      .cropped(to: extent)
+    let minimumDimension = min(extent.width, extent.height)
+    for stroke in strokes {
+      let radius = max(2, minimumDimension * stroke.radius)
+      var previous: CGPoint?
+      for normalized in stroke.points {
+        let center = CGPoint(
+          x: extent.minX + normalized.x * extent.width,
+          y: extent.maxY - normalized.y * extent.height
+        )
+        if let previous,
+           hypot(center.x - previous.x, center.y - previous.y) < radius * 0.35
+        {
+          continue
+        }
+        previous = center
+        guard let brush = CIFilter(
+          name: "CIRadialGradient",
+          parameters: [
+            "inputCenter": CIVector(cgPoint: center),
+            "inputRadius0": radius * 0.72,
+            "inputRadius1": radius,
+            "inputColor0": CIColor.white,
+            "inputColor1": CIColor.black,
+          ]
+        )?.outputImage?.cropped(to: extent) else { continue }
+        if stroke.operation == "paint" {
+          mask = brush.applyingFilter(
+            "CIMaximumCompositing",
+            parameters: [kCIInputBackgroundImageKey: mask]
+          ).cropped(to: extent)
+        } else {
+          let inverse = brush.applyingFilter("CIColorInvert").cropped(to: extent)
+          mask = mask.applyingFilter(
+            "CIMultiplyCompositing",
+            parameters: [kCIInputBackgroundImageKey: inverse]
+          ).cropped(to: extent)
+        }
+      }
+    }
+    return mask
+  }
+
+  private static func applyingEraseStrokes(
+    to source: CIImage,
+    strokes: [IOSEraseStroke],
+    extent: CGRect
+  ) -> CIImage {
+    var output = source
+    let minimumDimension = min(extent.width, extent.height)
+    for stroke in strokes {
+      let radius = max(2, minimumDimension * stroke.radius)
+      var previous: CGPoint?
+      for normalized in stroke.points {
+        let center = CGPoint(
+          x: extent.minX + normalized.x * extent.width,
+          y: extent.maxY - normalized.y * extent.height
+        )
+        if let previous,
+           hypot(center.x - previous.x, center.y - previous.y) < radius * 0.35
+        {
+          continue
+        }
+        previous = center
+        output = applyingEraseStamp(
+          to: output,
+          center: center,
+          radius: radius,
+          extent: extent
+        )
+      }
+    }
+    return output
+  }
+
+  private static func applyingEraseStamp(
+    to input: CIImage,
+    center: CGPoint,
+    radius: CGFloat,
+    extent: CGRect
+  ) -> CIImage {
+    let directions: [CGPoint] = [
+      CGPoint(x: -1, y: 0), CGPoint(x: 1, y: 0),
+      CGPoint(x: 0, y: -1), CGPoint(x: 0, y: 1),
+      CGPoint(x: -0.7, y: -0.7), CGPoint(x: 0.7, y: -0.7),
+      CGPoint(x: -0.7, y: 0.7), CGPoint(x: 0.7, y: 0.7),
+    ]
+    let samples = directions.map { direction in
+      input.clampedToExtent()
+        .transformed(by: CGAffineTransform(
+          translationX: direction.x * radius * 1.15,
+          y: direction.y * radius * 1.15
+        ))
+        .applyingFilter("CIColorMatrix", parameters: [
+          "inputRVector": CIVector(x: 0.125, y: 0, z: 0, w: 0),
+          "inputGVector": CIVector(x: 0, y: 0.125, z: 0, w: 0),
+          "inputBVector": CIVector(x: 0, y: 0, z: 0.125, w: 0),
+          "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0.125),
+        ])
+        .cropped(to: extent)
+    }
+    let repair = samples.dropFirst().reduce(samples[0]) { current, sample in
+      sample.applyingFilter(
+        "CIAdditionCompositing",
+        parameters: [kCIInputBackgroundImageKey: current]
+      ).cropped(to: extent)
+    }
+    let brush = CIFilter(
+      name: "CIRadialGradient",
+      parameters: [
+        "inputCenter": CIVector(cgPoint: center),
+        "inputRadius0": radius * 0.72,
+        "inputRadius1": radius,
+        "inputColor0": CIColor.white,
+        "inputColor1": CIColor.black,
+      ]
+    )?.outputImage?.cropped(to: extent)
+    guard let brush else { return input }
+    return repair.applyingFilter(
+      "CIBlendWithMask",
+      parameters: [
+        kCIInputBackgroundImageKey: input,
+        kCIInputMaskImageKey: brush,
+      ]
+    ).cropped(to: extent)
+  }
+}
+
 struct IOSImagePipeline {
   let schemaVersion: Int
   let exposureEV: Double
@@ -164,6 +557,18 @@ struct IOSImagePipeline {
   let lowLightRecovery: Int
   let hazeRemoval: Int
   let detailSharpening: Int
+  let flipHorizontal: Bool
+  let flipVertical: Bool
+  let perspectiveHorizontal: Double
+  let perspectiveVertical: Double
+  let photoFilter: String
+  let filterStrength: Int
+  let hslAdjustments: [String: [String: Double]]
+  let selectedFaceGeometryIndex: Int
+  let faceGeometryTargets: [IOSFaceGeometryParameters]
+  let selectedBodyGeometryIndex: Int
+  let bodyGeometryTargets: [IOSBodyGeometryParameters]
+  let semanticEditing: IOSSemanticEditingParameters
   let crop: CGRect
   let quarterTurns: Int
   let straightenDegrees: Double
@@ -172,7 +577,7 @@ struct IOSImagePipeline {
     guard
       let pipeline = arguments as? [String: Any],
       let schemaVersion = Self.exactInteger(pipeline["schemaVersion"]),
-      (1...6).contains(schemaVersion),
+      (1...10).contains(schemaVersion),
       pipeline["workingColorSpace"] as? String == "srgb",
       let adjustments = pipeline["adjustments"] as? [String: Any],
       let exposureEV = Self.finiteNumber(adjustments["exposureEv"]),
@@ -212,6 +617,22 @@ struct IOSImagePipeline {
       lowLightRecovery = 0
       hazeRemoval = 0
       detailSharpening = 0
+      flipHorizontal = false
+      flipVertical = false
+      perspectiveHorizontal = 0
+      perspectiveVertical = 0
+      photoFilter = "none"
+      filterStrength = 0
+      hslAdjustments = [:]
+      selectedFaceGeometryIndex = 0
+      faceGeometryTargets = [IOSFaceGeometryParameters(
+        faceSlim: 0, headSize: 0, jaw: 0, chin: 0, eyes: 0, nose: 0, mouth: 0
+      )]
+      selectedBodyGeometryIndex = 0
+      bodyGeometryTargets = [IOSBodyGeometryParameters(
+        slimming: 0, height: 0, shoulders: 0, waist: 0, legs: 0
+      )]
+      semanticEditing = .neutral
       crop = CGRect(x: 0, y: 0, width: 1, height: 1)
       quarterTurns = 0
       straightenDegrees = 0
@@ -380,6 +801,160 @@ struct IOSImagePipeline {
       hazeRemoval = 0
       detailSharpening = 0
     }
+    if schemaVersion >= 7 {
+      guard
+        let basic = pipeline["basicEditingRecipeV1"] as? [String: Any],
+        Set(basic.keys) == Set([
+          "recipeVersion", "flipHorizontal", "flipVertical",
+          "perspectiveHorizontal", "perspectiveVertical", "filter",
+          "filterStrength", "hsl",
+        ]),
+        Self.exactInteger(basic["recipeVersion"]) == 1,
+        let flipHorizontal = basic["flipHorizontal"] as? Bool,
+        let flipVertical = basic["flipVertical"] as? Bool,
+        let perspectiveHorizontal = Self.finiteNumber(basic["perspectiveHorizontal"]),
+        let perspectiveVertical = Self.finiteNumber(basic["perspectiveVertical"]),
+        (-30.0...30.0).contains(perspectiveHorizontal),
+        (-30.0...30.0).contains(perspectiveVertical),
+        let photoFilter = basic["filter"] as? String,
+        Self.supportedFilters.contains(photoFilter),
+        let filterStrength = Self.percentage(basic["filterStrength"]),
+        let rawHsl = basic["hsl"] as? [String: Any],
+        let hsl = Self.parseHsl(rawHsl)
+      else { return nil }
+      self.flipHorizontal = flipHorizontal
+      self.flipVertical = flipVertical
+      self.perspectiveHorizontal = perspectiveHorizontal
+      self.perspectiveVertical = perspectiveVertical
+      self.photoFilter = photoFilter
+      self.filterStrength = photoFilter == "none" ? 0 : filterStrength
+      hslAdjustments = hsl
+    } else {
+      flipHorizontal = false
+      flipVertical = false
+      perspectiveHorizontal = 0
+      perspectiveVertical = 0
+      photoFilter = "none"
+      filterStrength = 0
+      hslAdjustments = [:]
+    }
+    if schemaVersion >= 8 {
+      guard
+        let geometryRecipe = pipeline["portraitGeometryRecipeV1"] as? [String: Any],
+        Set(geometryRecipe.keys) == Set([
+          "recipeVersion", "selectedFaceIndex", "faceTargets",
+          "selectedBodyIndex", "bodyTargets",
+        ]),
+        Self.exactInteger(geometryRecipe["recipeVersion"]) == 1,
+        let selectedFaceIndex = Self.exactInteger(geometryRecipe["selectedFaceIndex"]),
+        let rawFaceTargets = geometryRecipe["faceTargets"] as? [Any],
+        (1...3).contains(rawFaceTargets.count),
+        rawFaceTargets.indices.contains(selectedFaceIndex),
+        let selectedBodyIndex = Self.exactInteger(geometryRecipe["selectedBodyIndex"]),
+        let rawBodyTargets = geometryRecipe["bodyTargets"] as? [Any],
+        (1...3).contains(rawBodyTargets.count),
+        rawBodyTargets.indices.contains(selectedBodyIndex),
+        let faceTargets = Self.parseFaceGeometryTargets(rawFaceTargets),
+        let bodyTargets = Self.parseBodyGeometryTargets(rawBodyTargets)
+      else { return nil }
+      selectedFaceGeometryIndex = selectedFaceIndex
+      faceGeometryTargets = faceTargets
+      selectedBodyGeometryIndex = selectedBodyIndex
+      bodyGeometryTargets = bodyTargets
+    } else {
+      selectedFaceGeometryIndex = min(
+        max(0, faceSlimStrengths.firstIndex(of: faceSlimStrength) ?? 0),
+        faceSlimStrengths.count - 1
+      )
+      faceGeometryTargets = faceSlimStrengths.map {
+        IOSFaceGeometryParameters(
+          faceSlim: Int(($0 * 100).rounded()), headSize: 0, jaw: 0,
+          chin: 0, eyes: 0, nose: 0, mouth: 0
+        )
+      }
+      selectedBodyGeometryIndex = 0
+      bodyGeometryTargets = [IOSBodyGeometryParameters(
+        slimming: Int((bodySlimStrength * 100).rounded()),
+        height: 0, shoulders: 0, waist: 0, legs: 0
+      )]
+    }
+    if schemaVersion >= 10 {
+      guard
+        pipeline["semanticEditingRecipeV1"] == nil,
+        let semantic = pipeline["semanticEditingRecipeV2"] as? [String: Any],
+        Set(semantic.keys) == Set([
+          "recipeVersion", "background", "backgroundBlur",
+          "backgroundImagePath",
+          "subjectExposure", "subjectSaturation", "backgroundExposure",
+          "backgroundSaturation", "localExposure", "localSaturation",
+          "subjectMaskStrokes", "localAdjustmentStrokes", "eraseStrokes",
+        ]),
+        Self.exactInteger(semantic["recipeVersion"]) == 2,
+        let background = semantic["background"] as? String,
+        Self.supportedBackgroundTreatments.contains(background),
+        let backgroundImagePath = semantic["backgroundImagePath"] as? String,
+        (background == "image") == !backgroundImagePath.isEmpty,
+        let backgroundBlur = Self.percentage(semantic["backgroundBlur"]),
+        let subjectExposure = Self.signedPercentage(semantic["subjectExposure"]),
+        let subjectSaturation = Self.signedPercentage(semantic["subjectSaturation"]),
+        let backgroundExposure = Self.signedPercentage(semantic["backgroundExposure"]),
+        let backgroundSaturation = Self.signedPercentage(semantic["backgroundSaturation"]),
+        let localExposure = Self.signedPercentage(semantic["localExposure"]),
+        let localSaturation = Self.signedPercentage(semantic["localSaturation"]),
+        let rawSubjectMaskStrokes = semantic["subjectMaskStrokes"] as? [Any],
+        rawSubjectMaskStrokes.count <= 40,
+        let subjectMaskStrokes = Self.parseMaskStrokes(rawSubjectMaskStrokes),
+        let rawLocalStrokes = semantic["localAdjustmentStrokes"] as? [Any],
+        rawLocalStrokes.count <= 40,
+        let localStrokes = Self.parseMaskStrokes(rawLocalStrokes),
+        let rawEraseStrokes = semantic["eraseStrokes"] as? [Any],
+        rawEraseStrokes.count <= 20,
+        let eraseStrokes = Self.parseEraseStrokes(rawEraseStrokes)
+      else { return nil }
+      semanticEditing = IOSSemanticEditingParameters(
+        background: background, backgroundImagePath: backgroundImagePath,
+        backgroundBlur: backgroundBlur,
+        subjectExposure: subjectExposure, subjectSaturation: subjectSaturation,
+        backgroundExposure: backgroundExposure,
+        backgroundSaturation: backgroundSaturation,
+        localExposure: localExposure, localSaturation: localSaturation,
+        subjectMaskStrokes: subjectMaskStrokes,
+        localAdjustmentStrokes: localStrokes,
+        eraseStrokes: eraseStrokes
+      )
+    } else if schemaVersion >= 9 {
+      guard
+        let semantic = pipeline["semanticEditingRecipeV1"] as? [String: Any],
+        Set(semantic.keys) == Set([
+          "recipeVersion", "background", "backgroundBlur",
+          "subjectExposure", "subjectSaturation", "backgroundExposure",
+          "backgroundSaturation", "eraseStrokes",
+        ]),
+        Self.exactInteger(semantic["recipeVersion"]) == 1,
+        let background = semantic["background"] as? String,
+        Self.supportedBackgroundTreatments.contains(background),
+        let backgroundBlur = Self.percentage(semantic["backgroundBlur"]),
+        let subjectExposure = Self.signedPercentage(semantic["subjectExposure"]),
+        let subjectSaturation = Self.signedPercentage(semantic["subjectSaturation"]),
+        let backgroundExposure = Self.signedPercentage(semantic["backgroundExposure"]),
+        let backgroundSaturation = Self.signedPercentage(semantic["backgroundSaturation"]),
+        let rawStrokes = semantic["eraseStrokes"] as? [Any],
+        rawStrokes.count <= 20,
+        let strokes = Self.parseEraseStrokes(rawStrokes)
+      else { return nil }
+      semanticEditing = IOSSemanticEditingParameters(
+        background: background, backgroundImagePath: "",
+        backgroundBlur: backgroundBlur,
+        subjectExposure: subjectExposure, subjectSaturation: subjectSaturation,
+        backgroundExposure: backgroundExposure,
+        backgroundSaturation: backgroundSaturation,
+        localExposure: 0, localSaturation: 0,
+        subjectMaskStrokes: [], localAdjustmentStrokes: [],
+        eraseStrokes: strokes
+      )
+    } else {
+      semanticEditing = .neutral
+    }
     crop = CGRect(
       x: values[0],
       y: values[1],
@@ -418,6 +993,159 @@ struct IOSImagePipeline {
     return result
   }
 
+  private static func signedPercentage(_ value: Any?) -> Int? {
+    guard let result = exactInteger(value), (-100...100).contains(result) else {
+      return nil
+    }
+    return result
+  }
+
+  private static func roundedPercentage(_ value: Any?) -> Int? {
+    guard let result = finiteNumber(value), (0.0...100.0).contains(result) else {
+      return nil
+    }
+    return Int(result.rounded())
+  }
+
+  private static func roundedSignedPercentage(_ value: Any?) -> Int? {
+    guard let result = finiteNumber(value), (-100.0...100.0).contains(result) else {
+      return nil
+    }
+    return Int(result.rounded())
+  }
+
+  private static func parseFaceGeometryTargets(
+    _ rawTargets: [Any]
+  ) -> [IOSFaceGeometryParameters]? {
+    var parsed: [IOSFaceGeometryParameters] = []
+    for raw in rawTargets {
+      guard
+        let target = raw as? [String: Any],
+        Set(target.keys) == Set([
+          "faceSlim", "headSize", "jaw", "chin", "eyes", "nose", "mouth",
+        ]),
+        let faceSlim = roundedPercentage(target["faceSlim"]),
+        let headSize = roundedPercentage(target["headSize"]),
+        let jaw = roundedSignedPercentage(target["jaw"]),
+        let chin = roundedSignedPercentage(target["chin"]),
+        let eyes = roundedSignedPercentage(target["eyes"]),
+        let nose = roundedSignedPercentage(target["nose"]),
+        let mouth = roundedSignedPercentage(target["mouth"])
+      else { return nil }
+      parsed.append(IOSFaceGeometryParameters(
+        faceSlim: faceSlim, headSize: headSize, jaw: jaw, chin: chin,
+        eyes: eyes, nose: nose, mouth: mouth
+      ))
+    }
+    return parsed
+  }
+
+  private static func parseBodyGeometryTargets(
+    _ rawTargets: [Any]
+  ) -> [IOSBodyGeometryParameters]? {
+    var parsed: [IOSBodyGeometryParameters] = []
+    for raw in rawTargets {
+      guard
+        let target = raw as? [String: Any],
+        Set(target.keys) == Set(["slimming", "height", "shoulders", "waist", "legs"]),
+        let slimming = roundedPercentage(target["slimming"]),
+        let height = roundedPercentage(target["height"]),
+        let shoulders = roundedSignedPercentage(target["shoulders"]),
+        let waist = roundedSignedPercentage(target["waist"]),
+        let legs = roundedPercentage(target["legs"])
+      else { return nil }
+      parsed.append(IOSBodyGeometryParameters(
+        slimming: slimming, height: height, shoulders: shoulders,
+        waist: waist, legs: legs
+      ))
+    }
+    return parsed
+  }
+
+  private static let supportedFilters: Set<String> = [
+    "none", "clean", "portrait", "cinematic", "film", "warmSun",
+    "coolAir", "vivid", "faded", "noir", "food", "landscape", "night",
+  ]
+
+  private static let supportedBackgroundTreatments: Set<String> = [
+    "original", "blur", "white", "black", "warm", "cool", "image",
+  ]
+
+  private static func parseEraseStrokes(_ rawStrokes: [Any]) -> [IOSEraseStroke]? {
+    var parsed: [IOSEraseStroke] = []
+    for raw in rawStrokes {
+      guard
+        let stroke = raw as? [String: Any],
+        Set(stroke.keys) == Set(["radius", "points"]),
+        let radius = finiteNumber(stroke["radius"]),
+        (0.005...0.12).contains(radius),
+        let rawPoints = stroke["points"] as? [Any],
+        (1...200).contains(rawPoints.count)
+      else { return nil }
+      var points: [CGPoint] = []
+      for rawPoint in rawPoints {
+        guard
+          let pair = rawPoint as? [Any], pair.count == 2,
+          let x = finiteNumber(pair[0]), let y = finiteNumber(pair[1]),
+          (0.0...1.0).contains(x), (0.0...1.0).contains(y)
+        else { return nil }
+        points.append(CGPoint(x: x, y: y))
+      }
+      parsed.append(IOSEraseStroke(radius: radius, points: points))
+    }
+    return parsed
+  }
+
+  private static func parseMaskStrokes(_ rawStrokes: [Any]) -> [IOSMaskStroke]? {
+    var parsed: [IOSMaskStroke] = []
+    for raw in rawStrokes {
+      guard
+        let stroke = raw as? [String: Any],
+        Set(stroke.keys) == Set(["operation", "radius", "points"]),
+        let operation = stroke["operation"] as? String,
+        operation == "paint" || operation == "erase",
+        let radius = finiteNumber(stroke["radius"]),
+        (0.005...0.12).contains(radius),
+        let rawPoints = stroke["points"] as? [Any],
+        (1...200).contains(rawPoints.count)
+      else { return nil }
+      var points: [CGPoint] = []
+      for rawPoint in rawPoints {
+        guard
+          let pair = rawPoint as? [Any], pair.count == 2,
+          let x = finiteNumber(pair[0]), let y = finiteNumber(pair[1]),
+          (0.0...1.0).contains(x), (0.0...1.0).contains(y)
+        else { return nil }
+        points.append(CGPoint(x: x, y: y))
+      }
+      parsed.append(IOSMaskStroke(operation: operation, radius: radius, points: points))
+    }
+    return parsed
+  }
+
+  private static let supportedHslChannels: Set<String> = [
+    "red", "orange", "yellow", "green", "cyan", "blue", "purple", "magenta",
+  ]
+
+  private static func parseHsl(_ raw: [String: Any]) -> [String: [String: Double]]? {
+    guard Set(raw.keys).isSubset(of: supportedHslChannels) else { return nil }
+    var parsed: [String: [String: Double]] = [:]
+    for (channel, value) in raw {
+      guard
+        let values = value as? [String: Any],
+        Set(values.keys) == Set(["hue", "saturation", "lightness"]),
+        let hue = finiteNumber(values["hue"]),
+        let saturation = finiteNumber(values["saturation"]),
+        let lightness = finiteNumber(values["lightness"]),
+        (-100.0...100.0).contains(hue),
+        (-100.0...100.0).contains(saturation),
+        (-100.0...100.0).contains(lightness)
+      else { return nil }
+      parsed[channel] = ["hue": hue, "saturation": saturation, "lightness": lightness]
+    }
+    return parsed
+  }
+
   private var colorTransform: ColorTransform {
     let exposureScale = pow(2, exposureEV)
     let redWarmthScale = 1 + warmth * 0.15
@@ -438,7 +1166,20 @@ struct IOSImagePipeline {
       .cropped(to: extent)
     let opaqueInput = input.composited(over: white)
     var reshapedInput = opaqueInput
-    if bodySlimStrength > 0 {
+    if schemaVersion >= 8 && bodyGeometryTargets.contains(where: {
+      $0.slimming != 0 || $0.height != 0 || $0.shoulders != 0 || $0.waist != 0 || $0.legs != 0
+    }) {
+      let context = portraitContext ?? IOSPortraitRetoucher.prepare(
+        source: opaqueInput,
+        extent: extent
+      )
+      reshapedInput = IOSPortraitRetoucher.applyingBodyGeometry(
+        to: reshapedInput,
+        parameters: bodyGeometryTargets,
+        extent: extent,
+        context: context
+      )
+    } else if bodySlimStrength > 0 {
       let context = portraitContext ?? IOSPortraitRetoucher.prepare(
         source: opaqueInput,
         extent: extent
@@ -450,7 +1191,21 @@ struct IOSImagePipeline {
         context: context
       )
     }
-    if faceSlimStrengths.contains(where: { $0 > 0 }) {
+    if schemaVersion >= 8 && faceGeometryTargets.contains(where: {
+      $0.faceSlim != 0 || $0.headSize != 0 || $0.jaw != 0 || $0.chin != 0
+        || $0.eyes != 0 || $0.nose != 0 || $0.mouth != 0
+    }) {
+      let context = portraitContext ?? IOSPortraitRetoucher.prepare(
+        source: opaqueInput,
+        extent: extent
+      )
+      reshapedInput = IOSPortraitRetoucher.applyingFaceGeometry(
+        to: reshapedInput,
+        parameters: faceGeometryTargets,
+        extent: extent,
+        context: context
+      )
+    } else if faceSlimStrengths.contains(where: { $0 > 0 }) {
       let context = portraitContext ?? IOSPortraitRetoucher.prepare(
         source: opaqueInput,
         extent: extent
@@ -541,6 +1296,20 @@ struct IOSImagePipeline {
         ]
       ).cropped(to: extent)
     }
+    if filterStrength > 0, photoFilter != "none" {
+      output = applyingPhotoFilter(to: output, extent: extent)
+    }
+    if !hslAdjustments.isEmpty, let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) {
+      let dimension = 32
+      output = output.applyingFilter(
+        "CIColorCubeWithColorSpace",
+        parameters: [
+          "inputCubeDimension": dimension,
+          "inputCubeData": Self.hslCubeData(dimension: dimension, adjustments: hslAdjustments),
+          "inputColorSpace": colorSpace,
+        ]
+      ).cropped(to: extent)
+    }
     if noiseReduction > 0 {
       let strength = Double(noiseReduction) / 100
       output = output.applyingFilter(
@@ -569,18 +1338,50 @@ struct IOSImagePipeline {
     }
     if hazeRemoval > 0 {
       let strength = Double(hazeRemoval) / 100
+      let dimension = 32
+      if let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) {
+        output = output.applyingFilter(
+          "CIColorCubeWithColorSpace",
+          parameters: [
+            "inputCubeDimension": dimension,
+            "inputCubeData": Self.contrastCubeData(
+              dimension: dimension,
+              contrast: strength * 0.18
+            ),
+            "inputColorSpace": colorSpace,
+          ]
+        ).cropped(to: extent)
+      }
       output = output.applyingFilter(
         "CIColorControls",
-        parameters: [
-          kCIInputContrastKey: 1 + strength * 0.18,
-          kCIInputSaturationKey: 1 + strength * 0.05,
-        ]
+        parameters: [kCIInputSaturationKey: 1 + strength * 0.05]
       ).cropped(to: extent)
     }
     if clarity != 0 {
-      output = output.applyingFilter(
+      let clarityInput = output
+      let sharpened = clarityInput.applyingFilter(
         "CISharpenLuminance",
         parameters: [kCIInputSharpnessKey: clarity * 0.8]
+      ).cropped(to: extent)
+      let grayscale = clarityInput.applyingFilter(
+        "CIColorControls",
+        parameters: [kCIInputSaturationKey: 0]
+      ).cropped(to: extent)
+      let midtoneMask = grayscale.applyingFilter(
+        "CIColorPolynomial",
+        parameters: [
+          "inputRedCoefficients": CIVector(x: 0, y: 4, z: -4, w: 0),
+          "inputGreenCoefficients": CIVector(x: 0, y: 4, z: -4, w: 0),
+          "inputBlueCoefficients": CIVector(x: 0, y: 4, z: -4, w: 0),
+          "inputAlphaCoefficients": CIVector(x: 0, y: 0, z: 0, w: 1),
+        ]
+      ).cropped(to: extent)
+      output = sharpened.applyingFilter(
+        "CIBlendWithMask",
+        parameters: [
+          kCIInputBackgroundImageKey: clarityInput,
+          kCIInputMaskImageKey: midtoneMask,
+        ]
       ).cropped(to: extent)
     }
     if detailSharpening > 0 {
@@ -632,6 +1433,18 @@ struct IOSImagePipeline {
         )
       }
     }
+    if schemaVersion >= 9 && semanticEditing != .neutral {
+      let context = portraitContext ?? IOSPortraitRetoucher.prepare(
+        source: opaqueInput,
+        extent: extent
+      )
+      output = IOSSemanticEditor.applying(
+        to: output,
+        parameters: semanticEditing,
+        subjectMask: context.combinedPersonMask,
+        extent: extent
+      )
+    }
     let geometricallyAdjusted = applyingGeometry(to: output, sourceExtent: extent)
     let geometryExtent = geometricallyAdjusted.extent.integral
     let geometryBackground = CIImage(
@@ -647,7 +1460,9 @@ struct IOSImagePipeline {
     cube.reserveCapacity(dimension * dimension * dimension * 4)
     let denominator = Double(dimension - 1)
     func adjusted(_ value: Double) -> Float {
-      let shaped = value + contrast * 2.5 * value * (1 - value) * (value - 0.5)
+      let endpointWeight = 4 * value * (1 - value)
+      let shaped = value
+        + contrast * 3.2 * value * (1 - value) * (value - 0.5) * endpointWeight
       return Float(min(max(shaped, 0), 1))
     }
     for blueIndex in 0..<dimension {
@@ -716,9 +1531,175 @@ struct IOSImagePipeline {
     return cube.withUnsafeBytes { Data($0) }
   }
 
+  private func applyingPhotoFilter(to input: CIImage, extent: CGRect) -> CIImage {
+    let amount = Double(filterStrength) / 100
+    let settings: (saturation: Double, contrast: Double, brightness: Double, temperature: Double)
+    switch photoFilter {
+    case "clean": settings = (1.04, 1.03, 0.025, 100)
+    case "portrait": settings = (0.96, 1.02, 0.035, 180)
+    case "cinematic": settings = (0.86, 1.16, -0.025, -220)
+    case "film": settings = (0.82, 1.08, 0.015, 120)
+    case "warmSun": settings = (1.05, 1.05, 0.025, 420)
+    case "coolAir": settings = (0.92, 1.04, 0.035, -420)
+    case "vivid": settings = (1.28, 1.10, 0.01, 0)
+    case "faded": settings = (0.78, 0.84, 0.055, 80)
+    case "noir": settings = (0, 1.20, 0, 0)
+    case "food": settings = (1.18, 1.08, 0.025, 260)
+    case "landscape": settings = (1.16, 1.12, -0.005, -80)
+    case "night": settings = (0.88, 1.10, 0.035, -260)
+    default: return input
+    }
+    var filtered = input.applyingFilter("CIColorControls", parameters: [
+      kCIInputSaturationKey: 1 + (settings.saturation - 1) * amount,
+    ])
+    let contrast = (settings.contrast - 1) * amount
+    let brightness = settings.brightness * amount
+    if (contrast != 0 || brightness != 0),
+       let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)
+    {
+      let dimension = 32
+      filtered = filtered.applyingFilter(
+        "CIColorCubeWithColorSpace",
+        parameters: [
+          "inputCubeDimension": dimension,
+          "inputCubeData": Self.filterToneCubeData(
+            dimension: dimension,
+            contrast: contrast,
+            brightness: brightness
+          ),
+          "inputColorSpace": colorSpace,
+        ]
+      )
+    }
+    if settings.temperature != 0 {
+      filtered = filtered.applyingFilter("CITemperatureAndTint", parameters: [
+        "inputNeutral": CIVector(x: 6500, y: 0),
+        "inputTargetNeutral": CIVector(x: 6500 + settings.temperature * amount, y: 0),
+      ])
+    }
+    return filtered.cropped(to: extent)
+  }
+
+  private static func filterToneCubeData(
+    dimension: Int,
+    contrast: Double,
+    brightness: Double
+  ) -> Data {
+    var cube = [Float]()
+    cube.reserveCapacity(dimension * dimension * dimension * 4)
+    let denominator = Double(dimension - 1)
+    func adjusted(_ value: Double) -> Float {
+      let lifted = value + brightness * 4 * value * (1 - value)
+      let shaped = lifted
+        + contrast * 2.5 * lifted * (1 - lifted) * (lifted - 0.5)
+      return Float(min(max(shaped, 0), 1))
+    }
+    for blueIndex in 0..<dimension {
+      let blue = Double(blueIndex) / denominator
+      for greenIndex in 0..<dimension {
+        let green = Double(greenIndex) / denominator
+        for redIndex in 0..<dimension {
+          let red = Double(redIndex) / denominator
+          cube.append(adjusted(red))
+          cube.append(adjusted(green))
+          cube.append(adjusted(blue))
+          cube.append(1)
+        }
+      }
+    }
+    return cube.withUnsafeBytes { Data($0) }
+  }
+
+  private static func hslCubeData(
+    dimension: Int,
+    adjustments: [String: [String: Double]]
+  ) -> Data {
+    let centers: [String: Double] = [
+      "red": 0, "orange": 30, "yellow": 60, "green": 120,
+      "cyan": 180, "blue": 240, "purple": 275, "magenta": 315,
+    ]
+    var cube = [Float]()
+    cube.reserveCapacity(dimension * dimension * dimension * 4)
+    let denominator = Double(dimension - 1)
+    for blueIndex in 0..<dimension {
+      for greenIndex in 0..<dimension {
+        for redIndex in 0..<dimension {
+          var hsv = rgbToHsv(
+            Double(redIndex) / denominator,
+            Double(greenIndex) / denominator,
+            Double(blueIndex) / denominator
+          )
+          var hueDelta = 0.0
+          var saturationDelta = 0.0
+          var lightnessDelta = 0.0
+          for (channel, values) in adjustments {
+            guard let center = centers[channel] else { continue }
+            let distance = abs(((hsv.h - center + 540).truncatingRemainder(dividingBy: 360)) - 180)
+            let weight = max(0, 1 - distance / 45)
+            hueDelta += (values["hue"] ?? 0) * 0.45 * weight
+            saturationDelta += (values["saturation"] ?? 0) / 100 * weight
+            lightnessDelta += (values["lightness"] ?? 0) / 100 * weight
+          }
+          hsv.h = (hsv.h + hueDelta + 360).truncatingRemainder(dividingBy: 360)
+          hsv.s = min(max(hsv.s * (1 + saturationDelta), 0), 1)
+          hsv.v = min(max(hsv.v + lightnessDelta * 0.35, 0), 1)
+          let rgb = hsvToRgb(hsv.h, hsv.s, hsv.v)
+          cube.append(Float(rgb.r)); cube.append(Float(rgb.g)); cube.append(Float(rgb.b)); cube.append(1)
+        }
+      }
+    }
+    return cube.withUnsafeBytes { Data($0) }
+  }
+
+  private static func rgbToHsv(_ r: Double, _ g: Double, _ b: Double) -> (h: Double, s: Double, v: Double) {
+    let maximum = max(r, g, b), minimum = min(r, g, b), delta = maximum - minimum
+    var hue = 0.0
+    if delta != 0 {
+      if maximum == r { hue = 60 * ((g - b) / delta).truncatingRemainder(dividingBy: 6) }
+      else if maximum == g { hue = 60 * ((b - r) / delta + 2) }
+      else { hue = 60 * ((r - g) / delta + 4) }
+    }
+    if hue < 0 { hue += 360 }
+    return (hue, maximum == 0 ? 0 : delta / maximum, maximum)
+  }
+
+  private static func hsvToRgb(_ h: Double, _ s: Double, _ v: Double) -> (r: Double, g: Double, b: Double) {
+    let chroma = v * s, x = chroma * (1 - abs((h / 60).truncatingRemainder(dividingBy: 2) - 1)), m = v - chroma
+    let rgb: (Double, Double, Double)
+    switch h {
+    case 0..<60: rgb = (chroma, x, 0)
+    case 60..<120: rgb = (x, chroma, 0)
+    case 120..<180: rgb = (0, chroma, x)
+    case 180..<240: rgb = (0, x, chroma)
+    case 240..<300: rgb = (x, 0, chroma)
+    default: rgb = (chroma, 0, x)
+    }
+    return (rgb.0 + m, rgb.1 + m, rgb.2 + m)
+  }
+
   private func applyingGeometry(to input: CIImage, sourceExtent: CGRect) -> CIImage {
     func aligned(_ value: CGFloat) -> CGFloat {
       floor(value + 0.5)
+    }
+    var geometryInput = input
+    if flipHorizontal || flipVertical {
+      let transform = CGAffineTransform(
+        a: flipHorizontal ? -1 : 1, b: 0, c: 0,
+        d: flipVertical ? -1 : 1,
+        tx: flipHorizontal ? sourceExtent.maxX + sourceExtent.minX : 0,
+        ty: flipVertical ? sourceExtent.maxY + sourceExtent.minY : 0
+      )
+      geometryInput = geometryInput.transformed(by: transform).cropped(to: sourceExtent)
+    }
+    if perspectiveHorizontal != 0 || perspectiveVertical != 0 {
+      let dx = sourceExtent.width * CGFloat(perspectiveHorizontal / 100)
+      let dy = sourceExtent.height * CGFloat(perspectiveVertical / 100)
+      geometryInput = geometryInput.applyingFilter("CIPerspectiveTransform", parameters: [
+        "inputTopLeft": CIVector(cgPoint: CGPoint(x: sourceExtent.minX + max(0, dx), y: sourceExtent.maxY - max(0, dy))),
+        "inputTopRight": CIVector(cgPoint: CGPoint(x: sourceExtent.maxX + min(0, dx), y: sourceExtent.maxY + min(0, dy))),
+        "inputBottomLeft": CIVector(cgPoint: CGPoint(x: sourceExtent.minX - min(0, dx), y: sourceExtent.minY - min(0, dy))),
+        "inputBottomRight": CIVector(cgPoint: CGPoint(x: sourceExtent.maxX - max(0, dx), y: sourceExtent.minY + max(0, dy))),
+      ]).cropped(to: sourceExtent)
     }
     let cropWidth = min(
       sourceExtent.width,
@@ -748,9 +1729,9 @@ struct IOSImagePipeline {
       let transform = CGAffineTransform(translationX: center.x, y: center.y)
         .rotated(by: radians)
         .translatedBy(x: -center.x, y: -center.y)
-      output = input.transformed(by: transform).cropped(to: cropRect)
+      output = geometryInput.transformed(by: transform).cropped(to: cropRect)
     } else {
-      output = input.cropped(to: cropRect)
+      output = geometryInput.cropped(to: cropRect)
     }
     if quarterTurns != 0 {
       let expectedSize = quarterTurns.isMultiple(of: 2)

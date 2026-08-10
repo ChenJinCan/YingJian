@@ -40,16 +40,29 @@ class PortraitEngineeringCorpusTest < Minitest::Test
       "status" => "ready",
       "portrait_required_assets" => 48,
       "portrait_minimum_single_assets" => 36,
+      "portrait_minimum_skin_tone_counts" => {
+        "skin_tone_light" => 2,
+        "skin_tone_medium" => 2,
+        "skin_tone_deep" => 2,
+      },
       "portrait_roles" => %w[portrait_single portrait_multi no_face],
       "assets" => assets,
     }
+  end
+
+  def skin_tone_tag(index)
+    return "skin_tone_light" if index < 2
+    return "skin_tone_medium" if index < 4
+    return "skin_tone_deep" if index < 6
+
+    nil
   end
 
   def test_requires_the_frozen_portrait_quality_matrix
     assets = Array.new(36) do |index|
       {
         "id" => format("portrait-%03d", index + 1),
-        "tags" => ["portrait_single"],
+        "tags" => ["portrait_single", skin_tone_tag(index)].compact,
       }
     end
     assets.concat(
@@ -100,7 +113,7 @@ class PortraitEngineeringCorpusTest < Minitest::Test
     assets = Array.new(48) do |index|
       {
         "id" => format("portrait-%03d", index + 1),
-        "tags" => ["portrait_single"],
+        "tags" => ["portrait_single", skin_tone_tag(index)].compact,
       }
     end
     assets[36] = {
@@ -112,6 +125,28 @@ class PortraitEngineeringCorpusTest < Minitest::Test
       PortraitEngineeringCorpus.validate_manifest!(portrait_manifest(assets))
     end
     assert_includes(error.message, "exactly one portrait role")
+  end
+
+
+  def test_requires_each_frozen_skin_tone_range_and_rejects_ambiguity
+    assets = Array.new(48) do |index|
+      {
+        "id" => format("portrait-%03d", index + 1),
+        "tags" => ["portrait_single", skin_tone_tag(index)].compact,
+      }
+    end
+    assets[5]["tags"] = ["portrait_single"]
+
+    error = assert_raises(PortraitEngineeringCorpus::ContractError) do
+      PortraitEngineeringCorpus.validate_manifest!(portrait_manifest(assets))
+    end
+    assert_includes(error.message, "at least 2 skin_tone_deep")
+
+    assets[5]["tags"] = ["portrait_single", "skin_tone_deep", "skin_tone_light"]
+    error = assert_raises(PortraitEngineeringCorpus::ContractError) do
+      PortraitEngineeringCorpus.validate_manifest!(portrait_manifest(assets))
+    end
+    assert_includes(error.message, "at most one skin tone range")
   end
 
   def test_rejects_manifest_declarations_that_drift_from_the_frozen_matrix

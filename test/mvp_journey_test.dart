@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:ui' show SemanticsAction;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -155,7 +156,7 @@ void main() {
           await tester.pumpAndSettle();
           await tester.tap(find.text('批量导出 6 张'));
           await tester.pumpAndSettle();
-          expect(find.textContaining('共 6 张'), findsOneWidget);
+          expect(find.textContaining('从 6 张只读原图'), findsOneWidget);
           await tester.tap(find.text('开始导出'));
           await tester.pumpAndSettle();
 
@@ -190,6 +191,7 @@ void main() {
   testWidgets('editing journey remains understandable at maximum text size', (
     tester,
   ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     tester.platformDispatcher.textScaleFactorTestValue = 2;
@@ -280,6 +282,40 @@ void main() {
     expect(maximumExposure.hasAction(SemanticsAction.decrease), isTrue);
     _expectCurrentTapSemanticsAtLeast(tester, 48);
 
+    final currentPhotoScope = find.byKey(
+      const ValueKey('editor-scope-currentPhoto'),
+    );
+    await tester.dragUntilVisible(
+      currentPhotoScope,
+      workspace,
+      const Offset(0, 300),
+    );
+    await Scrollable.ensureVisible(
+      tester.element(currentPhotoScope),
+      alignment: 0.15,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(currentPhotoScope.hitTestable());
+    await tester.pumpAndSettle();
+    final semanticCategory = find.byKey(
+      const ValueKey('editor-tool-category-semantic'),
+    );
+    await tester.ensureVisible(semanticCategory);
+    await tester.tap(semanticCategory);
+    await tester.pumpAndSettle();
+    final eraseBrush = find.byKey(const ValueKey('editor-open-erase-brush'));
+    await tester.dragUntilVisible(eraseBrush, workspace, const Offset(0, -300));
+    await Scrollable.ensureVisible(tester.element(eraseBrush), alignment: 0.5);
+    await tester.pumpAndSettle();
+    await tester.tap(eraseBrush.hitTestable());
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey('erase-brush-undo')), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const ValueKey('erase-brush-apply')));
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.text('取消').last);
+    await tester.pumpAndSettle();
+
     await tester.dragUntilVisible(
       find.text('批量导出 6 张'),
       workspace,
@@ -291,6 +327,7 @@ void main() {
     expect(tester.getSize(find.text('批量导出 6 张')).height, greaterThan(20));
     _expectCurrentTapSemanticsAtLeast(tester, 48);
     semantics.dispose();
+    debugDefaultTargetPlatformOverride = null;
   });
 }
 

@@ -91,7 +91,7 @@ final class JsonPhotoProjectStore implements PhotoProjectLifecycleStore {
     for (final photo in project.photos) {
       await deletePhotoCopy(photo);
     }
-    for (final name in const ['previews', 'analysis', 'debug']) {
+    for (final name in const ['media', 'previews', 'analysis', 'debug']) {
       final directory = Directory('${root.path}/$name');
       if (await directory.exists()) {
         await directory.delete(recursive: true);

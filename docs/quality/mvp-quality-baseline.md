@@ -354,6 +354,148 @@ ruby scripts/check_ios_color_detail_semantics.rb \
 立即释放。本门证明模拟器内的真实 Core Image/CVPixelBuffer 路径和状态语义，不替代 Profile/Release
 物理设备上的首帧、连续滑杆帧率、内存、前后台和温控证据。
 
+### 5.8 iOS 画质改善固定样片工程门
+
+`ios-quality-enhancement-engineering-v1` 直接编译生产 `IOSImagePipeline`，在完整 48 张固定语料的
+最长边 2,048 px 代理图上分别执行去噪 28、暗光提亮 32、去灰 18 和细节锐化 16。所有效果均从
+中性配方独立执行，不允许互相掩盖；强度 0 必须逐像素等价。自动门至少锁定：
+
+- 去噪的局部高频残差不高于中性档 90%，同时保留不少于 50% 的全图边缘能量；
+- 标记为 `low_light` 的样片平均亮度提升不少于 `2/255`，新增黑白 clipping 均不超过 `0.5%`；
+- 去灰逐张提高亮度标准差至少 `0.0005`，新增黑白 clipping 均不超过 `0.5%`；
+- 细节锐化逐张提高边缘能量至少 1%，新增黑白 clipping 均不超过 `0.5%`。
+
+固定样片门曾发现系统线性对比度滤镜在低光样片上把约 6% 像素压成纯黑；生产去灰现改用
+端点固定的软对比度 color cube，再施加克制饱和度。该机器门防止方向、零值和裁切回归，但不替代
+噪点观感、锐化光晕、纹理自然度与竞品同图盲评。执行：
+
+```sh
+ruby scripts/test_quality_enhancement_corpus.rb
+ruby scripts/run_quality_enhancement_corpus.rb \
+  .quality/corpus-manifest.local.yaml \
+  .quality/quality-enhancement-engineering-<source>
+```
+
+### 5.9 iOS 滤镜与八色 HSL 固定样片工程门
+
+`ios-basic-editing-engineering-v1` 直接编译生产 V10 `IOSImagePipeline`，从完整 48 张语料中按
+单人、多人、无人脸、风景、食物、宠物、低光、逆光、混合光、组内成员、EXIF 旋转和 Display P3
+选取 12 张互不重复的固定样片，在最长边 1,024 px 的代理图上验证：
+
+- 12 套冻结滤镜均以强度 60 独立执行，相对中性档 RGB 平均绝对差不得低于 `1/255`；
+- 每套滤镜新增纯黑不超过 `0.5%`、新增纯白不超过 `1%`；
+- 红、橙、黄、绿、青、蓝、紫、洋红八个 HSL 通道分别执行色相 `+20`、饱和度 `+25`、明度
+  `+15`，每项新增黑白 clipping 均不超过 `0.5%`；
+- 每个通道在 12 张语料中必须至少存在一张可测结果：色相 RGB 差 ≥ `0.0007`、饱和度色度提升
+  ≥ `0.0005`、明度提升 ≥ `0.0015`；
+- 中性滤镜强度 0 必须与中性配方逐像素等价。
+
+首轮真实低光测量发现线性对比度实现会使电影、黑白和风景滤镜分别产生约 45%、44% 和 23%
+的纯黑像素。生产滤镜现把饱和度与色调曲线拆开，并用保持纯黑/纯白端点的 color cube 执行
+亮度和对比塑形；修复后同一低光样片所有滤镜的纯黑比例约为 `0.03%`。该门锁定滤镜身份、
+八色通道可操作性和基础裁切安全，不替代风格审美、肤色偏好或竞品同图盲评。执行：
+
+```sh
+ruby scripts/test_basic_editing_corpus.rb
+ruby scripts/run_basic_editing_corpus.rb \
+  .quality/corpus-manifest.local.yaml \
+  .quality/basic-editing-engineering-<source>
+```
+
+### 5.10 iOS 构图固定样片工程门
+
+`ios-composition-engineering-v1` 使用与基础编辑门相同的 12 张多场景固定样片，直接执行生产 V10
+`IOSImagePipeline`，锁定裁剪、90° 旋转、水平/垂直翻转、水平校正和双向透视的坐标与边界语义：
+
+- 全部构图参数为 0 时必须逐像素等价；
+- 水平、垂直翻转必须产生可测变化，连续执行两次后的 RGB 平均绝对差不超过 `0.002`；
+- `[0.12, 0.08, 0.88, 0.92]` 归一化裁剪必须得到声明的像素对齐尺寸，且输出与按顶边坐标
+  直接取样的区域平均差不超过 `1/255`；
+- 顺时针 90° 必须交换宽高，连续四次后的 RGB 平均绝对差不超过 `0.002`；
+- `±5°` 水平校正、水平/垂直 `±15` 透视必须保持画布尺寸并产生可测变化；新增白色边界比例
+  不得超过 `16%`；
+- 翻转、双向透视、裁剪、旋转和校正组合执行后尺寸必须有效，纯白比例不得超过 `20%`。
+
+原生 Simulator 回归还对同一非对称 JPEG 同时执行上述组合配方，直接比较真实
+`IOSPhotoPreviewSession` Texture 与 `IOSPhotoFileRenderer` 最终 JPEG；尺寸必须相同，平均通道误差不超过
+4 个 8-bit 码值。该门证明生产坐标、方向和预览/导出同义性，不替代真人构图偏好或物理设备上的
+触控精度。执行：
+
+```sh
+ruby scripts/test_composition_corpus.rb
+ruby scripts/run_composition_corpus.rb \
+  .quality/corpus-manifest.local.yaml \
+  .quality/composition-engineering-<source>
+```
+
+### 5.11 iOS 基础光色统一固定样片工程门
+
+`ios-basic-tone-engineering-v1` 直接编译当前生产 V10 `IOSImagePipeline`，对完整 48 张固定语料在
+最长边 512 px 的代理图上分别执行曝光 `±0.5`、对比度 `±0.35`、色温/高光/阴影/色调 `±0.4`、
+饱和度 `±0.35` 和清晰度 `±0.25`。它沿用 5.2–5.6 已冻结的方向、最低可见强度、亮度漂移与
+裁切阈值，并额外要求八项全部显式为 0 时逐像素等价。该门替代依赖历史 V2 导出目录的当前性
+证明，但不改变各参数原有质量定义。
+
+门禁首轮发现两项生产问题：高键样片的正对比度新增约 `5.13%` 纯白，清晰度在高反差样片新增
+约 `1.44%` 纯黑。对比度曲线现增加第二层端点衰减，在中间调保持可见变化的同时把新增黑/白
+裁切都降到约 `0.012%`；清晰度现按原始亮度生成中间调权重，在近黑和近白区域淡出，把新增
+黑/白裁切降到约 `0.018% / 0.032%`。原生回归同时锁定黑白端点、灰阶对比方向，以及包含全部
+八项光色的 Texture 预览与最终 JPEG 同图语义。执行：
+
+```sh
+ruby scripts/test_basic_tone_corpus.rb
+ruby scripts/run_basic_tone_corpus.rb \
+  .quality/corpus-manifest.local.yaml \
+  .quality/basic-tone-engineering-<source>
+```
+
+### 5.12 iOS 局部与背景固定样片工程门
+
+`ios-semantic-editing-engineering-v1` 直接编译生产 V10 `IOSImagePipeline`，从通用语料中固定选择
+12 张覆盖单人、多人、无人脸、风景、食物、宠物、暗光、逆光、混合光、组图、EXIF 方向和
+Display P3 的真实输入。每张输入使用同一张带软边的确定性主体蒙版，分别验证主体/背景光色、
+背景虚化、纯白背景、用户图片背景、画笔局部光色、传统消除以及主体蒙版添加/擦除。
+
+该门要求空局部蒙版、空消除蒙版和全零语义处理逐像素等价；所有核心操作必须在目标区域可见，
+受保护区域平均变化不高于 `0.0005`；背景虚化和传统消除至少在 12 张中的 9 张达到 `1/255`
+的 P95 可见差异。另有原生回归锁定局部画笔与消除的 Texture 预览/最终 JPEG 同图语义。
+确定性软边蒙版用于隔离验证像素算子和保护边界，不替代 Vision 人物分割、发丝/半透明 Alpha
+质量或真人自然度盲评；这些仍由候选阶段的同图人工门验证。执行：
+
+```sh
+ruby scripts/test_semantic_editing_corpus.rb
+ruby scripts/run_semantic_editing_corpus.rb \
+  .quality/corpus-manifest.local.yaml \
+  .quality/semantic-editing-engineering-<source>
+```
+
+### 5.13 iOS 整组一致性固定样片工程门
+
+`ios-group-consistency-engineering-v1` 使用清单中 6 组各 4 张同场景输入，直接执行生产 V10
+`IOSImagePipeline`。固定共享层为强度 0.8 的克制光色、电影滤镜 45 和蓝色 HSL；实际管线必须收到
+滤镜强度 36、蓝色饱和度 -9.6。每张照片再根据与生产分析器相同的亮度和红蓝轴阈值独立加入
+曝光/白平衡补偿，并以逐张曝光 +0.08 验证单张覆盖层。
+
+自动门要求：
+
+- 共享层在 24 张输入上均达到至少 `1/255` 的 P95 可见差，单张覆盖也必须逐张可见；
+- 共享强度 0 时，即使保存了滤镜身份，也必须与中性配方逐像素等价；
+- 逐张补偿的参数、方向与生产分析合同一致；无补偿时逐像素等价，有补偿时必须产生对应亮度或色温轴变化；
+- 相对输入新增纯黑、纯白均不得超过 2%；
+- 每组共享结果和自适应结果的亮度范围都不得比输入扩大超过 0.005，且至少 2/6 组的自适应结果
+  必须把亮度范围收窄 0.01 以上。
+
+这条机器门证明三层配方确实进入同一生产像素管线，并阻止机械复制、滤镜丢失、单张覆盖冻结
+共享风格等回归。它不判断审美方向、同一人物肤色连续性或用户是否理解“整组/当前照片”；这些仍按
+6.4 的真人盲评和范围理解门验收。执行：
+
+```sh
+ruby scripts/test_group_consistency_corpus.rb
+ruby scripts/run_group_consistency_corpus.rb \
+  .quality/corpus-manifest.local.yaml \
+  .quality/group-consistency-engineering-<source>
+```
+
 ## 6. 人工盲评量表
 
 每张候选结果由至少 3 名评审在校准显示环境下匿名评分。使用 1–5 分：
@@ -499,6 +641,6 @@ scripts/run_ios_mvp_engineering_gate.sh <booted-ios-simulator-id>
 
 第一条只检查当前清单结构，第二条是完整门禁；在样片缺失时第二条必须失败。
 最后一条从正式首页路由进入编辑器，在 iOS Flutter 运行时同时执行单图原生纵切和六图最高行为旅程。单图纵切只以确定性 `PhotoSource` 代替系统相册选择界面，选择之后使用生产 `AppOwnedPhotoImporter`、原生 `yingjian/photo_input` 检查与 `JsonPhotoProjectStore`，验证应用私有副本、SHA-256、尺寸、方向、色彩空间、输入格式、相对路径快照和全新 Store/Widget 树恢复；随后继续使用生产 `MethodChannelPhotoPreviewRenderer` 与 `MethodChannelPhotoExporter`，验证 `ios-core-image` FlutterTexture 创建、曝光手势触发的配方更新、原图 JPEG 渲染、Simulator PhotoKit 保存、分享 JPEG 文件头/尺寸、Texture 释放和外部源 PNG 字节不变。运行器只预授权 Simulator `photos-add` 以避免系统弹窗，不替换上述生产 Adapter 或原生实现。六图旅程覆盖安全分析回退、三套推荐、整组调整、第二张单张覆盖、六张批量导出、单项失败、仅重试失败项及全部原始输入字节不变，故障注入与多图保存边界继续使用确定性替身。关键范围、照片、推荐、参数、项目恢复与失败重试均使用稳定 `ValueKey`，不依赖屏幕坐标或本地化文案。运行器结束时会恢复正常 `lib/main.dart` 构建目标，避免 Flutter 的临时 test listener 污染后续 Xcode 验证。它是 Simulator/Debug 工程证据，不证明系统相册选择 UI，也不能代替 Profile/Release 物理设备矩阵、真实高分辨率 PhotoKit 压力或真人范围理解。
-一键工程门要求本地通用语料、人像语料、iOS 三档设备证据和一个已启动的 iOS Simulator；默认路径可以分别通过 `YINGJIAN_IMAGE_CORPUS_MANIFEST`、`YINGJIAN_PORTRAIT_CORPUS_MANIFEST` 和 `YINGJIAN_IOS_DEVICE_EVIDENCE` 覆盖。它串行执行源码卫生、Flutter 静态/单元测试、iOS 原生测试、iOS Runtime 主旅程、两套语料、设备证据和发布合同，命令清单不包含延期平台任务。缺少任一真实输入时必须失败，且不会把工程通过升级为真人评审或交付通过。
+一键工程门要求本地通用语料、人像语料、iOS 三档设备证据和一个已启动的 iOS Simulator；默认路径可以分别通过 `YINGJIAN_IMAGE_CORPUS_MANIFEST`、`YINGJIAN_PORTRAIT_CORPUS_MANIFEST` 和 `YINGJIAN_IOS_DEVICE_EVIDENCE` 覆盖。它串行执行源码卫生、Flutter 静态/单元测试、iOS 原生测试、iOS Runtime 主旅程、普通 `lib/main.dart` Simulator 完整构建与非白屏启动、两套语料、设备证据和发布合同，命令清单不包含延期平台任务。普通启动门会在 integration harness 恢复配置后重新执行非 `--config-only` 构建，安装并启动产物，并对排除系统状态栏后的内容区做非白屏检查，防止把测试 Runner 或配置占位产物误认成可运行 App。缺少任一真实输入时必须失败，且不会把工程通过升级为真人评审或交付通过。
 匿名包构建、评分表字段和人像冻结门见[本地匿名图片评审工作流](blind-review-workflow.md)。
 iOS 三档 Profile/Release 原始测量、产物回查和生命周期门见[物理设备性能与生命周期证据工作流](device-evidence-workflow.md)。

@@ -190,11 +190,13 @@ void main() {
     );
     addTearDown(() => root.delete(recursive: true));
     final appCopy = File('${root.path}/media/photo-1.jpg');
+    final backgroundCopy = File('${root.path}/media/background-1.jpg');
     final preview = File('${root.path}/previews/photo-1/preview.jpg');
     final analysis = File('${root.path}/analysis/photo-1/result.json');
     final debugArtifact = File('${root.path}/debug/photo-1/trace.txt');
     await appCopy.parent.create(recursive: true);
     await appCopy.writeAsBytes(const [1, 2, 3]);
+    await backgroundCopy.writeAsBytes(const [4, 5, 6]);
     for (final derived in [preview, analysis, debugArtifact]) {
       await derived.parent.create(recursive: true);
       await derived.writeAsString('derived');
@@ -218,6 +220,7 @@ void main() {
 
     expect(await store.loadLatest(), isNull);
     expect(await appCopy.exists(), isFalse);
+    expect(await backgroundCopy.exists(), isFalse);
     expect(await preview.exists(), isFalse);
     expect(await analysis.exists(), isFalse);
     expect(await debugArtifact.exists(), isFalse);

@@ -515,7 +515,7 @@ abstract class AppLocalizations {
   /// No description provided for @faceSlimMultipleFaces.
   ///
   /// In zh, this message translates to:
-  /// **'检测到多个人脸：自然精修可用，瘦脸仅支持单人照片'**
+  /// **'检测到多个人脸，请选择要调整的人物'**
   String get faceSlimMultipleFaces;
 
   /// No description provided for @faceSlimUnavailable.
@@ -542,6 +542,270 @@ abstract class AppLocalizations {
   /// **'瘦身'**
   String get bodySlim;
 
+  /// No description provided for @headSize.
+  ///
+  /// In zh, this message translates to:
+  /// **'小头'**
+  String get headSize;
+
+  /// No description provided for @jaw.
+  ///
+  /// In zh, this message translates to:
+  /// **'下颌'**
+  String get jaw;
+
+  /// No description provided for @chin.
+  ///
+  /// In zh, this message translates to:
+  /// **'下巴'**
+  String get chin;
+
+  /// No description provided for @eyes.
+  ///
+  /// In zh, this message translates to:
+  /// **'眼睛'**
+  String get eyes;
+
+  /// No description provided for @nose.
+  ///
+  /// In zh, this message translates to:
+  /// **'鼻子'**
+  String get nose;
+
+  /// No description provided for @mouth.
+  ///
+  /// In zh, this message translates to:
+  /// **'嘴型'**
+  String get mouth;
+
+  /// No description provided for @heightAdjustment.
+  ///
+  /// In zh, this message translates to:
+  /// **'增高'**
+  String get heightAdjustment;
+
+  /// No description provided for @shoulders.
+  ///
+  /// In zh, this message translates to:
+  /// **'肩宽'**
+  String get shoulders;
+
+  /// No description provided for @waist.
+  ///
+  /// In zh, this message translates to:
+  /// **'腰围'**
+  String get waist;
+
+  /// No description provided for @legs.
+  ///
+  /// In zh, this message translates to:
+  /// **'长腿'**
+  String get legs;
+
+  /// No description provided for @bodyTargetHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择要调整的人物（按画面从左到右）'**
+  String get bodyTargetHint;
+
+  /// No description provided for @bodyTarget.
+  ///
+  /// In zh, this message translates to:
+  /// **'人物 {number}'**
+  String bodyTarget(int number);
+
+  /// No description provided for @semanticTools.
+  ///
+  /// In zh, this message translates to:
+  /// **'主体与局部'**
+  String get semanticTools;
+
+  /// No description provided for @mobileToolRetouch.
+  ///
+  /// In zh, this message translates to:
+  /// **'精修'**
+  String get mobileToolRetouch;
+
+  /// No description provided for @semanticToolsLocalReady.
+  ///
+  /// In zh, this message translates to:
+  /// **'主体分割已就绪 · 本地处理'**
+  String get semanticToolsLocalReady;
+
+  /// No description provided for @refineSubjectMask.
+  ///
+  /// In zh, this message translates to:
+  /// **'修整主体边缘'**
+  String get refineSubjectMask;
+
+  /// No description provided for @subjectMask.
+  ///
+  /// In zh, this message translates to:
+  /// **'主体蒙版'**
+  String get subjectMask;
+
+  /// No description provided for @localAdjustment.
+  ///
+  /// In zh, this message translates to:
+  /// **'局部光色'**
+  String get localAdjustment;
+
+  /// No description provided for @localExposure.
+  ///
+  /// In zh, this message translates to:
+  /// **'局部曝光'**
+  String get localExposure;
+
+  /// No description provided for @localSaturation.
+  ///
+  /// In zh, this message translates to:
+  /// **'局部饱和度'**
+  String get localSaturation;
+
+  /// No description provided for @paintMask.
+  ///
+  /// In zh, this message translates to:
+  /// **'涂抹'**
+  String get paintMask;
+
+  /// No description provided for @eraseMask.
+  ///
+  /// In zh, this message translates to:
+  /// **'擦除'**
+  String get eraseMask;
+
+  /// No description provided for @maskBrushHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'在画面上涂抹需要生效的区域；切换擦除可恢复该区域。绿色为添加，红色为擦除。'**
+  String get maskBrushHint;
+
+  /// No description provided for @clearMask.
+  ///
+  /// In zh, this message translates to:
+  /// **'清空蒙版'**
+  String get clearMask;
+
+  /// No description provided for @semanticSubjectUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'未识别到可用主体；仍可使用消除笔'**
+  String get semanticSubjectUnavailable;
+
+  /// No description provided for @backgroundTreatment.
+  ///
+  /// In zh, this message translates to:
+  /// **'背景处理'**
+  String get backgroundTreatment;
+
+  /// No description provided for @backgroundOriginal.
+  ///
+  /// In zh, this message translates to:
+  /// **'原背景'**
+  String get backgroundOriginal;
+
+  /// No description provided for @backgroundBlur.
+  ///
+  /// In zh, this message translates to:
+  /// **'背景虚化'**
+  String get backgroundBlur;
+
+  /// No description provided for @backgroundWhite.
+  ///
+  /// In zh, this message translates to:
+  /// **'白色背景'**
+  String get backgroundWhite;
+
+  /// No description provided for @backgroundBlack.
+  ///
+  /// In zh, this message translates to:
+  /// **'黑色背景'**
+  String get backgroundBlack;
+
+  /// No description provided for @backgroundWarm.
+  ///
+  /// In zh, this message translates to:
+  /// **'暖色背景'**
+  String get backgroundWarm;
+
+  /// No description provided for @backgroundCool.
+  ///
+  /// In zh, this message translates to:
+  /// **'冷色背景'**
+  String get backgroundCool;
+
+  /// No description provided for @backgroundImage.
+  ///
+  /// In zh, this message translates to:
+  /// **'图片背景'**
+  String get backgroundImage;
+
+  /// No description provided for @backgroundImageImportFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'背景图片无法导入，请换一张重试。'**
+  String get backgroundImageImportFailed;
+
+  /// No description provided for @subjectExposure.
+  ///
+  /// In zh, this message translates to:
+  /// **'主体明暗'**
+  String get subjectExposure;
+
+  /// No description provided for @subjectSaturation.
+  ///
+  /// In zh, this message translates to:
+  /// **'主体饱和'**
+  String get subjectSaturation;
+
+  /// No description provided for @backgroundExposure.
+  ///
+  /// In zh, this message translates to:
+  /// **'背景明暗'**
+  String get backgroundExposure;
+
+  /// No description provided for @backgroundSaturation.
+  ///
+  /// In zh, this message translates to:
+  /// **'背景饱和'**
+  String get backgroundSaturation;
+
+  /// No description provided for @eraseBrush.
+  ///
+  /// In zh, this message translates to:
+  /// **'消除笔'**
+  String get eraseBrush;
+
+  /// No description provided for @eraseBrushHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'在要移除的区域上涂抹；使用周围纹理进行本地修补'**
+  String get eraseBrushHint;
+
+  /// No description provided for @brushSize.
+  ///
+  /// In zh, this message translates to:
+  /// **'笔刷大小'**
+  String get brushSize;
+
+  /// No description provided for @clearEraseStrokes.
+  ///
+  /// In zh, this message translates to:
+  /// **'清除全部消除笔画'**
+  String get clearEraseStrokes;
+
+  /// No description provided for @clear.
+  ///
+  /// In zh, this message translates to:
+  /// **'清除'**
+  String get clear;
+
+  /// No description provided for @apply.
+  ///
+  /// In zh, this message translates to:
+  /// **'应用'**
+  String get apply;
+
   /// No description provided for @portraitTools.
   ///
   /// In zh, this message translates to:
@@ -553,6 +817,30 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'光色'**
   String get lightAndColorTools;
+
+  /// No description provided for @groupStyleIntensity.
+  ///
+  /// In zh, this message translates to:
+  /// **'整组风格'**
+  String get groupStyleIntensity;
+
+  /// No description provided for @groupStyleIntensityHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'调整整组共享效果强度，同时保留每张照片的独立补偿。'**
+  String get groupStyleIntensityHint;
+
+  /// No description provided for @primaryRecommendation.
+  ///
+  /// In zh, this message translates to:
+  /// **'主推荐'**
+  String get primaryRecommendation;
+
+  /// No description provided for @alternativeRecommendation.
+  ///
+  /// In zh, this message translates to:
+  /// **'备选'**
+  String get alternativeRecommendation;
 
   /// No description provided for @localPortraitReady.
   ///
@@ -614,17 +902,47 @@ abstract class AppLocalizations {
   /// **'1:1'**
   String get cropSquare;
 
+  /// No description provided for @freeCrop.
+  ///
+  /// In zh, this message translates to:
+  /// **'自由裁剪'**
+  String get freeCrop;
+
+  /// No description provided for @freeCropHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'拖动裁剪框的角点，保留想要的画面'**
+  String get freeCropHint;
+
+  /// No description provided for @applyCrop.
+  ///
+  /// In zh, this message translates to:
+  /// **'应用裁剪'**
+  String get applyCrop;
+
   /// No description provided for @cropFourThree.
   ///
   /// In zh, this message translates to:
   /// **'4:3'**
   String get cropFourThree;
 
+  /// No description provided for @cropThreeFour.
+  ///
+  /// In zh, this message translates to:
+  /// **'3:4'**
+  String get cropThreeFour;
+
   /// No description provided for @cropSixteenNine.
   ///
   /// In zh, this message translates to:
   /// **'16:9'**
   String get cropSixteenNine;
+
+  /// No description provided for @cropNineSixteen.
+  ///
+  /// In zh, this message translates to:
+  /// **'9:16'**
+  String get cropNineSixteen;
 
   /// No description provided for @resetComposition.
   ///
@@ -914,6 +1232,30 @@ abstract class AppLocalizations {
   /// **'待导出'**
   String get photoStatusQueued;
 
+  /// No description provided for @photoStatusExporting.
+  ///
+  /// In zh, this message translates to:
+  /// **'导出中'**
+  String get photoStatusExporting;
+
+  /// No description provided for @photoStatusExported.
+  ///
+  /// In zh, this message translates to:
+  /// **'已导出'**
+  String get photoStatusExported;
+
+  /// No description provided for @photoStatusExportFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'导出失败'**
+  String get photoStatusExportFailed;
+
+  /// No description provided for @photoStatusExportCancelled.
+  ///
+  /// In zh, this message translates to:
+  /// **'已取消导出'**
+  String get photoStatusExportCancelled;
+
   /// No description provided for @batchExportPhotos.
   ///
   /// In zh, this message translates to:
@@ -923,14 +1265,98 @@ abstract class AppLocalizations {
   /// No description provided for @exportConfirmationMessage.
   ///
   /// In zh, this message translates to:
-  /// **'将从每张只读原图生成 JPEG（sRGB，质量 95），共 {count} 张，并保存到系统相册。'**
+  /// **'将从 {count} 张只读原图重新执行全部效果并保存到系统相册。'**
   String exportConfirmationMessage(int count);
+
+  /// No description provided for @exportPhotoPlan.
+  ///
+  /// In zh, this message translates to:
+  /// **'本次照片'**
+  String get exportPhotoPlan;
+
+  /// No description provided for @exportWillExport.
+  ///
+  /// In zh, this message translates to:
+  /// **'将导出'**
+  String get exportWillExport;
+
+  /// No description provided for @exportWithSafeFallback.
+  ///
+  /// In zh, this message translates to:
+  /// **'将以安全回退导出'**
+  String get exportWithSafeFallback;
+
+  /// No description provided for @exportProcessingEstimate.
+  ///
+  /// In zh, this message translates to:
+  /// **'预计逐张本地处理，可取消尚未开始的照片。'**
+  String get exportProcessingEstimate;
 
   /// No description provided for @startExport.
   ///
   /// In zh, this message translates to:
   /// **'开始导出'**
   String get startExport;
+
+  /// No description provided for @exportFormat.
+  ///
+  /// In zh, this message translates to:
+  /// **'格式'**
+  String get exportFormat;
+
+  /// No description provided for @exportFormatJpeg.
+  ///
+  /// In zh, this message translates to:
+  /// **'JPEG'**
+  String get exportFormatJpeg;
+
+  /// No description provided for @exportFormatHeif.
+  ///
+  /// In zh, this message translates to:
+  /// **'HEIF'**
+  String get exportFormatHeif;
+
+  /// No description provided for @exportSize.
+  ///
+  /// In zh, this message translates to:
+  /// **'输出尺寸'**
+  String get exportSize;
+
+  /// No description provided for @exportSizeOriginal.
+  ///
+  /// In zh, this message translates to:
+  /// **'原像素尺寸'**
+  String get exportSizeOriginal;
+
+  /// No description provided for @exportQuality.
+  ///
+  /// In zh, this message translates to:
+  /// **'画质'**
+  String get exportQuality;
+
+  /// No description provided for @exportQualityHigh.
+  ///
+  /// In zh, this message translates to:
+  /// **'高画质'**
+  String get exportQualityHigh;
+
+  /// No description provided for @exportQualityStandard.
+  ///
+  /// In zh, this message translates to:
+  /// **'标准'**
+  String get exportQualityStandard;
+
+  /// No description provided for @exportQualityCompact.
+  ///
+  /// In zh, this message translates to:
+  /// **'节省空间'**
+  String get exportQualityCompact;
+
+  /// No description provided for @exportColorSpaceNotice.
+  ///
+  /// In zh, this message translates to:
+  /// **'首版统一以 sRGB 输出；原图不会被覆盖。'**
+  String get exportColorSpaceNotice;
 
   /// No description provided for @syncCurrentAdjustments.
   ///
@@ -1015,6 +1441,186 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'继续编辑'**
   String get continueEditing;
+
+  /// No description provided for @flipHorizontal.
+  ///
+  /// In zh, this message translates to:
+  /// **'水平翻转'**
+  String get flipHorizontal;
+
+  /// No description provided for @flipVertical.
+  ///
+  /// In zh, this message translates to:
+  /// **'垂直翻转'**
+  String get flipVertical;
+
+  /// No description provided for @perspectiveHorizontal.
+  ///
+  /// In zh, this message translates to:
+  /// **'水平透视'**
+  String get perspectiveHorizontal;
+
+  /// No description provided for @perspectiveVertical.
+  ///
+  /// In zh, this message translates to:
+  /// **'垂直透视'**
+  String get perspectiveVertical;
+
+  /// No description provided for @filterAndHsl.
+  ///
+  /// In zh, this message translates to:
+  /// **'滤镜与 HSL'**
+  String get filterAndHsl;
+
+  /// No description provided for @filterStrength.
+  ///
+  /// In zh, this message translates to:
+  /// **'滤镜强度'**
+  String get filterStrength;
+
+  /// No description provided for @hslHue.
+  ///
+  /// In zh, this message translates to:
+  /// **'色相'**
+  String get hslHue;
+
+  /// No description provided for @hslSaturation.
+  ///
+  /// In zh, this message translates to:
+  /// **'饱和度'**
+  String get hslSaturation;
+
+  /// No description provided for @hslLightness.
+  ///
+  /// In zh, this message translates to:
+  /// **'明度'**
+  String get hslLightness;
+
+  /// No description provided for @hslRed.
+  ///
+  /// In zh, this message translates to:
+  /// **'红'**
+  String get hslRed;
+
+  /// No description provided for @hslOrange.
+  ///
+  /// In zh, this message translates to:
+  /// **'橙'**
+  String get hslOrange;
+
+  /// No description provided for @hslYellow.
+  ///
+  /// In zh, this message translates to:
+  /// **'黄'**
+  String get hslYellow;
+
+  /// No description provided for @hslGreen.
+  ///
+  /// In zh, this message translates to:
+  /// **'绿'**
+  String get hslGreen;
+
+  /// No description provided for @hslCyan.
+  ///
+  /// In zh, this message translates to:
+  /// **'青'**
+  String get hslCyan;
+
+  /// No description provided for @hslBlue.
+  ///
+  /// In zh, this message translates to:
+  /// **'蓝'**
+  String get hslBlue;
+
+  /// No description provided for @hslPurple.
+  ///
+  /// In zh, this message translates to:
+  /// **'紫'**
+  String get hslPurple;
+
+  /// No description provided for @hslMagenta.
+  ///
+  /// In zh, this message translates to:
+  /// **'洋红'**
+  String get hslMagenta;
+
+  /// No description provided for @filterNone.
+  ///
+  /// In zh, this message translates to:
+  /// **'原图'**
+  String get filterNone;
+
+  /// No description provided for @filterClean.
+  ///
+  /// In zh, this message translates to:
+  /// **'清透'**
+  String get filterClean;
+
+  /// No description provided for @filterPortrait.
+  ///
+  /// In zh, this message translates to:
+  /// **'人像'**
+  String get filterPortrait;
+
+  /// No description provided for @filterCinematic.
+  ///
+  /// In zh, this message translates to:
+  /// **'电影'**
+  String get filterCinematic;
+
+  /// No description provided for @filterFilm.
+  ///
+  /// In zh, this message translates to:
+  /// **'胶片'**
+  String get filterFilm;
+
+  /// No description provided for @filterWarmSun.
+  ///
+  /// In zh, this message translates to:
+  /// **'暖阳'**
+  String get filterWarmSun;
+
+  /// No description provided for @filterCoolAir.
+  ///
+  /// In zh, this message translates to:
+  /// **'冷空气'**
+  String get filterCoolAir;
+
+  /// No description provided for @filterVivid.
+  ///
+  /// In zh, this message translates to:
+  /// **'鲜明'**
+  String get filterVivid;
+
+  /// No description provided for @filterFaded.
+  ///
+  /// In zh, this message translates to:
+  /// **'褪色'**
+  String get filterFaded;
+
+  /// No description provided for @filterNoir.
+  ///
+  /// In zh, this message translates to:
+  /// **'黑白'**
+  String get filterNoir;
+
+  /// No description provided for @filterFood.
+  ///
+  /// In zh, this message translates to:
+  /// **'美食'**
+  String get filterFood;
+
+  /// No description provided for @filterLandscape.
+  ///
+  /// In zh, this message translates to:
+  /// **'风景'**
+  String get filterLandscape;
+
+  /// No description provided for @filterNight.
+  ///
+  /// In zh, this message translates to:
+  /// **'夜景'**
+  String get filterNight;
 }
 
 class _AppLocalizationsDelegate

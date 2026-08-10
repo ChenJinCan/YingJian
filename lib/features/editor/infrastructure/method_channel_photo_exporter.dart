@@ -4,7 +4,7 @@ import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_for_platform.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 
-final class MethodChannelPhotoExporter implements PhotoExporter {
+final class MethodChannelPhotoExporter implements ConfigurablePhotoExporter {
   MethodChannelPhotoExporter({
     this.channel = const MethodChannel('yingjian/photo_export'),
   });
@@ -15,15 +15,25 @@ final class MethodChannelPhotoExporter implements PhotoExporter {
   Future<ExportedPhoto> export({
     required ProjectPhoto photo,
     required EditRecipe recipe,
+  }) => exportWithOptions(
+    photo: photo,
+    recipe: recipe,
+    options: PhotoExportOptions.defaults,
+  );
+
+  @override
+  Future<ExportedPhoto> exportWithOptions({
+    required ProjectPhoto photo,
+    required EditRecipe recipe,
+    required PhotoExportOptions options,
   }) async {
     final pipeline = imagePipelineForCurrentPlatform(recipe);
-    final response = await channel.invokeMapMethod<String, Object?>(
-      'exportPhoto',
-      <String, Object?>{
-        'sourcePath': photo.localPath,
-        'pipeline': pipeline.toPlatformArguments(),
-      },
-    );
+    final response = await channel
+        .invokeMapMethod<String, Object?>('exportPhoto', <String, Object?>{
+          'sourcePath': photo.localPath,
+          'pipeline': pipeline.toPlatformArguments(),
+          'options': options.toPlatformArguments(),
+        });
     if (response == null) {
       throw const FormatException('Photo export returned no result');
     }

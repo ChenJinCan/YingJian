@@ -249,7 +249,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get faceSlimMultipleFaces =>
-      'Multiple faces detected: natural retouching is available, while face slimming supports single-person photos only';
+      'Multiple faces detected. Choose the person to adjust.';
 
   @override
   String get faceSlimUnavailable =>
@@ -267,10 +267,162 @@ class AppLocalizationsEn extends AppLocalizations {
   String get bodySlim => 'Body slim';
 
   @override
+  String get headSize => 'Smaller head';
+
+  @override
+  String get jaw => 'Jaw';
+
+  @override
+  String get chin => 'Chin';
+
+  @override
+  String get eyes => 'Eyes';
+
+  @override
+  String get nose => 'Nose';
+
+  @override
+  String get mouth => 'Mouth';
+
+  @override
+  String get heightAdjustment => 'Height';
+
+  @override
+  String get shoulders => 'Shoulders';
+
+  @override
+  String get waist => 'Waist';
+
+  @override
+  String get legs => 'Long legs';
+
+  @override
+  String get bodyTargetHint => 'Choose a person to adjust (left to right)';
+
+  @override
+  String bodyTarget(int number) {
+    return 'Person $number';
+  }
+
+  @override
+  String get semanticTools => 'Subject & local';
+
+  @override
+  String get mobileToolRetouch => 'Retouch';
+
+  @override
+  String get semanticToolsLocalReady =>
+      'Subject segmentation ready · On-device';
+
+  @override
+  String get refineSubjectMask => 'Refine subject edges';
+
+  @override
+  String get subjectMask => 'Subject mask';
+
+  @override
+  String get localAdjustment => 'Local light & color';
+
+  @override
+  String get localExposure => 'Local exposure';
+
+  @override
+  String get localSaturation => 'Local saturation';
+
+  @override
+  String get paintMask => 'Paint';
+
+  @override
+  String get eraseMask => 'Erase';
+
+  @override
+  String get maskBrushHint =>
+      'Paint where the effect should apply. Switch to Erase to restore an area. Green adds; red removes.';
+
+  @override
+  String get clearMask => 'Clear mask';
+
+  @override
+  String get semanticSubjectUnavailable =>
+      'No supported subject found. The erase brush remains available.';
+
+  @override
+  String get backgroundTreatment => 'Background';
+
+  @override
+  String get backgroundOriginal => 'Original';
+
+  @override
+  String get backgroundBlur => 'Background blur';
+
+  @override
+  String get backgroundWhite => 'White background';
+
+  @override
+  String get backgroundBlack => 'Black background';
+
+  @override
+  String get backgroundWarm => 'Warm background';
+
+  @override
+  String get backgroundCool => 'Cool background';
+
+  @override
+  String get backgroundImage => 'Photo background';
+
+  @override
+  String get backgroundImageImportFailed =>
+      'That background photo could not be imported. Try another one.';
+
+  @override
+  String get subjectExposure => 'Subject light';
+
+  @override
+  String get subjectSaturation => 'Subject saturation';
+
+  @override
+  String get backgroundExposure => 'Background light';
+
+  @override
+  String get backgroundSaturation => 'Background saturation';
+
+  @override
+  String get eraseBrush => 'Erase brush';
+
+  @override
+  String get eraseBrushHint =>
+      'Paint over an unwanted area to repair it with nearby texture.';
+
+  @override
+  String get brushSize => 'Brush size';
+
+  @override
+  String get clearEraseStrokes => 'Clear all erase strokes';
+
+  @override
+  String get clear => 'Clear';
+
+  @override
+  String get apply => 'Apply';
+
+  @override
   String get portraitTools => 'Portrait';
 
   @override
   String get lightAndColorTools => 'Light & color';
+
+  @override
+  String get groupStyleIntensity => 'Group look';
+
+  @override
+  String get groupStyleIntensityHint =>
+      'Adjusts the shared look while preserving each photo\'s adaptive correction.';
+
+  @override
+  String get primaryRecommendation => 'Recommended';
+
+  @override
+  String get alternativeRecommendation => 'Alternative';
 
   @override
   String get localPortraitReady => 'Portrait tools ready · On-device';
@@ -305,10 +457,25 @@ class AppLocalizationsEn extends AppLocalizations {
   String get cropSquare => '1:1';
 
   @override
+  String get freeCrop => 'Free crop';
+
+  @override
+  String get freeCropHint => 'Drag a crop corner to keep the frame you want';
+
+  @override
+  String get applyCrop => 'Apply crop';
+
+  @override
   String get cropFourThree => '4:3';
 
   @override
+  String get cropThreeFour => '3:4';
+
+  @override
   String get cropSixteenNine => '16:9';
+
+  @override
+  String get cropNineSixteen => '9:16';
 
   @override
   String get resetComposition => 'Reset composition';
@@ -477,17 +644,73 @@ class AppLocalizationsEn extends AppLocalizations {
   String get photoStatusQueued => 'Ready to export';
 
   @override
+  String get photoStatusExporting => 'Exporting';
+
+  @override
+  String get photoStatusExported => 'Exported';
+
+  @override
+  String get photoStatusExportFailed => 'Export failed';
+
+  @override
+  String get photoStatusExportCancelled => 'Export cancelled';
+
+  @override
   String batchExportPhotos(int count) {
     return 'Export $count photos';
   }
 
   @override
   String exportConfirmationMessage(int count) {
-    return 'Create JPEG files (sRGB, quality 95) from $count read-only originals and save them to Photos.';
+    return 'Replay every edit from $count read-only originals and save the results to Photos.';
   }
 
   @override
+  String get exportPhotoPlan => 'Photos in this export';
+
+  @override
+  String get exportWillExport => 'Will export';
+
+  @override
+  String get exportWithSafeFallback => 'Will export with safe fallback';
+
+  @override
+  String get exportProcessingEstimate =>
+      'Photos are processed locally one at a time. Items not started can be cancelled.';
+
+  @override
   String get startExport => 'Start export';
+
+  @override
+  String get exportFormat => 'Format';
+
+  @override
+  String get exportFormatJpeg => 'JPEG';
+
+  @override
+  String get exportFormatHeif => 'HEIF';
+
+  @override
+  String get exportSize => 'Output size';
+
+  @override
+  String get exportSizeOriginal => 'Original pixel size';
+
+  @override
+  String get exportQuality => 'Quality';
+
+  @override
+  String get exportQualityHigh => 'High quality';
+
+  @override
+  String get exportQualityStandard => 'Standard';
+
+  @override
+  String get exportQualityCompact => 'Save space';
+
+  @override
+  String get exportColorSpaceNotice =>
+      'The first release exports sRGB and never overwrites the original.';
 
   @override
   String get syncCurrentAdjustments => 'Sync current adjustments to group';
@@ -536,4 +759,94 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get continueEditing => 'Continue editing';
+
+  @override
+  String get flipHorizontal => 'Flip horizontal';
+
+  @override
+  String get flipVertical => 'Flip vertical';
+
+  @override
+  String get perspectiveHorizontal => 'Horizontal perspective';
+
+  @override
+  String get perspectiveVertical => 'Vertical perspective';
+
+  @override
+  String get filterAndHsl => 'Filters & HSL';
+
+  @override
+  String get filterStrength => 'Filter strength';
+
+  @override
+  String get hslHue => 'Hue';
+
+  @override
+  String get hslSaturation => 'Saturation';
+
+  @override
+  String get hslLightness => 'Lightness';
+
+  @override
+  String get hslRed => 'Red';
+
+  @override
+  String get hslOrange => 'Orange';
+
+  @override
+  String get hslYellow => 'Yellow';
+
+  @override
+  String get hslGreen => 'Green';
+
+  @override
+  String get hslCyan => 'Cyan';
+
+  @override
+  String get hslBlue => 'Blue';
+
+  @override
+  String get hslPurple => 'Purple';
+
+  @override
+  String get hslMagenta => 'Magenta';
+
+  @override
+  String get filterNone => 'Original';
+
+  @override
+  String get filterClean => 'Clean';
+
+  @override
+  String get filterPortrait => 'Portrait';
+
+  @override
+  String get filterCinematic => 'Cinematic';
+
+  @override
+  String get filterFilm => 'Film';
+
+  @override
+  String get filterWarmSun => 'Warm sun';
+
+  @override
+  String get filterCoolAir => 'Cool air';
+
+  @override
+  String get filterVivid => 'Vivid';
+
+  @override
+  String get filterFaded => 'Faded';
+
+  @override
+  String get filterNoir => 'Noir';
+
+  @override
+  String get filterFood => 'Food';
+
+  @override
+  String get filterLandscape => 'Landscape';
+
+  @override
+  String get filterNight => 'Night';
 }

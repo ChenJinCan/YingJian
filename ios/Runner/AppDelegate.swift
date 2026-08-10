@@ -686,10 +686,33 @@ enum IOSPortraitCapabilityPolicy {
     } else {
       faceSlimReason = "backgroundRisk"
     }
-    let bodyApplicable = reshapeContext.bodySlimGeometry != nil
+    let bodyTargetCount = reshapeContext.bodyReshapeTargets.count
+    let bodyApplicable = bodyTargetCount > 0
+    func normalizedTargetRegion(_ rawRect: CGRect) -> [String: Double]? {
+      let rect = rawRect.intersection(imageExtent)
+      guard rect.width > 0, rect.height > 0 else { return nil }
+      return [
+        "left": Double(rect.minX / imageExtent.width),
+        "top": Double(1 - (rect.maxY / imageExtent.height)),
+        "right": Double(rect.maxX / imageExtent.width),
+        "bottom": Double(1 - (rect.minY / imageExtent.height)),
+      ]
+    }
+    let faceTargetRegions = reshapeContext.faceSlimTargets.compactMap {
+      normalizedTargetRegion($0.features.faceBounds)
+    }
+    let bodyTargetRegions = reshapeContext.bodyReshapeTargets.compactMap { target in
+      let influence = target.geometry.influenceRect
+      return normalizedTargetRegion(
+        influence.insetBy(
+          dx: -influence.width * 0.15,
+          dy: -influence.height * 0.12
+        )
+      )
+    }
     return [
       "analysisVersion": "local-pixels-v1",
-      "capabilityVersion": "ios-core-image-vision-v12-multiface-slim",
+      "capabilityVersion": "ios-core-image-vision-v14-target-regions",
       "confidence": "medium",
       "exposure": exposure,
       "whiteBalance": whiteBalance,
@@ -700,7 +723,10 @@ enum IOSPortraitCapabilityPolicy {
         (portraitStatus.applicability == "unavailable" ? "unavailable" : "unsafe"),
       "faceSlimReason": faceSlimReason,
       "faceSlimTargetCount": faceSlimTargetCount,
+      "faceTargetRegions": faceTargetRegions,
       "body": bodyApplicable ? "applicable" : "unavailable",
+      "bodyTargetCount": bodyTargetCount,
+      "bodyTargetRegions": bodyTargetRegions,
       "scene": faceCount == 0 && !bodyApplicable ? "unknown" : "people",
     ]
   }
@@ -766,7 +792,8 @@ enum IOSPortraitCapabilityPolicy {
     guard
       let values = arguments as? [String: Any],
       let sourcePath = values["sourcePath"] as? String,
-      let pipeline = IOSImagePipeline(arguments: values["pipeline"])
+      let pipeline = IOSImagePipeline(arguments: values["pipeline"]),
+      let options = IOSPhotoExportOptions(arguments: values["options"])
     else {
       result(FlutterError(code: "invalidArguments", message: "Invalid export request", details: nil))
       return
@@ -783,6 +810,7 @@ enum IOSPortraitCapabilityPolicy {
         self?.renderAndSave(
           sourcePath: sourcePath,
           pipeline: pipeline,
+          options: options,
           result: result
         )
       }
@@ -792,16 +820,19 @@ enum IOSPortraitCapabilityPolicy {
   private func renderAndSave(
     sourcePath: String,
     pipeline: IOSImagePipeline,
+    options: IOSPhotoExportOptions,
     result: @escaping FlutterResult
   ) {
+    let fileExtension = options.format == "heif" ? "heic" : "jpg"
     let temporaryURL = FileManager.default.temporaryDirectory
-      .appendingPathComponent("Yingjian_\(UUID().uuidString).jpg")
+      .appendingPathComponent("Yingjian_\(UUID().uuidString).\(fileExtension)")
     let artifact: IOSPhotoRenderedFile
     do {
       artifact = try IOSPhotoFileRenderer(context: photoExportContext).render(
         sourcePath: sourcePath,
         pipeline: pipeline,
-        destinationURL: temporaryURL
+        destinationURL: temporaryURL,
+        options: options
       )
     } catch IOSPhotoFileRenderError.decodeFailed {
       finishWithError(code: "decodeFailed", message: "Photo could not be decoded", result: result)
@@ -816,7 +847,7 @@ enum IOSPortraitCapabilityPolicy {
       let request = PHAssetCreationRequest.forAsset()
       request.creationDate = ImageExportMetadata.captureDate(from: artifact.metadata)
       let options = PHAssetResourceCreationOptions()
-      options.originalFilename = "Yingjian_\(Int(Date().timeIntervalSince1970)).jpg"
+      options.originalFilename = "Yingjian_\(Int(Date().timeIntervalSince1970)).\(fileExtension)"
       request.addResource(with: .photo, fileURL: temporaryURL, options: options)
       assetId = request.placeholderForCreatedAsset?.localIdentifier
     } completionHandler: { success, _ in

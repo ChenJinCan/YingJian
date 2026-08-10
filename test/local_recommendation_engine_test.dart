@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/recommendations/application/local_recommendation_coordinator.dart';
 import 'package:yingjian/features/recommendations/application/photo_analysis_cache.dart';
@@ -252,8 +253,12 @@ void main() {
       );
 
       expect(
-        project.effectiveRecipeFor(photo.id).portraitRecipe.textureSmoothing,
-        35,
+        project.effectiveRecipeFor(photo.id).portraitRecipe,
+        PortraitRetouchRecipe.naturalBeautificationRecommended,
+      );
+      expect(
+        project.effectiveRecipeFor(photo.id).portraitRecipe.blemishReduction,
+        greaterThan(0),
       );
       expect(
         project.effectiveRecipeFor(secondPhoto.id).portraitRecipe.isNeutral,

@@ -9,6 +9,9 @@ minimum_tag_counts:
   portrait_single: 8
   portrait_multi: 4
   no_face: 8
+  landscape: 2
+  food: 2
+  pet: 4
   low_light: 4
   backlit: 4
   mixed_light: 4

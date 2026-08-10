@@ -39,11 +39,13 @@ final class BoundedBatchPhotoExporter {
   BoundedBatchPhotoExporter({
     required this.session,
     required this.exporter,
+    this.options = PhotoExportOptions.defaults,
     this.onSharePathCreated,
   });
 
   final PhotoProjectSession session;
   final PhotoExporter exporter;
+  final PhotoExportOptions options;
   final void Function(String photoId, String localPath)? onSharePathCreated;
   bool _cancelRequested = false;
   bool _running = false;
@@ -115,10 +117,14 @@ final class BoundedBatchPhotoExporter {
         }
         await session.setPhotoExportState(photo.id, PhotoExportState.running);
         try {
-          final exported = await exporter.export(
-            photo: photo,
-            recipe: session.effectiveRecipeFor(photo.id),
-          );
+          final recipe = session.effectiveRecipeFor(photo.id);
+          final exported = exporter is ConfigurablePhotoExporter
+              ? await (exporter as ConfigurablePhotoExporter).exportWithOptions(
+                  photo: photo,
+                  recipe: recipe,
+                  options: options,
+                )
+              : await exporter.export(photo: photo, recipe: recipe);
           final sharePath = exported.sharePath;
           if (sharePath != null && sharePath.isNotEmpty) {
             onSharePathCreated?.call(photo.id, sharePath);

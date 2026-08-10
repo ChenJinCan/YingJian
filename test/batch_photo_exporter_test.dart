@@ -74,6 +74,30 @@ void main() {
     });
   });
 
+  test('forwards one frozen export configuration to every photo', () async {
+    final photos = _photos(2);
+    final session = PhotoProjectSession(
+      importer: FakePhotoImporter(),
+      store: MemoryPhotoProjectStore(_project(photos)),
+    );
+    await session.restore();
+    final exporter = _ConfigurableRecordingExporter();
+    final options = PhotoExportOptions(
+      format: PhotoExportFormat.heif,
+      size: PhotoExportSize.longEdge,
+      longEdgePixels: 2048,
+      quality: PhotoExportQuality.standard,
+    );
+
+    await BoundedBatchPhotoExporter(
+      session: session,
+      exporter: exporter,
+      options: options,
+    ).export();
+
+    expect(exporter.options, [options, options]);
+  });
+
   test(
     'restart marks interrupted work cancelled without replaying it',
     () async {
@@ -171,5 +195,30 @@ final class _DeferredFirstExporter implements PhotoExporter {
       height: 3024,
       sharePath: '/tmp/Yingjian_${photo.id}.jpg',
     );
+  }
+}
+
+final class _ConfigurableRecordingExporter
+    implements ConfigurablePhotoExporter {
+  final List<PhotoExportOptions> options = [];
+
+  @override
+  Future<ExportedPhoto> export({
+    required ProjectPhoto photo,
+    required EditRecipe recipe,
+  }) => exportWithOptions(
+    photo: photo,
+    recipe: recipe,
+    options: PhotoExportOptions.defaults,
+  );
+
+  @override
+  Future<ExportedPhoto> exportWithOptions({
+    required ProjectPhoto photo,
+    required EditRecipe recipe,
+    required PhotoExportOptions options,
+  }) async {
+    this.options.add(options);
+    return ExportedPhoto(assetId: photo.id, width: 2048, height: 1536);
   }
 }

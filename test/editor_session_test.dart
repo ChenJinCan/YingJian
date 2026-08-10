@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/editor/application/editor_session.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/portrait_geometry_recipe.dart';
 import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
 
 void main() {
@@ -127,6 +128,40 @@ void main() {
       session.undo();
       expect(session.recipe, EditRecipe.neutral);
       expect(session.canUndo, isFalse);
+    });
+
+    test('portrait target focus is not an undoable effect by itself', () {
+      final session = EditorSession(
+        initialRecipe: EditRecipe(
+          portraitGeometryRecipe: PortraitGeometryRecipe(
+            faceTargets: [FaceGeometryTarget(), FaceGeometryTarget()],
+          ),
+        ),
+      );
+
+      session.selectPortraitTarget(
+        session.recipe.copyWith(
+          portraitGeometryRecipe: session.recipe.portraitGeometryRecipe
+              .selectFace(1),
+        ),
+      );
+
+      expect(session.recipe.portraitGeometryRecipe.selectedFaceIndex, 1);
+      expect(session.canUndo, isFalse);
+
+      session.beginAdjustment();
+      session.preview(
+        session.recipe.copyWith(
+          portraitGeometryRecipe: session.recipe.portraitGeometryRecipe
+              .updateSelectedFace((target) => target.copyWith(faceSlim: 30)),
+        ),
+      );
+      session.commitAdjustment();
+
+      expect(session.canUndo, isTrue);
+      session.undo();
+      expect(session.recipe.portraitGeometryRecipe.selectedFaceIndex, 1);
+      expect(session.recipe.portraitGeometryRecipe.faceTargets[1].faceSlim, 0);
     });
 
     test('records natural portrait retouch as one undoable semantic edit', () {

@@ -81,7 +81,13 @@ Dir.mktmpdir("blind-review-test-", quality_root) do |directory|
     {
       "id" => index.zero? ? "portrait-001" : format("filler-%03d", index + 1),
       "sha256" => index.zero? ? source_sha256 : format("%064x", index + 1),
-      "tags" => index.zero? ? ["portrait_single", "improvable"] : ["portrait_single"],
+      "tags" => [
+        "portrait_single",
+        ("improvable" if index.zero?),
+        ("skin_tone_light" if index < 2),
+        ("skin_tone_medium" if index >= 2 && index < 4),
+        ("skin_tone_deep" if index >= 4 && index < 6),
+      ].compact,
       "license" => Marshal.load(Marshal.dump(authorization)),
     }
   end
@@ -92,6 +98,11 @@ Dir.mktmpdir("blind-review-test-", quality_root) do |directory|
       "status" => "ready",
       "portrait_required_assets" => 48,
       "portrait_minimum_single_assets" => 36,
+      "portrait_minimum_skin_tone_counts" => {
+        "skin_tone_light" => 2,
+        "skin_tone_medium" => 2,
+        "skin_tone_deep" => 2,
+      },
       "portrait_roles" => %w[portrait_single portrait_multi no_face],
       "assets" => corpus_assets,
     ),
@@ -116,7 +127,7 @@ Dir.mktmpdir("blind-review-test-", quality_root) do |directory|
     "items" => [
       {
         "asset_id" => "portrait-001",
-        "tags" => ["portrait_single", "improvable"],
+        "tags" => ["portrait_single", "improvable", "skin_tone_light"],
         "candidates" => files.map do |name|
           path = File.join(inputs, name)
           {
@@ -373,6 +384,9 @@ Dir.mktmpdir("blind-review-test-", quality_root) do |directory|
       ["no_face", "negative_safety"]
     end
     tags << %w[deep_skin beard freckles_moles glasses makeup][index % 5]
+    tags << "skin_tone_light" if index < 2
+    tags << "skin_tone_medium" if index >= 2 && index < 4
+    tags << "skin_tone_deep" if index >= 4 && index < 6
     candidates = Marshal.load(Marshal.dump(plan["items"].first["candidates"]))
     baseline_hash = nil
     candidates.each_with_index do |candidate, candidate_index|
@@ -402,7 +416,7 @@ Dir.mktmpdir("blind-review-test-", quality_root) do |directory|
     }
   end
   expanded_corpus_path = File.join(directory, "expanded-portrait-corpus-manifest.yaml")
-  expanded_corpus_assets = expanded_plan["items"].map do |item|
+  expanded_corpus_assets = expanded_plan["items"].each_with_index.map do |item, index|
     baseline = item["candidates"].find { |candidate| candidate["role"] == "baseline_original" }
     {
       "id" => item["asset_id"],
@@ -418,6 +432,11 @@ Dir.mktmpdir("blind-review-test-", quality_root) do |directory|
       "status" => "ready",
       "portrait_required_assets" => 48,
       "portrait_minimum_single_assets" => 36,
+      "portrait_minimum_skin_tone_counts" => {
+        "skin_tone_light" => 2,
+        "skin_tone_medium" => 2,
+        "skin_tone_deep" => 2,
+      },
       "portrait_roles" => %w[portrait_single portrait_multi no_face],
       "assets" => expanded_corpus_assets,
     ),

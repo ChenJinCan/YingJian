@@ -42,8 +42,17 @@ final class PortraitRetouchRecipe {
   static const int recipeVersion = 2;
   static const String analysisVersion = 'vision-multiface-v1';
   static const String effectVersion = 'portrait-core-contract-v2';
+  static const String naturalBeautificationProfileVersion =
+      'natural-beautification-profile-v1';
 
   static final neutral = PortraitRetouchRecipe();
+  static const naturalBeautificationRecommended = PortraitRetouchRecipe._(
+    textureSmoothing: 45,
+    skinToneLighting: 40,
+    blemishReduction: 20,
+    faceSlimming: 0,
+    torsoSlimming: 0,
+  );
 
   final int textureSmoothing;
   final int skinToneLighting;

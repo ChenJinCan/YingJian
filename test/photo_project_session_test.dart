@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 
@@ -401,6 +403,170 @@ void main() {
       expect(restored.focusPhotoId, 'photo-2');
     });
 
+    test('current photo can replace and reset a shared group filter', () async {
+      final sharedBasic = BasicEditingRecipe(
+        filter: PhotoFilter.cinematic,
+        filterStrength: 60,
+        hsl: {HslChannel.blue: HslAdjustment(saturation: -12)},
+      );
+      final saved = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'group-filter',
+        sharedStyle: SharedStyle(
+          recipe: EditRecipe(basicEditingRecipe: sharedBasic),
+        ),
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+
+      await session.setEditingScope(
+        ProjectEditingScope.currentPhoto,
+        photoId: 'photo-2',
+      );
+      expect(
+        session.editableRecipe.basicEditingRecipe.filter,
+        PhotoFilter.cinematic,
+      );
+
+      await session.commitEdit(EditRecipe.neutral);
+      expect(
+        session.effectiveRecipeFor('photo-1').basicEditingRecipe.filter,
+        PhotoFilter.cinematic,
+      );
+      expect(
+        session.effectiveRecipeFor('photo-2').basicEditingRecipe.filter,
+        PhotoFilter.none,
+      );
+      expect(session.project?.photoOverrides, contains('photo-2'));
+
+      await session.resetScopedEdit();
+      expect(session.project?.photoOverrides, isNot(contains('photo-2')));
+      expect(
+        session.effectiveRecipeFor('photo-2').basicEditingRecipe.filter,
+        PhotoFilter.cinematic,
+      );
+    });
+
+    test(
+      'syncs a current filter to the group without promoting photo geometry',
+      () async {
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'group-look',
+          sharedStyle: SharedStyle(
+            intensity: 0.5,
+            recipe: EditRecipe(
+              basicEditingRecipe: BasicEditingRecipe(
+                filter: PhotoFilter.clean,
+                filterStrength: 40,
+              ),
+            ),
+          ),
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        await session.setEditingScope(
+          ProjectEditingScope.currentPhoto,
+          photoId: 'photo-2',
+        );
+        final crop = CropGeometry(left: 0.1, right: 0.9);
+        await session.commitEdit(
+          EditRecipe(
+            basicEditingRecipe: BasicEditingRecipe(
+              flipHorizontal: true,
+              perspectiveHorizontal: 7,
+              filter: PhotoFilter.film,
+              filterStrength: 35,
+              hsl: {HslChannel.orange: HslAdjustment(saturation: 10)},
+            ),
+            crop: crop,
+          ),
+        );
+
+        expect(session.canSyncCurrentPhotoAdjustmentsToGroup, isTrue);
+        await session.syncCurrentPhotoAdjustmentsToGroup();
+
+        expect(
+          session.project!.sharedStyle.recipe.basicEditingRecipe.filter,
+          PhotoFilter.film,
+        );
+        expect(
+          session.project!.sharedStyle.recipe.basicEditingRecipe.filterStrength,
+          70,
+        );
+        expect(
+          session.effectiveRecipeFor('photo-1').basicEditingRecipe.filter,
+          PhotoFilter.film,
+        );
+        expect(
+          session
+              .effectiveRecipeFor('photo-1')
+              .basicEditingRecipe
+              .filterStrength,
+          35,
+        );
+        final current = session.effectiveRecipeFor('photo-2');
+        expect(current.basicEditingRecipe.filter, PhotoFilter.film);
+        expect(current.basicEditingRecipe.filterStrength, 35);
+        expect(current.basicEditingRecipe.flipHorizontal, isTrue);
+        expect(current.basicEditingRecipe.perspectiveHorizontal, 7);
+        expect(current.crop, crop);
+        expect(
+          session.project!.photoOverrides['photo-2']!.overridesBasicLook,
+          isFalse,
+        );
+
+        await session.undoEdit();
+        expect(
+          session.project!.sharedStyle.recipe.basicEditingRecipe.filter,
+          PhotoFilter.clean,
+        );
+        expect(
+          session.project!.photoOverrides['photo-2']!.overridesBasicLook,
+          isTrue,
+        );
+        expect(
+          session.effectiveRecipeFor('photo-2').basicEditingRecipe.filter,
+          PhotoFilter.film,
+        );
+        await session.redoEdit();
+        expect(
+          session.project!.sharedStyle.recipe.basicEditingRecipe.filter,
+          PhotoFilter.film,
+        );
+        expect(
+          session.project!.photoOverrides['photo-2']!.overridesBasicLook,
+          isFalse,
+        );
+
+        await session.setEditingScope(ProjectEditingScope.group);
+        await session.commitEdit(
+          session.editableRecipe.copyWith(
+            basicEditingRecipe: BasicEditingRecipe(
+              filter: PhotoFilter.cinematic,
+              filterStrength: 30,
+            ),
+          ),
+        );
+        final afterGroupChange = session.effectiveRecipeFor('photo-2');
+        expect(
+          afterGroupChange.basicEditingRecipe.filter,
+          PhotoFilter.cinematic,
+        );
+        expect(afterGroupChange.basicEditingRecipe.filterStrength, 15);
+        expect(afterGroupChange.basicEditingRecipe.flipHorizontal, isTrue);
+        expect(afterGroupChange.crop, crop);
+      },
+    );
+
     test(
       'restores semantic current-photo history and can undo and redo it',
       () async {
@@ -489,6 +655,63 @@ void main() {
     );
 
     test(
+      'resets the group recipe and intensity as one undoable edit',
+      () async {
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'group-reset',
+          sharedStyle: SharedStyle(
+            intensity: 0.4,
+            recipe: EditRecipe(
+              exposure: 0.2,
+              basicEditingRecipe: BasicEditingRecipe(
+                filter: PhotoFilter.film,
+                filterStrength: 60,
+              ),
+            ),
+          ),
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+
+        await session.resetScopedEdit();
+
+        expect(session.project!.sharedStyle.recipe, EditRecipe.neutral);
+        expect(session.project!.sharedStyle.intensity, 1);
+        expect(session.project!.undoHistory, hasLength(1));
+        await session.undoEdit();
+        expect(session.project!.sharedStyle, saved.sharedStyle);
+        await session.redoEdit();
+        expect(session.project!.sharedStyle.recipe, EditRecipe.neutral);
+        expect(session.project!.sharedStyle.intensity, 1);
+      },
+    );
+
+    test('allows resetting a neutral group with stale intensity', () async {
+      final store = _MemoryPhotoProjectStore()
+        ..savedProject = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'neutral-strength',
+          sharedStyle: SharedStyle(intensity: 0.4, recipe: EditRecipe.neutral),
+        );
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+
+      expect(session.canResetScopedEdit, isTrue);
+      await session.resetScopedEdit();
+
+      expect(session.project!.sharedStyle.intensity, 1);
+      expect(session.canResetScopedEdit, isFalse);
+    });
+
+    test(
       'syncs current color adjustments to the group as one undoable operation',
       () async {
         final crop = CropGeometry(left: 0.1, right: 0.9);
@@ -562,6 +785,94 @@ void main() {
         expect(restored.photoOverrides, session.project?.photoOverrides);
         expect(restored.undoHistory, session.project?.undoHistory);
         expect(restored.redoHistory, session.project?.redoHistory);
+      },
+    );
+
+    test(
+      'restores a current-photo override without discarding adaptive portrait compensation',
+      () async {
+        final adaptivePortrait = PortraitRetouchRecipe(textureSmoothing: 35);
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'clean-natural-01',
+          editingScope: ProjectEditingScope.currentPhoto,
+          focusPhotoId: 'photo-2',
+          adaptiveCompensations: {
+            'photo-2': AdaptiveCompensation(
+              recipe: EditRecipe.neutral,
+              source: AdaptiveCompensationSource.localAnalysisV1,
+              portraitRecipe: adaptivePortrait,
+            ),
+          },
+          photoOverrides: {
+            'photo-2': PhotoOverride(
+              recipe: EditRecipe(portraitRecipe: adaptivePortrait),
+            ),
+          },
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+
+        await session.resetScopedEdit();
+
+        expect(session.project?.photoOverrides, isEmpty);
+        expect(
+          session.effectiveRecipeFor('photo-2').portraitRecipe.textureSmoothing,
+          35,
+        );
+        expect(session.project?.undoHistory, hasLength(1));
+        final restored = PhotoProject.fromJson(session.project!.toJson());
+        expect(
+          restored.undoHistory.single.kind,
+          ProjectEditOperationKind.resetCurrentPhotoOverride,
+        );
+
+        await session.undoEdit();
+        expect(
+          session.project?.photoOverrides['photo-2']?.recipe,
+          saved.photoOverrides['photo-2']?.recipe,
+        );
+        await session.redoEdit();
+        expect(session.project?.photoOverrides, isEmpty);
+        expect(
+          session.effectiveRecipeFor('photo-2').portraitRecipe.textureSmoothing,
+          35,
+        );
+      },
+    );
+
+    test(
+      'restores history after a photo override is fully synced to the group',
+      () async {
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'clean-natural-01',
+          editingScope: ProjectEditingScope.currentPhoto,
+          focusPhotoId: 'photo-2',
+          sharedStyle: SharedStyle(recipe: EditRecipe(exposure: 0.1)),
+          photoOverrides: {
+            'photo-2': PhotoOverride(recipe: EditRecipe(contrast: 0.2)),
+          },
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+
+        await session.syncCurrentPhotoAdjustmentsToGroup();
+        final restored = PhotoProject.fromJson(session.project!.toJson());
+
+        expect(restored.photoOverrides, isEmpty);
+        expect(
+          restored.undoHistory.single.kind,
+          ProjectEditOperationKind.syncCurrentPhotoToGroup,
+        );
       },
     );
 

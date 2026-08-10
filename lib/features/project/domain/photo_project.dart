@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
 
@@ -165,7 +166,11 @@ extension PhotoExportStateTransitions on PhotoExportState {
 
 enum ProjectEditingScope { group, currentPhoto }
 
-enum ProjectEditOperationKind { scopedEdit, syncCurrentPhotoToGroup }
+enum ProjectEditOperationKind {
+  scopedEdit,
+  syncCurrentPhotoToGroup,
+  resetCurrentPhotoOverride,
+}
 
 @immutable
 class ProjectEditOperation {
@@ -459,25 +464,113 @@ void _validateUnitValue(double value, String name) {
 
 @immutable
 class PhotoOverride {
-  const PhotoOverride({required this.recipe});
+  factory PhotoOverride({
+    required EditRecipe recipe,
+    bool? overridesBasicLook,
+    @Deprecated('Use overridesBasicLook') bool? overridesBasicEditing,
+    bool? overridesCrop,
+  }) => PhotoOverride._(
+    recipe: recipe,
+    overridesBasicLook:
+        overridesBasicLook ??
+        overridesBasicEditing ??
+        !_sameBasicLook(recipe.basicEditingRecipe, BasicEditingRecipe.neutral),
+    overridesCrop: overridesCrop ?? !recipe.crop.isOriginal,
+  );
+
+  const PhotoOverride._({
+    required this.recipe,
+    required this.overridesBasicLook,
+    required this.overridesCrop,
+  });
 
   final EditRecipe recipe;
+  final bool overridesBasicLook;
+  final bool overridesCrop;
 
-  Map<String, Object> toJson() => {'recipe': recipe.toJson()};
+  Map<String, Object> toJson() => {
+    'recipe': recipe.toJson(),
+    'overridesBasicLook': overridesBasicLook,
+    'overridesCrop': overridesCrop,
+  };
 
   factory PhotoOverride.fromJson(Map<String, Object?> json) {
+    final recipe = EditRecipe.fromJson(json['recipe']! as Map<String, Object?>);
     return PhotoOverride(
-      recipe: EditRecipe.fromJson(json['recipe']! as Map<String, Object?>),
+      recipe: recipe,
+      overridesBasicLook:
+          json['overridesBasicLook'] as bool? ??
+          json['overridesBasicEditing'] as bool?,
+      overridesCrop: json['overridesCrop'] as bool?,
     );
   }
 
   @override
   bool operator ==(Object other) =>
-      other is PhotoOverride && other.recipe == recipe;
+      other is PhotoOverride &&
+      other.recipe == recipe &&
+      other.overridesBasicLook == overridesBasicLook &&
+      other.overridesCrop == overridesCrop;
 
   @override
-  int get hashCode => recipe.hashCode;
+  int get hashCode => Object.hash(recipe, overridesBasicLook, overridesCrop);
 }
+
+bool _sameBasicLook(BasicEditingRecipe first, BasicEditingRecipe second) =>
+    first.filter == second.filter &&
+    first.filterStrength == second.filterStrength &&
+    mapEquals(first.hsl, second.hsl);
+
+BasicEditingRecipe _basicLookOnly(BasicEditingRecipe recipe) =>
+    BasicEditingRecipe(
+      filter: recipe.filter,
+      filterStrength: recipe.filterStrength,
+      hsl: recipe.hsl,
+    );
+
+BasicEditingRecipe? _promoteBasicLook(
+  BasicEditingRecipe recipe,
+  double effectiveIntensity,
+) {
+  final filterStrength = recipe.filterStrength / effectiveIntensity;
+  final scaledHsl = <HslChannel, HslAdjustment>{};
+  if (!filterStrength.isFinite || filterStrength > 100) return null;
+  for (final entry in recipe.hsl.entries) {
+    final hue = entry.value.hue / effectiveIntensity;
+    final saturation = entry.value.saturation / effectiveIntensity;
+    final lightness = entry.value.lightness / effectiveIntensity;
+    if ([
+      hue,
+      saturation,
+      lightness,
+    ].any((value) => !value.isFinite || value < -100 || value > 100)) {
+      return null;
+    }
+    scaledHsl[entry.key] = HslAdjustment(
+      hue: hue,
+      saturation: saturation,
+      lightness: lightness,
+    );
+  }
+  return BasicEditingRecipe(
+    filter: recipe.filter,
+    filterStrength: filterStrength,
+    hsl: scaledHsl,
+  );
+}
+
+BasicEditingRecipe _composeBasicEditing({
+  required BasicEditingRecipe geometry,
+  required BasicEditingRecipe look,
+}) => BasicEditingRecipe(
+  flipHorizontal: geometry.flipHorizontal,
+  flipVertical: geometry.flipVertical,
+  perspectiveHorizontal: geometry.perspectiveHorizontal,
+  perspectiveVertical: geometry.perspectiveVertical,
+  filter: look.filter,
+  filterStrength: look.filterStrength,
+  hsl: look.hsl,
+);
 
 @immutable
 class PhotoGroupSyncPlan {
@@ -627,6 +720,14 @@ class PhotoProject {
               (operation.beforeRecipe != operation.afterRecipe ||
                   operation.beforePhotoOverrideRecipe !=
                       operation.afterPhotoOverrideRecipe),
+        ProjectEditOperationKind.resetCurrentPhotoOverride =>
+          operation.scope == ProjectEditingScope.currentPhoto &&
+              photoId != null &&
+              photoIds.contains(photoId) &&
+              operation.beforePhotoOverrideRecipe != null &&
+              operation.afterPhotoOverrideRecipe == null &&
+              operation.beforeRecipe == operation.beforePhotoOverrideRecipe &&
+              operation.beforeSharedIntensity == operation.afterSharedIntensity,
       };
       if (!operation.beforeSharedIntensity.isFinite ||
           operation.beforeSharedIntensity < 0 ||
@@ -645,9 +746,11 @@ class PhotoProject {
   }
 
   static const maxPhotoCount = 6;
-  // V7 persists explicit per-photo quality enhancement controls. Older
-  // recipes migrate with all four values at zero through EditRecipe.fromJson.
-  static const schemaVersion = 7;
+  // V9 separates the shareable filter/HSL look from per-photo basic geometry,
+  // so flips and perspective never freeze later group-style edits. V8's
+  // broader overridesBasicEditing flag is accepted as a conservative look
+  // override during migration.
+  static const schemaVersion = 9;
 
   final String id;
   final DateTime createdAt;
@@ -731,13 +834,27 @@ class PhotoProject {
     if (!photos.any((photo) => photo.id == photoId)) {
       throw ArgumentError.value(photoId, 'photoId', 'Photo is not in project');
     }
-    final override = photoOverrides[photoId]?.recipe;
-    if (override == null || !override.hasColorAdjustments) return null;
-
+    final overrideLayer = photoOverrides[photoId];
+    final override = overrideLayer?.recipe;
+    if (override == null ||
+        (!override.hasColorAdjustments && !overrideLayer!.overridesBasicLook)) {
+      return null;
+    }
     final safeSharedIntensity = sharedStyle.intensity
         .clamp(0.0, adaptiveCompensations[photoId]?.safeSharedIntensity ?? 1.0)
         .toDouble();
     if (safeSharedIntensity <= 0) return null;
+    final promotedBasicLook = overrideLayer!.overridesBasicLook
+        ? _promoteBasicLook(
+            _basicLookOnly(override.basicEditingRecipe),
+            safeSharedIntensity,
+          )
+        : _basicLookOnly(sharedStyle.recipe.basicEditingRecipe);
+    if (promotedBasicLook == null) return null;
+    final referenceBasicLook = _scaledSharedBasic(
+      promotedBasicLook,
+      safeSharedIntensity,
+    );
 
     double? promote(double sharedValue, double overrideValue) {
       final value = sharedValue + overrideValue / safeSharedIntensity;
@@ -784,6 +901,7 @@ class PhotoProject {
           tint: tint!,
           saturation: saturation!,
           clarity: clarity!,
+          basicEditingRecipe: promotedBasicLook,
           crop: sharedStyle.recipe.crop,
         ),
       ),
@@ -793,7 +911,15 @@ class PhotoProject {
         bodySlimStrength: override.bodySlimStrength,
         portraitRecipe: override.portraitRecipe,
         qualityEnhancementRecipe: override.qualityEnhancementRecipe,
-        crop: override.crop,
+        basicEditingRecipe: _composeBasicEditing(
+          geometry: override.basicEditingRecipe,
+          look: referenceBasicLook,
+        ),
+        portraitGeometryRecipe: override.portraitGeometryRecipe,
+        semanticEditingRecipe: override.semanticEditingRecipe,
+        crop: overrideLayer.overridesCrop
+            ? override.crop
+            : sharedStyle.recipe.crop,
       ),
     );
   }
@@ -831,7 +957,16 @@ class PhotoProject {
     final sharedIntensity = sharedStyle.intensity
         .clamp(0.0, adaptiveLayer?.safeSharedIntensity ?? 1.0)
         .toDouble();
-    final override = photoOverride ?? photoOverrides[photoId]?.recipe;
+    final storedOverride = photoOverrides[photoId];
+    final override = photoOverride ?? storedOverride?.recipe;
+    final sharedBasic = _scaledSharedBasic(
+      shared.basicEditingRecipe,
+      sharedIntensity,
+    );
+    final overridesBasicLook =
+        photoOverride != null || (storedOverride?.overridesBasicLook ?? false);
+    final overridesCrop =
+        photoOverride != null || (storedOverride?.overridesCrop ?? false);
     return EditRecipe(
       exposure: _sumAndClamp(
         shared.exposure * sharedIntensity,
@@ -886,11 +1021,55 @@ class PhotoProject {
       qualityEnhancementRecipe:
           override?.qualityEnhancementRecipe ??
           EditRecipe.neutral.qualityEnhancementRecipe,
-      crop: photoOverride != null || photoOverrides.containsKey(photoId)
-          ? override!.crop
-          : shared.crop,
+      // Flip and perspective are always per-photo, while filter/HSL follow the
+      // shared look unless this photo explicitly replaces or clears it.
+      basicEditingRecipe: _composeBasicEditing(
+        geometry: override?.basicEditingRecipe ?? BasicEditingRecipe.neutral,
+        look: overridesBasicLook ? override!.basicEditingRecipe : sharedBasic,
+      ),
+      portraitGeometryRecipe:
+          override?.portraitGeometryRecipe ??
+          EditRecipe.neutral.portraitGeometryRecipe,
+      semanticEditingRecipe:
+          override?.semanticEditingRecipe ??
+          EditRecipe.neutral.semanticEditingRecipe,
+      crop: overridesCrop ? override!.crop : shared.crop,
     );
   }
+
+  EditRecipe photoOverrideBaselineFor(String photoId) {
+    if (!photos.any((photo) => photo.id == photoId)) {
+      throw ArgumentError.value(photoId, 'photoId', 'Photo is not in project');
+    }
+    final adaptiveLayer = adaptiveCompensations[photoId];
+    final sharedIntensity = sharedStyle.intensity
+        .clamp(0.0, adaptiveLayer?.safeSharedIntensity ?? 1.0)
+        .toDouble();
+    return EditRecipe(
+      portraitRecipe: adaptiveLayer?.portraitRecipe,
+      basicEditingRecipe: _scaledSharedBasic(
+        sharedStyle.recipe.basicEditingRecipe,
+        sharedIntensity,
+      ),
+      crop: sharedStyle.recipe.crop,
+    );
+  }
+
+  static BasicEditingRecipe _scaledSharedBasic(
+    BasicEditingRecipe recipe,
+    double intensity,
+  ) => BasicEditingRecipe(
+    filter: recipe.filter,
+    filterStrength: recipe.filterStrength * intensity,
+    hsl: {
+      for (final entry in recipe.hsl.entries)
+        entry.key: HslAdjustment(
+          hue: entry.value.hue * intensity,
+          saturation: entry.value.saturation * intensity,
+          lightness: entry.value.lightness * intensity,
+        ),
+    },
+  );
 
   PhotoProject copyWith({
     DateTime? updatedAt,

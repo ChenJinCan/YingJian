@@ -3,6 +3,23 @@ import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
 
 void main() {
+  test(
+    'natural beautification profile writes three real non-geometric values',
+    () {
+      const profile = PortraitRetouchRecipe.naturalBeautificationRecommended;
+
+      expect(
+        PortraitRetouchRecipe.naturalBeautificationProfileVersion,
+        isNotEmpty,
+      );
+      expect(profile.textureSmoothing, 45);
+      expect(profile.skinToneLighting, 40);
+      expect(profile.blemishReduction, 20);
+      expect(profile.faceSlimming, 0);
+      expect(profile.torsoSlimming, 0);
+    },
+  );
+
   test('stores exactly five bounded 0...100 portrait parameters', () {
     final recipe = PortraitRetouchRecipe(
       textureSmoothing: 40,

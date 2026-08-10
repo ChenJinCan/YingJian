@@ -61,7 +61,38 @@ class PortraitEngineeringDiagnosticTest
         File.read(File.join(output, "diagnostic-key.json")) ==
           File.read(File.join(second_output, "diagnostic-key.json"))
 
+      original_manifest = File.read(manifest_path)
       original_report = File.read(report_path)
+      supplemental_manifest = YAML.safe_load(
+        original_manifest,
+        permitted_classes: [],
+        aliases: false,
+      )
+      supplemental_asset = Marshal.load(
+        Marshal.dump(supplemental_manifest.fetch("assets").first),
+      )
+      supplemental_asset["id"] = "portrait-supplemental-001"
+      supplemental_asset["tags"] = supplemental_asset.fetch("tags") + [
+        PortraitEngineeringCorpus::SUPPLEMENTAL_TAG,
+      ]
+      supplemental_manifest.fetch("assets") << supplemental_asset
+      File.write(manifest_path, YAML.dump(supplemental_manifest))
+      supplemental_report = JSON.parse(original_report)
+      supplemental_report["manifest_sha256"] = Digest::SHA256.file(
+        manifest_path,
+      ).hexdigest
+      File.write(report_path, JSON.pretty_generate(supplemental_report))
+      _stdout, stderr, status = Open3.capture3(
+        "ruby",
+        File.join(repo_root, "scripts/build_portrait_engineering_diagnostic.rb"),
+        report_path,
+        manifest_path,
+        File.join(directory, "supplemental-diagnostic"),
+      )
+      raise "supplemental manifest asset blocked the diagnostic: #{stderr}" unless status.success?
+      File.write(manifest_path, original_manifest)
+      File.write(report_path, original_report)
+
       stale_report = JSON.parse(original_report)
       stale_report["contract_source_sha256"] = "0" * 64
       File.write(report_path, JSON.pretty_generate(stale_report))
@@ -170,13 +201,23 @@ class PortraitEngineeringDiagnosticTest
       "status" => "ready",
       "portrait_required_assets" => 48,
       "portrait_minimum_single_assets" => 36,
+      "portrait_minimum_skin_tone_counts" => {
+        "skin_tone_light" => 2,
+        "skin_tone_medium" => 2,
+        "skin_tone_deep" => 2,
+      },
       "portrait_roles" => %w[portrait_single portrait_multi no_face],
       "assets" => 48.times.map do |index|
         role = index < 36 ? "portrait_single" : (index < 40 ? "portrait_multi" : "no_face")
         {
           "id" => format("portrait-%03d", index + 1),
           "sha256" => source_sha256,
-          "tags" => [role],
+          "tags" => [
+            role,
+            ("skin_tone_light" if index < 2),
+            ("skin_tone_medium" if index >= 2 && index < 4),
+            ("skin_tone_deep" if index >= 4 && index < 6),
+          ].compact,
           "media" => {
             "format" => "jpeg",
             "width" => 64,

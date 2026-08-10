@@ -74,6 +74,38 @@ void main() {
     expect(find.byType(Texture), findsOneWidget);
   });
 
+  testWidgets('uses the requested preview edge and recreates when it changes', (
+    tester,
+  ) async {
+    final renderer = _RecordingPreviewRenderer();
+    var maxEdge = 384;
+    late StateSetter rebuild;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setState) {
+            rebuild = setState;
+            return NativePhotoPreview(
+              sourcePath: '/tmp/Yingjian_preview_fixture.jpg',
+              recipe: EditRecipe.neutral,
+              renderer: renderer,
+              maxEdge: maxEdge,
+              errorBuilder: (_) => const Text('preview unavailable'),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(renderer.maxEdges, [384]);
+
+    rebuild(() => maxEdge = 512);
+    await tester.pumpAndSettle();
+
+    expect(renderer.maxEdges, [384, 512]);
+    expect(renderer.disposedTextureIds, [1]);
+  });
+
   testWidgets('retries the same failed preview when retryToken changes', (
     tester,
   ) async {
@@ -155,6 +187,7 @@ Widget _previewApp(PhotoPreviewRenderer renderer) => MaterialApp(
 class _RecordingPreviewRenderer implements PhotoPreviewRenderer {
   int createCount = 0;
   final List<int> disposedTextureIds = [];
+  final List<int> maxEdges = [];
 
   @override
   Future<PhotoPreviewHandle> create({
@@ -163,6 +196,7 @@ class _RecordingPreviewRenderer implements PhotoPreviewRenderer {
     int maxEdge = 2048,
   }) async {
     createCount += 1;
+    maxEdges.add(maxEdge);
     return PhotoPreviewHandle(
       textureId: createCount,
       width: 1200,

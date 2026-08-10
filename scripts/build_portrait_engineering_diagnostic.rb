@@ -120,7 +120,8 @@ unless report["asset_count"] == PortraitEngineeringCorpus::REQUIRED_ASSET_COUNT 
        report_assets.length == PortraitEngineeringCorpus::REQUIRED_ASSET_COUNT
   fail_diagnostic("report must contain exactly 48 assets")
 end
-manifest_assets = manifest.fetch("assets").to_h { |asset| [asset.fetch("id"), asset] }
+manifest_assets = PortraitEngineeringCorpus.engineering_assets(manifest)
+  .to_h { |asset| [asset.fetch("id"), asset] }
 candidate_identity = report["candidate"]
 unless candidate_identity.is_a?(Hash) &&
        candidate_identity["candidateKind"].is_a?(String) &&

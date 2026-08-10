@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:yingjian/features/editor/application/batch_photo_exporter.dart';
@@ -9,9 +10,12 @@ import 'package:yingjian/features/editor/application/editor_session.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
 import 'package:yingjian/features/editor/application/photo_sharer.dart';
+import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_for_platform.dart';
+import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
 import 'package:yingjian/features/editor/domain/quality_enhancement_recipe.dart';
+import 'package:yingjian/features/editor/domain/semantic_editing_recipe.dart';
 import 'package:yingjian/features/editor/presentation/native_photo_preview.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
@@ -41,6 +45,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   BoundedBatchPhotoExporter? _batchExporter;
   Future<BatchExportSummary>? _batchCompletion;
   BatchExportSummary? _exportSummary;
+  PhotoExportOptions _exportOptions = PhotoExportOptions.defaults;
   final Map<String, String> _ownedSharePathsByPhotoId = {};
   final Set<String> _supersededSharePaths = {};
   bool _preparingRecommendations = false;
@@ -49,8 +54,14 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   final Map<String, PortraitApplicability> _faceSlimApplicabilityByPhotoId = {};
   final Map<String, PortraitDegradationReason> _faceSlimReasonByPhotoId = {};
   final Map<String, int> _faceSlimTargetCountByPhotoId = {};
+  final Map<String, List<NormalizedTargetRegion>> _faceTargetRegionsByPhotoId =
+      {};
   final Map<String, PortraitApplicability> _bodyApplicabilityByPhotoId = {};
+  final Map<String, int> _bodyTargetCountByPhotoId = {};
+  final Map<String, List<NormalizedTargetRegion>> _bodyTargetRegionsByPhotoId =
+      {};
   int _previewRecommendationIndex = -1;
+  double? _previewSharedIntensity;
   double? _pendingPhotoStripOffset;
   bool _savingPhotoStripPosition = false;
   PhotoAnalysisCancellationToken? _analysisCancellation;
@@ -192,7 +203,10 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     final restoredFaceSlim = <String, PortraitApplicability>{};
     final restoredFaceSlimReason = <String, PortraitDegradationReason>{};
     final restoredFaceSlimTargetCount = <String, int>{};
+    final restoredFaceTargetRegions = <String, List<NormalizedTargetRegion>>{};
     final restoredBody = <String, PortraitApplicability>{};
+    final restoredBodyTargetCount = <String, int>{};
+    final restoredBodyTargetRegions = <String, List<NormalizedTargetRegion>>{};
     var refreshRequired = false;
     for (final photo in project.photos) {
       try {
@@ -206,7 +220,10 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           restoredFaceSlim[photo.id] = analysis.faceSlim;
           restoredFaceSlimReason[photo.id] = analysis.faceSlimReason;
           restoredFaceSlimTargetCount[photo.id] = analysis.faceSlimTargetCount;
+          restoredFaceTargetRegions[photo.id] = analysis.faceTargetRegions;
           restoredBody[photo.id] = analysis.body;
+          restoredBodyTargetCount[photo.id] = analysis.bodyTargetCount;
+          restoredBodyTargetRegions[photo.id] = analysis.bodyTargetRegions;
         } else {
           refreshRequired = true;
         }
@@ -229,9 +246,18 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       _faceSlimTargetCountByPhotoId
         ..clear()
         ..addAll(restoredFaceSlimTargetCount);
+      _faceTargetRegionsByPhotoId
+        ..clear()
+        ..addAll(restoredFaceTargetRegions);
       _bodyApplicabilityByPhotoId
         ..clear()
         ..addAll(restoredBody);
+      _bodyTargetCountByPhotoId
+        ..clear()
+        ..addAll(restoredBodyTargetCount);
+      _bodyTargetRegionsByPhotoId
+        ..clear()
+        ..addAll(restoredBodyTargetRegions);
     });
     return refreshRequired;
   }
@@ -301,9 +327,21 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
             for (final entry in preparation.analyses.entries)
               entry.key: entry.value.faceSlimTargetCount,
           });
+          _faceTargetRegionsByPhotoId.addAll({
+            for (final entry in preparation.analyses.entries)
+              entry.key: entry.value.faceTargetRegions,
+          });
           _bodyApplicabilityByPhotoId.addAll({
             for (final entry in preparation.analyses.entries)
               entry.key: entry.value.body,
+          });
+          _bodyTargetCountByPhotoId.addAll({
+            for (final entry in preparation.analyses.entries)
+              entry.key: entry.value.bodyTargetCount,
+          });
+          _bodyTargetRegionsByPhotoId.addAll({
+            for (final entry in preparation.analyses.entries)
+              entry.key: entry.value.bodyTargetRegions,
           });
           if (exposeRecommendations) {
             _previewRecommendationIndex = preparation.recommendations.isEmpty
@@ -418,8 +456,17 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
 
   Future<void> _resetEdit() async {
     if (_exportSummary != null || _exporting || _sharing) return;
-    _editorSession.load(EditRecipe.neutral);
-    await _persistRecipe();
+    try {
+      await _session?.resetScopedEdit();
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
+      }
+    } finally {
+      _editorSession.load(_session?.editableRecipe ?? EditRecipe.neutral);
+    }
   }
 
   Future<void> _syncCurrentPhotoAdjustmentsToGroup() async {
@@ -504,6 +551,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     if (_exportSummary != null || _exporting || _sharing) return;
     final session = _session!;
     final photo = session.photos[_selectedIndex];
+    _previewSharedIntensity = null;
     try {
       await session.setEditingScope(
         scope,
@@ -516,6 +564,39 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           context,
         ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
       }
+    }
+  }
+
+  void _beginSharedIntensityAdjustment() {
+    final project = _session?.project;
+    if (project == null ||
+        project.editingScope != ProjectEditingScope.group ||
+        _previewSharedIntensity != null) {
+      return;
+    }
+    setState(() => _previewSharedIntensity = project.sharedStyle.intensity);
+  }
+
+  void _previewSharedIntensityAdjustment(double intensity) {
+    if (_previewSharedIntensity == null) return;
+    setState(() => _previewSharedIntensity = intensity);
+  }
+
+  Future<void> _commitSharedIntensityAdjustment() async {
+    final intensity = _previewSharedIntensity;
+    if (intensity == null || _exportSummary != null || _exporting || _sharing) {
+      return;
+    }
+    try {
+      await _session?.commitSharedIntensity(intensity);
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
+      }
+    } finally {
+      if (mounted) setState(() => _previewSharedIntensity = null);
     }
   }
 
@@ -563,6 +644,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       _faceSlimReasonByPhotoId.remove(photo.id);
       _faceSlimTargetCountByPhotoId.remove(photo.id);
       _bodyApplicabilityByPhotoId.remove(photo.id);
+      _bodyTargetCountByPhotoId.remove(photo.id);
       final focusPhotoId = _session!.project?.focusPhotoId;
       if (focusPhotoId != null) {
         _selectedIndex = _session!.photos.indexWhere(
@@ -602,6 +684,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       _faceSlimReasonByPhotoId.clear();
       _faceSlimTargetCountByPhotoId.clear();
       _bodyApplicabilityByPhotoId.clear();
+      _bodyTargetCountByPhotoId.clear();
       await _discardShareFiles();
       _selectedIndex = 0;
       _editorSession.load(EditRecipe.neutral);
@@ -675,8 +758,10 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         (!retryFailuresOnly && _exportSummary != null)) {
       return;
     }
-    if (!retryFailuresOnly && !await _confirmBatchExport()) {
-      return;
+    if (!retryFailuresOnly) {
+      final options = await _confirmBatchExport();
+      if (options == null) return;
+      _exportOptions = options;
     }
     if (!mounted) {
       return;
@@ -688,6 +773,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       final batch = BoundedBatchPhotoExporter(
         session: _session!,
         exporter: context.read<PhotoExporter>(),
+        options: _exportOptions,
         onSharePathCreated: (photoId, localPath) {
           attemptPhotoIds.add(photoId);
           _ownSharePath(photoId, localPath);
@@ -743,27 +829,211 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<bool> _confirmBatchExport() async {
-    final count = _session?.photos.length ?? 0;
-    return await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Text(context.l10n.batchExportPhotos(count)),
-            content: Text(context.l10n.exportConfirmationMessage(count)),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: Text(context.l10n.cancel),
-              ),
-              FilledButton(
-                key: const ValueKey('export-confirm'),
-                onPressed: () => Navigator.pop(context, true),
-                child: Text(context.l10n.startExport),
-              ),
-            ],
+  Future<PhotoExportOptions?> _confirmBatchExport() async {
+    final project = _session?.project;
+    if (project == null) return null;
+    final count = project.photos.length;
+    var selected = _exportOptions;
+    return showDialog<PhotoExportOptions>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(context.l10n.batchExportPhotos(count)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(context.l10n.exportConfirmationMessage(count)),
+                const SizedBox(height: 16),
+                Text(
+                  context.l10n.exportPhotoPlan,
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                const SizedBox(height: 8),
+                Semantics(
+                  key: const ValueKey('export-photo-plan'),
+                  container: true,
+                  explicitChildNodes: true,
+                  child: Column(
+                    children: [
+                      for (
+                        var index = 0;
+                        index < project.photos.length;
+                        index++
+                      )
+                        Builder(
+                          builder: (context) {
+                            final photo = project.photos[index];
+                            final status = _exportPlanStatus(
+                              context,
+                              project,
+                              photo.id,
+                            );
+                            return ListTile(
+                              key: ValueKey('export-preview-photo-${photo.id}'),
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              leading: Icon(status.$1, size: 20),
+                              title: Text(
+                                photo.originalName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              subtitle: Text(
+                                '${index + 1}/$count · ${status.$2}',
+                              ),
+                            );
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+                Text(
+                  context.l10n.exportProcessingEstimate,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  context.l10n.exportFormat,
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                const SizedBox(height: 8),
+                SegmentedButton<PhotoExportFormat>(
+                  key: const ValueKey('export-format'),
+                  segments: [
+                    ButtonSegment(
+                      value: PhotoExportFormat.jpeg,
+                      label: Text(context.l10n.exportFormatJpeg),
+                    ),
+                    ButtonSegment(
+                      value: PhotoExportFormat.heif,
+                      label: Text(context.l10n.exportFormatHeif),
+                    ),
+                  ],
+                  selected: {selected.format},
+                  onSelectionChanged: (selection) => setDialogState(
+                    () => selected = PhotoExportOptions(
+                      format: selection.single,
+                      size: selected.size,
+                      longEdgePixels: selected.longEdgePixels,
+                      quality: selected.quality,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<int>(
+                  key: const ValueKey('export-size'),
+                  initialValue: selected.size == PhotoExportSize.original
+                      ? 0
+                      : selected.longEdgePixels,
+                  decoration: InputDecoration(
+                    labelText: context.l10n.exportSize,
+                  ),
+                  items: [
+                    DropdownMenuItem(
+                      value: 0,
+                      child: Text(context.l10n.exportSizeOriginal),
+                    ),
+                    const DropdownMenuItem(value: 4096, child: Text('4096 px')),
+                    const DropdownMenuItem(value: 2048, child: Text('2048 px')),
+                    const DropdownMenuItem(value: 1080, child: Text('1080 px')),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setDialogState(
+                      () => selected = PhotoExportOptions(
+                        format: selected.format,
+                        size: value == 0
+                            ? PhotoExportSize.original
+                            : PhotoExportSize.longEdge,
+                        longEdgePixels: value == 0 ? null : value,
+                        quality: selected.quality,
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<PhotoExportQuality>(
+                  key: const ValueKey('export-quality'),
+                  initialValue: selected.quality,
+                  decoration: InputDecoration(
+                    labelText: context.l10n.exportQuality,
+                  ),
+                  items: [
+                    DropdownMenuItem(
+                      value: PhotoExportQuality.high,
+                      child: Text(context.l10n.exportQualityHigh),
+                    ),
+                    DropdownMenuItem(
+                      value: PhotoExportQuality.standard,
+                      child: Text(context.l10n.exportQualityStandard),
+                    ),
+                    DropdownMenuItem(
+                      value: PhotoExportQuality.compact,
+                      child: Text(context.l10n.exportQualityCompact),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setDialogState(
+                      () => selected = PhotoExportOptions(
+                        format: selected.format,
+                        size: selected.size,
+                        longEdgePixels: selected.longEdgePixels,
+                        quality: value,
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  context.l10n.exportColorSpaceNotice,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
           ),
-        ) ??
-        false;
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(context.l10n.cancel),
+            ),
+            FilledButton(
+              key: const ValueKey('export-confirm'),
+              onPressed: () => Navigator.pop(context, selected),
+              child: Text(context.l10n.startExport),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  (IconData, String) _exportPlanStatus(
+    BuildContext context,
+    PhotoProject project,
+    String photoId,
+  ) {
+    final exportState =
+        project.exportStates[photoId] ?? PhotoExportState.notQueued;
+    switch (exportState) {
+      case PhotoExportState.queued:
+        return (Icons.outbox_outlined, context.l10n.photoStatusQueued);
+      case PhotoExportState.running:
+        return (Icons.sync, context.l10n.photoStatusExporting);
+      case PhotoExportState.saved:
+        return (Icons.check_circle_outline, context.l10n.photoStatusExported);
+      case PhotoExportState.failed:
+        return (Icons.error_outline, context.l10n.photoStatusExportFailed);
+      case PhotoExportState.cancelled:
+        return (Icons.cancel_outlined, context.l10n.photoStatusExportCancelled);
+      case PhotoExportState.notQueued:
+        if (project.analysisStates[photoId] == PhotoAnalysisState.failed) {
+          return (Icons.shield_outlined, context.l10n.exportWithSafeFallback);
+        }
+        return (Icons.check_circle_outline, context.l10n.exportWillExport);
+    }
   }
 
   void _cancelBatchExport() => _batchExporter?.cancel();
@@ -819,6 +1089,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         PhotoShareOutcome.completed => context.l10n.photoShareCompleted,
         PhotoShareOutcome.canceled => context.l10n.photoShareCanceled,
       };
+
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(message)));
@@ -947,10 +1218,31 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         final previewRecipe = photos.isEmpty
             ? EditRecipe.neutral
             : previewRecommendation == null
-            ? session.previewRecipeFor(
-                photos[_selectedIndex].id,
-                _editorSession.recipe,
-              )
+            ? _previewSharedIntensity == null
+                  ? session.previewRecipeFor(
+                      photos[_selectedIndex].id,
+                      _editorSession.recipe,
+                    )
+                  : session.project!
+                        .copyWith(
+                          sharedStyle: SharedStyle(
+                            family: session.project!.sharedStyle.family,
+                            intensity: _previewSharedIntensity!,
+                            recipe:
+                                session.project!.editingScope ==
+                                    ProjectEditingScope.group
+                                ? _editorSession.recipe
+                                : session.project!.sharedStyle.recipe,
+                          ),
+                        )
+                        .effectiveRecipeFor(
+                          photos[_selectedIndex].id,
+                          photoOverride:
+                              session.project!.editingScope ==
+                                  ProjectEditingScope.currentPhoto
+                              ? _editorSession.recipe
+                              : null,
+                        )
             : session.project!
                   .copyWith(
                     sharedStyle: previewRecommendation.sharedStyle,
@@ -977,6 +1269,10 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
             selectedPhoto != null &&
             _bodyApplicabilityByPhotoId[selectedPhoto.id] ==
                 PortraitApplicability.applicable;
+        final bodyTargetCount = selectedPhoto == null
+            ? 0
+            : _bodyTargetCountByPhotoId[selectedPhoto.id] ??
+                  (bodyApplicable ? 1 : 0);
         final faceSlimApplicable =
             selectedPhoto != null &&
             _faceSlimApplicabilityByPhotoId[selectedPhoto.id] ==
@@ -989,6 +1285,12 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
             ? 0
             : _faceSlimTargetCountByPhotoId[selectedPhoto.id] ??
                   (faceSlimApplicable ? 1 : 0);
+        final faceTargetRegions = selectedPhoto == null
+            ? const <NormalizedTargetRegion>[]
+            : _faceTargetRegionsByPhotoId[selectedPhoto.id] ?? const [];
+        final bodyTargetRegions = selectedPhoto == null
+            ? const <NormalizedTargetRegion>[]
+            : _bodyTargetRegionsByPhotoId[selectedPhoto.id] ?? const [];
         final photoToolsVisible =
             photos.length == 1 ||
             session.project?.editingScope == ProjectEditingScope.currentPhoto;
@@ -1020,7 +1322,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                   editingEnabled: editingEnabled,
                   canUndo: session.canUndo,
                   canRedo: session.canRedo,
-                  isEdited: _editorSession.isEdited,
+                  isEdited: session.canResetScopedEdit,
                   exporting: _exporting,
                   sharing: _sharing,
                   exportSummary: _exportSummary,
@@ -1068,7 +1370,10 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                     faceSlimApplicable: faceSlimApplicable,
                     faceSlimReason: faceSlimReason,
                     faceSlimTargetCount: faceSlimTargetCount,
+                    faceTargetRegions: faceTargetRegions,
                     bodyApplicable: bodyApplicable,
+                    bodyTargetCount: bodyTargetCount,
+                    bodyTargetRegions: bodyTargetRegions,
                     photoToolsVisible: photoToolsVisible,
                     canSyncCurrentPhoto:
                         session.canSyncCurrentPhotoAdjustmentsToGroup,
@@ -1093,6 +1398,11 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                     onPhotoStripScrollEnd: _savePhotoStripPosition,
                     onRecommendationPreviewed: (index) =>
                         setState(() => _previewRecommendationIndex = index),
+                    previewSharedIntensity: _previewSharedIntensity,
+                    onSharedIntensityStart: _beginSharedIntensityAdjustment,
+                    onSharedIntensityChanged: _previewSharedIntensityAdjustment,
+                    onSharedIntensityEnd: () =>
+                        unawaited(_commitSharedIntensityAdjustment()),
                     onEditingScopeChanged: (scope) =>
                         unawaited(_setEditingScope(scope)),
                   ),
@@ -1225,7 +1535,10 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.faceSlimApplicable,
     required this.faceSlimReason,
     required this.faceSlimTargetCount,
+    required this.faceTargetRegions,
     required this.bodyApplicable,
+    required this.bodyTargetCount,
+    required this.bodyTargetRegions,
     required this.photoToolsVisible,
     required this.canSyncCurrentPhoto,
     required this.photoStripController,
@@ -1240,6 +1553,10 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.onSyncCurrentPhotoToGroup,
     required this.onPhotoStripScrollEnd,
     required this.onRecommendationPreviewed,
+    required this.previewSharedIntensity,
+    required this.onSharedIntensityStart,
+    required this.onSharedIntensityChanged,
+    required this.onSharedIntensityEnd,
     required this.onEditingScopeChanged,
   });
 
@@ -1261,7 +1578,10 @@ class _PhotoWorkspace extends StatelessWidget {
   final bool faceSlimApplicable;
   final PortraitDegradationReason faceSlimReason;
   final int faceSlimTargetCount;
+  final List<NormalizedTargetRegion> faceTargetRegions;
   final bool bodyApplicable;
+  final int bodyTargetCount;
+  final List<NormalizedTargetRegion> bodyTargetRegions;
   final bool photoToolsVisible;
   final bool canSyncCurrentPhoto;
   final ScrollController photoStripController;
@@ -1276,6 +1596,10 @@ class _PhotoWorkspace extends StatelessWidget {
   final VoidCallback onSyncCurrentPhotoToGroup;
   final VoidCallback onPhotoStripScrollEnd;
   final ValueChanged<int> onRecommendationPreviewed;
+  final double? previewSharedIntensity;
+  final VoidCallback onSharedIntensityStart;
+  final ValueChanged<double> onSharedIntensityChanged;
+  final VoidCallback onSharedIntensityEnd;
   final ValueChanged<ProjectEditingScope> onEditingScopeChanged;
 
   @override
@@ -1519,11 +1843,46 @@ class _PhotoWorkspace extends StatelessWidget {
                     ),
                   ),
                 ],
+                if (editingEnabled &&
+                    exportSummary == null &&
+                    !recommendationFlow &&
+                    project.editingScope == ProjectEditingScope.group) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    context.l10n.groupStyleIntensityHint,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  _AdjustmentSlider(
+                    key: const ValueKey('editor-group-style-intensity'),
+                    enabled: !interactionsBlocked,
+                    label: context.l10n.groupStyleIntensity,
+                    semanticLabel: context.l10n.groupStyleIntensity,
+                    value:
+                        previewSharedIntensity ?? project.sharedStyle.intensity,
+                    minimum: 0,
+                    maximum: 1,
+                    onStart: onSharedIntensityStart,
+                    onChanged: onSharedIntensityChanged,
+                    onEnd: onSharedIntensityEnd,
+                  ),
+                ],
                 if (exportSummary == null && recommendationFlow) ...[
                   const SizedBox(height: 12),
                   _RecommendationPanel(
                     preparing: preparingRecommendations,
                     recommendations: recommendations,
+                    sourcePath: selected.localPath,
+                    previewRecipes: [
+                      for (final recommendation in recommendations)
+                        project
+                            .copyWith(
+                              sharedStyle: recommendation.sharedStyle,
+                              adaptiveCompensations:
+                                  recommendation.adaptiveCompensations,
+                            )
+                            .effectiveRecipeFor(selected.id),
+                    ],
+                    previewRenderer: previewRenderer,
                     selectedIndex: selectedRecommendationIndex,
                     onPreviewed: onRecommendationPreviewed,
                   ),
@@ -1533,28 +1892,24 @@ class _PhotoWorkspace extends StatelessWidget {
                         ? 56
                         : 12,
                   ),
-                  _AdjustmentToolStrip(
+                  _MobileToolWorkspace(
                     enabled: editingEnabled,
-                    extended: supportsImagePipelineV2,
                     photoToolsVisible: photoToolsVisible,
                     portraitAvailable: portraitApplicable,
                     faceSlimAvailable: faceSlimApplicable,
                     faceSlimReason: faceSlimReason,
                     faceSlimTargetCount: faceSlimTargetCount,
+                    faceTargetRegions: faceTargetRegions,
                     bodyAvailable: bodyApplicable,
+                    bodyTargetCount: bodyTargetCount,
+                    bodyTargetRegions: bodyTargetRegions,
+                    subjectAvailable: portraitApplicable || bodyApplicable,
+                    allowDetailedTools: photoToolsVisible,
+                    photo: selected,
                     recipe: recipe,
                     editorSession: editorSession,
                     onRecipeCommitted: onRecipeCommitted,
                   ),
-                  const SizedBox(height: 8),
-                  if (supportsImagePipelineV2 && photos.length == 1)
-                    _CompositionTools(
-                      enabled: editingEnabled,
-                      photo: selected,
-                      recipe: recipe,
-                      editorSession: editorSession,
-                      onRecipeCommitted: onRecipeCommitted,
-                    ),
                   if (canSyncCurrentPhoto) ...[
                     OutlinedButton.icon(
                       onPressed: editingEnabled
@@ -1772,6 +2127,7 @@ class _ExportSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Semantics(
+      key: const ValueKey('export-summary-card'),
       liveRegion: true,
       child: Card(
         child: Padding(
@@ -1822,8 +2178,19 @@ class _ExportSummaryCard extends StatelessWidget {
   PhotoProject project,
   String photoId,
 ) {
-  if (project.exportStates[photoId] == PhotoExportState.queued) {
-    return (Icons.outbox_outlined, context.l10n.photoStatusQueued);
+  switch (project.exportStates[photoId] ?? PhotoExportState.notQueued) {
+    case PhotoExportState.queued:
+      return (Icons.outbox_outlined, context.l10n.photoStatusQueued);
+    case PhotoExportState.running:
+      return (Icons.sync, context.l10n.photoStatusExporting);
+    case PhotoExportState.saved:
+      return (Icons.check_circle_outline, context.l10n.photoStatusExported);
+    case PhotoExportState.failed:
+      return (Icons.error_outline, context.l10n.photoStatusExportFailed);
+    case PhotoExportState.cancelled:
+      return (Icons.cancel_outlined, context.l10n.photoStatusExportCancelled);
+    case PhotoExportState.notQueued:
+      break;
   }
   if (project.analysisStates[photoId] == PhotoAnalysisState.failed) {
     return (Icons.error_outline, context.l10n.photoStatusFailed);
@@ -1841,12 +2208,18 @@ class _RecommendationPanel extends StatelessWidget {
   const _RecommendationPanel({
     required this.preparing,
     required this.recommendations,
+    required this.sourcePath,
+    required this.previewRecipes,
+    required this.previewRenderer,
     required this.selectedIndex,
     required this.onPreviewed,
   });
 
   final bool preparing;
   final List<LocalRecommendation> recommendations;
+  final String sourcePath;
+  final List<EditRecipe> previewRecipes;
+  final PhotoPreviewRenderer previewRenderer;
   final int selectedIndex;
   final ValueChanged<int> onPreviewed;
 
@@ -1890,74 +2263,132 @@ class _RecommendationPanel extends StatelessWidget {
             Text(context.l10n.recommendationsSubtitle),
             const SizedBox(height: 12),
             SizedBox(
-              height: 166,
-              child: ListView.separated(
+              height: 224,
+              child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
-                itemCount: recommendations.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 10),
-                itemBuilder: (context, index) {
-                  final recommendation = recommendations[index];
-                  final isSelected = index == safeIndex;
-                  return Semantics(
-                    selected: isSelected,
-                    button: true,
-                    child: InkWell(
-                      key: ValueKey(
-                        'recommendation-${recommendation.family.name}',
-                      ),
-                      onTap: () => onPreviewed(index),
-                      borderRadius: BorderRadius.circular(16),
-                      child: AnimatedContainer(
-                        duration: MediaQuery.disableAnimationsOf(context)
-                            ? Duration.zero
-                            : const Duration(milliseconds: 160),
-                        width: 148,
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(16),
-                          color: isSelected
-                              ? Theme.of(context).colorScheme.primaryContainer
-                              : Theme.of(
-                                  context,
-                                ).colorScheme.surfaceContainerHigh,
-                          border: Border.all(
-                            color: isSelected
-                                ? Theme.of(context).colorScheme.primary
-                                : Colors.transparent,
-                            width: 2,
-                          ),
+                child: Row(
+                  children: [
+                    for (var index = 0; index < recommendations.length; index++)
+                      Padding(
+                        padding: EdgeInsets.only(
+                          right: index == recommendations.length - 1 ? 0 : 10,
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Icon(_recommendationIcon(recommendation.family)),
-                            Text(
-                              _recommendationLabel(
-                                context,
-                                recommendation.family,
+                        child: Builder(
+                          builder: (context) {
+                            final recommendation = recommendations[index];
+                            final isSelected = index == safeIndex;
+                            return Semantics(
+                              selected: isSelected,
+                              button: true,
+                              child: InkWell(
+                                key: ValueKey(
+                                  'recommendation-${recommendation.family.name}',
+                                ),
+                                onTap: () => onPreviewed(index),
+                                borderRadius: BorderRadius.circular(16),
+                                child: AnimatedContainer(
+                                  duration:
+                                      MediaQuery.disableAnimationsOf(context)
+                                      ? Duration.zero
+                                      : const Duration(milliseconds: 160),
+                                  width: 156,
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(16),
+                                    color: isSelected
+                                        ? Theme.of(
+                                            context,
+                                          ).colorScheme.primaryContainer
+                                        : Theme.of(
+                                            context,
+                                          ).colorScheme.surfaceContainerHigh,
+                                    border: Border.all(
+                                      color: isSelected
+                                          ? Theme.of(
+                                              context,
+                                            ).colorScheme.primary
+                                          : Colors.transparent,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(10),
+                                        child: SizedBox(
+                                          key: ValueKey(
+                                            'recommendation-preview-'
+                                            '${recommendation.family.name}',
+                                          ),
+                                          width: double.infinity,
+                                          height: 82,
+                                          child: ExcludeSemantics(
+                                            child: NativePhotoPreview(
+                                              sourcePath: sourcePath,
+                                              recipe: previewRecipes[index],
+                                              renderer: previewRenderer,
+                                              maxEdge: 384,
+                                              errorBuilder: (context) =>
+                                                  ColoredBox(
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .surfaceContainerHighest,
+                                                    child: Center(
+                                                      child: Icon(
+                                                        _recommendationIcon(
+                                                          recommendation.family,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      Text(
+                                        _recommendationLabel(
+                                          context,
+                                          recommendation.family,
+                                        ),
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.titleSmall,
+                                      ),
+                                      Text(
+                                        index == 0
+                                            ? context.l10n.primaryRecommendation
+                                            : context
+                                                  .l10n
+                                                  .alternativeRecommendation,
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.labelSmall,
+                                      ),
+                                      Text(
+                                        _recommendationReason(
+                                          context,
+                                          recommendation.reason,
+                                        ),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.bodySmall,
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ),
-                              style: Theme.of(context).textTheme.titleSmall,
-                            ),
-                            Text(
-                              context.l10n.localEffect,
-                              style: Theme.of(context).textTheme.labelSmall,
-                            ),
-                            Text(
-                              _recommendationReason(
-                                context,
-                                recommendation.reason,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ],
+                            );
+                          },
                         ),
                       ),
-                    ),
-                  );
-                },
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 12),
@@ -2193,6 +2624,226 @@ class _BeforeAfterPreviewState extends State<_BeforeAfterPreview> {
   }
 }
 
+enum _MobileToolCategory {
+  composition,
+  color,
+  filters,
+  quality,
+  retouch,
+  semantic,
+}
+
+enum _AdjustmentToolScope { color, quality, portrait }
+
+class _MobileToolWorkspace extends StatefulWidget {
+  const _MobileToolWorkspace({
+    required this.enabled,
+    required this.photoToolsVisible,
+    required this.portraitAvailable,
+    required this.faceSlimAvailable,
+    required this.faceSlimReason,
+    required this.faceSlimTargetCount,
+    required this.faceTargetRegions,
+    required this.bodyAvailable,
+    required this.bodyTargetCount,
+    required this.bodyTargetRegions,
+    required this.subjectAvailable,
+    required this.allowDetailedTools,
+    required this.photo,
+    required this.recipe,
+    required this.editorSession,
+    required this.onRecipeCommitted,
+  });
+
+  final bool enabled;
+  final bool photoToolsVisible;
+  final bool portraitAvailable;
+  final bool faceSlimAvailable;
+  final PortraitDegradationReason faceSlimReason;
+  final int faceSlimTargetCount;
+  final List<NormalizedTargetRegion> faceTargetRegions;
+  final bool bodyAvailable;
+  final int bodyTargetCount;
+  final List<NormalizedTargetRegion> bodyTargetRegions;
+  final bool subjectAvailable;
+  final bool allowDetailedTools;
+  final ProjectPhoto photo;
+  final EditRecipe recipe;
+  final EditorSession editorSession;
+  final VoidCallback onRecipeCommitted;
+
+  @override
+  State<_MobileToolWorkspace> createState() => _MobileToolWorkspaceState();
+}
+
+class _MobileToolWorkspaceState extends State<_MobileToolWorkspace> {
+  late _MobileToolCategory _selected;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected =
+        widget.photoToolsVisible &&
+            (widget.portraitAvailable || widget.bodyAvailable)
+        ? _MobileToolCategory.retouch
+        : _MobileToolCategory.color;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final categories = <_MobileToolCategory>[
+      if (widget.allowDetailedTools && supportsImagePipelineV2)
+        _MobileToolCategory.composition,
+      _MobileToolCategory.color,
+      if (defaultTargetPlatform == TargetPlatform.iOS)
+        _MobileToolCategory.filters,
+      if (widget.allowDetailedTools &&
+          defaultTargetPlatform == TargetPlatform.iOS) ...[
+        _MobileToolCategory.quality,
+        if (widget.photoToolsVisible &&
+            (widget.portraitAvailable || widget.bodyAvailable))
+          _MobileToolCategory.retouch,
+        _MobileToolCategory.semantic,
+      ],
+    ];
+    final selected = categories.contains(_selected)
+        ? _selected
+        : _MobileToolCategory.color;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: 48,
+          child: SingleChildScrollView(
+            key: const ValueKey('editor-tool-categories'),
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (var index = 0; index < categories.length; index++) ...[
+                  if (index > 0) const SizedBox(width: 8),
+                  ChoiceChip(
+                    key: ValueKey(
+                      'editor-tool-category-${categories[index].name}',
+                    ),
+                    avatar: Icon(_icon(categories[index]), size: 18),
+                    label: Text(_label(context, categories[index])),
+                    selected: categories[index] == selected,
+                    onSelected: (_) =>
+                        setState(() => _selected = categories[index]),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 180),
+          child: KeyedSubtree(
+            key: ValueKey('editor-tool-panel-${selected.name}'),
+            child: switch (selected) {
+              _MobileToolCategory.color => _AdjustmentToolStrip(
+                scope: _AdjustmentToolScope.color,
+                enabled: widget.enabled,
+                extended: supportsImagePipelineV2,
+                photoToolsVisible: widget.photoToolsVisible,
+                portraitAvailable: widget.portraitAvailable,
+                faceSlimAvailable: widget.faceSlimAvailable,
+                faceSlimReason: widget.faceSlimReason,
+                faceSlimTargetCount: widget.faceSlimTargetCount,
+                faceTargetRegions: widget.faceTargetRegions,
+                bodyAvailable: widget.bodyAvailable,
+                bodyTargetCount: widget.bodyTargetCount,
+                bodyTargetRegions: widget.bodyTargetRegions,
+                photo: widget.photo,
+                recipe: widget.recipe,
+                editorSession: widget.editorSession,
+                onRecipeCommitted: widget.onRecipeCommitted,
+              ),
+              _MobileToolCategory.quality => _AdjustmentToolStrip(
+                scope: _AdjustmentToolScope.quality,
+                enabled: widget.enabled,
+                extended: supportsImagePipelineV2,
+                photoToolsVisible: widget.photoToolsVisible,
+                portraitAvailable: widget.portraitAvailable,
+                faceSlimAvailable: widget.faceSlimAvailable,
+                faceSlimReason: widget.faceSlimReason,
+                faceSlimTargetCount: widget.faceSlimTargetCount,
+                faceTargetRegions: widget.faceTargetRegions,
+                bodyAvailable: widget.bodyAvailable,
+                bodyTargetCount: widget.bodyTargetCount,
+                bodyTargetRegions: widget.bodyTargetRegions,
+                photo: widget.photo,
+                recipe: widget.recipe,
+                editorSession: widget.editorSession,
+                onRecipeCommitted: widget.onRecipeCommitted,
+              ),
+              _MobileToolCategory.retouch => _AdjustmentToolStrip(
+                scope: _AdjustmentToolScope.portrait,
+                enabled: widget.enabled,
+                extended: supportsImagePipelineV2,
+                photoToolsVisible: widget.photoToolsVisible,
+                portraitAvailable: widget.portraitAvailable,
+                faceSlimAvailable: widget.faceSlimAvailable,
+                faceSlimReason: widget.faceSlimReason,
+                faceSlimTargetCount: widget.faceSlimTargetCount,
+                faceTargetRegions: widget.faceTargetRegions,
+                bodyAvailable: widget.bodyAvailable,
+                bodyTargetCount: widget.bodyTargetCount,
+                bodyTargetRegions: widget.bodyTargetRegions,
+                photo: widget.photo,
+                recipe: widget.recipe,
+                editorSession: widget.editorSession,
+                onRecipeCommitted: widget.onRecipeCommitted,
+              ),
+              _MobileToolCategory.composition => _CompositionTools(
+                enabled: widget.enabled,
+                photo: widget.photo,
+                recipe: widget.recipe,
+                editorSession: widget.editorSession,
+                onRecipeCommitted: widget.onRecipeCommitted,
+              ),
+              _MobileToolCategory.filters => _FilterHslTools(
+                enabled: widget.enabled,
+                recipe: widget.recipe,
+                editorSession: widget.editorSession,
+                onRecipeCommitted: widget.onRecipeCommitted,
+              ),
+              _MobileToolCategory.semantic => _SemanticTools(
+                enabled: widget.enabled,
+                subjectAvailable: widget.subjectAvailable,
+                photo: widget.photo,
+                recipe: widget.recipe,
+                editorSession: widget.editorSession,
+                onRecipeCommitted: widget.onRecipeCommitted,
+              ),
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  IconData _icon(_MobileToolCategory category) => switch (category) {
+    _MobileToolCategory.composition => Icons.crop_rotate,
+    _MobileToolCategory.color => Icons.tune,
+    _MobileToolCategory.filters => Icons.filter_vintage_outlined,
+    _MobileToolCategory.quality => Icons.auto_fix_high_outlined,
+    _MobileToolCategory.retouch => Icons.face_retouching_natural,
+    _MobileToolCategory.semantic => Icons.layers_outlined,
+  };
+
+  String _label(BuildContext context, _MobileToolCategory category) =>
+      switch (category) {
+        _MobileToolCategory.composition => context.l10n.composition,
+        _MobileToolCategory.color => context.l10n.lightAndColorTools,
+        _MobileToolCategory.filters => context.l10n.filterAndHsl,
+        _MobileToolCategory.quality => context.l10n.qualityTools,
+        _MobileToolCategory.retouch => context.l10n.mobileToolRetouch,
+        _MobileToolCategory.semantic => context.l10n.semanticTools,
+      };
+}
+
 enum _AdjustmentParameter {
   exposure,
   highlights,
@@ -2212,11 +2863,22 @@ enum _AdjustmentParameter {
   skinToneLighting,
   blemishReduction,
   faceSlim,
+  headSize,
+  jaw,
+  chin,
+  eyes,
+  nose,
+  mouth,
   bodySlim,
+  height,
+  shoulders,
+  waist,
+  legs,
 }
 
 class _AdjustmentToolStrip extends StatefulWidget {
   const _AdjustmentToolStrip({
+    required this.scope,
     required this.enabled,
     required this.extended,
     required this.photoToolsVisible,
@@ -2224,12 +2886,17 @@ class _AdjustmentToolStrip extends StatefulWidget {
     required this.faceSlimAvailable,
     required this.faceSlimReason,
     required this.faceSlimTargetCount,
+    required this.faceTargetRegions,
     required this.bodyAvailable,
+    required this.bodyTargetCount,
+    required this.bodyTargetRegions,
+    required this.photo,
     required this.recipe,
     required this.editorSession,
     required this.onRecipeCommitted,
   });
 
+  final _AdjustmentToolScope scope;
   final bool enabled;
   final bool extended;
   final bool photoToolsVisible;
@@ -2237,7 +2904,11 @@ class _AdjustmentToolStrip extends StatefulWidget {
   final bool faceSlimAvailable;
   final PortraitDegradationReason faceSlimReason;
   final int faceSlimTargetCount;
+  final List<NormalizedTargetRegion> faceTargetRegions;
   final bool bodyAvailable;
+  final int bodyTargetCount;
+  final List<NormalizedTargetRegion> bodyTargetRegions;
+  final ProjectPhoto photo;
   final EditRecipe recipe;
   final EditorSession editorSession;
   final VoidCallback onRecipeCommitted;
@@ -2252,16 +2923,16 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
   @override
   void initState() {
     super.initState();
-    _selected = widget.photoToolsVisible && widget.portraitAvailable
-        ? _AdjustmentParameter.naturalBeautification
-        : widget.photoToolsVisible && widget.bodyAvailable
-        ? _AdjustmentParameter.bodySlim
-        : _AdjustmentParameter.exposure;
+    _selected = _initialSelection();
   }
 
   @override
   void didUpdateWidget(covariant _AdjustmentToolStrip oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.scope != widget.scope) {
+      _selected = _initialSelection();
+      return;
+    }
     if ((!oldWidget.portraitAvailable || !oldWidget.photoToolsVisible) &&
         widget.portraitAvailable &&
         widget.photoToolsVisible) {
@@ -2293,53 +2964,34 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
 
   @override
   Widget build(BuildContext context) {
-    final parameters = widget.extended
-        ? <_AdjustmentParameter>[
-            if (widget.photoToolsVisible)
-              _AdjustmentParameter.qualityImprovement,
-            if (widget.photoToolsVisible && widget.portraitAvailable)
-              _AdjustmentParameter.naturalBeautification,
-            if (widget.photoToolsVisible && widget.faceSlimAvailable)
-              _AdjustmentParameter.faceSlim,
-            if (widget.photoToolsVisible && widget.bodyAvailable)
-              _AdjustmentParameter.bodySlim,
-            ..._AdjustmentParameter.values.where(
-              (parameter) =>
-                  parameter != _AdjustmentParameter.naturalBeautification &&
-                  parameter != _AdjustmentParameter.qualityImprovement &&
-                  parameter != _AdjustmentParameter.noiseReduction &&
-                  parameter != _AdjustmentParameter.lowLightRecovery &&
-                  parameter != _AdjustmentParameter.hazeRemoval &&
-                  parameter != _AdjustmentParameter.detailSharpening &&
-                  parameter != _AdjustmentParameter.textureSmoothing &&
-                  parameter != _AdjustmentParameter.skinToneLighting &&
-                  parameter != _AdjustmentParameter.blemishReduction &&
-                  parameter != _AdjustmentParameter.faceSlim &&
-                  parameter != _AdjustmentParameter.bodySlim,
-            ),
-          ]
-        : const <_AdjustmentParameter>[
-            _AdjustmentParameter.exposure,
-            _AdjustmentParameter.contrast,
-            _AdjustmentParameter.warmth,
-          ];
+    final parameters = _parameters();
     final selected =
         parameters.contains(_selected) ||
             (widget.photoToolsVisible && _isQualityDetail(_selected)) ||
             (widget.photoToolsVisible &&
                 widget.portraitAvailable &&
-                _isNaturalDetail(_selected))
+                _isNaturalDetail(_selected)) ||
+            (widget.photoToolsVisible &&
+                widget.faceSlimAvailable &&
+                _isFaceGeometry(_selected)) ||
+            (widget.photoToolsVisible &&
+                widget.bodyAvailable &&
+                _isBodyGeometry(_selected))
         ? _selected
         : parameters.first;
-    final effectiveRecipe =
-        selected == _AdjustmentParameter.faceSlim &&
-            widget.faceSlimTargetCount > 0
-        ? widget.recipe.copyWith(
-            faceSlimRecipe: widget.recipe.faceSlimRecipe.withTargetCount(
-              widget.faceSlimTargetCount,
-            ),
-          )
-        : widget.recipe;
+    var effectiveRecipe = widget.recipe;
+    if (widget.faceSlimTargetCount > 0) {
+      effectiveRecipe = effectiveRecipe.copyWith(
+        portraitGeometryRecipe: effectiveRecipe.portraitGeometryRecipe
+            .withFaceTargetCount(widget.faceSlimTargetCount),
+      );
+    }
+    if (widget.bodyTargetCount > 0) {
+      effectiveRecipe = effectiveRecipe.copyWith(
+        portraitGeometryRecipe: effectiveRecipe.portraitGeometryRecipe
+            .withBodyTargetCount(widget.bodyTargetCount),
+      );
+    }
     final selectedLabel = _label(context, selected);
     final selectedValue = _value(effectiveRecipe, selected);
     final selectedIsPortrait = _isPortrait(selected);
@@ -2371,7 +3023,8 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
               key: const ValueKey('editor-adjustment-section'),
               style: Theme.of(context).textTheme.titleSmall,
             ),
-            if (portraitReady) ...[
+            if (widget.scope == _AdjustmentToolScope.portrait &&
+                portraitReady) ...[
               const Spacer(),
               Flexible(
                 child: _PortraitToolStatus(
@@ -2382,14 +3035,16 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
             ],
           ],
         ),
-        if (!portraitReady) ...[
+        if (widget.scope == _AdjustmentToolScope.portrait &&
+            !portraitReady) ...[
           const SizedBox(height: 4),
           _PortraitToolStatus(
             photoToolsVisible: widget.photoToolsVisible,
             available: false,
           ),
         ],
-        if (widget.photoToolsVisible &&
+        if (widget.scope == _AdjustmentToolScope.portrait &&
+            widget.photoToolsVisible &&
             widget.portraitAvailable &&
             !widget.faceSlimAvailable) ...[
           const SizedBox(height: 6),
@@ -2422,7 +3077,11 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
                   (parameter == _AdjustmentParameter.qualityImprovement &&
                       _isQualityDetail(selected)) ||
                   (parameter == _AdjustmentParameter.naturalBeautification &&
-                      _isNaturalDetail(selected));
+                      _isNaturalDetail(selected)) ||
+                  (parameter == _AdjustmentParameter.faceSlim &&
+                      _isFaceGeometry(selected)) ||
+                  (parameter == _AdjustmentParameter.bodySlim &&
+                      _isBodyGeometry(selected));
               void select() => setState(() => _selected = parameter);
               return _AdjustmentToolButton(
                 key: ValueKey('editor-adjustment-tab-${parameter.name}'),
@@ -2490,6 +3149,58 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
             ),
           ),
         ],
+        if (_isFaceGeometry(selected)) ...[
+          const SizedBox(height: 8),
+          SizedBox(
+            height: largeText ? 104 : 64,
+            child: ListView.separated(
+              key: const ValueKey('editor-face-geometry-tabs'),
+              scrollDirection: Axis.horizontal,
+              itemCount: _faceGeometryParameters.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                final parameter = _faceGeometryParameters[index];
+                return _AdjustmentToolButton(
+                  key: ValueKey('editor-adjustment-tab-${parameter.name}'),
+                  enabled: widget.enabled,
+                  selected: parameter == selected,
+                  label: _label(context, parameter),
+                  icon: _icon(parameter),
+                  largeText: largeText,
+                  onTap: widget.enabled
+                      ? () => setState(() => _selected = parameter)
+                      : null,
+                );
+              },
+            ),
+          ),
+        ],
+        if (_isBodyGeometry(selected)) ...[
+          const SizedBox(height: 8),
+          SizedBox(
+            height: largeText ? 104 : 64,
+            child: ListView.separated(
+              key: const ValueKey('editor-body-geometry-tabs'),
+              scrollDirection: Axis.horizontal,
+              itemCount: _bodyGeometryParameters.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                final parameter = _bodyGeometryParameters[index];
+                return _AdjustmentToolButton(
+                  key: ValueKey('editor-adjustment-tab-${parameter.name}'),
+                  enabled: widget.enabled,
+                  selected: parameter == selected,
+                  label: _label(context, parameter),
+                  icon: _icon(parameter),
+                  largeText: largeText,
+                  onTap: widget.enabled
+                      ? () => setState(() => _selected = parameter)
+                      : null,
+                );
+              },
+            ),
+          ),
+        ],
         const SizedBox(height: 8),
         if (selected == _AdjustmentParameter.qualityImprovement)
           Row(
@@ -2526,12 +3237,8 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
                       ? () {
                           widget.editorSession.apply(
                             widget.recipe.copyWith(
-                              portraitRecipe: widget.recipe.portraitRecipe
-                                  .copyWith(
-                                    textureSmoothing: 45,
-                                    skinToneLighting: 40,
-                                    blemishReduction: 20,
-                                  ),
+                              portraitRecipe: PortraitRetouchRecipe
+                                  .naturalBeautificationRecommended,
                             ),
                           );
                           widget.onRecipeCommitted();
@@ -2547,7 +3254,56 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (selected == _AdjustmentParameter.faceSlim &&
+              if (_isFaceGeometry(selected) &&
+                  widget.faceTargetRegions.length ==
+                      widget.faceSlimTargetCount &&
+                  widget.faceTargetRegions.isNotEmpty) ...[
+                _PortraitTargetSelector(
+                  key: const ValueKey('editor-face-target-selector'),
+                  photo: widget.photo,
+                  regions: widget.faceTargetRegions,
+                  selectedIndex:
+                      effectiveRecipe.portraitGeometryRecipe.selectedFaceIndex,
+                  targetLabel: context.l10n.faceSlimTarget,
+                  hint: context.l10n.faceSlimTargetHint,
+                  enabled: widget.enabled,
+                  onSelected: (index) {
+                    widget.editorSession.selectPortraitTarget(
+                      effectiveRecipe.copyWith(
+                        portraitGeometryRecipe: effectiveRecipe
+                            .portraitGeometryRecipe
+                            .selectFace(index),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 8),
+              ],
+              if (_isBodyGeometry(selected) &&
+                  widget.bodyTargetRegions.length == widget.bodyTargetCount &&
+                  widget.bodyTargetRegions.isNotEmpty) ...[
+                _PortraitTargetSelector(
+                  key: const ValueKey('editor-body-target-selector'),
+                  photo: widget.photo,
+                  regions: widget.bodyTargetRegions,
+                  selectedIndex:
+                      effectiveRecipe.portraitGeometryRecipe.selectedBodyIndex,
+                  targetLabel: context.l10n.bodyTarget,
+                  hint: context.l10n.bodyTargetHint,
+                  enabled: widget.enabled,
+                  onSelected: (index) {
+                    widget.editorSession.selectPortraitTarget(
+                      effectiveRecipe.copyWith(
+                        portraitGeometryRecipe: effectiveRecipe
+                            .portraitGeometryRecipe
+                            .selectBody(index),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 8),
+              ],
+              if (_isFaceGeometry(selected) &&
                   widget.faceSlimTargetCount > 1) ...[
                 Text(
                   context.l10n.faceSlimTargetHint,
@@ -2570,19 +3326,55 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
                         label: Text(context.l10n.faceSlimTarget(index + 1)),
                         selected:
                             effectiveRecipe
-                                .faceSlimRecipe
-                                .selectedTargetIndex ==
+                                .portraitGeometryRecipe
+                                .selectedFaceIndex ==
                             index,
                         onSelected: widget.enabled
                             ? (_) {
-                                widget.editorSession.apply(
+                                widget.editorSession.selectPortraitTarget(
                                   effectiveRecipe.copyWith(
-                                    faceSlimRecipe: effectiveRecipe
-                                        .faceSlimRecipe
-                                        .selectTarget(index),
+                                    portraitGeometryRecipe: effectiveRecipe
+                                        .portraitGeometryRecipe
+                                        .selectFace(index),
                                   ),
                                 );
-                                widget.onRecipeCommitted();
+                              }
+                            : null,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+              ],
+              if (_isBodyGeometry(selected) && widget.bodyTargetCount > 1) ...[
+                Text(
+                  context.l10n.bodyTargetHint,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (var index = 0; index < widget.bodyTargetCount; index++)
+                      ChoiceChip(
+                        key: ValueKey('editor-body-target-$index'),
+                        label: Text(context.l10n.bodyTarget(index + 1)),
+                        selected:
+                            effectiveRecipe
+                                .portraitGeometryRecipe
+                                .selectedBodyIndex ==
+                            index,
+                        onSelected: widget.enabled
+                            ? (_) {
+                                widget.editorSession.selectPortraitTarget(
+                                  effectiveRecipe.copyWith(
+                                    portraitGeometryRecipe: effectiveRecipe
+                                        .portraitGeometryRecipe
+                                        .selectBody(index),
+                                  ),
+                                );
                               }
                             : null,
                       ),
@@ -2599,22 +3391,8 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
                       label: selectedLabel,
                       semanticLabel: selectedLabel,
                       value: selectedValue,
-                      minimum:
-                          selected == _AdjustmentParameter.textureSmoothing ||
-                              selected ==
-                                  _AdjustmentParameter.skinToneLighting ||
-                              selected ==
-                                  _AdjustmentParameter.blemishReduction ||
-                              _isQualityDetail(selected) ||
-                              selected == _AdjustmentParameter.faceSlim ||
-                              selected == _AdjustmentParameter.bodySlim
-                          ? 0
-                          : -1,
-                      maximum: selected == _AdjustmentParameter.faceSlim
-                          ? 0.5
-                          : selected == _AdjustmentParameter.bodySlim
-                          ? 0.35
-                          : 1,
+                      minimum: _minimum(selected),
+                      maximum: _maximum(selected),
                       onStart: widget.editorSession.beginAdjustment,
                       onChanged: (value) => widget.editorSession.preview(
                         _copyWith(effectiveRecipe, selected, value),
@@ -2647,13 +3425,107 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
     );
   }
 
+  _AdjustmentParameter _initialSelection() => switch (widget.scope) {
+    _AdjustmentToolScope.color => _AdjustmentParameter.exposure,
+    _AdjustmentToolScope.quality => _AdjustmentParameter.qualityImprovement,
+    _AdjustmentToolScope.portrait =>
+      widget.photoToolsVisible && widget.portraitAvailable
+          ? _AdjustmentParameter.naturalBeautification
+          : _AdjustmentParameter.bodySlim,
+  };
+
+  List<_AdjustmentParameter> _parameters() => switch (widget.scope) {
+    _AdjustmentToolScope.color =>
+      widget.extended
+          ? const [
+              _AdjustmentParameter.exposure,
+              _AdjustmentParameter.highlights,
+              _AdjustmentParameter.shadows,
+              _AdjustmentParameter.contrast,
+              _AdjustmentParameter.warmth,
+              _AdjustmentParameter.tint,
+              _AdjustmentParameter.saturation,
+              _AdjustmentParameter.clarity,
+            ]
+          : const [
+              _AdjustmentParameter.exposure,
+              _AdjustmentParameter.contrast,
+              _AdjustmentParameter.warmth,
+            ],
+    _AdjustmentToolScope.quality => const [
+      _AdjustmentParameter.qualityImprovement,
+    ],
+    _AdjustmentToolScope.portrait => [
+      if (widget.photoToolsVisible && widget.portraitAvailable)
+        _AdjustmentParameter.naturalBeautification,
+      if (widget.photoToolsVisible && widget.faceSlimAvailable)
+        _AdjustmentParameter.faceSlim,
+      if (widget.photoToolsVisible && widget.bodyAvailable)
+        _AdjustmentParameter.bodySlim,
+    ],
+  };
+
   bool _isPortrait(_AdjustmentParameter parameter) =>
       parameter == _AdjustmentParameter.naturalBeautification ||
       parameter == _AdjustmentParameter.textureSmoothing ||
       parameter == _AdjustmentParameter.skinToneLighting ||
       parameter == _AdjustmentParameter.blemishReduction ||
+      _isFaceGeometry(parameter) ||
+      _isBodyGeometry(parameter);
+
+  bool _isFaceGeometry(_AdjustmentParameter parameter) => const {
+    _AdjustmentParameter.faceSlim,
+    _AdjustmentParameter.headSize,
+    _AdjustmentParameter.jaw,
+    _AdjustmentParameter.chin,
+    _AdjustmentParameter.eyes,
+    _AdjustmentParameter.nose,
+    _AdjustmentParameter.mouth,
+  }.contains(parameter);
+
+  bool _isBodyGeometry(_AdjustmentParameter parameter) => const {
+    _AdjustmentParameter.bodySlim,
+    _AdjustmentParameter.height,
+    _AdjustmentParameter.shoulders,
+    _AdjustmentParameter.waist,
+    _AdjustmentParameter.legs,
+  }.contains(parameter);
+
+  double _minimum(_AdjustmentParameter parameter) =>
+      parameter == _AdjustmentParameter.jaw ||
+          parameter == _AdjustmentParameter.chin ||
+          parameter == _AdjustmentParameter.eyes ||
+          parameter == _AdjustmentParameter.nose ||
+          parameter == _AdjustmentParameter.mouth ||
+          parameter == _AdjustmentParameter.shoulders ||
+          parameter == _AdjustmentParameter.waist
+      ? -0.5
+      : parameter == _AdjustmentParameter.textureSmoothing ||
+            parameter == _AdjustmentParameter.skinToneLighting ||
+            parameter == _AdjustmentParameter.blemishReduction ||
+            _isQualityDetail(parameter) ||
+            _isFaceGeometry(parameter) ||
+            _isBodyGeometry(parameter)
+      ? 0
+      : -1;
+
+  double _maximum(_AdjustmentParameter parameter) =>
       parameter == _AdjustmentParameter.faceSlim ||
-      parameter == _AdjustmentParameter.bodySlim;
+          parameter == _AdjustmentParameter.headSize
+      ? 0.5
+      : parameter == _AdjustmentParameter.bodySlim ||
+            parameter == _AdjustmentParameter.height ||
+            parameter == _AdjustmentParameter.legs
+      ? 0.35
+      : parameter == _AdjustmentParameter.jaw ||
+            parameter == _AdjustmentParameter.chin ||
+            parameter == _AdjustmentParameter.eyes ||
+            parameter == _AdjustmentParameter.nose ||
+            parameter == _AdjustmentParameter.mouth ||
+            parameter == _AdjustmentParameter.shoulders ||
+            parameter == _AdjustmentParameter.waist
+      ? 0.5
+      : 1;
 
   bool _isQuality(_AdjustmentParameter parameter) =>
       parameter == _AdjustmentParameter.qualityImprovement ||
@@ -2664,6 +3536,22 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
     _AdjustmentParameter.lowLightRecovery,
     _AdjustmentParameter.hazeRemoval,
     _AdjustmentParameter.detailSharpening,
+  ];
+
+  static const _faceGeometryParameters = <_AdjustmentParameter>[
+    _AdjustmentParameter.headSize,
+    _AdjustmentParameter.jaw,
+    _AdjustmentParameter.chin,
+    _AdjustmentParameter.eyes,
+    _AdjustmentParameter.nose,
+    _AdjustmentParameter.mouth,
+  ];
+
+  static const _bodyGeometryParameters = <_AdjustmentParameter>[
+    _AdjustmentParameter.height,
+    _AdjustmentParameter.shoulders,
+    _AdjustmentParameter.waist,
+    _AdjustmentParameter.legs,
   ];
 
   bool _isQualityDetail(_AdjustmentParameter parameter) =>
@@ -2697,7 +3585,17 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
     _AdjustmentParameter.skinToneLighting => Icons.light_mode_outlined,
     _AdjustmentParameter.blemishReduction => Icons.healing_outlined,
     _AdjustmentParameter.faceSlim => Icons.face_6_outlined,
+    _AdjustmentParameter.headSize => Icons.face_outlined,
+    _AdjustmentParameter.jaw => Icons.change_history_outlined,
+    _AdjustmentParameter.chin => Icons.keyboard_arrow_down,
+    _AdjustmentParameter.eyes => Icons.visibility_outlined,
+    _AdjustmentParameter.nose => Icons.air_outlined,
+    _AdjustmentParameter.mouth => Icons.sentiment_satisfied_alt_outlined,
     _AdjustmentParameter.bodySlim => Icons.accessibility_new,
+    _AdjustmentParameter.height => Icons.height,
+    _AdjustmentParameter.shoulders => Icons.open_in_full,
+    _AdjustmentParameter.waist => Icons.compress,
+    _AdjustmentParameter.legs => Icons.straighten,
   };
 
   String _label(BuildContext context, _AdjustmentParameter parameter) =>
@@ -2722,7 +3620,17 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
         _AdjustmentParameter.skinToneLighting => context.l10n.skinToneLighting,
         _AdjustmentParameter.blemishReduction => context.l10n.blemishReduction,
         _AdjustmentParameter.faceSlim => context.l10n.faceSlim,
+        _AdjustmentParameter.headSize => context.l10n.headSize,
+        _AdjustmentParameter.jaw => context.l10n.jaw,
+        _AdjustmentParameter.chin => context.l10n.chin,
+        _AdjustmentParameter.eyes => context.l10n.eyes,
+        _AdjustmentParameter.nose => context.l10n.nose,
+        _AdjustmentParameter.mouth => context.l10n.mouth,
         _AdjustmentParameter.bodySlim => context.l10n.bodySlim,
+        _AdjustmentParameter.height => context.l10n.heightAdjustment,
+        _AdjustmentParameter.shoulders => context.l10n.shoulders,
+        _AdjustmentParameter.waist => context.l10n.waist,
+        _AdjustmentParameter.legs => context.l10n.legs,
       };
 
   double _value(EditRecipe recipe, _AdjustmentParameter parameter) =>
@@ -2764,9 +3672,47 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
           recipe.portraitRecipe.skinToneLighting / 100,
         _AdjustmentParameter.blemishReduction =>
           recipe.portraitRecipe.blemishReduction / 100,
-        _AdjustmentParameter.faceSlim => recipe.faceSlimStrength,
-        _AdjustmentParameter.bodySlim => recipe.bodySlimStrength,
+        _AdjustmentParameter.faceSlim ||
+        _AdjustmentParameter.headSize ||
+        _AdjustmentParameter.jaw ||
+        _AdjustmentParameter.chin ||
+        _AdjustmentParameter.eyes ||
+        _AdjustmentParameter.nose ||
+        _AdjustmentParameter.mouth => _faceGeometryValue(recipe, parameter),
+        _AdjustmentParameter.bodySlim ||
+        _AdjustmentParameter.height ||
+        _AdjustmentParameter.shoulders ||
+        _AdjustmentParameter.waist ||
+        _AdjustmentParameter.legs => _bodyGeometryValue(recipe, parameter),
       };
+
+  double _faceGeometryValue(EditRecipe recipe, _AdjustmentParameter parameter) {
+    final geometry = recipe.portraitGeometryRecipe;
+    final target = geometry.faceTargets[geometry.selectedFaceIndex];
+    return switch (parameter) {
+      _AdjustmentParameter.faceSlim => target.faceSlim / 100,
+      _AdjustmentParameter.headSize => target.headSize / 100,
+      _AdjustmentParameter.jaw => target.jaw / 100,
+      _AdjustmentParameter.chin => target.chin / 100,
+      _AdjustmentParameter.eyes => target.eyes / 100,
+      _AdjustmentParameter.nose => target.nose / 100,
+      _AdjustmentParameter.mouth => target.mouth / 100,
+      _ => 0,
+    };
+  }
+
+  double _bodyGeometryValue(EditRecipe recipe, _AdjustmentParameter parameter) {
+    final geometry = recipe.portraitGeometryRecipe;
+    final target = geometry.bodyTargets[geometry.selectedBodyIndex];
+    return switch (parameter) {
+      _AdjustmentParameter.bodySlim => target.slimming / 100,
+      _AdjustmentParameter.height => target.height / 100,
+      _AdjustmentParameter.shoulders => target.shoulders / 100,
+      _AdjustmentParameter.waist => target.waist / 100,
+      _AdjustmentParameter.legs => target.legs / 100,
+      _ => 0,
+    };
+  }
 
   EditRecipe _copyWith(
     EditRecipe recipe,
@@ -2818,9 +3764,244 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
         blemishReduction: (value * 100).round(),
       ),
     ),
-    _AdjustmentParameter.faceSlim => recipe.copyWith(faceSlimStrength: value),
-    _AdjustmentParameter.bodySlim => recipe.copyWith(bodySlimStrength: value),
+    _AdjustmentParameter.faceSlim ||
+    _AdjustmentParameter.headSize ||
+    _AdjustmentParameter.jaw ||
+    _AdjustmentParameter.chin ||
+    _AdjustmentParameter.eyes ||
+    _AdjustmentParameter.nose ||
+    _AdjustmentParameter.mouth => _copyFaceGeometry(recipe, parameter, value),
+    _AdjustmentParameter.bodySlim ||
+    _AdjustmentParameter.height ||
+    _AdjustmentParameter.shoulders ||
+    _AdjustmentParameter.waist ||
+    _AdjustmentParameter.legs => _copyBodyGeometry(recipe, parameter, value),
   };
+
+  EditRecipe _copyFaceGeometry(
+    EditRecipe recipe,
+    _AdjustmentParameter parameter,
+    double value,
+  ) => recipe.copyWith(
+    portraitGeometryRecipe: recipe.portraitGeometryRecipe.updateSelectedFace(
+      (target) => switch (parameter) {
+        _AdjustmentParameter.faceSlim => target.copyWith(faceSlim: value * 100),
+        _AdjustmentParameter.headSize => target.copyWith(headSize: value * 100),
+        _AdjustmentParameter.jaw => target.copyWith(jaw: value * 100),
+        _AdjustmentParameter.chin => target.copyWith(chin: value * 100),
+        _AdjustmentParameter.eyes => target.copyWith(eyes: value * 100),
+        _AdjustmentParameter.nose => target.copyWith(nose: value * 100),
+        _AdjustmentParameter.mouth => target.copyWith(mouth: value * 100),
+        _ => target,
+      },
+    ),
+  );
+
+  EditRecipe _copyBodyGeometry(
+    EditRecipe recipe,
+    _AdjustmentParameter parameter,
+    double value,
+  ) => recipe.copyWith(
+    portraitGeometryRecipe: recipe.portraitGeometryRecipe.updateSelectedBody(
+      (target) => switch (parameter) {
+        _AdjustmentParameter.bodySlim => target.copyWith(slimming: value * 100),
+        _AdjustmentParameter.height => target.copyWith(height: value * 100),
+        _AdjustmentParameter.shoulders => target.copyWith(
+          shoulders: value * 100,
+        ),
+        _AdjustmentParameter.waist => target.copyWith(waist: value * 100),
+        _AdjustmentParameter.legs => target.copyWith(legs: value * 100),
+        _ => target,
+      },
+    ),
+  );
+}
+
+class _PortraitTargetSelector extends StatelessWidget {
+  const _PortraitTargetSelector({
+    required this.photo,
+    required this.regions,
+    required this.selectedIndex,
+    required this.targetLabel,
+    required this.hint,
+    required this.enabled,
+    required this.onSelected,
+    super.key,
+  });
+
+  final ProjectPhoto photo;
+  final List<NormalizedTargetRegion> regions;
+  final int selectedIndex;
+  final String Function(int number) targetLabel;
+  final String hint;
+  final bool enabled;
+  final ValueChanged<int> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      label: hint,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(hint, style: Theme.of(context).textTheme.bodySmall),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: ColoredBox(
+              color: colors.surfaceContainerHighest,
+              child: SizedBox(
+                height: 180,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final sourceSize = _orientedSourceSize(photo);
+                    final imageRect = _containedRect(
+                      Size(constraints.maxWidth, constraints.maxHeight),
+                      sourceSize,
+                    );
+                    return Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.file(
+                          File(photo.localPath),
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, _, _) => const Center(
+                            child: Icon(Icons.broken_image_outlined),
+                          ),
+                        ),
+                        for (var index = 0; index < regions.length; index++)
+                          _target(
+                            context,
+                            Size(constraints.maxWidth, constraints.maxHeight),
+                            imageRect,
+                            regions[index],
+                            index,
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _target(
+    BuildContext context,
+    Size canvasSize,
+    Rect imageRect,
+    NormalizedTargetRegion region,
+    int index,
+  ) {
+    final visualRect = Rect.fromLTRB(
+      imageRect.left + region.left * imageRect.width,
+      imageRect.top + region.top * imageRect.height,
+      imageRect.left + region.right * imageRect.width,
+      imageRect.top + region.bottom * imageRect.height,
+    );
+    final hitWidth = min(canvasSize.width, max(44.0, visualRect.width + 12));
+    final hitHeight = min(canvasSize.height, max(44.0, visualRect.height + 12));
+    final hitRect = Rect.fromLTWH(
+      (visualRect.center.dx - hitWidth / 2)
+          .clamp(0, canvasSize.width - hitWidth)
+          .toDouble(),
+      (visualRect.center.dy - hitHeight / 2)
+          .clamp(0, canvasSize.height - hitHeight)
+          .toDouble(),
+      hitWidth,
+      hitHeight,
+    );
+    final selected = index == selectedIndex;
+    final colors = Theme.of(context).colorScheme;
+    return Positioned.fromRect(
+      rect: hitRect,
+      child: Semantics(
+        key: ValueKey('portrait-target-overlay-$index'),
+        button: true,
+        selected: selected,
+        label: targetLabel(index + 1),
+        hint: selected ? null : hint,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: enabled ? () => onSelected(index) : null,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned.fromRect(
+                rect: visualRect.shift(-hitRect.topLeft),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: selected ? colors.primary : Colors.white,
+                      width: selected ? 3 : 2,
+                    ),
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black54, blurRadius: 3),
+                    ],
+                  ),
+                ),
+              ),
+              Positioned(
+                left: max(0, visualRect.left - hitRect.left - 10),
+                top: max(0, visualRect.top - hitRect.top - 10),
+                child: Container(
+                  width: 28,
+                  height: 28,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: selected ? colors.primary : Colors.black87,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                  ),
+                  child: selected
+                      ? Icon(Icons.check, size: 17, color: colors.onPrimary)
+                      : Text(
+                          '${index + 1}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  static Size _orientedSourceSize(ProjectPhoto photo) {
+    final swapsAxes = const {5, 6, 7, 8}.contains(photo.orientation);
+    return Size(
+      (swapsAxes ? photo.pixelHeight : photo.pixelWidth).toDouble(),
+      (swapsAxes ? photo.pixelWidth : photo.pixelHeight).toDouble(),
+    );
+  }
+
+  static Rect _containedRect(Size available, Size source) {
+    if (source.width <= 0 || source.height <= 0) {
+      return Offset.zero & available;
+    }
+    final scale = min(
+      available.width / source.width,
+      available.height / source.height,
+    );
+    final rendered = Size(source.width * scale, source.height * scale);
+    return Rect.fromLTWH(
+      (available.width - rendered.width) / 2,
+      (available.height - rendered.height) / 2,
+      rendered.width,
+      rendered.height,
+    );
+  }
 }
 
 class _PortraitToolStatus extends StatelessWidget {
@@ -2950,29 +4131,78 @@ class _CompositionTools extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final basic = recipe.basicEditingRecipe;
+    final hasCompositionChanges =
+        !recipe.crop.isOriginal ||
+        basic.flipHorizontal ||
+        basic.flipVertical ||
+        basic.perspectiveHorizontal != 0 ||
+        basic.perspectiveVertical != 0;
     return ExpansionTile(
+      key: const ValueKey('editor-composition-tools'),
+      initiallyExpanded: true,
       tilePadding: EdgeInsets.zero,
       childrenPadding: const EdgeInsets.only(bottom: 8),
       leading: const Icon(Icons.crop_rotate),
       title: Text(context.l10n.composition),
       children: [
-        Row(
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             IconButton.filledTonal(
               tooltip: context.l10n.rotateLeft,
               onPressed: enabled ? () => _rotate(-1) : null,
               icon: const Icon(Icons.rotate_left),
             ),
-            const SizedBox(width: 8),
             IconButton.filledTonal(
               tooltip: context.l10n.rotateRight,
               onPressed: enabled ? () => _rotate(1) : null,
               icon: const Icon(Icons.rotate_right),
             ),
-            const Spacer(),
+            IconButton.filledTonal(
+              key: const ValueKey('editor-flip-horizontal'),
+              tooltip: context.l10n.flipHorizontal,
+              onPressed: enabled
+                  ? () => _commit(
+                      recipe.copyWith(
+                        basicEditingRecipe: recipe.basicEditingRecipe.copyWith(
+                          flipHorizontal:
+                              !recipe.basicEditingRecipe.flipHorizontal,
+                        ),
+                      ),
+                    )
+                  : null,
+              icon: const Icon(Icons.flip),
+            ),
+            IconButton.filledTonal(
+              key: const ValueKey('editor-flip-vertical'),
+              tooltip: context.l10n.flipVertical,
+              onPressed: enabled
+                  ? () => _commit(
+                      recipe.copyWith(
+                        basicEditingRecipe: recipe.basicEditingRecipe.copyWith(
+                          flipVertical: !recipe.basicEditingRecipe.flipVertical,
+                        ),
+                      ),
+                    )
+                  : null,
+              icon: const RotatedBox(quarterTurns: 1, child: Icon(Icons.flip)),
+            ),
             TextButton(
-              onPressed: enabled && !recipe.crop.isOriginal
-                  ? () => _commit(recipe.copyWith(crop: CropGeometry.original))
+              onPressed: enabled && hasCompositionChanges
+                  ? () => _commit(
+                      recipe.copyWith(
+                        crop: CropGeometry.original,
+                        basicEditingRecipe: basic.copyWith(
+                          flipHorizontal: false,
+                          flipVertical: false,
+                          perspectiveHorizontal: 0,
+                          perspectiveVertical: 0,
+                        ),
+                      ),
+                    )
                   : null,
               child: Text(context.l10n.resetComposition),
             ),
@@ -2985,11 +4215,32 @@ class _CompositionTools extends StatelessWidget {
             children: [
               _cropChip(context.l10n.originalCrop, null),
               const SizedBox(width: 8),
+              ActionChip(
+                key: const ValueKey('editor-free-crop'),
+                avatar: const Icon(Icons.crop_free, size: 18),
+                label: Text(context.l10n.freeCrop),
+                onPressed: enabled
+                    ? () => unawaited(_openFreeCrop(context))
+                    : null,
+              ),
+              const SizedBox(width: 8),
               _cropChip(context.l10n.cropSquare, 1),
               const SizedBox(width: 8),
               _cropChip(context.l10n.cropFourThree, 4 / 3),
               const SizedBox(width: 8),
+              _cropChip(
+                context.l10n.cropThreeFour,
+                3 / 4,
+                key: const ValueKey('editor-crop-3-4'),
+              ),
+              const SizedBox(width: 8),
               _cropChip(context.l10n.cropSixteenNine, 16 / 9),
+              const SizedBox(width: 8),
+              _cropChip(
+                context.l10n.cropNineSixteen,
+                9 / 16,
+                key: const ValueKey('editor-crop-9-16'),
+              ),
             ],
           ),
         ),
@@ -3010,12 +4261,53 @@ class _CompositionTools extends StatelessWidget {
             onRecipeCommitted();
           },
         ),
+        const SizedBox(height: 8),
+        _AdjustmentSlider(
+          key: const ValueKey('editor-perspective-horizontal'),
+          enabled: enabled,
+          label: context.l10n.perspectiveHorizontal,
+          semanticLabel: context.l10n.perspectiveHorizontal,
+          value: recipe.basicEditingRecipe.perspectiveHorizontal / 30,
+          onStart: editorSession.beginAdjustment,
+          onChanged: (value) => editorSession.preview(
+            recipe.copyWith(
+              basicEditingRecipe: recipe.basicEditingRecipe.copyWith(
+                perspectiveHorizontal: value * 30,
+              ),
+            ),
+          ),
+          onEnd: () {
+            editorSession.commitAdjustment();
+            onRecipeCommitted();
+          },
+        ),
+        const SizedBox(height: 8),
+        _AdjustmentSlider(
+          key: const ValueKey('editor-perspective-vertical'),
+          enabled: enabled,
+          label: context.l10n.perspectiveVertical,
+          semanticLabel: context.l10n.perspectiveVertical,
+          value: recipe.basicEditingRecipe.perspectiveVertical / 30,
+          onStart: editorSession.beginAdjustment,
+          onChanged: (value) => editorSession.preview(
+            recipe.copyWith(
+              basicEditingRecipe: recipe.basicEditingRecipe.copyWith(
+                perspectiveVertical: value * 30,
+              ),
+            ),
+          ),
+          onEnd: () {
+            editorSession.commitAdjustment();
+            onRecipeCommitted();
+          },
+        ),
       ],
     );
   }
 
-  Widget _cropChip(String label, double? targetAspectRatio) {
+  Widget _cropChip(String label, double? targetAspectRatio, {Key? key}) {
     return ActionChip(
+      key: key,
       label: Text(label),
       onPressed: enabled
           ? () {
@@ -3039,6 +4331,22 @@ class _CompositionTools extends StatelessWidget {
     );
   }
 
+  Future<void> _openFreeCrop(BuildContext context) async {
+    final swapsAxes = photo.orientation >= 5;
+    final width = swapsAxes ? photo.pixelHeight : photo.pixelWidth;
+    final height = swapsAxes ? photo.pixelWidth : photo.pixelHeight;
+    final result = await showDialog<CropGeometry>(
+      context: context,
+      builder: (context) => _FreeCropDialog(
+        sourcePath: photo.localPath,
+        sourceAspectRatio: width > 0 && height > 0 ? width / height : 4 / 3,
+        initial: recipe.crop,
+        previewRecipe: recipe.copyWith(crop: CropGeometry.original),
+      ),
+    );
+    if (result != null) _commit(recipe.copyWith(crop: result));
+  }
+
   void _rotate(int delta) {
     final turns = (recipe.crop.quarterTurns + delta) % 4;
     _commit(recipe.copyWith(crop: recipe.crop.copyWith(quarterTurns: turns)));
@@ -3048,6 +4356,1355 @@ class _CompositionTools extends StatelessWidget {
     editorSession.apply(next);
     onRecipeCommitted();
   }
+}
+
+class _FreeCropDialog extends StatefulWidget {
+  const _FreeCropDialog({
+    required this.sourcePath,
+    required this.sourceAspectRatio,
+    required this.initial,
+    required this.previewRecipe,
+  });
+
+  final String sourcePath;
+  final double sourceAspectRatio;
+  final CropGeometry initial;
+  final EditRecipe previewRecipe;
+
+  @override
+  State<_FreeCropDialog> createState() => _FreeCropDialogState();
+}
+
+class _FreeCropDialogState extends State<_FreeCropDialog> {
+  late double _left = widget.initial.left;
+  late double _top = widget.initial.top;
+  late double _right = widget.initial.right;
+  late double _bottom = widget.initial.bottom;
+  int _activeCorner = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    var canvasWidth = min(MediaQuery.sizeOf(context).width - 128, 360.0);
+    var canvasHeight = canvasWidth / widget.sourceAspectRatio;
+    if (canvasHeight > 420) {
+      canvasHeight = 420;
+      canvasWidth = canvasHeight * widget.sourceAspectRatio;
+    }
+    final canvasSize = Size(canvasWidth, canvasHeight);
+    return AlertDialog(
+      title: Text(context.l10n.freeCrop),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(context.l10n.freeCropHint),
+            const SizedBox(height: 12),
+            SizedBox.fromSize(
+              size: canvasSize,
+              child: Semantics(
+                label: context.l10n.freeCropHint,
+                child: GestureDetector(
+                  key: const ValueKey('free-crop-canvas'),
+                  behavior: HitTestBehavior.opaque,
+                  onPanStart: (details) =>
+                      _selectCorner(details.localPosition, canvasSize),
+                  onPanUpdate: (details) =>
+                      _moveCorner(details.delta, canvasSize),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      NativePhotoPreview(
+                        sourcePath: widget.sourcePath,
+                        recipe: widget.previewRecipe,
+                        renderer: context.read<PhotoPreviewRenderer>(),
+                        errorBuilder: (context) => ColoredBox(
+                          color: Theme.of(context).colorScheme.surfaceContainer,
+                          child: const Center(
+                            child: Icon(Icons.broken_image_outlined),
+                          ),
+                        ),
+                      ),
+                      CustomPaint(
+                        painter: _CropOverlayPainter(
+                          crop: Rect.fromLTRB(_left, _top, _right, _bottom),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(context.l10n.cancel),
+        ),
+        FilledButton(
+          key: const ValueKey('free-crop-apply'),
+          onPressed: () => Navigator.pop(
+            context,
+            widget.initial.copyWith(
+              left: _left,
+              top: _top,
+              right: _right,
+              bottom: _bottom,
+            ),
+          ),
+          child: Text(context.l10n.applyCrop),
+        ),
+      ],
+    );
+  }
+
+  void _selectCorner(Offset position, Size size) {
+    final normalized = Offset(
+      position.dx / size.width,
+      position.dy / size.height,
+    );
+    final corners = [
+      Offset(_left, _top),
+      Offset(_right, _top),
+      Offset(_right, _bottom),
+      Offset(_left, _bottom),
+    ];
+    var bestDistance = double.infinity;
+    for (var index = 0; index < corners.length; index++) {
+      final distance = (corners[index] - normalized).distanceSquared;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        _activeCorner = index;
+      }
+    }
+  }
+
+  void _moveCorner(Offset delta, Size size) {
+    const minimumSpan = 0.08;
+    final dx = delta.dx / size.width;
+    final dy = delta.dy / size.height;
+    setState(() {
+      if (_activeCorner == 0 || _activeCorner == 3) {
+        _left = (_left + dx).clamp(0, _right - minimumSpan);
+      } else {
+        _right = (_right + dx).clamp(_left + minimumSpan, 1);
+      }
+      if (_activeCorner == 0 || _activeCorner == 1) {
+        _top = (_top + dy).clamp(0, _bottom - minimumSpan);
+      } else {
+        _bottom = (_bottom + dy).clamp(_top + minimumSpan, 1);
+      }
+    });
+  }
+}
+
+class _CropOverlayPainter extends CustomPainter {
+  const _CropOverlayPainter({required this.crop});
+
+  final Rect crop;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final cropRect = Rect.fromLTRB(
+      crop.left * size.width,
+      crop.top * size.height,
+      crop.right * size.width,
+      crop.bottom * size.height,
+    );
+    final shade = Path()
+      ..fillType = PathFillType.evenOdd
+      ..addRect(Offset.zero & size)
+      ..addRect(cropRect);
+    canvas.drawPath(shade, Paint()..color = Colors.black54);
+    canvas.drawRect(
+      cropRect,
+      Paint()
+        ..color = Colors.white
+        ..strokeWidth = 2
+        ..style = PaintingStyle.stroke,
+    );
+    final handlePaint = Paint()..color = Colors.white;
+    for (final corner in [
+      cropRect.topLeft,
+      cropRect.topRight,
+      cropRect.bottomRight,
+      cropRect.bottomLeft,
+    ]) {
+      canvas.drawCircle(corner, 7, handlePaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _CropOverlayPainter oldDelegate) =>
+      oldDelegate.crop != crop;
+}
+
+class _FilterHslTools extends StatefulWidget {
+  const _FilterHslTools({
+    required this.enabled,
+    required this.recipe,
+    required this.editorSession,
+    required this.onRecipeCommitted,
+  });
+
+  final bool enabled;
+  final EditRecipe recipe;
+  final EditorSession editorSession;
+  final VoidCallback onRecipeCommitted;
+
+  @override
+  State<_FilterHslTools> createState() => _FilterHslToolsState();
+}
+
+class _FilterHslToolsState extends State<_FilterHslTools> {
+  HslChannel _selectedChannel = HslChannel.red;
+
+  @override
+  Widget build(BuildContext context) {
+    final currentRecipe = widget.editorSession.recipe;
+    final basic = currentRecipe.basicEditingRecipe;
+    final hsl = basic.hsl[_selectedChannel] ?? HslAdjustment.neutral;
+    return ExpansionTile(
+      key: const ValueKey('editor-filter-hsl-tools'),
+      initiallyExpanded: true,
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: const EdgeInsets.only(bottom: 8),
+      leading: const Icon(Icons.filter_vintage_outlined),
+      title: Text(context.l10n.filterAndHsl),
+      children: [
+        SizedBox(
+          height: 44,
+          child: ListView.separated(
+            key: const ValueKey('editor-filter-list'),
+            scrollDirection: Axis.horizontal,
+            itemCount: PhotoFilter.values.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (context, index) {
+              final filter = PhotoFilter.values[index];
+              return ChoiceChip(
+                key: ValueKey('editor-filter-${filter.name}'),
+                label: Text(_filterLabel(context, filter)),
+                selected: basic.filter == filter,
+                onSelected: widget.enabled
+                    ? (_) {
+                        widget.editorSession.apply(
+                          widget.editorSession.recipe.copyWith(
+                            basicEditingRecipe: basic.copyWith(
+                              filter: filter,
+                              filterStrength: filter == PhotoFilter.none
+                                  ? 0
+                                  : basic.filterStrength == 0
+                                  ? 70
+                                  : basic.filterStrength,
+                            ),
+                          ),
+                        );
+                        widget.onRecipeCommitted();
+                      }
+                    : null,
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 8),
+        _AdjustmentSlider(
+          key: const ValueKey('editor-filter-strength'),
+          enabled: widget.enabled && basic.filter != PhotoFilter.none,
+          label: context.l10n.filterStrength,
+          semanticLabel: context.l10n.filterStrength,
+          value: basic.filterStrength / 100,
+          minimum: 0,
+          onStart: widget.editorSession.beginAdjustment,
+          onChanged: (value) => widget.editorSession.preview(
+            widget.editorSession.recipe.copyWith(
+              basicEditingRecipe: basic.copyWith(filterStrength: value * 100),
+            ),
+          ),
+          onEnd: _commitAdjustment,
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 42,
+          child: ListView.separated(
+            key: const ValueKey('editor-hsl-channels'),
+            scrollDirection: Axis.horizontal,
+            itemCount: HslChannel.values.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (context, index) {
+              final channel = HslChannel.values[index];
+              return ChoiceChip(
+                key: ValueKey('editor-hsl-${channel.name}'),
+                label: Text(_channelLabel(context, channel)),
+                selected: channel == _selectedChannel,
+                onSelected: (_) => setState(() => _selectedChannel = channel),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 8),
+        _hslSlider(
+          context,
+          'hue',
+          context.l10n.hslHue,
+          hsl.hue,
+          (value) => HslAdjustment(
+            hue: value,
+            saturation: hsl.saturation,
+            lightness: hsl.lightness,
+          ),
+        ),
+        const SizedBox(height: 6),
+        _hslSlider(
+          context,
+          'saturation',
+          context.l10n.hslSaturation,
+          hsl.saturation,
+          (value) => HslAdjustment(
+            hue: hsl.hue,
+            saturation: value,
+            lightness: hsl.lightness,
+          ),
+        ),
+        const SizedBox(height: 6),
+        _hslSlider(
+          context,
+          'lightness',
+          context.l10n.hslLightness,
+          hsl.lightness,
+          (value) => HslAdjustment(
+            hue: hsl.hue,
+            saturation: hsl.saturation,
+            lightness: value,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _hslSlider(
+    BuildContext context,
+    String id,
+    String label,
+    double value,
+    HslAdjustment Function(double value) update,
+  ) => _AdjustmentSlider(
+    key: ValueKey('editor-hsl-${_selectedChannel.name}-$id'),
+    enabled: widget.enabled,
+    label: label,
+    semanticLabel: '$label ${_channelLabel(context, _selectedChannel)}',
+    value: value / 100,
+    onStart: widget.editorSession.beginAdjustment,
+    onChanged: (normalized) {
+      final nextHsl = Map<HslChannel, HslAdjustment>.of(
+        widget.editorSession.recipe.basicEditingRecipe.hsl,
+      )..[_selectedChannel] = update(normalized * 100);
+      widget.editorSession.preview(
+        widget.editorSession.recipe.copyWith(
+          basicEditingRecipe: widget.editorSession.recipe.basicEditingRecipe
+              .copyWith(hsl: nextHsl),
+        ),
+      );
+    },
+    onEnd: _commitAdjustment,
+  );
+
+  void _commitAdjustment() {
+    widget.editorSession.commitAdjustment();
+    widget.onRecipeCommitted();
+  }
+
+  String _filterLabel(BuildContext context, PhotoFilter filter) =>
+      switch (filter) {
+        PhotoFilter.none => context.l10n.filterNone,
+        PhotoFilter.clean => context.l10n.filterClean,
+        PhotoFilter.portrait => context.l10n.filterPortrait,
+        PhotoFilter.cinematic => context.l10n.filterCinematic,
+        PhotoFilter.film => context.l10n.filterFilm,
+        PhotoFilter.warmSun => context.l10n.filterWarmSun,
+        PhotoFilter.coolAir => context.l10n.filterCoolAir,
+        PhotoFilter.vivid => context.l10n.filterVivid,
+        PhotoFilter.faded => context.l10n.filterFaded,
+        PhotoFilter.noir => context.l10n.filterNoir,
+        PhotoFilter.food => context.l10n.filterFood,
+        PhotoFilter.landscape => context.l10n.filterLandscape,
+        PhotoFilter.night => context.l10n.filterNight,
+      };
+
+  String _channelLabel(BuildContext context, HslChannel channel) =>
+      switch (channel) {
+        HslChannel.red => context.l10n.hslRed,
+        HslChannel.orange => context.l10n.hslOrange,
+        HslChannel.yellow => context.l10n.hslYellow,
+        HslChannel.green => context.l10n.hslGreen,
+        HslChannel.cyan => context.l10n.hslCyan,
+        HslChannel.blue => context.l10n.hslBlue,
+        HslChannel.purple => context.l10n.hslPurple,
+        HslChannel.magenta => context.l10n.hslMagenta,
+      };
+}
+
+class _SemanticTools extends StatelessWidget {
+  const _SemanticTools({
+    required this.enabled,
+    required this.subjectAvailable,
+    required this.photo,
+    required this.recipe,
+    required this.editorSession,
+    required this.onRecipeCommitted,
+  });
+
+  final bool enabled;
+  final bool subjectAvailable;
+  final ProjectPhoto photo;
+  final EditRecipe recipe;
+  final EditorSession editorSession;
+  final VoidCallback onRecipeCommitted;
+
+  @override
+  Widget build(BuildContext context) {
+    final semantic = editorSession.recipe.semanticEditingRecipe;
+    return ExpansionTile(
+      key: const ValueKey('editor-semantic-tools'),
+      initiallyExpanded: true,
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: const EdgeInsets.only(bottom: 8),
+      leading: const Icon(Icons.layers_outlined),
+      title: Text(context.l10n.semanticTools),
+      subtitle: Text(
+        subjectAvailable
+            ? context.l10n.semanticToolsLocalReady
+            : context.l10n.semanticSubjectUnavailable,
+      ),
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            context.l10n.backgroundTreatment,
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+        ),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: 44,
+          child: SingleChildScrollView(
+            key: const ValueKey('editor-background-treatment-list'),
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (
+                  var index = 0;
+                  index < BackgroundTreatment.values.length;
+                  index++
+                ) ...[
+                  if (index > 0) const SizedBox(width: 8),
+                  Builder(
+                    builder: (context) {
+                      final treatment = BackgroundTreatment.values[index];
+                      return ChoiceChip(
+                        key: ValueKey('editor-background-${treatment.name}'),
+                        label: Text(_backgroundLabel(context, treatment)),
+                        selected: semantic.background == treatment,
+                        onSelected:
+                            enabled &&
+                                (treatment == BackgroundTreatment.original ||
+                                    subjectAvailable)
+                            ? (_) {
+                                if (treatment == BackgroundTreatment.image) {
+                                  unawaited(_pickBackgroundImage(context));
+                                  return;
+                                }
+                                _commit(
+                                  semantic.copyWith(
+                                    background: treatment,
+                                    backgroundImagePath: null,
+                                    backgroundBlur:
+                                        treatment == BackgroundTreatment.blur &&
+                                            semantic.backgroundBlur == 0
+                                        ? 45
+                                        : semantic.backgroundBlur,
+                                  ),
+                                );
+                              }
+                            : null,
+                      );
+                    },
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        if (semantic.background == BackgroundTreatment.blur) ...[
+          const SizedBox(height: 6),
+          _semanticSlider(
+            context: context,
+            key: const ValueKey('editor-background-blur'),
+            label: context.l10n.backgroundBlur,
+            value: semantic.backgroundBlur / 100,
+            enabled: enabled && subjectAvailable,
+            update: (value) =>
+                semantic.copyWith(backgroundBlur: (value * 100).round()),
+            minimum: 0,
+          ),
+        ],
+        if (subjectAvailable) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  key: const ValueKey('editor-open-subject-mask-brush'),
+                  onPressed: enabled
+                      ? () => _openMaskBrush(context, localAdjustment: false)
+                      : null,
+                  icon: const Icon(Icons.gesture_outlined),
+                  label: Text(context.l10n.refineSubjectMask),
+                ),
+              ),
+              if (semantic.subjectMaskStrokes.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                IconButton.filledTonal(
+                  key: const ValueKey('editor-clear-subject-mask'),
+                  tooltip: context.l10n.clearMask,
+                  onPressed: enabled
+                      ? () => _commit(
+                          semantic.copyWith(subjectMaskStrokes: const []),
+                        )
+                      : null,
+                  icon: const Icon(Icons.restart_alt),
+                ),
+              ],
+            ],
+          ),
+        ],
+        const SizedBox(height: 8),
+        _semanticSlider(
+          context: context,
+          key: const ValueKey('editor-subject-exposure'),
+          label: context.l10n.subjectExposure,
+          value: semantic.subjectExposure / 100,
+          enabled: enabled && subjectAvailable,
+          update: (value) =>
+              semantic.copyWith(subjectExposure: (value * 100).round()),
+        ),
+        _semanticSlider(
+          context: context,
+          key: const ValueKey('editor-subject-saturation'),
+          label: context.l10n.subjectSaturation,
+          value: semantic.subjectSaturation / 100,
+          enabled: enabled && subjectAvailable,
+          update: (value) =>
+              semantic.copyWith(subjectSaturation: (value * 100).round()),
+        ),
+        _semanticSlider(
+          context: context,
+          key: const ValueKey('editor-background-exposure'),
+          label: context.l10n.backgroundExposure,
+          value: semantic.backgroundExposure / 100,
+          enabled: enabled && subjectAvailable,
+          update: (value) =>
+              semantic.copyWith(backgroundExposure: (value * 100).round()),
+        ),
+        _semanticSlider(
+          context: context,
+          key: const ValueKey('editor-background-saturation'),
+          label: context.l10n.backgroundSaturation,
+          value: semantic.backgroundSaturation / 100,
+          enabled: enabled && subjectAvailable,
+          update: (value) =>
+              semantic.copyWith(backgroundSaturation: (value * 100).round()),
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            context.l10n.localAdjustment,
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+        ),
+        _semanticSlider(
+          context: context,
+          key: const ValueKey('editor-local-exposure'),
+          label: context.l10n.localExposure,
+          value: semantic.localExposure / 100,
+          enabled: enabled,
+          update: (value) =>
+              semantic.copyWith(localExposure: (value * 100).round()),
+        ),
+        _semanticSlider(
+          context: context,
+          key: const ValueKey('editor-local-saturation'),
+          label: context.l10n.localSaturation,
+          value: semantic.localSaturation / 100,
+          enabled: enabled,
+          update: (value) =>
+              semantic.copyWith(localSaturation: (value * 100).round()),
+        ),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                key: const ValueKey('editor-open-local-adjustment-brush'),
+                onPressed: enabled
+                    ? () => _openMaskBrush(context, localAdjustment: true)
+                    : null,
+                icon: const Icon(Icons.brush_outlined),
+                label: Text(context.l10n.localAdjustment),
+              ),
+            ),
+            if (semantic.localAdjustmentStrokes.isNotEmpty) ...[
+              const SizedBox(width: 8),
+              IconButton.filledTonal(
+                key: const ValueKey('editor-clear-local-adjustment-mask'),
+                tooltip: context.l10n.clearMask,
+                onPressed: enabled
+                    ? () => _commit(
+                        semantic.copyWith(localAdjustmentStrokes: const []),
+                      )
+                    : null,
+                icon: const Icon(Icons.restart_alt),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                key: const ValueKey('editor-open-erase-brush'),
+                onPressed: enabled ? () => _openEraseBrush(context) : null,
+                icon: const Icon(Icons.auto_fix_off_outlined),
+                label: Text(context.l10n.eraseBrush),
+              ),
+            ),
+            if (semantic.eraseStrokes.isNotEmpty) ...[
+              const SizedBox(width: 8),
+              IconButton.filledTonal(
+                key: const ValueKey('editor-clear-erase-brush'),
+                tooltip: context.l10n.clearEraseStrokes,
+                onPressed: enabled
+                    ? () => _commit(semantic.copyWith(eraseStrokes: const []))
+                    : null,
+                icon: const Icon(Icons.delete_sweep_outlined),
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _semanticSlider({
+    required BuildContext context,
+    required Key key,
+    required String label,
+    required double value,
+    required bool enabled,
+    required SemanticEditingRecipe Function(double value) update,
+    double minimum = -1,
+  }) => _AdjustmentSlider(
+    key: key,
+    enabled: enabled,
+    label: label,
+    semanticLabel: label,
+    value: value,
+    minimum: minimum,
+    onStart: editorSession.beginAdjustment,
+    onChanged: (value) => editorSession.preview(
+      editorSession.recipe.copyWith(semanticEditingRecipe: update(value)),
+    ),
+    onEnd: () {
+      editorSession.commitAdjustment();
+      onRecipeCommitted();
+    },
+  );
+
+  Future<void> _openEraseBrush(BuildContext context) async {
+    final result = await showDialog<List<EraseStroke>>(
+      context: context,
+      builder: (context) => _EraseBrushDialog(
+        sourcePath: photo.localPath,
+        sourceAspectRatio: photo.pixelWidth > 0 && photo.pixelHeight > 0
+            ? photo.pixelWidth / photo.pixelHeight
+            : 4 / 3,
+        initial: editorSession.recipe.semanticEditingRecipe.eraseStrokes,
+        previewRecipe: editorSession.recipe,
+      ),
+    );
+    if (result != null) {
+      _commit(
+        editorSession.recipe.semanticEditingRecipe.copyWith(
+          eraseStrokes: result,
+        ),
+      );
+    }
+  }
+
+  Future<void> _openMaskBrush(
+    BuildContext context, {
+    required bool localAdjustment,
+  }) async {
+    final semantic = editorSession.recipe.semanticEditingRecipe;
+    final result = await showDialog<List<MaskStroke>>(
+      context: context,
+      builder: (context) => _MaskBrushDialog(
+        sourcePath: photo.localPath,
+        sourceAspectRatio: photo.pixelWidth > 0 && photo.pixelHeight > 0
+            ? photo.pixelWidth / photo.pixelHeight
+            : 4 / 3,
+        initial: localAdjustment
+            ? semantic.localAdjustmentStrokes
+            : semantic.subjectMaskStrokes,
+        previewRecipe: editorSession.recipe,
+        localAdjustment: localAdjustment,
+      ),
+    );
+    if (result == null) return;
+    _commit(
+      localAdjustment
+          ? semantic.copyWith(localAdjustmentStrokes: result)
+          : semantic.copyWith(subjectMaskStrokes: result),
+    );
+  }
+
+  Future<void> _pickBackgroundImage(BuildContext context) async {
+    final batch = await context.read<PhotoImporter>().importPhotos(limit: 1);
+    if (!context.mounted) return;
+    if (batch.photos.isEmpty) {
+      if (batch.failures.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.backgroundImageImportFailed)),
+        );
+      }
+      return;
+    }
+    _commit(
+      editorSession.recipe.semanticEditingRecipe.copyWith(
+        background: BackgroundTreatment.image,
+        backgroundImagePath: batch.photos.single.localPath,
+      ),
+    );
+  }
+
+  void _commit(SemanticEditingRecipe semantic) {
+    editorSession.apply(
+      editorSession.recipe.copyWith(semanticEditingRecipe: semantic),
+    );
+    onRecipeCommitted();
+  }
+
+  String _backgroundLabel(
+    BuildContext context,
+    BackgroundTreatment treatment,
+  ) => switch (treatment) {
+    BackgroundTreatment.original => context.l10n.backgroundOriginal,
+    BackgroundTreatment.blur => context.l10n.backgroundBlur,
+    BackgroundTreatment.white => context.l10n.backgroundWhite,
+    BackgroundTreatment.black => context.l10n.backgroundBlack,
+    BackgroundTreatment.warm => context.l10n.backgroundWarm,
+    BackgroundTreatment.cool => context.l10n.backgroundCool,
+    BackgroundTreatment.image => context.l10n.backgroundImage,
+  };
+}
+
+class _MaskBrushDialog extends StatefulWidget {
+  const _MaskBrushDialog({
+    required this.sourcePath,
+    required this.sourceAspectRatio,
+    required this.initial,
+    required this.previewRecipe,
+    required this.localAdjustment,
+  });
+
+  final String sourcePath;
+  final double sourceAspectRatio;
+  final List<MaskStroke> initial;
+  final EditRecipe previewRecipe;
+  final bool localAdjustment;
+
+  @override
+  State<_MaskBrushDialog> createState() => _MaskBrushDialogState();
+}
+
+class _MaskBrushDialogState extends State<_MaskBrushDialog> {
+  late List<MaskStroke> _strokes = widget.initial.toList();
+  final List<List<MaskStroke>> _undoHistory = [];
+  final List<List<MaskStroke>> _redoHistory = [];
+  MaskBrushOperation _operation = MaskBrushOperation.paint;
+  double _radius = 0.035;
+  List<NormalizedPoint>? _activePoints;
+
+  @override
+  Widget build(BuildContext context) {
+    var canvasWidth = min(MediaQuery.sizeOf(context).width - 128, 360.0);
+    var canvasHeight = canvasWidth / widget.sourceAspectRatio;
+    if (canvasHeight > 420) {
+      canvasHeight = 420;
+      canvasWidth = canvasHeight * widget.sourceAspectRatio;
+    }
+    final canvasSize = Size(canvasWidth, canvasHeight);
+    final semantic = widget.previewRecipe.semanticEditingRecipe;
+    final previewSemantic = widget.localAdjustment
+        ? semantic.copyWith(
+            localExposure: 0,
+            localSaturation: 0,
+            localAdjustmentStrokes: const [],
+          )
+        : semantic.copyWith(subjectMaskStrokes: const []);
+    final keyPrefix = widget.localAdjustment ? 'local-mask' : 'subject-mask';
+    return AlertDialog(
+      title: Text(
+        widget.localAdjustment
+            ? context.l10n.localAdjustment
+            : context.l10n.subjectMask,
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(context.l10n.maskBrushHint),
+            const SizedBox(height: 8),
+            SegmentedButton<MaskBrushOperation>(
+              key: ValueKey('$keyPrefix-operation'),
+              segments: [
+                ButtonSegment(
+                  value: MaskBrushOperation.paint,
+                  icon: const Icon(Icons.brush_outlined),
+                  label: Text(context.l10n.paintMask),
+                ),
+                ButtonSegment(
+                  value: MaskBrushOperation.erase,
+                  icon: const Icon(Icons.auto_fix_off_outlined),
+                  label: Text(context.l10n.eraseMask),
+                ),
+              ],
+              selected: {_operation},
+              onSelectionChanged: (selection) =>
+                  setState(() => _operation = selection.single),
+            ),
+            const SizedBox(height: 12),
+            SizedBox.fromSize(
+              size: canvasSize,
+              child: Semantics(
+                key: ValueKey('$keyPrefix-canvas-semantics'),
+                container: true,
+                excludeSemantics: true,
+                label: widget.localAdjustment
+                    ? context.l10n.localAdjustment
+                    : context.l10n.subjectMask,
+                hint: context.l10n.maskBrushHint,
+                onTap: _strokes.length >= 40
+                    ? null
+                    : () => _addCenterStamp(canvasSize),
+                child: GestureDetector(
+                  key: ValueKey('$keyPrefix-canvas'),
+                  excludeFromSemantics: true,
+                  behavior: HitTestBehavior.opaque,
+                  onTapDown: _strokes.length >= 40
+                      ? null
+                      : (details) =>
+                            _startStroke(details.localPosition, canvasSize),
+                  onTapUp: _strokes.length >= 40
+                      ? null
+                      : (_) => _finishStroke(),
+                  onPanStart: _strokes.length >= 40
+                      ? null
+                      : (details) =>
+                            _startStroke(details.localPosition, canvasSize),
+                  onPanUpdate: _strokes.length >= 40
+                      ? null
+                      : (details) =>
+                            _continueStroke(details.localPosition, canvasSize),
+                  onPanEnd: _strokes.length >= 40
+                      ? null
+                      : (_) => _finishStroke(),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      NativePhotoPreview(
+                        sourcePath: widget.sourcePath,
+                        recipe: widget.previewRecipe.copyWith(
+                          semanticEditingRecipe: previewSemantic,
+                        ),
+                        renderer: context.read<PhotoPreviewRenderer>(),
+                        errorBuilder: (context) => ColoredBox(
+                          color: Theme.of(context).colorScheme.surfaceContainer,
+                          child: const Center(
+                            child: Icon(Icons.broken_image_outlined),
+                          ),
+                        ),
+                      ),
+                      CustomPaint(
+                        painter: _MaskStrokePainter(
+                          strokes: _strokes,
+                          activePoints: _activePoints,
+                          activeRadius: _radius,
+                          activeOperation: _operation,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            _AdjustmentSlider(
+              key: ValueKey('$keyPrefix-brush-size'),
+              enabled: true,
+              label: context.l10n.brushSize,
+              semanticLabel: context.l10n.brushSize,
+              value: _radius,
+              minimum: 0.005,
+              maximum: 0.12,
+              onStart: () {},
+              onChanged: (value) => setState(() => _radius = value),
+              onEnd: () {},
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                IconButton(
+                  key: ValueKey('$keyPrefix-undo'),
+                  tooltip: context.l10n.undo,
+                  onPressed: _undoHistory.isEmpty ? null : _undoStrokeChange,
+                  icon: const Icon(Icons.undo),
+                ),
+                IconButton(
+                  key: ValueKey('$keyPrefix-redo'),
+                  tooltip: context.l10n.redo,
+                  onPressed: _redoHistory.isEmpty ? null : _redoStrokeChange,
+                  icon: const Icon(Icons.redo),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _strokes.isEmpty ? null : () => _replaceStrokes(const []),
+          child: Text(context.l10n.clear),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(context.l10n.cancel),
+        ),
+        FilledButton(
+          key: ValueKey('$keyPrefix-apply'),
+          onPressed: () => Navigator.pop(context, _strokes),
+          child: Text(context.l10n.apply),
+        ),
+      ],
+    );
+  }
+
+  void _startStroke(Offset position, Size size) {
+    setState(() => _activePoints = [_normalized(position, size)]);
+  }
+
+  void _continueStroke(Offset position, Size size) {
+    final points = _activePoints;
+    if (points == null || points.length >= 200) return;
+    final next = _normalized(position, size);
+    if ((Offset(next.x, next.y) - Offset(points.last.x, points.last.y))
+            .distance <
+        _radius * 0.25) {
+      return;
+    }
+    setState(() => points.add(next));
+  }
+
+  void _finishStroke() {
+    final points = _activePoints;
+    if (points == null || points.isEmpty) return;
+    _replaceStrokes([
+      ..._strokes,
+      MaskStroke(operation: _operation, radius: _radius, points: points),
+    ]);
+  }
+
+  void _addCenterStamp(Size canvasSize) {
+    _startStroke(canvasSize.center(Offset.zero), canvasSize);
+    _finishStroke();
+  }
+
+  void _replaceStrokes(List<MaskStroke> next) {
+    setState(() {
+      _undoHistory.add(List.unmodifiable(_strokes));
+      _redoHistory.clear();
+      _strokes = List.of(next);
+      _activePoints = null;
+    });
+  }
+
+  void _undoStrokeChange() {
+    if (_undoHistory.isEmpty) return;
+    setState(() {
+      _redoHistory.add(List.unmodifiable(_strokes));
+      _strokes = List.of(_undoHistory.removeLast());
+      _activePoints = null;
+    });
+  }
+
+  void _redoStrokeChange() {
+    if (_redoHistory.isEmpty) return;
+    setState(() {
+      _undoHistory.add(List.unmodifiable(_strokes));
+      _strokes = List.of(_redoHistory.removeLast());
+      _activePoints = null;
+    });
+  }
+
+  NormalizedPoint _normalized(Offset position, Size size) =>
+      NormalizedPoint.checked(
+        (position.dx / size.width).clamp(0, 1),
+        (position.dy / size.height).clamp(0, 1),
+      );
+}
+
+class _MaskStrokePainter extends CustomPainter {
+  const _MaskStrokePainter({
+    required this.strokes,
+    required this.activePoints,
+    required this.activeRadius,
+    required this.activeOperation,
+  });
+
+  final List<MaskStroke> strokes;
+  final List<NormalizedPoint>? activePoints;
+  final double activeRadius;
+  final MaskBrushOperation activeOperation;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (final stroke in strokes) {
+      _paintStroke(
+        canvas,
+        size,
+        stroke.points,
+        stroke.radius,
+        stroke.operation,
+      );
+    }
+    final active = activePoints;
+    if (active != null) {
+      _paintStroke(canvas, size, active, activeRadius, activeOperation);
+    }
+  }
+
+  void _paintStroke(
+    Canvas canvas,
+    Size size,
+    List<NormalizedPoint> points,
+    double radius,
+    MaskBrushOperation operation,
+  ) {
+    final offsets = points
+        .map((point) => Offset(point.x * size.width, point.y * size.height))
+        .toList();
+    if (offsets.isEmpty) return;
+    final paint = Paint()
+      ..color =
+          (operation == MaskBrushOperation.paint
+                  ? Colors.greenAccent
+                  : Colors.redAccent)
+              .withValues(alpha: 0.55)
+      ..strokeWidth = radius * min(size.width, size.height) * 2
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..style = PaintingStyle.stroke;
+    if (offsets.length == 1) {
+      canvas.drawCircle(
+        offsets.single,
+        paint.strokeWidth / 2,
+        paint..style = PaintingStyle.fill,
+      );
+      return;
+    }
+    final path = Path()..moveTo(offsets.first.dx, offsets.first.dy);
+    for (final point in offsets.skip(1)) {
+      path.lineTo(point.dx, point.dy);
+    }
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _MaskStrokePainter oldDelegate) =>
+      oldDelegate.strokes != strokes ||
+      oldDelegate.activePoints != activePoints ||
+      oldDelegate.activeRadius != activeRadius ||
+      oldDelegate.activeOperation != activeOperation;
+}
+
+class _EraseBrushDialog extends StatefulWidget {
+  const _EraseBrushDialog({
+    required this.sourcePath,
+    required this.sourceAspectRatio,
+    required this.initial,
+    required this.previewRecipe,
+  });
+
+  final String sourcePath;
+  final double sourceAspectRatio;
+  final List<EraseStroke> initial;
+  final EditRecipe previewRecipe;
+
+  @override
+  State<_EraseBrushDialog> createState() => _EraseBrushDialogState();
+}
+
+class _EraseBrushDialogState extends State<_EraseBrushDialog> {
+  late List<EraseStroke> _strokes = widget.initial.toList();
+  final List<List<EraseStroke>> _undoHistory = [];
+  final List<List<EraseStroke>> _redoHistory = [];
+  double _radius = 0.035;
+  List<NormalizedPoint>? _activePoints;
+
+  @override
+  Widget build(BuildContext context) {
+    var canvasWidth = min(MediaQuery.sizeOf(context).width - 96, 360.0);
+    var canvasHeight = canvasWidth / widget.sourceAspectRatio;
+    if (canvasHeight > 420) {
+      canvasHeight = 420;
+      canvasWidth = canvasHeight * widget.sourceAspectRatio;
+    }
+    final canvasSize = Size(canvasWidth, canvasHeight);
+    final previewSemantic = widget.previewRecipe.semanticEditingRecipe.copyWith(
+      eraseStrokes: const [],
+    );
+    return AlertDialog(
+      title: Text(context.l10n.eraseBrush),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(context.l10n.eraseBrushHint),
+          const SizedBox(height: 12),
+          SizedBox.fromSize(
+            size: canvasSize,
+            child: Semantics(
+              key: const ValueKey('erase-brush-canvas-semantics'),
+              container: true,
+              excludeSemantics: true,
+              label: context.l10n.eraseBrush,
+              hint: context.l10n.eraseBrushHint,
+              onTap: _strokes.length >= 20
+                  ? null
+                  : () => _addCenterStamp(canvasSize),
+              child: GestureDetector(
+                key: const ValueKey('erase-brush-canvas'),
+                excludeFromSemantics: true,
+                behavior: HitTestBehavior.opaque,
+                onPanStart: _strokes.length >= 20
+                    ? null
+                    : (details) =>
+                          _startStroke(details.localPosition, canvasSize),
+                onPanUpdate: _strokes.length >= 20
+                    ? null
+                    : (details) =>
+                          _continueStroke(details.localPosition, canvasSize),
+                onPanEnd: _strokes.length >= 20 ? null : (_) => _finishStroke(),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    NativePhotoPreview(
+                      sourcePath: widget.sourcePath,
+                      recipe: widget.previewRecipe.copyWith(
+                        semanticEditingRecipe: previewSemantic,
+                      ),
+                      renderer: context.read<PhotoPreviewRenderer>(),
+                      errorBuilder: (context) => ColoredBox(
+                        color: Theme.of(context).colorScheme.surfaceContainer,
+                        child: const Center(
+                          child: Icon(Icons.broken_image_outlined),
+                        ),
+                      ),
+                    ),
+                    CustomPaint(
+                      painter: _EraseStrokePainter(
+                        strokes: _strokes,
+                        activePoints: _activePoints,
+                        activeRadius: _radius,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          _AdjustmentSlider(
+            key: const ValueKey('erase-brush-size'),
+            enabled: true,
+            label: context.l10n.brushSize,
+            semanticLabel: context.l10n.brushSize,
+            value: _radius,
+            minimum: 0.005,
+            maximum: 0.12,
+            onStart: () {},
+            onChanged: (value) => setState(() => _radius = value),
+            onEnd: () {},
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              IconButton(
+                key: const ValueKey('erase-brush-undo'),
+                tooltip: context.l10n.undo,
+                onPressed: _undoHistory.isEmpty ? null : _undoStrokeChange,
+                icon: const Icon(Icons.undo),
+              ),
+              IconButton(
+                key: const ValueKey('erase-brush-redo'),
+                tooltip: context.l10n.redo,
+                onPressed: _redoHistory.isEmpty ? null : _redoStrokeChange,
+                icon: const Icon(Icons.redo),
+              ),
+            ],
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: _strokes.isEmpty ? null : () => _replaceStrokes(const []),
+          child: Text(context.l10n.clear),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(context.l10n.cancel),
+        ),
+        FilledButton(
+          key: const ValueKey('erase-brush-apply'),
+          onPressed: () => Navigator.pop(context, _strokes),
+          child: Text(context.l10n.apply),
+        ),
+      ],
+    );
+  }
+
+  void _startStroke(Offset position, Size size) {
+    setState(() {
+      _activePoints = [_normalized(position, size)];
+    });
+  }
+
+  void _continueStroke(Offset position, Size size) {
+    final points = _activePoints;
+    if (points == null || points.length >= 200) return;
+    final next = _normalized(position, size);
+    if ((Offset(next.x, next.y) - Offset(points.last.x, points.last.y))
+            .distance <
+        _radius * 0.25) {
+      return;
+    }
+    setState(() => points.add(next));
+  }
+
+  void _finishStroke() {
+    final points = _activePoints;
+    if (points == null || points.isEmpty) return;
+    _replaceStrokes([
+      ..._strokes,
+      EraseStroke(radius: _radius, points: points),
+    ]);
+  }
+
+  void _addCenterStamp(Size canvasSize) {
+    _startStroke(canvasSize.center(Offset.zero), canvasSize);
+    _finishStroke();
+  }
+
+  void _replaceStrokes(List<EraseStroke> next) {
+    setState(() {
+      _undoHistory.add(List.unmodifiable(_strokes));
+      _redoHistory.clear();
+      _strokes = List.of(next);
+      _activePoints = null;
+    });
+  }
+
+  void _undoStrokeChange() {
+    if (_undoHistory.isEmpty) return;
+    setState(() {
+      _redoHistory.add(List.unmodifiable(_strokes));
+      _strokes = List.of(_undoHistory.removeLast());
+      _activePoints = null;
+    });
+  }
+
+  void _redoStrokeChange() {
+    if (_redoHistory.isEmpty) return;
+    setState(() {
+      _undoHistory.add(List.unmodifiable(_strokes));
+      _strokes = List.of(_redoHistory.removeLast());
+      _activePoints = null;
+    });
+  }
+
+  NormalizedPoint _normalized(Offset position, Size size) =>
+      NormalizedPoint.checked(
+        (position.dx / size.width).clamp(0, 1),
+        (position.dy / size.height).clamp(0, 1),
+      );
+}
+
+class _EraseStrokePainter extends CustomPainter {
+  const _EraseStrokePainter({
+    required this.strokes,
+    required this.activePoints,
+    required this.activeRadius,
+  });
+
+  final List<EraseStroke> strokes;
+  final List<NormalizedPoint>? activePoints;
+  final double activeRadius;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (final stroke in strokes) {
+      _paintStroke(canvas, size, stroke.points, stroke.radius);
+    }
+    final active = activePoints;
+    if (active != null) _paintStroke(canvas, size, active, activeRadius);
+  }
+
+  void _paintStroke(
+    Canvas canvas,
+    Size size,
+    List<NormalizedPoint> points,
+    double radius,
+  ) {
+    final offsets = points
+        .map((point) => Offset(point.x * size.width, point.y * size.height))
+        .toList();
+    if (offsets.isEmpty) return;
+    final paint = Paint()
+      ..color = Colors.redAccent.withValues(alpha: 0.58)
+      ..strokeWidth = radius * min(size.width, size.height) * 2
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..style = PaintingStyle.stroke;
+    if (offsets.length == 1) {
+      canvas.drawCircle(
+        offsets.single,
+        paint.strokeWidth / 2,
+        paint..style = PaintingStyle.fill,
+      );
+      return;
+    }
+    final path = Path()..moveTo(offsets.first.dx, offsets.first.dy);
+    for (final point in offsets.skip(1)) {
+      path.lineTo(point.dx, point.dy);
+    }
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _EraseStrokePainter oldDelegate) =>
+      oldDelegate.strokes != strokes ||
+      oldDelegate.activePoints != activePoints ||
+      oldDelegate.activeRadius != activeRadius;
 }
 
 class _AdjustmentSlider extends StatelessWidget {

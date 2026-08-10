@@ -148,7 +148,7 @@ Dir.mktmpdir("portrait-review-plan-test-", quality_root) do |directory|
     "items" => [
       {
         "asset_id" => "portrait-001",
-        "tags" => %w[portrait_single improvable glasses],
+        "tags" => %w[portrait_single improvable glasses skin_tone_light],
         "capture_manifest" => manifest_path,
         "source" => {
           "version" => "raw-source-v1",
@@ -210,7 +210,14 @@ Dir.mktmpdir("portrait-review-plan-test-", quality_root) do |directory|
     {
       "id" => format("portrait-%03d", index + 1),
       "sha256" => index.zero? ? "a" * 64 : format("%064x", index + 1),
-      "tags" => index.zero? ? %w[portrait_single improvable glasses] : ["portrait_single"],
+      "tags" => [
+        "portrait_single",
+        ("improvable" if index.zero?),
+        ("glasses" if index.zero?),
+        ("skin_tone_light" if index < 2),
+        ("skin_tone_medium" if index >= 2 && index < 4),
+        ("skin_tone_deep" if index >= 4 && index < 6),
+      ].compact,
       "license" => {
         "internal_review_authorized" => true,
         "evidence_ref" => authorization_path.sub("#{repo_root}/", ""),
@@ -225,6 +232,11 @@ Dir.mktmpdir("portrait-review-plan-test-", quality_root) do |directory|
       "status" => "ready",
       "portrait_required_assets" => 48,
       "portrait_minimum_single_assets" => 36,
+      "portrait_minimum_skin_tone_counts" => {
+        "skin_tone_light" => 2,
+        "skin_tone_medium" => 2,
+        "skin_tone_deep" => 2,
+      },
       "portrait_roles" => %w[portrait_single portrait_multi no_face],
       "assets" => corpus_assets,
     ),

@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/infrastructure/method_channel_photo_exporter.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 
@@ -35,9 +36,15 @@ void main() {
       originalName: 'original.heic',
     );
 
-    final exported = await exporter.export(
+    final exported = await exporter.exportWithOptions(
       photo: photo,
       recipe: EditRecipe(exposure: 0.25),
+      options: PhotoExportOptions(
+        format: PhotoExportFormat.heif,
+        size: PhotoExportSize.longEdge,
+        longEdgePixels: 2048,
+        quality: PhotoExportQuality.standard,
+      ),
     );
 
     expect(receivedCall?.method, 'exportPhoto');
@@ -45,10 +52,19 @@ void main() {
     expect(arguments['sourcePath'], photo.localPath);
     expect(arguments.containsKey('imageBytes'), isFalse);
     final pipeline = arguments['pipeline']! as Map<Object?, Object?>;
-    expect(pipeline['schemaVersion'], 6);
+    expect(pipeline['schemaVersion'], 10);
+    expect(arguments['options'], {
+      'format': 'heif',
+      'size': 'longEdge',
+      'longEdgePixels': 2048,
+      'quality': 'standard',
+      'colorSpace': 'srgb',
+    });
     expect(pipeline['workingColorSpace'], 'srgb');
     expect(pipeline['portraitRecipeV2'], isA<Map<Object?, Object?>>());
     expect(pipeline['faceSlimRecipeV1'], isA<Map<Object?, Object?>>());
+    expect(pipeline['portraitGeometryRecipeV1'], isA<Map<Object?, Object?>>());
+    expect(pipeline['semanticEditingRecipeV2'], isA<Map<Object?, Object?>>());
     expect(
       pipeline['qualityEnhancementRecipeV1'],
       isA<Map<Object?, Object?>>(),

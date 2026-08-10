@@ -1,6 +1,6 @@
 # 映见 MVP Spec
 
-> 状态：ready-for-agent；版本：1.3；日期：2026-08-06；核心承诺：一张精修，整组好看；首发平台：iOS / TestFlight；本轮目标：先证明与醒图同任务可替代的六项人像核心能力，再验证“三套本地推荐 + 整组自适应 + 批量保真导出”的完整闭环。
+> 状态：ready-for-agent；版本：1.4；日期：2026-08-09；核心承诺：一张精修，整组好看；首发平台：iOS / TestFlight；本轮目标：交付无需借助其他应用即可完成构图、调色、滤镜、画质改善、自然人像精修、基础五官与身体塑形、简单局部处理和高质量导出的静态修图闭环，再验证“三套本地推荐 + 整组自适应 + 批量保真导出”。
 
 ## Problem Statement
 
@@ -18,7 +18,7 @@
 
 重点照片提供本地“画质改善”入口。它把去噪、暗光提亮、去灰和细节锐化的安全推荐值写入四个真实参数，用户可以独立调整、归零和撤销；首版只改善已有像素，不执行超分辨率、生成式细节重建或人脸生成修复。
 
-`一键自然美化`是一项把安全推荐值写入真实子参数的语义操作，不是第四层隐藏效果。它展开后明确显示 `质感磨皮`、`肤色与面部光线`、`瑕疵减弱`；项目只保存这三个非几何参数、最多三张脸各自独立的瘦脸强度、瘦身参数和算法版本。最多三张高置信度人脸可分别计算非几何安全强度和被用户逐脸选择塑形；瘦身仍只面向单个高置信度主体。所有几何参数默认值为 `0`，不由一键自然美化或三套推荐自动开启。整组共享审美风格，每张照片保留独立补偿和单张覆盖，最终从原图批量导出。
+`一键自然美化`是一项把安全推荐值写入真实子参数的语义操作，不是第四层隐藏效果。它展开后明确显示 `质感磨皮`、`肤色与面部光线`、`瑕疵减弱`；项目保存这三个非几何参数、最多三张脸各自独立的面部塑形参数、最多三个可用身体主体的独立塑形参数和算法版本。多人照片由用户显式选择目标；应用不做年龄或性别推断。所有几何参数默认值为 `0`，不由一键自然美化或三套推荐自动开启。整组共享审美风格，每张照片保留独立补偿和单张覆盖，最终从原图批量导出。
 
 默认闭环完全本地执行，不上传照片、不调用图片生成模型、不要求账号，也不依赖云端服务成功。
 
@@ -67,7 +67,7 @@
 4. 瑕疵减弱只处理高置信度、孤立、短期性的小范围痘印和色斑；无法区分痣、雀斑、皱纹、妆容或身份特征时必须跳过。
 5. 非几何能力支持最多三张高置信度成人脸，每张脸独立计算安全上限；低置信度对象独立关闭，不阻断其他人物、基础修图或导出。
 6. 用户可在最多三张可用人脸中逐脸选择并设置独立强度；非零瘦脸只收窄目标脸部轮廓，同时保护其他人脸、眼、鼻、嘴和背景；非零瘦身产生可见且单调的躯干宽度收窄，同时保护头部、四肢和背景。
-7. 前后对比、撤销/重做、归零、项目恢复、预览和原图导出保持五个持久化参数的独立语义；一键自然美化本身作为一次可撤销操作。
+7. 前后对比、撤销/重做、归零、项目恢复、预览和原图导出保持三个非几何参数以及逐脸、逐身体目标几何参数的独立语义；一键自然美化本身作为一次可撤销操作。
 8. 多主体、遮挡、低置信度或保护门失败时，对应塑形工具不可用，但非几何人像能力按脸独立判断，基础修图和导出始终不受阻。
 
 ### MVP 产品验证门
@@ -125,27 +125,40 @@ MVP_INTERACTION_REJECTABLE_STRUCTURES: web_tool_dashboard,poster_style_mobile,hi
 - 三套预览全部由本地配方产生，不创建云端生成任务。
 - 推荐只从声明过的参数和配方中选择，不执行任意脚本、着色器或自由参数。
 
-### P0.4 单张精修与基础人像塑形
+### P0.4 单张基础编辑
 
 - 提供曝光、高光、阴影、对比度、色温、色调、饱和度和清晰度/锐度等核心光色能力。
-- 提供裁剪、旋转、水平校正和恢复原始构图。
-- 提供滤镜/配方强度调整。
+- 提供自由裁剪、常用比例裁剪、旋转、水平/垂直翻转、水平校正、克制的水平/垂直透视矫正和恢复原始构图。
+- 提供至少 12 套结果可预览、强度可调、可归零的冻结滤镜；滤镜不是推荐方案的别名。
+- 提供红、橙、黄、绿、青、蓝、紫、洋红八个通道的色相、饱和度与明度调整；首版不要求曲线。
 - 提供画质改善结果入口，并展开为去噪、暗光提亮、去灰和细节锐化四个真实参数；四项均为 `0...100`，`0` 严格关闭，一键只写入可见参数且形成一次可撤销操作。
 - 去噪必须降低细碎亮度/色彩噪声但不过度抹平边缘；暗光提亮优先恢复暗部可读性并保护高光；去灰提高低对比画面的层次但不得明显压黑或过饱和；细节锐化只做克制边缘增强，不制造明显白边、黑边或噪声放大。
 - 四项效果必须由同一版本化本地管线执行，项目恢复、预览和原图导出保持相同参数语义；不适用或无法安全改善时允许保持原图，不阻断其他编辑或导出。
+
+### P0.5 人像精修与基础塑形
+
 - 有适用人脸时提供一键自然美化；它把安全推荐值写入质感磨皮、肤色与面部光线、瑕疵减弱三个真实参数，不形成隐藏处理层。
 - 三个非几何子能力均可独立调整、归零和撤销；所有用户参数显示为 `0...100`，`0` 严格关闭。具体推荐值和最高安全值由固定样片校准后冻结，不在实现前拍脑袋写死。
 - 质感磨皮、肤色与面部光线、瑕疵减弱支持最多三张高置信度人脸，按脸独立计算能力安全上限，但首版不为这三项非几何能力提供逐脸不同用户强度；应用不做年龄或性别推断。
 - 瑕疵减弱是 P0，不再是可选增强；首版只做自动、高置信度、保守减弱，不提供手动画笔或点按修复。
-- 最多三张高置信度人脸满足各自安全条件时，提供逐脸选择和独立强度；单个高置信度主体满足条件时提供躯干瘦身。默认值均为 0，不由三套推荐自动改变。
-- MVP 不提供大眼、鼻形、嘴形、下巴长度、头身比、局部身体部位或妆容重塑。
+- 最多三张高置信度人脸满足各自安全条件时，提供画面内逐脸选择和独立强度；每张目标脸提供瘦脸、小头、下颌、下巴、大眼、鼻形和嘴形的基础调整。默认值均为 0，不由三套推荐自动改变。
+- 对明确选择的主体提供整体瘦身、增高、肩、腰和腿部的基础塑形；多人照片必须先选择目标，不以“只支持单人”或年龄推断替代目标选择。
+- 所有几何塑形都必须使用人物/身体分割、关键点约束和背景保护；检测不到可靠目标时只关闭对应工具，不阻断其他编辑和导出。
+- 妆容、发型、发色和发量不属于本轮 P0。
 - 人像检测或引擎不可用时，稳定降级到基础光色与构图，不阻塞导出。
 - 所有参数具有合法范围、默认值、归零、前后对比和撤销语义。
 - 一次连续滑块手势只形成一个撤销步骤。
 
 六项核心能力中的任一项若不能独立通过冻结样片和同图竞品门，只能进入内部开发候选，不得宣布“竞品入场能力已对齐”，也不得以其他能力替代。
 
-### P0.5 整组一致性与单张覆盖
+### P0.6 简单局部与背景处理
+
+- 提供人物主体抠图，至少覆盖单人、多人和常见发丝边缘；结果以可撤销蒙版保存，不改写原图。
+- 提供背景虚化和纯色/用户图片替换；主体边缘、肤色和半透明区域不得产生明显黑白边。
+- 提供基于画笔蒙版的基础消除和局部光色调整；首版允许传统修复，不要求生成式补全复杂结构。
+- 局部工具必须提供画笔大小、擦除/恢复、蒙版可视化、撤销和重做；`0` 或空蒙版严格无效果。
+
+### P0.7 整组一致性与单张覆盖
 
 - 整组共享色彩倾向、对比关系、滤镜质感和全局强度。
 - 每张照片拥有独立曝光、白平衡、肤色保护和安全强度补偿。
@@ -156,7 +169,7 @@ MVP_INTERACTION_REJECTABLE_STRUCTURES: web_tool_dashboard,poster_style_mobile,hi
 - 用户可以恢复单张覆盖，而不破坏整组共享风格。
 - 逐张检查时清楚标记未处理、已覆盖、失败和待导出状态。
 
-### P0.6 原画质批量导出
+### P0.8 原画质批量导出
 
 - 从每张应用自有原图重新执行共享风格、逐张补偿和单张覆盖。
 - 不从 Flutter 预览、屏幕截图或重复压缩的中间 JPEG 导出。
@@ -164,11 +177,12 @@ MVP_INTERACTION_REJECTABLE_STRUCTURES: web_tool_dashboard,poster_style_mobile,hi
 - 显示逐张进度，允许取消尚未开始的项目。
 - 单张失败不回滚已经成功的照片，并提供明确的失败项重试。
 - 保持正确 EXIF 方向、长宽比和目标像素尺寸。
-- 首期明确支持 JPEG/sRGB；HEIF、Display P3 和元数据保留按基线决策决定是否启用，不得静默错误转换。
+- 用户可在 JPEG 与 HEIF 中选择格式，在原尺寸、常用长边尺寸中选择输出尺寸，并选择有语义的高/标准/节省空间质量档；默认 JPEG、原尺寸、高质量、sRGB。
+- Display P3 和完整元数据保留按基线决策决定是否启用，不得静默错误转换。
 - 原图永不覆盖。
 - 成功后可以调用系统分享，但不自动发布到外部平台。
 
-### P0.7 信任、隐私和可访问性
+### P0.9 信任、隐私和可访问性
 
 - 首次本地出片不要求登录。
 - 默认处理不上传照片。
@@ -332,10 +346,10 @@ empty
 - Natural portrait quality is a release gate, not a checkbox based on API availability.
 - The MVP core package is one-tap natural beautification, independently controllable texture-preserving smoothing, skin tone and face lighting, conservative automatic blemish reduction, explicit face slimming and explicit torso slimming.
 - One-tap natural beautification is a semantic command that writes the three non-geometric child parameters. It is not persisted or rendered as an additional hidden effect.
-- The project persists five actual portrait parameters plus declared analysis/effect versions: smoothing, skin-light correction, blemish reduction, face slimming and torso slimming. Every parameter uses user semantics `0...100`, and `0` strictly disables that effect.
-- Non-geometric processing supports up to three high-confidence faces with per-face safety caps and one photo-level user strength per parameter. Face slimming separately supports deterministic per-face selection and independent strengths for up to three eligible faces; the app does not infer age or sex.
+- The project persists three photo-level non-geometric parameters plus independent geometry targets: each face stores face slimming, head size, jaw, chin, eyes, nose and mouth; each body stores overall slimming, height, shoulders, waist and legs. It also persists declared analysis/effect versions and selected target indices. Unsigned parameters use `0...100`; bidirectional parameters use `-100...100`; `0` strictly disables that effect.
+- Non-geometric processing supports up to three high-confidence faces with per-face safety caps and one photo-level user strength per parameter. Geometry supports deterministic per-target selection and independent values for up to three eligible faces and three eligible bodies; the app does not infer age or sex.
 - Face/body geometry defaults to zero, remains outside automatic recommendations, and is exposed only when landmark, segmentation and background-safety gates pass.
-- Eye, nose, mouth, chin-length, head/body-ratio, localized body-part reshaping, beautification presets and makeup are excluded.
+- Freehand liquify, posture generation, muscle/chest/hip reshaping, beautification presets and makeup are excluded. The bounded landmark- and mask-constrained face/body controls listed in P0.5 remain in scope.
 - Apple system capabilities, self-built processing and license-compatible open on-device models are evaluated first. A commercial candidate is only a fallback when the same fixed corpus proves that these candidates cannot reach the frozen quality floor.
 - Failure or license unavailability degrades to base editing and never prevents project access or export.
 - Natural skin/light/texture quality is governed by [Natural Portrait Retouch Vertical Slice Spec](natural-portrait-retouch-vertical-slice-spec.md); face/body geometry, applicability and protection gates are governed separately by [Portrait Reshape Vertical Slice Spec](portrait-reshape-vertical-slice-spec.md). Each capability must freeze its own candidate before product integration.
@@ -463,7 +477,7 @@ Target users complete the primary journey without coaching. Observe whether they
 - Text, fonts, stickers, templates, collages and creator marketplaces.
 - Manual brushes, complex local masks, layers, curves, channels and RAW workflows.
 - Super-resolution, generative detail reconstruction, model-based face restoration and severe motion-deblur recovery; bounded local denoise, low-light recovery, dehaze and detail sharpening remain in scope.
-- Advanced facial-feature reshaping, localized body-part editing and makeup; the bounded face/torso slimming defined by the portrait-reshape vertical slice remains in scope.
+- Freehand or generative facial/body reshaping, posture generation, muscle/chest/hip editing and makeup; the bounded landmark- and mask-constrained controls defined by the portrait-reshape vertical slice remain in scope.
 - Teeth or eye-white brightening, dedicated eye-bag/nasolabial removal, child-specific portrait effects, and manual blemish/healing brushes.
 - Automatic social publishing, community and content feeds.
 - Store submission, test distribution and public release.
@@ -481,7 +495,7 @@ Target users complete the primary journey without coaching. Observe whether they
 3. Prove the Flutter-to-native preview/export vertical slice on iOS; retain the Android adapter as deferred, non-blocking work.
 4. Prove the multi-face non-geometric protection Spike and the conservative blemish-reduction Spike before changing production portrait UI or recipes.
 5. Freeze texture smoothing, skin-light correction and blemish reduction as three independently controllable effects, then define one-tap natural beautification as a semantic recipe operation over them.
-6. Prove explicit face slimming and torso slimming separately, including landmark/pose/segmentation applicability and background-protection gates.
+6. Prove the bounded face and body geometry controls separately, including target selection, landmark/pose/segmentation applicability and background-protection gates; the face-slim and overall-body-slim headline abilities retain their separate competitor gates.
 7. Run the six same-image competitor gates and freeze only candidates that meet their own result contract.
 8. Implement the single-photo base editor on the proven rendering path.
 9. Add deterministic analysis and three local recommendations.
@@ -500,7 +514,7 @@ Pause product implementation and revisit the corresponding decision if:
 - no portrait candidate reaches the naturalness floor within acceptable license and privacy constraints;
 - multi-face protection cannot independently close low-confidence faces, or blemish reduction cannot distinguish temporary blemishes from identity details at a useful strength;
 - any of the six core portrait abilities fails its own same-image competitor gate; another ability's score cannot waive this stop condition;
-- face slimming or torso slimming cannot meet the frozen feature/body/background protection gates at a visibly useful strength;
+- any P0 face or body geometry control cannot meet its frozen feature/body/background protection gate at a visibly useful strength;
 - users repeatedly mistake group and single-photo scope;
 - three recommendations do not reduce decision effort in uncoached testing;
 - group adaptation performs no better than applying one absolute preset to every photo.

@@ -14,14 +14,16 @@ class NativePhotoPreview extends StatefulWidget {
     required this.renderer,
     required this.errorBuilder,
     this.retryToken = 0,
+    this.maxEdge = 2048,
     super.key,
-  });
+  }) : assert(maxEdge > 0 && maxEdge <= 2048);
 
   final String sourcePath;
   final EditRecipe recipe;
   final PhotoPreviewRenderer renderer;
   final WidgetBuilder errorBuilder;
   final int retryToken;
+  final int maxEdge;
 
   @override
   State<NativePhotoPreview> createState() => _NativePhotoPreviewState();
@@ -81,6 +83,7 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.retryToken != widget.retryToken ||
         oldWidget.sourcePath != widget.sourcePath ||
+        oldWidget.maxEdge != widget.maxEdge ||
         !identical(oldWidget.renderer, widget.renderer)) {
       unawaited(_replacePreview());
       return;
@@ -122,6 +125,7 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
       final handle = await widget.renderer.create(
         sourcePath: widget.sourcePath,
         pipeline: imagePipelineForCurrentPlatform(initialRecipe),
+        maxEdge: widget.maxEdge,
       );
       if (!mounted || generation != _generation) {
         await _safeDispose(handle);

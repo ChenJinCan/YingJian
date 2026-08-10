@@ -5,6 +5,12 @@ module PortraitEngineeringCorpus
 
   REQUIRED_ASSET_COUNT = 48
   MINIMUM_SINGLE_PORTRAIT_COUNT = 36
+  SKIN_TONE_TAGS = %w[skin_tone_light skin_tone_medium skin_tone_deep].freeze
+  MINIMUM_SKIN_TONE_COUNTS = {
+    "skin_tone_light" => 2,
+    "skin_tone_medium" => 2,
+    "skin_tone_deep" => 2,
+  }.freeze
   PORTRAIT_ROLES = %w[portrait_single portrait_multi no_face].freeze
   SUPPLEMENTAL_TAG = "portrait_engineering_supplemental"
   EFFECT_METRIC_VERSION = "whole-frame-srgb-rgba8-v1"
@@ -54,6 +60,10 @@ module PortraitEngineeringCorpus
       raise ContractError,
             "portrait_minimum_single_assets must equal #{MINIMUM_SINGLE_PORTRAIT_COUNT}"
     end
+    unless manifest["portrait_minimum_skin_tone_counts"] == MINIMUM_SKIN_TONE_COUNTS
+      raise ContractError,
+            "portrait_minimum_skin_tone_counts must equal #{MINIMUM_SKIN_TONE_COUNTS}"
+    end
     unless manifest["portrait_roles"] == PORTRAIT_ROLES
       raise ContractError, "portrait_roles must equal #{PORTRAIT_ROLES.join(", ")}"
     end
@@ -63,6 +73,7 @@ module PortraitEngineeringCorpus
     end
 
     single_portrait_count = 0
+    skin_tone_counts = SKIN_TONE_TAGS.to_h { |tag| [tag, 0] }
     assets.each_with_index do |asset, index|
       unless asset.is_a?(Hash)
         raise ContractError, "assets[#{index}] must be a mapping"
@@ -77,12 +88,27 @@ module PortraitEngineeringCorpus
         raise ContractError, "#{asset_id} must declare exactly one portrait role"
       end
       single_portrait_count += 1 if roles.first == "portrait_single"
+      skin_tones = tags & SKIN_TONE_TAGS
+      if skin_tones.length > 1
+        asset_id = asset["id"] || "assets[#{index}]"
+        raise ContractError, "#{asset_id} must declare at most one skin tone range"
+      end
+      if skin_tones.any? && roles.first != "portrait_single"
+        asset_id = asset["id"] || "assets[#{index}]"
+        raise ContractError, "#{asset_id} skin tone range requires portrait_single"
+      end
+      skin_tone_counts[skin_tones.first] += 1 if skin_tones.any?
     end
 
-    return if single_portrait_count >= MINIMUM_SINGLE_PORTRAIT_COUNT
+    if single_portrait_count < MINIMUM_SINGLE_PORTRAIT_COUNT
+      raise ContractError,
+            "manifest must contain at least #{MINIMUM_SINGLE_PORTRAIT_COUNT} portrait_single assets"
+    end
+    MINIMUM_SKIN_TONE_COUNTS.each do |tag, minimum|
+      next if skin_tone_counts.fetch(tag) >= minimum
 
-    raise ContractError,
-          "manifest must contain at least #{MINIMUM_SINGLE_PORTRAIT_COUNT} portrait_single assets"
+      raise ContractError, "manifest must contain at least #{minimum} #{tag} assets"
+    end
   end
 
   def engineering_assets(manifest)

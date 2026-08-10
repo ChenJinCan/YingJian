@@ -96,6 +96,19 @@ class PhotoProjectSession extends ChangeNotifier {
   bool get canUndo => _project?.undoHistory.isNotEmpty ?? false;
   bool get canRedo => _project?.redoHistory.isNotEmpty ?? false;
   bool get canEdit => _project?.flowState == PhotoProjectFlowState.editing;
+  bool get canResetScopedEdit {
+    final current = _project;
+    if (current == null || current.flowState != PhotoProjectFlowState.editing) {
+      return false;
+    }
+    if (current.editingScope == ProjectEditingScope.group) {
+      return current.sharedStyle.recipe != EditRecipe.neutral ||
+          current.sharedStyle.intensity != 1;
+    }
+    final photoId = current.focusPhotoId ?? current.photos.first.id;
+    return current.photoOverrides.containsKey(photoId);
+  }
+
   bool get canSyncCurrentPhotoAdjustmentsToGroup {
     final current = _project;
     if (current == null ||
@@ -376,6 +389,59 @@ class PhotoProjectSession extends ChangeNotifier {
     await _saveAndPublish(next);
   }
 
+  Future<void> resetScopedEdit() async {
+    final current = _project;
+    if (current == null) {
+      throw StateError('A project is required before resetting an edit');
+    }
+    if (current.flowState != PhotoProjectFlowState.editing) {
+      throw StateError('Edits can only be reset while editing');
+    }
+    if (current.editingScope == ProjectEditingScope.group) {
+      if (!canResetScopedEdit) return;
+      final operation = ProjectEditOperation(
+        scope: ProjectEditingScope.group,
+        beforeRecipe: current.sharedStyle.recipe,
+        afterRecipe: EditRecipe.neutral,
+        beforeSharedIntensity: current.sharedStyle.intensity,
+        afterSharedIntensity: 1,
+      );
+      final next = _applyOperation(
+        current,
+        operation,
+        operation.afterRecipe,
+        sharedIntensity: operation.afterSharedIntensity,
+        undoHistory: [...current.undoHistory, operation],
+        redoHistory: const [],
+      );
+      await _saveAndPublish(next);
+      return;
+    }
+    final photoId = current.focusPhotoId ?? current.photos.first.id;
+    final override = current.photoOverrides[photoId]?.recipe;
+    if (override == null) return;
+    final baseline = _photoOverrideBaseline(current, photoId);
+    final operation = ProjectEditOperation(
+      kind: ProjectEditOperationKind.resetCurrentPhotoOverride,
+      scope: ProjectEditingScope.currentPhoto,
+      photoId: photoId,
+      beforeRecipe: override,
+      afterRecipe: baseline,
+      beforeSharedIntensity: current.sharedStyle.intensity,
+      afterSharedIntensity: current.sharedStyle.intensity,
+      beforePhotoOverrideRecipe: override,
+    );
+    final next = _applyOperation(
+      current,
+      operation,
+      baseline,
+      sharedIntensity: current.sharedStyle.intensity,
+      undoHistory: [...current.undoHistory, operation],
+      redoHistory: const [],
+    );
+    await _saveAndPublish(next);
+  }
+
   Future<void> syncCurrentPhotoAdjustmentsToGroup() async {
     final current = _project;
     if (current == null) {
@@ -619,11 +685,27 @@ class PhotoProjectSession extends ChangeNotifier {
     if (operation.kind == ProjectEditOperationKind.syncCurrentPhotoToGroup) {
       final photoId = operation.photoId!;
       final overrides = Map.of(current.photoOverrides);
+      final nextSharedStyle = SharedStyle(
+        recipe: recipe,
+        family: current.sharedStyle.family,
+        intensity: sharedIntensity,
+      );
+      final projectWithNextSharedStyle = current.copyWith(
+        sharedStyle: nextSharedStyle,
+      );
       if (syncedPhotoOverride == null ||
-          _canRemovePhotoOverride(current, photoId, syncedPhotoOverride)) {
+          _canRemovePhotoOverride(
+            projectWithNextSharedStyle,
+            photoId,
+            syncedPhotoOverride,
+          )) {
         overrides.remove(photoId);
       } else {
-        overrides[photoId] = PhotoOverride(recipe: syncedPhotoOverride);
+        overrides[photoId] = _photoOverrideFor(
+          projectWithNextSharedStyle,
+          photoId,
+          syncedPhotoOverride,
+        );
       }
       for (final photo in current.photos) {
         exportStates[photo.id] = PhotoExportState.notQueued;
@@ -632,11 +714,30 @@ class PhotoProjectSession extends ChangeNotifier {
         updatedAt: _now(),
         editingScope: ProjectEditingScope.currentPhoto,
         focusPhotoId: photoId,
-        sharedStyle: SharedStyle(
-          recipe: recipe,
-          family: current.sharedStyle.family,
-          intensity: sharedIntensity,
-        ),
+        sharedStyle: nextSharedStyle,
+        photoOverrides: overrides,
+        exportStates: exportStates,
+        undoHistory: undoHistory,
+        redoHistory: redoHistory,
+      );
+    }
+    if (operation.kind == ProjectEditOperationKind.resetCurrentPhotoOverride) {
+      final photoId = operation.photoId!;
+      final overrides = Map.of(current.photoOverrides);
+      if (syncedPhotoOverride == null) {
+        overrides.remove(photoId);
+      } else {
+        overrides[photoId] = _photoOverrideFor(
+          current,
+          photoId,
+          syncedPhotoOverride,
+        );
+      }
+      exportStates[photoId] = PhotoExportState.notQueued;
+      return current.copyWith(
+        updatedAt: _now(),
+        editingScope: ProjectEditingScope.currentPhoto,
+        focusPhotoId: photoId,
         photoOverrides: overrides,
         exportStates: exportStates,
         undoHistory: undoHistory,
@@ -666,7 +767,7 @@ class PhotoProjectSession extends ChangeNotifier {
     if (_canRemovePhotoOverride(current, photoId, recipe)) {
       overrides.remove(photoId);
     } else {
-      overrides[photoId] = PhotoOverride(recipe: recipe);
+      overrides[photoId] = _photoOverrideFor(current, photoId, recipe);
     }
     exportStates[photoId] = PhotoExportState.notQueued;
     return current.copyWith(
@@ -689,19 +790,37 @@ class PhotoProjectSession extends ChangeNotifier {
   EditRecipe _editablePhotoRecipe(PhotoProject project, String photoId) {
     final stored = project.photoOverrides[photoId]?.recipe;
     if (stored != null) return stored;
-    return EditRecipe(
-      portraitRecipe: project.adaptiveCompensations[photoId]?.portraitRecipe,
-    );
+    return _photoOverrideBaseline(project, photoId);
+  }
+
+  EditRecipe _photoOverrideBaseline(PhotoProject project, String photoId) {
+    return project.photoOverrideBaselineFor(photoId);
   }
 
   bool _canRemovePhotoOverride(
     PhotoProject project,
     String photoId,
     EditRecipe recipe,
-  ) =>
-      recipe == EditRecipe.neutral &&
-      (project.adaptiveCompensations[photoId]?.portraitRecipe.isNeutral ??
-          true);
+  ) => recipe == project.photoOverrideBaselineFor(photoId);
+
+  PhotoOverride _photoOverrideFor(
+    PhotoProject project,
+    String photoId,
+    EditRecipe recipe,
+  ) {
+    final baseline = project.photoOverrideBaselineFor(photoId);
+    return PhotoOverride(
+      recipe: recipe,
+      overridesBasicLook: !_sameBasicLook(recipe, baseline),
+      overridesCrop: recipe.crop != baseline.crop,
+    );
+  }
+
+  bool _sameBasicLook(EditRecipe first, EditRecipe second) =>
+      first.basicEditingRecipe.filter == second.basicEditingRecipe.filter &&
+      first.basicEditingRecipe.filterStrength ==
+          second.basicEditingRecipe.filterStrength &&
+      mapEquals(first.basicEditingRecipe.hsl, second.basicEditingRecipe.hsl);
 
   PhotoProject _requirePhoto(String photoId) {
     final current = _project;

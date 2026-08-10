@@ -390,7 +390,7 @@ final class LocalRecommendationEngine {
           ? 1
           : 0,
       portraitRecipe: analysis.portrait == PortraitApplicability.applicable
-          ? PortraitRetouchRecipe(textureSmoothing: 35, skinToneLighting: 35)
+          ? PortraitRetouchRecipe.naturalBeautificationRecommended
           : PortraitRetouchRecipe.neutral,
     );
   }

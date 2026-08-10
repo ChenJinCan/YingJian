@@ -24,7 +24,7 @@ final class MethodChannelPhotoAnalyzer implements PhotoAnalyzer {
       nativeCapabilityVersion ??
       (Platform.isAndroid
           ? 'android-bitmap-face-v1'
-          : 'ios-core-image-vision-v12-multiface-slim');
+          : 'ios-core-image-vision-v14-target-regions');
 
   @override
   PhotoAnalysisEngineIdentity identityFor(ProjectPhoto photo) {
@@ -52,6 +52,22 @@ final class MethodChannelPhotoAnalyzer implements PhotoAnalyzer {
         {'sourcePath': photo.localPath},
       );
       if (raw == null) return fallback.analyze(photo);
+      final faceSlimTargetCount = raw['faceSlimTargetCount'] == null
+          ? null
+          : _boundedTargetCount(raw['faceSlimTargetCount']);
+      final faceTargetRegions = _targetRegions(raw['faceTargetRegions']);
+      final bodyTargetCount = raw['bodyTargetCount'] == null
+          ? null
+          : _boundedTargetCount(raw['bodyTargetCount']);
+      final bodyTargetRegions = _targetRegions(raw['bodyTargetRegions']);
+      if ((faceTargetRegions.isNotEmpty &&
+              faceTargetRegions.length != faceSlimTargetCount) ||
+          (bodyTargetRegions.isNotEmpty &&
+              bodyTargetRegions.length != bodyTargetCount)) {
+        throw const FormatException(
+          'Portrait target regions do not match count',
+        );
+      }
       final analysis = LocalPhotoAnalysis(
         analysisVersion: _requiredString(raw, 'analysisVersion'),
         capabilityVersion: _requiredString(raw, 'capabilityVersion'),
@@ -76,12 +92,13 @@ final class MethodChannelPhotoAnalyzer implements PhotoAnalyzer {
         faceSlimReason: raw['faceSlimReason'] == null
             ? null
             : _enum(raw['faceSlimReason'], PortraitDegradationReason.values),
-        faceSlimTargetCount: raw['faceSlimTargetCount'] == null
-            ? null
-            : _boundedTargetCount(raw['faceSlimTargetCount']),
+        faceSlimTargetCount: faceSlimTargetCount,
+        faceTargetRegions: faceTargetRegions,
         body: raw['body'] == null
             ? PortraitApplicability.unavailable
             : _enum(raw['body'], PortraitApplicability.values),
+        bodyTargetCount: bodyTargetCount,
+        bodyTargetRegions: bodyTargetRegions,
         scene: _enum(raw['scene'], SceneKind.values),
       );
       return analysis.matchesInput(photo) &&
@@ -114,5 +131,22 @@ final class MethodChannelPhotoAnalyzer implements PhotoAnalyzer {
       throw const FormatException('Invalid face slim target count');
     }
     return raw.toInt();
+  }
+
+  List<NormalizedTargetRegion> _targetRegions(Object? raw) {
+    if (raw == null) return const [];
+    if (raw is! List || raw.length > 3) {
+      throw const FormatException('Invalid portrait target regions');
+    }
+    return List.unmodifiable(
+      raw.map((value) {
+        if (value is! Map) {
+          throw const FormatException('Invalid portrait target region');
+        }
+        return NormalizedTargetRegion.fromJson(
+          Map<String, Object?>.from(value),
+        );
+      }),
+    );
   }
 }

@@ -37,6 +37,65 @@ enum PortraitDegradationReason {
 enum SceneKind { unknown, people, landscape, food, night }
 
 @immutable
+class NormalizedTargetRegion {
+  const NormalizedTargetRegion({
+    required this.left,
+    required this.top,
+    required this.right,
+    required this.bottom,
+  }) : assert(left >= 0 && left <= 1),
+       assert(top >= 0 && top <= 1),
+       assert(right >= 0 && right <= 1),
+       assert(bottom >= 0 && bottom <= 1),
+       assert(right > left),
+       assert(bottom > top);
+
+  final double left;
+  final double top;
+  final double right;
+  final double bottom;
+
+  Map<String, double> toJson() => {
+    'left': left,
+    'top': top,
+    'right': right,
+    'bottom': bottom,
+  };
+
+  factory NormalizedTargetRegion.fromJson(Map<String, Object?> json) {
+    double coordinate(String key) {
+      final value = json[key];
+      if (value is! num || !value.isFinite || value < 0 || value > 1) {
+        throw FormatException('Invalid normalized target coordinate $key');
+      }
+      return value.toDouble();
+    }
+
+    final region = NormalizedTargetRegion(
+      left: coordinate('left'),
+      top: coordinate('top'),
+      right: coordinate('right'),
+      bottom: coordinate('bottom'),
+    );
+    if (region.right <= region.left || region.bottom <= region.top) {
+      throw const FormatException('Invalid normalized target region');
+    }
+    return region;
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is NormalizedTargetRegion &&
+      other.left == left &&
+      other.top == top &&
+      other.right == right &&
+      other.bottom == bottom;
+
+  @override
+  int get hashCode => Object.hash(left, top, right, bottom);
+}
+
+@immutable
 class PhotoAnalysisEngineIdentity {
   const PhotoAnalysisEngineIdentity({
     required this.analysisVersion,
@@ -72,11 +131,18 @@ class LocalPhotoAnalysis {
     PortraitApplicability? faceSlim,
     PortraitDegradationReason? faceSlimReason,
     int? faceSlimTargetCount,
+    this.faceTargetRegions = const [],
     this.body = PortraitApplicability.unavailable,
+    int? bodyTargetCount,
+    this.bodyTargetRegions = const [],
     this.scene = SceneKind.unknown,
   }) : assert(
          faceSlimTargetCount == null ||
              (faceSlimTargetCount >= 0 && faceSlimTargetCount <= 3),
+       ),
+       assert(
+         bodyTargetCount == null ||
+             (bodyTargetCount >= 0 && bodyTargetCount <= 3),
        ),
        portrait = portrait,
        portraitReason = portraitReason,
@@ -84,7 +150,10 @@ class LocalPhotoAnalysis {
        faceSlimReason = faceSlimReason ?? portraitReason,
        faceSlimTargetCount =
            faceSlimTargetCount ??
-           ((faceSlim ?? portrait) == PortraitApplicability.applicable ? 1 : 0);
+           ((faceSlim ?? portrait) == PortraitApplicability.applicable ? 1 : 0),
+       bodyTargetCount =
+           bodyTargetCount ??
+           (body == PortraitApplicability.applicable ? 1 : 0);
 
   final String analysisVersion;
   final String capabilityVersion;
@@ -104,7 +173,10 @@ class LocalPhotoAnalysis {
   final PortraitApplicability faceSlim;
   final PortraitDegradationReason faceSlimReason;
   final int faceSlimTargetCount;
+  final List<NormalizedTargetRegion> faceTargetRegions;
   final PortraitApplicability body;
+  final int bodyTargetCount;
+  final List<NormalizedTargetRegion> bodyTargetRegions;
   final SceneKind scene;
 
   String get cacheIdentity => [
@@ -139,7 +211,14 @@ class LocalPhotoAnalysis {
     'faceSlim': faceSlim.name,
     'faceSlimReason': faceSlimReason.name,
     'faceSlimTargetCount': faceSlimTargetCount,
+    'faceTargetRegions': faceTargetRegions
+        .map((region) => region.toJson())
+        .toList(growable: false),
     'body': body.name,
+    'bodyTargetCount': bodyTargetCount,
+    'bodyTargetRegions': bodyTargetRegions
+        .map((region) => region.toJson())
+        .toList(growable: false),
     'scene': scene.name,
   };
 
@@ -167,6 +246,42 @@ class LocalPhotoAnalysis {
             faceSlimTargetCount < 0 ||
             faceSlimTargetCount > 3)) {
       throw const FormatException('Invalid faceSlimTargetCount');
+    }
+    final bodyTargetCount = json['bodyTargetCount'];
+    if (bodyTargetCount != null &&
+        (bodyTargetCount is! num ||
+            bodyTargetCount.toInt() != bodyTargetCount ||
+            bodyTargetCount < 0 ||
+            bodyTargetCount > 3)) {
+      throw const FormatException('Invalid bodyTargetCount');
+    }
+    List<NormalizedTargetRegion> regions(String key) {
+      final raw = json[key];
+      if (raw == null) return const [];
+      if (raw is! List || raw.length > 3) {
+        throw FormatException('Invalid $key');
+      }
+      return List.unmodifiable(
+        raw.map((value) {
+          if (value is! Map) throw FormatException('Invalid $key entry');
+          return NormalizedTargetRegion.fromJson(
+            Map<String, Object?>.from(value),
+          );
+        }),
+      );
+    }
+
+    final faceTargetRegions = regions('faceTargetRegions');
+    final bodyTargetRegions = regions('bodyTargetRegions');
+    if (faceTargetRegions.isNotEmpty &&
+        faceSlimTargetCount != null &&
+        faceTargetRegions.length != (faceSlimTargetCount as num).toInt()) {
+      throw const FormatException('Face target regions do not match count');
+    }
+    if (bodyTargetRegions.isNotEmpty &&
+        bodyTargetCount != null &&
+        bodyTargetRegions.length != (bodyTargetCount as num).toInt()) {
+      throw const FormatException('Body target regions do not match count');
     }
     return LocalPhotoAnalysis(
       analysisVersion: requiredString('analysisVersion'),
@@ -198,9 +313,14 @@ class LocalPhotoAnalysis {
       faceSlimTargetCount: faceSlimTargetCount == null
           ? null
           : (faceSlimTargetCount as num).toInt(),
+      faceTargetRegions: faceTargetRegions,
       body: json['body'] == null
           ? PortraitApplicability.unavailable
           : enumValue('body', PortraitApplicability.values),
+      bodyTargetCount: bodyTargetCount == null
+          ? null
+          : (bodyTargetCount as num).toInt(),
+      bodyTargetRegions: bodyTargetRegions,
       scene: enumValue('scene', SceneKind.values),
     );
   }
@@ -239,11 +359,14 @@ class LocalPhotoAnalysis {
       other.faceSlim == faceSlim &&
       other.faceSlimReason == faceSlimReason &&
       other.faceSlimTargetCount == faceSlimTargetCount &&
+      listEquals(other.faceTargetRegions, faceTargetRegions) &&
       other.body == body &&
+      other.bodyTargetCount == bodyTargetCount &&
+      listEquals(other.bodyTargetRegions, bodyTargetRegions) &&
       other.scene == scene;
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     analysisVersion,
     capabilityVersion,
     contentSha256,
@@ -262,9 +385,12 @@ class LocalPhotoAnalysis {
     faceSlim,
     faceSlimReason,
     faceSlimTargetCount,
+    Object.hashAll(faceTargetRegions),
     body,
+    bodyTargetCount,
+    Object.hashAll(bodyTargetRegions),
     scene,
-  );
+  ]);
 }
 
 abstract interface class PhotoAnalyzer {
