@@ -12,8 +12,8 @@ void main() {
         PortraitRetouchRecipe.naturalBeautificationProfileVersion,
         isNotEmpty,
       );
-      expect(profile.textureSmoothing, 45);
-      expect(profile.skinToneLighting, 40);
+      expect(profile.textureSmoothing, 50);
+      expect(profile.skinToneLighting, 50);
       expect(profile.blemishReduction, 20);
       expect(profile.faceSlimming, 0);
       expect(profile.torsoSlimming, 0);

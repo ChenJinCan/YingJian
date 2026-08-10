@@ -1581,8 +1581,8 @@ void main() {
       var portraitRecipe = store.project!
           .effectiveRecipeFor(photo.id)
           .portraitRecipe;
-      expect(portraitRecipe.textureSmoothing, 45);
-      expect(portraitRecipe.skinToneLighting, 40);
+      expect(portraitRecipe.textureSmoothing, 50);
+      expect(portraitRecipe.skinToneLighting, 50);
       expect(portraitRecipe.blemishReduction, 20);
 
       await tester.tap(faceSlimTab);
@@ -1730,7 +1730,7 @@ void main() {
       );
       final recipe = store.project!.effectiveRecipeFor('portrait-photo');
       expect(recipe.portraitStrength, 0);
-      expect(recipe.portraitRecipe.textureSmoothing, 45);
+      expect(recipe.portraitRecipe.textureSmoothing, 50);
       expect(find.text('选择人像'), findsNothing);
 
       await tester.tap(find.text('撤销'));
@@ -1781,7 +1781,7 @@ void main() {
             .effectiveRecipeFor(photo.id)
             .portraitRecipe
             .textureSmoothing,
-        45,
+        50,
       );
       await tester.tap(find.text('撤销'));
       await tester.pumpAndSettle();

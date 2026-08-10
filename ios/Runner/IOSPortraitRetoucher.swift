@@ -249,7 +249,11 @@ struct IOSPortraitMasks {
 /// Landmark-derived local deformation area. The mapping is inverse: every
 /// destination pixel asks for a source coordinate, avoiding holes or seams.
 struct IOSFaceSlimGeometry: Equatable {
-  static let maximumShiftRatio: CGFloat = 0.24
+  // CainCamera calibrates lower-face shave at 0.12 and upper-face lift at
+  // 0.05. Keeping both values avoids the uniform squeeze produced by the
+  // earlier generic warp.
+  static let lowerFaceShiftRatio: CGFloat = 0.12
+  static let upperFaceShiftRatio: CGFloat = 0.05
 
   let centerX: CGFloat
   let halfWidth: CGFloat
@@ -274,7 +278,10 @@ struct IOSFaceSlimGeometry: Equatable {
       * (1 - smoothstep(0.78, 1, normalizedX))
     let verticalGate = smoothstep(lowerY, lowerY + verticalSpan * 0.2, destination.y)
       * (1 - smoothstep(upperY - verticalSpan * 0.2, upperY, destination.y))
-    let shift = (destination.x - centerX) * bounded * Self.maximumShiftRatio
+    let verticalPosition = max(0, min(1, (destination.y - lowerY) / verticalSpan))
+    let shiftRatio = Self.lowerFaceShiftRatio
+      + (Self.upperFaceShiftRatio - Self.lowerFaceShiftRatio) * verticalPosition
+    let shift = (destination.x - centerX) * bounded * shiftRatio
       * horizontalGate * verticalGate
     return CGPoint(x: destination.x + shift, y: destination.y)
   }
@@ -645,9 +652,71 @@ enum IOSBlemishReductionCandidate {
 /// remain inside this native boundary and never cross the Flutter channel.
 enum IOSPortraitRetoucher {
   static let candidateKind = "vision-landmarks-geometry-roi"
-  static let effectVersion = "ios-metal-warp-retouch-candidate-v10"
+  static let effectVersion = "ios-metal-warp-retouch-candidate-v12"
   static let analysisMaxEdge: CGFloat = 768
   private static let context = CIContext(options: [.cacheIntermediates: false])
+  /// GPUPixel's mature beauty blend expressed as a Core Image stitchable
+  /// kernel. Its fixed radius/delta/theta calibration is intentionally kept
+  /// inside the native renderer so the existing recipe remains vendor-free.
+  private static let textureSmoothingKernel: CIColorKernel? = {
+    let source = """
+    #include <CoreImage/CoreImage.h>
+    using namespace metal;
+
+    [[stitchable]] half4 textureSmoothingBlend(
+      coreimage::sample_h original,
+      coreimage::sample_h mean,
+      float blurAlpha
+    ) {
+      half3 difference = (original.rgb - mean.rgb) * half(7.07);
+      half3 variance = min(difference * difference, half3(1.0));
+      half meanVariance = (variance.r + variance.g + variance.b) / half(3.0);
+      half skinSupport = clamp(
+        (min(original.r, mean.r - half(0.1)) - half(0.2)) * half(4.0),
+        half(0.0),
+        half(1.0)
+      );
+      half theta = half(0.1);
+      half smoothing = (half(1.0) - meanVariance / (meanVariance + theta))
+        * skinSupport * half(blurAlpha);
+      half3 result = mix(original.rgb, mean.rgb, clamp(smoothing, half(0.0), half(1.0)));
+      return half4(result, original.a);
+    }
+    """
+    return try? CIKernel.kernels(withMetalString: source)
+      .first(where: { $0.name == "textureSmoothingBlend" }) as? CIColorKernel
+  }()
+  /// CainCamera's complexion black/range levels, with a bounded midtone lift
+  /// in place of its bundled LUT. The published calibration is preserved in
+  /// gamma-encoded sRGB so black and highlight anchors remain stable.
+  private static let complexionLevelsKernel: CIColorKernel? = {
+    let source = """
+    #include <CoreImage/CoreImage.h>
+    using namespace metal;
+
+    [[stitchable]] half4 complexionLevels(
+      coreimage::sample_h original,
+      float strength
+    ) {
+      half levelBlack = half(0.01960784);
+      half levelRangeInv = half(1.040816);
+      half3 leveled = clamp(
+        (original.rgb - half3(levelBlack)) * levelRangeInv,
+        half3(0.0),
+        half3(1.0)
+      );
+      half luma = dot(leveled, half3(0.2126, 0.7152, 0.0722));
+      half midtoneGate = smoothstep(half(0.02), half(0.18), luma)
+        * (half(1.0) - smoothstep(half(0.72), half(1.0), luma));
+      half3 relit = leveled + (half3(1.0) - leveled)
+        * half(0.08 * strength) * midtoneGate;
+      half3 result = mix(original.rgb, relit, half(strength));
+      return half4(clamp(result, half3(0.0), half3(1.0)), original.a);
+    }
+    """
+    return try? CIKernel.kernels(withMetalString: source)
+      .first(where: { $0.name == "complexionLevels" }) as? CIColorKernel
+  }()
   private static let localSlimWarpKernel: CIWarpKernel? = {
     let source = """
     #include <CoreImage/CoreImage.h>
@@ -656,7 +725,7 @@ enum IOSPortraitRetoucher {
     [[stitchable]] float2 localSlimWarp(
       float4 region,
       float strength,
-      float shiftRatio,
+      float2 shiftRatios,
       coreimage::destination destinationPixel
     ) {
       float2 destination = destinationPixel.coord();
@@ -670,6 +739,8 @@ enum IOSPortraitRetoucher {
         * (1.0 - smoothstep(0.78, 1.0, normalizedX));
       float verticalGate = smoothstep(lowerY, lowerY + verticalSpan * 0.16, destination.y)
         * (1.0 - smoothstep(upperY - verticalSpan * 0.16, upperY, destination.y));
+      float verticalPosition = clamp((destination.y - lowerY) / verticalSpan, 0.0, 1.0);
+      float shiftRatio = mix(shiftRatios.x, shiftRatios.y, verticalPosition);
       float shift = (destination.x - centerX) * strength * shiftRatio
         * horizontalGate * verticalGate;
       return float2(destination.x + shift, destination.y);
@@ -693,7 +764,9 @@ enum IOSPortraitRetoucher {
       float2 radius = max(region.zw, float2(1.0));
       float2 delta = destination - center;
       float distance = length(delta / radius);
-      float gate = 1.0 - smoothstep(0.55, 1.0, distance);
+      // CainCamera's eye warp and Harbeth's bulge both use a radial squared
+      // falloff. Core Image supplies interpolated sampling for the result.
+      float gate = max(0.0, 1.0 - distance * distance);
       return center + delta * (1.0 + amount * gate);
     }
     """
@@ -753,7 +826,8 @@ enum IOSPortraitRetoucher {
         lowerY: geometry.lowerY,
         upperY: geometry.upperY,
         strength: effectiveStrength,
-        shiftRatio: IOSFaceSlimGeometry.maximumShiftRatio
+        lowerShiftRatio: IOSFaceSlimGeometry.lowerFaceShiftRatio,
+        upperShiftRatio: IOSFaceSlimGeometry.upperFaceShiftRatio
       )
     else {
       return input
@@ -818,15 +892,15 @@ enum IOSPortraitRetoucher {
       output = applyingLocalScale(
         to: output, center: CGPoint(x: bounds.midX, y: bounds.midY),
         radius: faceRadius,
-        amountX: Double(values.headSize) / 100 * 0.14,
-        amountY: Double(values.headSize) / 100 * 0.14,
+        amountX: Double(values.headSize) / 100 * 0.12,
+        amountY: Double(values.headSize) / 100 * 0.12,
         mask: target.mask, extent: extent
       )
       output = applyingLocalScale(
         to: output,
         center: CGPoint(x: bounds.midX, y: bounds.minY + bounds.height * 0.28),
         radius: CGPoint(x: bounds.width * 0.48, y: bounds.height * 0.30),
-        amountX: -Double(values.jaw) / 100 * 0.16,
+        amountX: -Double(values.jaw) / 100 * 0.12,
         amountY: 0,
         mask: target.mask, extent: extent
       )
@@ -835,30 +909,30 @@ enum IOSPortraitRetoucher {
         center: CGPoint(x: bounds.midX, y: bounds.minY + bounds.height * 0.12),
         radius: CGPoint(x: bounds.width * 0.30, y: bounds.height * 0.24),
         amountX: 0,
-        amountY: -Double(values.chin) / 100 * 0.14,
+        amountY: -Double(values.chin) / 100 * 0.08,
         mask: target.mask, extent: extent
       )
       for eye in [features.leftEye, features.rightEye] {
         output = applyingLocalScale(
           to: output, center: eye,
           radius: CGPoint(x: bounds.width * 0.17, y: bounds.height * 0.12),
-          amountX: -Double(values.eyes) / 100 * 0.18,
-          amountY: -Double(values.eyes) / 100 * 0.18,
+          amountX: -Double(values.eyes) / 100 * 0.12,
+          amountY: -Double(values.eyes) / 100 * 0.12,
           mask: target.mask, extent: extent
         )
       }
       output = applyingLocalScale(
         to: output, center: features.nose,
         radius: CGPoint(x: bounds.width * 0.16, y: bounds.height * 0.20),
-        amountX: -Double(values.nose) / 100 * 0.14,
-        amountY: -Double(values.nose) / 100 * 0.14,
+        amountX: -Double(values.nose) / 100 * 0.10,
+        amountY: -Double(values.nose) / 100 * 0.10,
         mask: target.mask, extent: extent
       )
       output = applyingLocalScale(
         to: output, center: features.mouth,
         radius: CGPoint(x: bounds.width * 0.25, y: bounds.height * 0.13),
-        amountX: -Double(values.mouth) / 100 * 0.14,
-        amountY: -Double(values.mouth) / 100 * 0.10,
+        amountX: -Double(values.mouth) / 100 * 0.10,
+        amountY: -Double(values.mouth) / 100 * 0.08,
         mask: target.mask, extent: extent
       )
     }
@@ -887,7 +961,8 @@ enum IOSPortraitRetoucher {
         lowerY: geometry.lowerY,
         upperY: geometry.upperY,
         strength: bounded,
-        shiftRatio: IOSBodySlimGeometry.maximumShiftRatio
+        lowerShiftRatio: IOSBodySlimGeometry.maximumShiftRatio,
+        upperShiftRatio: IOSBodySlimGeometry.maximumShiftRatio
       )
     else {
       return input
@@ -969,7 +1044,8 @@ enum IOSPortraitRetoucher {
             centerX: geometry.centerX, halfWidth: geometry.halfWidth,
             lowerY: lowerY, upperY: upperY,
             strength: strength,
-            shiftRatio: IOSBodySlimGeometry.maximumShiftRatio
+            lowerShiftRatio: IOSBodySlimGeometry.maximumShiftRatio,
+            upperShiftRatio: IOSBodySlimGeometry.maximumShiftRatio
           )
     else { return input }
     return warped.applyingFilter(
@@ -1018,9 +1094,11 @@ enum IOSPortraitRetoucher {
     lowerY: CGFloat,
     upperY: CGFloat,
     strength: Double,
-    shiftRatio: CGFloat
+    lowerShiftRatio: CGFloat,
+    upperShiftRatio: CGFloat
   ) -> CIImage? {
-    let maximumShift = halfWidth * shiftRatio * abs(CGFloat(strength))
+    let maximumShift = halfWidth * max(abs(lowerShiftRatio), abs(upperShiftRatio))
+      * abs(CGFloat(strength))
     return localSlimWarpKernel?.apply(
       extent: extent,
       roiCallback: { _, rectangle in
@@ -1030,7 +1108,7 @@ enum IOSPortraitRetoucher {
       arguments: [
         CIVector(x: centerX, y: halfWidth, z: lowerY, w: upperY),
         NSNumber(value: strength),
-        NSNumber(value: Double(shiftRatio)),
+        CIVector(x: lowerShiftRatio, y: upperShiftRatio),
       ]
     )?.cropped(to: extent)
   }
@@ -1782,33 +1860,23 @@ enum IOSPortraitRetoucher {
   ) -> CIImage {
     let bounded = max(0, min(1, strength))
     let input = materialized(source.cropped(to: extent), extent: extent)
-    guard bounded > 0 else { return input }
-    let bilateralReference = input.clampedToExtent().applyingFilter(
-      "CINoiseReduction",
-      parameters: [
-        "inputNoiseLevel": 0.012 + bounded * 0.035,
-        "inputSharpness": 0.18 - bounded * 0.12,
-      ]
-    ).cropped(to: extent)
-    let softened = bilateralReference.clampedToExtent().applyingFilter(
+    guard bounded > 0, let textureSmoothingKernel else { return input }
+    // GPUPixel's published thresholds operate on gamma-encoded RGB samples.
+    // Core Image's working space is linear, so preserve those exact constants
+    // by entering and leaving sRGB around only this calibrated blend.
+    let encodedInput = input.applyingFilter("CILinearToSRGBToneCurve").cropped(to: extent)
+    let mean = encodedInput.clampedToExtent().applyingFilter(
       "CIGaussianBlur",
-      parameters: [kCIInputRadiusKey: 0.45 + bounded * 0.75]
+      parameters: [kCIInputRadiusKey: 4.0]
     ).cropped(to: extent)
-    let mixed = input.applyingFilter(
-      "CIDissolveTransition",
-      parameters: [
-        kCIInputTargetImageKey: softened,
-        kCIInputTimeKey: 0.12 + bounded * 0.32,
-      ]
-    ).cropped(to: extent)
-    let edgeProtected = input.applyingFilter(
-      "CIBlendWithMask",
-      parameters: [
-        kCIInputBackgroundImageKey: mixed,
-        kCIInputMaskImageKey: permanentEdgeMask(source: input, extent: extent),
-      ]
-    ).cropped(to: extent)
-    return edgeProtected.applyingFilter(
+    guard let encodedSmoothed = textureSmoothingKernel.apply(
+      extent: extent,
+      arguments: [encodedInput, mean, bounded]
+    ) else { return input }
+    let smoothed = encodedSmoothed
+      .applyingFilter("CISRGBToneCurveToLinear")
+      .cropped(to: extent)
+    return smoothed.applyingFilter(
       "CIBlendWithMask",
       parameters: [
         kCIInputBackgroundImageKey: input,
@@ -1824,39 +1892,17 @@ enum IOSPortraitRetoucher {
     extent: CGRect
   ) -> CIImage {
     let bounded = max(0, min(1, strength))
-    let input = source.cropped(to: extent)
-    guard bounded > 0 else { return input }
-    let toneRadius = min(24, max(6, min(extent.width, extent.height) * 0.015))
-    let localTone = input.clampedToExtent().applyingFilter(
-      "CIGaussianBlur",
-      parameters: [kCIInputRadiusKey: toneRadius]
-    ).cropped(to: extent)
-    let colorBalanced = localTone.applyingFilter(
-      "CIColorBlendMode",
-      parameters: [kCIInputBackgroundImageKey: input]
-    ).cropped(to: extent)
-    let lowFrequencyMix = input.applyingFilter(
-      "CIDissolveTransition",
-      parameters: [
-        kCIInputTargetImageKey: colorBalanced,
-        kCIInputTimeKey: 0.1 + bounded * 0.3,
-      ]
-    ).cropped(to: extent)
-    let relit = lowFrequencyMix.applyingFilter(
-      "CIHighlightShadowAdjust",
-      parameters: [
-        "inputHighlightAmount": 1 - bounded * 0.06,
-        "inputShadowAmount": bounded * 0.2,
-      ]
-    ).applyingFilter(
-      "CIColorControls",
-      parameters: [
-        kCIInputBrightnessKey: bounded * 0.012,
-        kCIInputContrastKey: 1 - bounded * 0.018,
-        kCIInputSaturationKey: 1 - bounded * 0.015,
-      ]
-    ).cropped(to: extent)
-    return relit.applyingFilter(
+    let input = materialized(source.cropped(to: extent), extent: extent)
+    guard bounded > 0, let complexionLevelsKernel else { return input }
+    let encoded = input.applyingFilter("CILinearToSRGBToneCurve").cropped(to: extent)
+    guard let correctedEncoded = complexionLevelsKernel.apply(
+      extent: extent,
+      arguments: [encoded, bounded]
+    ) else { return input }
+    let corrected = correctedEncoded
+      .applyingFilter("CISRGBToneCurveToLinear")
+      .cropped(to: extent)
+    return corrected.applyingFilter(
       "CIBlendWithMask",
       parameters: [
         kCIInputBackgroundImageKey: input,

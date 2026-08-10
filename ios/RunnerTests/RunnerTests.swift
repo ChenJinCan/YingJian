@@ -1269,6 +1269,58 @@ class RunnerTests: XCTestCase {
     )
   }
 
+  func testTextureSmoothingUsesMatureDefaultToReduceMicrotextureAndKeepFaceEdge() throws {
+    let width = 96
+    let height = 64
+    let pixels = (0..<(width * height)).flatMap { index -> [UInt8] in
+      let x = index % width
+      let checker = ((index / width) + x).isMultiple(of: 2) ? 18 : -18
+      let base = x < width / 2 ? 112 : 188
+      let value = UInt8(clamping: base + checker)
+      return [value, value, value, 255]
+    }
+    let source = CIImage(
+      bitmapData: Data(pixels),
+      bytesPerRow: width * 4,
+      size: CGSize(width: width, height: height),
+      format: .RGBA8,
+      colorSpace: sRGB
+    )
+    let mask = CIImage(color: .white).cropped(to: source.extent)
+    let context = IOSPortraitRetouchContext(effectiveMask: mask)
+    let matureDefault = try XCTUnwrap(
+      IOSImagePipeline(arguments: pipelineV4(textureSmoothing: 50))
+    )
+    let output = try rgbaBytes(
+      matureDefault.applying(to: source, extent: source.extent, portraitContext: context)
+    )
+    let baseline = try rgbaBytes(source)
+
+    let baselineMicrotexture = meanHorizontalLumaDifference(
+      baseline,
+      width: width,
+      xRange: 4..<(width / 2 - 4)
+    )
+    let outputMicrotexture = meanHorizontalLumaDifference(
+      output,
+      width: width,
+      xRange: 4..<(width / 2 - 4)
+    )
+    XCTAssertLessThanOrEqual(
+      outputMicrotexture,
+      baselineMicrotexture * 0.94,
+      "the open-source 0.5 beauty default must visibly reduce fine skin variation"
+    )
+
+    let baselineEdge = meanVerticalEdgeContrast(baseline, width: width, edgeX: width / 2)
+    let outputEdge = meanVerticalEdgeContrast(output, width: width, edgeX: width / 2)
+    XCTAssertGreaterThanOrEqual(
+      outputEdge,
+      baselineEdge * 0.82,
+      "smoothing must retain the stable face boundary instead of blurring through it"
+    )
+  }
+
   func testIndependentSkinToneLightingIsMaskedAndRaisesDarkSkinWithoutClipping() throws {
     let extent = CGRect(x: 0, y: 0, width: 64, height: 32)
     let source = CIImage(color: CIColor(red: 0.34, green: 0.24, blue: 0.20))
@@ -1298,6 +1350,44 @@ class RunnerTests: XCTestCase {
     }
   }
 
+  func testSkinToneLightingUsesComplexionLevelsWithoutLiftingTheBlackPoint() throws {
+    let pixels: [UInt8] = [
+      5, 5, 5, 255,
+      64, 52, 44, 255,
+      220, 205, 196, 255,
+    ]
+    let source = CIImage(
+      bitmapData: Data(pixels),
+      bytesPerRow: pixels.count,
+      size: CGSize(width: 3, height: 1),
+      format: .RGBA8,
+      colorSpace: sRGB
+    )
+    let output = IOSPortraitRetoucher.applyingSkinToneLighting(
+      to: source,
+      strength: 0.5,
+      mask: CIImage(color: .white).cropped(to: source.extent),
+      extent: source.extent
+    )
+    let outputBytes = try rgbaBytes(output)
+
+    XCTAssertLessThanOrEqual(
+      outputBytes[0],
+      8,
+      "complexion normalization must keep the calibrated near-black anchor dark"
+    )
+    XCTAssertGreaterThan(
+      outputBytes[4],
+      pixels[4],
+      "the mature 0.5 complexion default must still lift a dim face midtone"
+    )
+    XCTAssertLessThanOrEqual(
+      outputBytes[8],
+      235,
+      "face lighting must retain highlight headroom"
+    )
+  }
+
   func testFaceSlimInverseMappingIsLocalProtectedAndMonotonic() {
     let geometry = IOSFaceSlimGeometry(
       centerX: 50,
@@ -1325,6 +1415,16 @@ class RunnerTests: XCTestCase {
     XCTAssertGreaterThan(medium.x, neutral.x)
     XCTAssertGreaterThan(strong.x, medium.x)
     XCTAssertEqual(strong.y, target.y)
+
+    let lowerCheek = CGPoint(x: 68, y: 32)
+    let upperCheek = CGPoint(x: 68, y: 48)
+    let lowerShift = geometry.sourcePoint(for: lowerCheek, strength: 1).x - lowerCheek.x
+    let upperShift = geometry.sourcePoint(for: upperCheek, strength: 1).x - upperCheek.x
+    XCTAssertGreaterThan(
+      lowerShift,
+      upperShift,
+      "CainCamera's 0.12 jaw calibration must remain stronger than its 0.05 upper-face lift"
+    )
   }
 
   func testProductionPipelineAppliesInjectedFaceSlimGeometryAndKeepsZeroExact() throws {
@@ -3341,6 +3441,38 @@ class RunnerTests: XCTestCase {
       count += 1
     }
     return Double(total) / Double(count)
+  }
+
+  private func meanHorizontalLumaDifference(
+    _ bytes: [UInt8],
+    width: Int,
+    xRange: Range<Int>
+  ) -> Double {
+    let height = bytes.count / 4 / width
+    var total = 0
+    var count = 0
+    for y in 0..<height {
+      for x in xRange where x > 0 {
+        let offset = (y * width + x) * 4
+        total += abs(Int(bytes[offset]) - Int(bytes[offset - 4]))
+        count += 1
+      }
+    }
+    return Double(total) / Double(count)
+  }
+
+  private func meanVerticalEdgeContrast(
+    _ bytes: [UInt8],
+    width: Int,
+    edgeX: Int
+  ) -> Double {
+    let height = bytes.count / 4 / width
+    let total = (0..<height).reduce(0) { result, y in
+      let left = (y * width + edgeX - 1) * 4
+      let right = (y * width + edgeX) * 4
+      return result + abs(Int(bytes[right]) - Int(bytes[left]))
+    }
+    return Double(total) / Double(height)
   }
 
   private func firstPixel(_ image: CIImage) throws -> [Int] {

@@ -175,7 +175,7 @@ void main() {
       find.byKey(const ValueKey('recommendation-use')).hitTestable(),
       findsOneWidget,
     );
-    expect(previewRenderer.textureSmoothingStrengths, contains(0.45));
+    expect(previewRenderer.textureSmoothingStrengths, contains(0.5));
     expect(previewRenderer.maxEdges.where((edge) => edge == 384), hasLength(3));
     expect(previewRenderer.maxEdges, contains(2048));
 
@@ -193,7 +193,7 @@ void main() {
           ?.effectiveRecipeFor(importedPhoto.id)
           .portraitRecipe
           .textureSmoothing,
-      45,
+      50,
     );
     expect(
       (await store.loadLatest())
@@ -202,7 +202,7 @@ void main() {
           .blemishReduction,
       20,
     );
-    expect(previewRenderer.textureSmoothingStrengths.last, 0.45);
+    expect(previewRenderer.textureSmoothingStrengths.last, 0.5);
     expect(
       find.byKey(const ValueKey('editor-batch-export')).hitTestable(),
       findsOneWidget,
@@ -302,8 +302,8 @@ void main() {
     var portraitRecipe = (await store.loadLatest())!
         .effectiveRecipeFor(importedPhoto.id)
         .portraitRecipe;
-    expect(portraitRecipe.textureSmoothing, 45);
-    expect(portraitRecipe.skinToneLighting, 40);
+    expect(portraitRecipe.textureSmoothing, 50);
+    expect(portraitRecipe.skinToneLighting, 50);
     expect(portraitRecipe.blemishReduction, 20);
     expect(
       (await store.loadLatest())
@@ -331,13 +331,13 @@ void main() {
       matching: find.byType(Slider),
     );
     expect(textureControl, findsOneWidget);
-    expect(tester.widget<Slider>(textureControl).value, closeTo(0.45, 0.01));
+    expect(tester.widget<Slider>(textureControl).value, closeTo(0.5, 0.01));
     await tester.drag(textureControl, const Offset(90, 0));
     await tester.pumpAndSettle();
     portraitRecipe = (await store.loadLatest())!
         .effectiveRecipeFor(importedPhoto.id)
         .portraitRecipe;
-    expect(portraitRecipe.textureSmoothing, greaterThan(45));
+    expect(portraitRecipe.textureSmoothing, greaterThan(50));
     expect(
       find.byKey(const ValueKey('editor-adjustment-section')),
       findsOneWidget,
@@ -649,9 +649,9 @@ void main() {
     expect(exporter.recipes.single.portraitStrength, 0);
     expect(
       exporter.recipes.single.portraitRecipe.textureSmoothing,
-      greaterThan(45),
+      greaterThan(50),
     );
-    expect(exporter.recipes.single.portraitRecipe.skinToneLighting, 40);
+    expect(exporter.recipes.single.portraitRecipe.skinToneLighting, 50);
     expect(exporter.recipes.single.portraitRecipe.blemishReduction, 20);
     expect(previewRenderer.backends, contains('ios-core-image'));
     expect(previewRenderer.updateCount, greaterThan(0));

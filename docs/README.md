@@ -22,6 +22,7 @@
 ## 架构与质量
 
 - Flutter 与原生边界：[Flutter 工程基座](architecture/flutter-foundation.md)
+- 已采用的开源图像参数：[MVP 开源算法标定](architecture/mvp-open-source-calibrations.md)
 - 不可逆架构决策：[`adr/`](adr/)
 - 图像合同、阈值和最终验收：[MVP 质量基线](quality/mvp-quality-baseline.md)
 - 设备、盲评、竞品与可用性执行格式：[`quality/`](quality/)
