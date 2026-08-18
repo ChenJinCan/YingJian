@@ -127,29 +127,33 @@ void main() {
       expect(session.project, saved);
     });
 
-    test('does not start export until every photo is queued', () async {
-      final saved = _twoPhotoProject().copyWith(
-        flowState: PhotoProjectFlowState.editing,
-        selectedRecommendationId: 'clean-natural-01',
-        exportStates: const {
-          'photo-1': PhotoExportState.queued,
-          'photo-2': PhotoExportState.notQueued,
-        },
-      );
-      final store = _MemoryPhotoProjectStore()..savedProject = saved;
-      final session = PhotoProjectSession(
-        importer: _FakePhotoImporter(const []),
-        store: store,
-      );
-      await session.restore();
+    test(
+      'starts a scoped export while untouched photos stay unqueued',
+      () async {
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'clean-natural-01',
+          exportStates: const {
+            'photo-1': PhotoExportState.queued,
+            'photo-2': PhotoExportState.notQueued,
+          },
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
 
-      await expectLater(
-        session.transitionTo(PhotoProjectFlowState.exporting),
-        throwsStateError,
-      );
+        await session.transitionTo(PhotoProjectFlowState.exporting);
 
-      expect(session.project, saved);
-    });
+        expect(session.project?.flowState, PhotoProjectFlowState.exporting);
+        expect(
+          session.project?.exportStates['photo-2'],
+          PhotoExportState.notQueued,
+        );
+      },
+    );
 
     test('retries queued failures without re-queuing saved photos', () async {
       final saved = _twoPhotoProject().copyWith(

@@ -215,7 +215,7 @@ void main() {
     expect(voiceEntry.hitTestable(), findsOneWidget);
     await tester.tap(voiceEntry);
     await tester.pumpAndSettle();
-    expect(find.text('描述你想要的效果'), findsOneWidget);
+    expect(find.text('想怎么改？'), findsOneWidget);
     await tester.enterText(
       find.byKey(const ValueKey('voice-edit-text-field')),
       '照片亮一点',
@@ -226,19 +226,15 @@ void main() {
       (await store.loadLatest())!.effectiveRecipeFor(importedPhoto.id).exposure,
       closeTo(exposureBeforeVoice + 0.12, 0.0001),
     );
-    expect(find.text('已应用 1 项可见参数'), findsOneWidget);
-    await tester.tap(find.widgetWithText(SnackBarAction, '撤销'));
+    expect(find.byKey(const ValueKey('editor-feedback-pill')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('editor-feedback-undo')));
     await tester.pumpAndSettle();
     expect(
       (await store.loadLatest())!.effectiveRecipeFor(importedPhoto.id).exposure,
       exposureBeforeVoice,
     );
 
-    final manualAdjustments = find.byKey(
-      const ValueKey('editor-manual-adjustments'),
-    );
-    await tester.ensureVisible(manualAdjustments);
-    await tester.tap(manualAdjustments);
+    await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
     await tester.pumpAndSettle();
 
     final qualityCategory = find.byKey(
@@ -649,19 +645,14 @@ void main() {
     expect(semanticEditing.localExposure, greaterThan(0));
     expect(semanticEditing.localAdjustmentStrokes, isNotEmpty);
 
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pumpAndSettle();
     final saveButton = find.byKey(const ValueKey('editor-batch-export'));
     await tester.ensureVisible(saveButton);
     await tester.tap(saveButton);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('export-size')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('2048 px').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('export-quality')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('标准').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('export-confirm')));
+    expect(find.byKey(const ValueKey('editor-save-options')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('save-current')));
     await tester.pump();
     // Vision/Core Image cold starts on the iOS simulator can exceed 30 seconds
     // once portrait, semantic masks, filters, and geometry are combined.
@@ -696,16 +687,16 @@ void main() {
     final shareFile = File(sharePath!);
     expect(await shareFile.exists(), isTrue);
     expect((await shareFile.readAsBytes()).take(2), [0xff, 0xd8]);
-    final exportSummaryCard = find.byKey(const ValueKey('export-summary-card'));
+    final saveSuccess = find.byKey(const ValueKey('editor-save-success'));
     for (
       var attempt = 0;
-      attempt < 200 && exportSummaryCard.evaluate().isEmpty;
+      attempt < 200 && saveSuccess.evaluate().isEmpty;
       attempt++
     ) {
       await tester.pump(const Duration(milliseconds: 100));
     }
-    expect(exportSummaryCard, findsOneWidget);
-    expect(find.text('已保存 1 张 · 失败 0 张 · 取消 0 张'), findsWidgets);
+    expect(saveSuccess, findsOneWidget);
+    expect(find.text('1 张照片已保存到相册'), findsOneWidget);
     expect(await source.readAsBytes(), sourceBytes);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
@@ -730,7 +721,6 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-resume-project')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
-    expect(find.text('portrait.png'), findsOneWidget);
     expect(
       find.byKey(ValueKey('photo-preview-${importedPhoto.id}')),
       findsOneWidget,
@@ -793,7 +783,7 @@ void main() {
         find.byKey(const ValueKey('recommendation-texturedStyle')),
         findsOneWidget,
       );
-      final workspace = find.byKey(const ValueKey('photo-workspace-scroll'));
+      var workspace = find.byKey(const ValueKey('photo-workspace-scroll'));
       final naturalRecommendation = find.byKey(
         const ValueKey('recommendation-naturalClean'),
       );
@@ -823,6 +813,9 @@ void main() {
       expect(store.project?.sharedStyle.family, SharedStyleFamily.naturalClean);
       expect(store.project?.adaptiveCompensations, hasLength(6));
 
+      await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
+      await tester.pumpAndSettle();
+      workspace = find.byKey(const ValueKey('photo-workspace-scroll'));
       final groupIntensity = find.byKey(
         const ValueKey('editor-group-style-intensity'),
       );
@@ -832,13 +825,6 @@ void main() {
       await tester.drag(groupIntensity, const Offset(-70, 0));
       await tester.pumpAndSettle();
       expect(store.project!.sharedStyle.intensity, lessThan(1));
-
-      final manualAdjustments = find.byKey(
-        const ValueKey('editor-manual-adjustments'),
-      );
-      await tester.ensureVisible(manualAdjustments);
-      await tester.tap(manualAdjustments);
-      await tester.pumpAndSettle();
 
       final groupFilters = find.byKey(
         const ValueKey('editor-tool-category-filters'),
@@ -908,12 +894,15 @@ void main() {
       );
       await tester.tap(currentPhotoScope);
       await tester.pumpAndSettle();
-      final currentManualAdjustments = find.byKey(
-        const ValueKey('editor-manual-adjustments'),
+      await tester.fling(
+        find.byKey(const ValueKey('editor-swipe-photos')),
+        const Offset(-500, 0),
+        1200,
       );
-      await tester.ensureVisible(currentManualAdjustments);
-      await tester.tap(currentManualAdjustments);
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
+      await tester.pumpAndSettle();
+      workspace = find.byKey(const ValueKey('photo-workspace-scroll'));
       for (final category in <String>[
         'composition',
         'color',
@@ -926,10 +915,6 @@ void main() {
           findsOneWidget,
         );
       }
-      await tester.tap(
-        find.byKey(const ValueKey('editor-photo-ios-runtime-photo-2')),
-      );
-      await tester.pumpAndSettle();
       final contrastTab = find.byKey(
         const ValueKey('editor-adjustment-tab-contrast'),
       );
@@ -955,11 +940,13 @@ void main() {
         ),
       );
 
+      await tester.tap(find.byIcon(Icons.close));
+      await tester.pumpAndSettle();
       final exportButton = find.byKey(const ValueKey('editor-batch-export'));
       await tester.ensureVisible(exportButton);
       await tester.tap(exportButton);
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('export-confirm')));
+      await tester.tap(find.byKey(const ValueKey('save-all')));
       await tester.pumpAndSettle();
 
       expect(exporter.photoIds, [

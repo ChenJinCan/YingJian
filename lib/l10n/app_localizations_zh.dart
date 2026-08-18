@@ -830,10 +830,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get manualAdjustmentsHint => '需要时再展开全部参数';
 
   @override
+  String get adjustPhoto => '自己调';
+
+  @override
   String get savePhotos => '保存';
 
   @override
-  String get voiceEditTitle => '描述你想要的效果';
+  String get voiceEditTitle => '想怎么改？';
 
   @override
   String get voiceEditHint => '例如：照片亮一点，皮肤自然一点';
@@ -863,4 +866,59 @@ class AppLocalizationsZh extends AppLocalizations {
   String voiceEditApplied(int count) {
     return '已应用 $count 项可见参数';
   }
+
+  @override
+  String get voiceEditDone => '已经改好了';
+
+  @override
+  String get editResultBrighter => '已让这张更亮';
+
+  @override
+  String get editResultApplied => '已完成这次修改';
+
+  @override
+  String get syncAllPhotos => '同步到全部';
+
+  @override
+  String get manualSimpleHint => '选一个你想要的结果';
+
+  @override
+  String get manualBrighter => '亮一点';
+
+  @override
+  String get manualWarmer => '暖一点';
+
+  @override
+  String get manualNaturalSkin => '自然肤色';
+
+  @override
+  String get manualSmootherSkin => '皮肤更细腻';
+
+  @override
+  String get manualSmallerFace => '脸小一点';
+
+  @override
+  String get manualNaturalBody => '身形更自然';
+
+  @override
+  String get choosePersonTitle => '想修谁？';
+
+  @override
+  String get choosePersonHint => '点一下照片里的人';
+
+  @override
+  String saveAllPhotos(int count) {
+    return '保存全部 $count 张';
+  }
+
+  @override
+  String get saveCurrentPhoto => '保存当前 1 张';
+
+  @override
+  String saveSuccess(int count) {
+    return '$count 张照片已保存到相册';
+  }
+
+  @override
+  String get finish => '完成';
 }

@@ -1000,32 +1000,18 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(saveButton);
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('export-format')), findsOneWidget);
-    expect(find.byKey(const ValueKey('export-size')), findsOneWidget);
-    expect(find.byKey(const ValueKey('export-quality')), findsOneWidget);
-    expect(find.byKey(const ValueKey('export-photo-plan')), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('export-preview-photo-photo-1')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(
-        of: find.byKey(const ValueKey('export-preview-photo-photo-1')),
-        matching: find.text('周末人像.png'),
-      ),
-      findsOneWidget,
-    );
-    expect(find.textContaining('将导出'), findsOneWidget);
-    expect(find.text('预计逐张本地处理，可取消尚未开始的照片。'), findsOneWidget);
-    await tester.tap(find.text('开始导出'));
+    expect(find.byKey(const ValueKey('editor-save-options')), findsOneWidget);
+    expect(find.byKey(const ValueKey('save-all')), findsOneWidget);
+    expect(find.byKey(const ValueKey('save-current')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('save-all')));
     await tester.pumpAndSettle();
 
     expect(exporter.exportedPhoto, photo);
     expect(exporter.exportedRecipe?.exposure, greaterThan(0));
-    expect(find.text('已保存 1 张 · 失败 0 张 · 取消 0 张'), findsWidgets);
+    expect(find.text('1 张照片已保存到相册'), findsOneWidget);
     final exportStatesBeforeShare = Map.of(store.project!.exportStates);
-    await tester.ensureVisible(find.text('分享已保存照片'));
-    await tester.tap(find.text('分享已保存照片'));
+    await tester.ensureVisible(find.byKey(const ValueKey('save-share')));
+    await tester.tap(find.byKey(const ValueKey('save-share')));
     await _pumpUntilText(tester, '已通过系统分享完成操作');
     expect(sharer.sharedPaths, ['/tmp/Yingjian_fixture.jpg']);
     expect(find.text('已通过系统分享完成操作'), findsOneWidget);
@@ -1041,67 +1027,29 @@ void main() {
     final store = await _pumpSinglePhotoExport(tester, sharer);
     final exportStatesBeforeShare = Map.of(store.project!.exportStates);
 
-    await tester.ensureVisible(find.text('分享已保存照片'));
-    await tester.tap(find.text('分享已保存照片'));
+    await tester.ensureVisible(find.byKey(const ValueKey('save-share')));
+    await tester.tap(find.byKey(const ValueKey('save-share')));
     await _pumpUntilText(tester, '已取消分享，保存结果不受影响');
 
     expect(find.text('已取消分享，保存结果不受影响'), findsOneWidget);
-    expect(find.text('已保存 1 张 · 失败 0 张 · 取消 0 张'), findsWidgets);
+    expect(find.text('1 张照片已保存到相册'), findsOneWidget);
     expect(find.text('分享已保存照片'), findsOneWidget);
     expect(store.project?.exportStates, exportStatesBeforeShare);
-    await tester.ensureVisible(find.text('继续编辑'));
-    await tester.tap(find.text('继续编辑'));
+    await tester.tap(find.byKey(const ValueKey('save-finish')));
     await tester.pumpAndSettle();
     expect(sharer.discardedPaths, ['/tmp/Yingjian_fixture.jpg']);
   });
 
-  testWidgets('saved export locks photo inputs until continuing editing', (
+  testWidgets('saved export replaces editing inputs until finishing', (
     tester,
   ) async {
     await _pumpSinglePhotoExport(tester, FakePhotoSharer());
 
-    await tester.drag(
-      find.byKey(const Key('photo-workspace-scroll')),
-      const Offset(0, 600),
-    );
+    expect(find.byKey(const Key('photo-workspace-scroll')), findsNothing);
+    expect(find.byKey(const ValueKey('editor-save-success')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('save-finish')));
     await tester.pumpAndSettle();
-    expect(
-      tester
-          .widget<IconButton>(
-            find.widgetWithIcon(IconButton, Icons.remove_circle_outline),
-          )
-          .onPressed,
-      isNull,
-    );
-    await tester.dragUntilVisible(
-      find.text('继续添加照片'),
-      find.byKey(const Key('photo-workspace-scroll')),
-      const Offset(0, -300),
-    );
-    expect(
-      tester
-          .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '继续添加照片'))
-          .onPressed,
-      isNull,
-    );
-
-    await tester.ensureVisible(find.text('继续编辑'));
-    await tester.tap(find.text('继续编辑'));
-    await tester.pumpAndSettle();
-
-    await tester.drag(
-      find.byKey(const Key('photo-workspace-scroll')),
-      const Offset(0, 600),
-    );
-    await tester.pumpAndSettle();
-    expect(
-      tester
-          .widget<IconButton>(
-            find.widgetWithIcon(IconButton, Icons.remove_circle_outline),
-          )
-          .onPressed,
-      isNotNull,
-    );
+    expect(find.byKey(const ValueKey('home-start-editing')), findsOneWidget);
   });
 
   testWidgets('system share failure preserves the saved result', (
@@ -1111,12 +1059,12 @@ void main() {
     final store = await _pumpSinglePhotoExport(tester, sharer);
     final exportStatesBeforeShare = Map.of(store.project!.exportStates);
 
-    await tester.ensureVisible(find.text('分享已保存照片'));
-    await tester.tap(find.text('分享已保存照片'));
+    await tester.ensureVisible(find.byKey(const ValueKey('save-share')));
+    await tester.tap(find.byKey(const ValueKey('save-share')));
     await _pumpUntilText(tester, '暂时无法分享，保存结果不受影响');
 
     expect(find.text('暂时无法分享，保存结果不受影响'), findsOneWidget);
-    expect(find.text('已保存 1 张 · 失败 0 张 · 取消 0 张'), findsWidgets);
+    expect(find.text('1 张照片已保存到相册'), findsOneWidget);
     expect(find.text('分享已保存照片'), findsOneWidget);
     expect(store.project?.exportStates, exportStatesBeforeShare);
   });
@@ -1127,21 +1075,21 @@ void main() {
     final sharer = _DeferredPhotoSharer();
     await _pumpSinglePhotoExport(tester, sharer);
 
-    await tester.ensureVisible(find.text('分享已保存照片'));
-    await tester.tap(find.text('分享已保存照片'));
+    await tester.ensureVisible(find.byKey(const ValueKey('save-share')));
+    await tester.tap(find.byKey(const ValueKey('save-share')));
     await tester.pump();
     await sharer.started.future;
 
     expect(find.text('正在打开系统分享…'), findsOneWidget);
     expect(
       tester
-          .widget<TextButton>(find.widgetWithText(TextButton, '继续编辑'))
+          .widget<FilledButton>(find.byKey(const ValueKey('save-finish')))
           .onPressed,
       isNull,
     );
     expect(
       tester
-          .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '继续添加照片'))
+          .widget<TextButton>(find.byKey(const ValueKey('save-share')))
           .onPressed,
       isNull,
     );
@@ -2526,7 +2474,7 @@ void main() {
     final saveButton = find.byKey(const ValueKey('editor-batch-export'));
     await tester.tap(saveButton);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('开始导出'));
+    await tester.tap(find.byKey(const ValueKey('save-all')));
     await tester.pumpAndSettle();
 
     expect(find.text('已保存 1 张 · 失败 1 张 · 取消 0 张'), findsWidgets);
@@ -2588,7 +2536,7 @@ void main() {
     await tester.ensureVisible(saveButton);
     await tester.tap(saveButton);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('开始导出'));
+    await tester.tap(find.byKey(const ValueKey('save-all')));
     await tester.pumpAndSettle();
 
     expect(find.text('已保存 0 张 · 失败 1 张 · 取消 0 张'), findsWidgets);
@@ -2637,15 +2585,16 @@ void main() {
     final saveButton = find.byKey(const ValueKey('editor-batch-export'));
     await tester.tap(saveButton);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('开始导出'));
+    await tester.tap(find.byKey(const ValueKey('save-all')));
     for (
       var attempt = 0;
-      attempt < 6 && find.text('开始导出').evaluate().isNotEmpty;
+      attempt < 6 &&
+          find.byKey(const ValueKey('save-all')).evaluate().isNotEmpty;
       attempt += 1
     ) {
       await tester.pump(const Duration(milliseconds: 100));
     }
-    expect(find.text('开始导出'), findsNothing);
+    expect(find.byKey(const ValueKey('save-all')), findsNothing);
 
     await tester.ensureVisible(find.text('正在逐张导出…'));
     await tester.pump();
@@ -2746,7 +2695,7 @@ void main() {
     await tester.ensureVisible(saveButton);
     await tester.tap(saveButton);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('开始导出'));
+    await tester.tap(find.byKey(const ValueKey('save-all')));
     await tester.pump(const Duration(milliseconds: 300));
 
     await tester.tap(find.byType(BackButton));
@@ -2925,7 +2874,7 @@ Future<MemoryPhotoProjectStore> _pumpSinglePhotoExport(
   await tester.ensureVisible(saveButton);
   await tester.tap(saveButton);
   await tester.pumpAndSettle();
-  await tester.tap(find.text('开始导出'));
+  await tester.tap(find.byKey(const ValueKey('save-all')));
   await tester.pumpAndSettle();
   return store;
 }

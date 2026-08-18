@@ -1676,6 +1676,12 @@ abstract class AppLocalizations {
   /// **'需要时再展开全部参数'**
   String get manualAdjustmentsHint;
 
+  /// No description provided for @adjustPhoto.
+  ///
+  /// In zh, this message translates to:
+  /// **'自己调'**
+  String get adjustPhoto;
+
   /// No description provided for @savePhotos.
   ///
   /// In zh, this message translates to:
@@ -1685,7 +1691,7 @@ abstract class AppLocalizations {
   /// No description provided for @voiceEditTitle.
   ///
   /// In zh, this message translates to:
-  /// **'描述你想要的效果'**
+  /// **'想怎么改？'**
   String get voiceEditTitle;
 
   /// No description provided for @voiceEditHint.
@@ -1741,6 +1747,108 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'已应用 {count} 项可见参数'**
   String voiceEditApplied(int count);
+
+  /// No description provided for @voiceEditDone.
+  ///
+  /// In zh, this message translates to:
+  /// **'已经改好了'**
+  String get voiceEditDone;
+
+  /// No description provided for @editResultBrighter.
+  ///
+  /// In zh, this message translates to:
+  /// **'已让这张更亮'**
+  String get editResultBrighter;
+
+  /// No description provided for @editResultApplied.
+  ///
+  /// In zh, this message translates to:
+  /// **'已完成这次修改'**
+  String get editResultApplied;
+
+  /// No description provided for @syncAllPhotos.
+  ///
+  /// In zh, this message translates to:
+  /// **'同步到全部'**
+  String get syncAllPhotos;
+
+  /// No description provided for @manualSimpleHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'选一个你想要的结果'**
+  String get manualSimpleHint;
+
+  /// No description provided for @manualBrighter.
+  ///
+  /// In zh, this message translates to:
+  /// **'亮一点'**
+  String get manualBrighter;
+
+  /// No description provided for @manualWarmer.
+  ///
+  /// In zh, this message translates to:
+  /// **'暖一点'**
+  String get manualWarmer;
+
+  /// No description provided for @manualNaturalSkin.
+  ///
+  /// In zh, this message translates to:
+  /// **'自然肤色'**
+  String get manualNaturalSkin;
+
+  /// No description provided for @manualSmootherSkin.
+  ///
+  /// In zh, this message translates to:
+  /// **'皮肤更细腻'**
+  String get manualSmootherSkin;
+
+  /// No description provided for @manualSmallerFace.
+  ///
+  /// In zh, this message translates to:
+  /// **'脸小一点'**
+  String get manualSmallerFace;
+
+  /// No description provided for @manualNaturalBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'身形更自然'**
+  String get manualNaturalBody;
+
+  /// No description provided for @choosePersonTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'想修谁？'**
+  String get choosePersonTitle;
+
+  /// No description provided for @choosePersonHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'点一下照片里的人'**
+  String get choosePersonHint;
+
+  /// No description provided for @saveAllPhotos.
+  ///
+  /// In zh, this message translates to:
+  /// **'保存全部 {count} 张'**
+  String saveAllPhotos(int count);
+
+  /// No description provided for @saveCurrentPhoto.
+  ///
+  /// In zh, this message translates to:
+  /// **'保存当前 1 张'**
+  String get saveCurrentPhoto;
+
+  /// No description provided for @saveSuccess.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count} 张照片已保存到相册'**
+  String saveSuccess(int count);
+
+  /// No description provided for @finish.
+  ///
+  /// In zh, this message translates to:
+  /// **'完成'**
+  String get finish;
 }
 
 class _AppLocalizationsDelegate

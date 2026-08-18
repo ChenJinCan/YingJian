@@ -79,7 +79,10 @@ final class BoundedBatchPhotoExporter {
         : null;
   }
 
-  Future<BatchExportSummary> export({bool retryFailuresOnly = false}) async {
+  Future<BatchExportSummary> export({
+    bool retryFailuresOnly = false,
+    Set<String>? photoIds,
+  }) async {
     if (_running) throw StateError('A batch export is already active');
     final initial = session.project;
     if (initial == null) throw StateError('A photo project is required');
@@ -91,6 +94,7 @@ final class BoundedBatchPhotoExporter {
       throw StateError('Batch export can only start from editing');
     }
     final targets = project.photos.where((photo) {
+      if (photoIds != null && !photoIds.contains(photo.id)) return false;
       final state = project.exportStates[photo.id]!;
       return retryFailuresOnly
           ? state == PhotoExportState.failed ||

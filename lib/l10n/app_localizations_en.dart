@@ -880,10 +880,13 @@ class AppLocalizationsEn extends AppLocalizations {
       'Open all parameters only when you need them';
 
   @override
+  String get adjustPhoto => 'Adjust myself';
+
+  @override
   String get savePhotos => 'Save';
 
   @override
-  String get voiceEditTitle => 'Describe the result you want';
+  String get voiceEditTitle => 'What would you like to change?';
 
   @override
   String get voiceEditHint => 'For example: make it brighter with natural skin';
@@ -916,4 +919,59 @@ class AppLocalizationsEn extends AppLocalizations {
   String voiceEditApplied(int count) {
     return 'Applied $count visible parameters';
   }
+
+  @override
+  String get voiceEditDone => 'Done';
+
+  @override
+  String get editResultBrighter => 'Made this photo brighter';
+
+  @override
+  String get editResultApplied => 'Change applied';
+
+  @override
+  String get syncAllPhotos => 'Sync to all';
+
+  @override
+  String get manualSimpleHint => 'Choose the result you want';
+
+  @override
+  String get manualBrighter => 'Brighter';
+
+  @override
+  String get manualWarmer => 'Warmer';
+
+  @override
+  String get manualNaturalSkin => 'Natural skin';
+
+  @override
+  String get manualSmootherSkin => 'Smoother skin';
+
+  @override
+  String get manualSmallerFace => 'Smaller face';
+
+  @override
+  String get manualNaturalBody => 'Natural body';
+
+  @override
+  String get choosePersonTitle => 'Who would you like to edit?';
+
+  @override
+  String get choosePersonHint => 'Tap a person in the photo';
+
+  @override
+  String saveAllPhotos(int count) {
+    return 'Save all $count photos';
+  }
+
+  @override
+  String get saveCurrentPhoto => 'Save current photo';
+
+  @override
+  String saveSuccess(int count) {
+    return '$count photos saved to Photos';
+  }
+
+  @override
+  String get finish => 'Done';
 }

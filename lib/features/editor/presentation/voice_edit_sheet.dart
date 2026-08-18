@@ -83,6 +83,12 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
     }
   }
 
+  void _applySuggestion(String instruction) {
+    _controller.text = instruction;
+    _controller.selection = TextSelection.collapsed(offset: instruction.length);
+    setState(() => _error = null);
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
@@ -120,6 +126,27 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
               style: Theme.of(
                 context,
               ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ActionChip(
+                  key: const ValueKey('quick-edit-brighter'),
+                  onPressed: _applying || _listening
+                      ? null
+                      : () => _applySuggestion('照片亮一点'),
+                  label: Text(context.l10n.quickEditBrighter),
+                ),
+                ActionChip(
+                  key: const ValueKey('quick-edit-natural-skin'),
+                  onPressed: _applying || _listening
+                      ? null
+                      : () => _applySuggestion('皮肤自然一点'),
+                  label: Text(context.l10n.quickEditNaturalSkin),
+                ),
+              ],
             ),
             const SizedBox(height: 16),
             TextField(

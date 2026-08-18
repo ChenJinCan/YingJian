@@ -84,17 +84,32 @@ void main() {
           );
           expect(store.project?.adaptiveCompensations, hasLength(6));
 
-          final workspace = find.byKey(const Key('photo-workspace-scroll'));
-          final manualAdjustments = find.byKey(
-            const ValueKey('editor-manual-adjustments'),
+          await tester.tap(find.byKey(const ValueKey('editor-manual-entry')));
+          await tester.pumpAndSettle();
+          expect(
+            find.byKey(const ValueKey('editor-manual-sheet')),
+            findsOneWidget,
           );
-          await Scrollable.ensureVisible(
-            tester.element(manualAdjustments),
-            alignment: 0.15,
+          expect(find.text('亮一点'), findsOneWidget);
+          expect(find.text('暖一点'), findsOneWidget);
+          expect(find.text('自然肤色'), findsOneWidget);
+          expect(find.text('皮肤更细腻'), findsOneWidget);
+          expect(find.text('脸小一点'), findsOneWidget);
+          expect(find.text('身形更自然'), findsOneWidget);
+          await tester.tap(
+            find.byKey(const ValueKey('manual-action-brighter')),
           );
           await tester.pumpAndSettle();
-          await tester.tap(manualAdjustments);
+          expect(
+            find.byKey(const ValueKey('editor-feedback-pill')),
+            findsOneWidget,
+          );
+          await tester.tap(find.byKey(const ValueKey('editor-feedback-undo')));
           await tester.pumpAndSettle();
+
+          await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
+          await tester.pumpAndSettle();
+          var workspace = find.byKey(const Key('photo-workspace-scroll'));
           final exposureAdjustment = find.byKey(
             const ValueKey('editor-adjustment-exposure'),
           );
@@ -126,21 +141,15 @@ void main() {
           );
           await tester.tap(find.text('仅当前照片'));
           await tester.pumpAndSettle();
-          final thumbnailStrip = find.byType(ListView).last;
-          await tester.ensureVisible(thumbnailStrip);
-          await tester.pumpAndSettle();
-          await tester.tap(find.bySemanticsLabel(RegExp(r'^photo-2\.png')));
-          await tester.pumpAndSettle();
-          final reopenedManualAdjustments = find.byKey(
-            const ValueKey('editor-manual-adjustments'),
-          );
-          await Scrollable.ensureVisible(
-            tester.element(reopenedManualAdjustments),
-            alignment: 0.15,
+          await tester.fling(
+            find.byKey(const ValueKey('editor-swipe-photos')),
+            const Offset(-300, 0),
+            1200,
           );
           await tester.pumpAndSettle();
-          await tester.tap(reopenedManualAdjustments);
+          await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
           await tester.pumpAndSettle();
+          workspace = find.byKey(const Key('photo-workspace-scroll'));
           await tester.dragUntilVisible(
             find.byKey(const ValueKey('editor-adjustment-tab-contrast')),
             workspace,
@@ -176,12 +185,19 @@ void main() {
             isNot(store.project?.effectiveRecipeFor('photo-2').contrast),
           );
 
+          await tester.tap(find.byIcon(Icons.close));
+          await tester.pumpAndSettle();
           final savePhotos = find.byKey(const ValueKey('editor-batch-export'));
           await tester.ensureVisible(savePhotos);
           await tester.tap(savePhotos);
           await tester.pumpAndSettle();
-          expect(find.textContaining('从 6 张只读原图'), findsOneWidget);
-          await tester.tap(find.text('开始导出'));
+          expect(
+            find.byKey(const ValueKey('editor-save-options')),
+            findsOneWidget,
+          );
+          expect(find.text('保存全部 6 张'), findsOneWidget);
+          expect(find.text('保存当前 1 张'), findsOneWidget);
+          await tester.tap(find.byKey(const ValueKey('save-all')));
           await tester.pumpAndSettle();
 
           expect(find.text('已保存 5 张 · 失败 1 张 · 取消 0 张'), findsWidgets);
@@ -267,22 +283,12 @@ void main() {
     await tester.tap(find.text('开始修图'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(find.text('第 1 / 6 张 · 编辑整组'), findsOneWidget);
-    expect(find.bySemanticsLabel(RegExp(r'^photo-1\.png')), findsWidgets);
+    expect(find.text('1 / 6'), findsOneWidget);
+    expect(find.byKey(const ValueKey('editor-open-tools')), findsOneWidget);
 
-    final workspace = find.byKey(const Key('photo-workspace-scroll'));
-    await tester.fling(workspace, const Offset(0, -1000), 2000);
+    await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
     await tester.pumpAndSettle();
-    final manualAdjustments = find.byKey(
-      const ValueKey('editor-manual-adjustments'),
-    );
-    await Scrollable.ensureVisible(
-      tester.element(manualAdjustments),
-      alignment: 0.15,
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(manualAdjustments);
-    await tester.pumpAndSettle();
+    var workspace = find.byKey(const Key('photo-workspace-scroll'));
     final exposureAdjustment = find.byKey(
       const ValueKey('editor-adjustment-exposure'),
     );
@@ -333,21 +339,12 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(currentPhotoScope.hitTestable());
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
+    await tester.pumpAndSettle();
+    workspace = find.byKey(const Key('photo-workspace-scroll'));
     final semanticCategory = find.byKey(
       const ValueKey('editor-tool-category-semantic'),
     );
-    if (semanticCategory.evaluate().isEmpty) {
-      final manualAdjustments = find.byKey(
-        const ValueKey('editor-manual-adjustments'),
-      );
-      await Scrollable.ensureVisible(
-        tester.element(manualAdjustments),
-        alignment: 0.15,
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(manualAdjustments);
-      await tester.pumpAndSettle();
-    }
     await tester.ensureVisible(semanticCategory);
     await tester.tap(semanticCategory);
     await tester.pumpAndSettle();

@@ -796,7 +796,8 @@ class PhotoProject {
           exportStates.values.every(
             (state) =>
                 state == PhotoExportState.queued ||
-                state == PhotoExportState.saved,
+                state == PhotoExportState.saved ||
+                state == PhotoExportState.notQueued,
           );
     }
     if (flowState == PhotoProjectFlowState.exporting &&
@@ -805,7 +806,8 @@ class PhotoProject {
         (state) =>
             state == PhotoExportState.saved ||
             state == PhotoExportState.failed ||
-            state == PhotoExportState.cancelled,
+            state == PhotoExportState.cancelled ||
+            state == PhotoExportState.notQueued,
       );
     }
     return true;

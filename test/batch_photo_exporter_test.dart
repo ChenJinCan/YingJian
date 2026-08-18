@@ -99,6 +99,32 @@ void main() {
   });
 
   test(
+    'current-photo save exports only the explicitly selected photo',
+    () async {
+      final photos = _photos(3);
+      final session = PhotoProjectSession(
+        importer: FakePhotoImporter(),
+        store: MemoryPhotoProjectStore(_project(photos)),
+      );
+      await session.restore();
+      final exporter = _RecordingExporter();
+
+      final summary = await BoundedBatchPhotoExporter(
+        session: session,
+        exporter: exporter,
+      ).export(photoIds: {'photo-2'});
+
+      expect(exporter.calls, ['photo-2']);
+      expect(summary.savedCount, 1);
+      expect(session.project?.exportStates, {
+        'photo-1': PhotoExportState.notQueued,
+        'photo-2': PhotoExportState.saved,
+        'photo-3': PhotoExportState.notQueued,
+      });
+    },
+  );
+
+  test(
     'restart marks interrupted work cancelled without replaying it',
     () async {
       final photos = _photos(3);
