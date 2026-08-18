@@ -18,6 +18,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get startEditing => 'Start editing';
 
   @override
+  String get homeHeroTitle => 'Make beauty easier';
+
+  @override
+  String get recentProjects => 'Recent projects';
+
+  @override
+  String get noRecentProjects =>
+      'No projects yet. Choose a few photos to begin.';
+
+  @override
   String get unfinishedProject => 'Unfinished project';
 
   @override
@@ -560,11 +570,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get analysisPreparing => 'Preparing three local looks…';
 
   @override
-  String get recommendationsTitle => 'Choose an overall direction';
+  String get recommendationsTitle => 'Choose a direction you like';
 
   @override
   String get recommendationsSubtitle =>
-      'All three looks are created on device. Choose one, then fine-tune it.';
+      'All three looks are created on device. Start with the result and change anything later.';
 
   @override
   String get safeFallbackNotice =>
@@ -578,7 +588,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get localEffect => 'On-device effect';
 
   @override
-  String get useThisLook => 'Use this look';
+  String get useThisLook => 'Use this';
 
   @override
   String get recommendationNaturalClean => 'Natural clean';
@@ -849,4 +859,61 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get filterNight => 'Night';
+
+  @override
+  String get voiceEditEntry => 'Tell me how to edit';
+
+  @override
+  String get voiceEditPrompt => 'What else would you like to change?';
+
+  @override
+  String get quickEditBrighter => 'Make it brighter';
+
+  @override
+  String get quickEditNaturalSkin => 'Natural skin';
+
+  @override
+  String get manualAdjustments => 'Manual adjustments';
+
+  @override
+  String get manualAdjustmentsHint =>
+      'Open all parameters only when you need them';
+
+  @override
+  String get savePhotos => 'Save';
+
+  @override
+  String get voiceEditTitle => 'Describe the result you want';
+
+  @override
+  String get voiceEditHint => 'For example: make it brighter with natural skin';
+
+  @override
+  String get voiceEditPrivacy =>
+      'Voice is used only to transcribe your instruction. Visible parameters still render the edit locally.';
+
+  @override
+  String get voiceEditRecord => 'Start speaking';
+
+  @override
+  String get voiceEditStop => 'Finish recording';
+
+  @override
+  String get voiceEditListening => 'Listening…';
+
+  @override
+  String get voiceEditApply => 'Apply changes';
+
+  @override
+  String get voiceEditUnsupported =>
+      'This instruction cannot be interpreted safely yet. Try different wording or adjust it manually.';
+
+  @override
+  String get voiceEditFailed =>
+      'Voice is temporarily unavailable. You can type the instruction instead.';
+
+  @override
+  String voiceEditApplied(int count) {
+    return 'Applied $count visible parameters';
+  }
 }

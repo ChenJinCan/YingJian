@@ -76,7 +76,7 @@ class AppSettings extends ChangeNotifier {
     final stored = _preferences.getString(_themeModeKey);
     return ThemeMode.values.firstWhere(
       (mode) => mode.name == stored,
-      orElse: () => ThemeMode.system,
+      orElse: () => ThemeMode.dark,
     );
   }
 

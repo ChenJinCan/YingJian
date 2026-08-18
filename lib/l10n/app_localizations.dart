@@ -116,6 +116,24 @@ abstract class AppLocalizations {
   /// **'开始修图'**
   String get startEditing;
 
+  /// No description provided for @homeHeroTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'让变美更容易'**
+  String get homeHeroTitle;
+
+  /// No description provided for @recentProjects.
+  ///
+  /// In zh, this message translates to:
+  /// **'最近项目'**
+  String get recentProjects;
+
+  /// No description provided for @noRecentProjects.
+  ///
+  /// In zh, this message translates to:
+  /// **'还没有项目，选几张照片开始吧'**
+  String get noRecentProjects;
+
   /// No description provided for @unfinishedProject.
   ///
   /// In zh, this message translates to:
@@ -1091,13 +1109,13 @@ abstract class AppLocalizations {
   /// No description provided for @recommendationsTitle.
   ///
   /// In zh, this message translates to:
-  /// **'先选一个整体方向'**
+  /// **'选一个喜欢的方向'**
   String get recommendationsTitle;
 
   /// No description provided for @recommendationsSubtitle.
   ///
   /// In zh, this message translates to:
-  /// **'三套效果都在本机生成，不上传照片。选中后可继续细调。'**
+  /// **'三套效果都在本机生成，不上传照片。先看结果，之后随时都能继续修改。'**
   String get recommendationsSubtitle;
 
   /// No description provided for @safeFallbackNotice.
@@ -1121,7 +1139,7 @@ abstract class AppLocalizations {
   /// No description provided for @useThisLook.
   ///
   /// In zh, this message translates to:
-  /// **'使用这套效果'**
+  /// **'就用这个'**
   String get useThisLook;
 
   /// No description provided for @recommendationNaturalClean.
@@ -1621,6 +1639,108 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'夜景'**
   String get filterNight;
+
+  /// No description provided for @voiceEditEntry.
+  ///
+  /// In zh, this message translates to:
+  /// **'说说怎么修'**
+  String get voiceEditEntry;
+
+  /// No description provided for @voiceEditPrompt.
+  ///
+  /// In zh, this message translates to:
+  /// **'还想怎么改？'**
+  String get voiceEditPrompt;
+
+  /// No description provided for @quickEditBrighter.
+  ///
+  /// In zh, this message translates to:
+  /// **'更亮一点'**
+  String get quickEditBrighter;
+
+  /// No description provided for @quickEditNaturalSkin.
+  ///
+  /// In zh, this message translates to:
+  /// **'肤色自然一点'**
+  String get quickEditNaturalSkin;
+
+  /// No description provided for @manualAdjustments.
+  ///
+  /// In zh, this message translates to:
+  /// **'手动调整'**
+  String get manualAdjustments;
+
+  /// No description provided for @manualAdjustmentsHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'需要时再展开全部参数'**
+  String get manualAdjustmentsHint;
+
+  /// No description provided for @savePhotos.
+  ///
+  /// In zh, this message translates to:
+  /// **'保存'**
+  String get savePhotos;
+
+  /// No description provided for @voiceEditTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'描述你想要的效果'**
+  String get voiceEditTitle;
+
+  /// No description provided for @voiceEditHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'例如：照片亮一点，皮肤自然一点'**
+  String get voiceEditHint;
+
+  /// No description provided for @voiceEditPrivacy.
+  ///
+  /// In zh, this message translates to:
+  /// **'语音只用于转写指令；修图结果仍由可见参数在本地生成。'**
+  String get voiceEditPrivacy;
+
+  /// No description provided for @voiceEditRecord.
+  ///
+  /// In zh, this message translates to:
+  /// **'开始说话'**
+  String get voiceEditRecord;
+
+  /// No description provided for @voiceEditStop.
+  ///
+  /// In zh, this message translates to:
+  /// **'完成录音'**
+  String get voiceEditStop;
+
+  /// No description provided for @voiceEditListening.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在听…'**
+  String get voiceEditListening;
+
+  /// No description provided for @voiceEditApply.
+  ///
+  /// In zh, this message translates to:
+  /// **'应用修改'**
+  String get voiceEditApply;
+
+  /// No description provided for @voiceEditUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂时无法安全理解这条指令，请换一种说法或手动调整。'**
+  String get voiceEditUnsupported;
+
+  /// No description provided for @voiceEditFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂时无法使用语音，可以直接输入文字。'**
+  String get voiceEditFailed;
+
+  /// No description provided for @voiceEditApplied.
+  ///
+  /// In zh, this message translates to:
+  /// **'已应用 {count} 项可见参数'**
+  String voiceEditApplied(int count);
 }
 
 class _AppLocalizationsDelegate

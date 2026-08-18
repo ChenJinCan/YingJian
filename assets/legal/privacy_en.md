@@ -28,6 +28,8 @@ After enough successful editing activity, the operating system may show its nati
 
 Photo access is used only to select images for editing and save results you explicitly export. The app should request a permission only immediately before the related capability and explain its purpose.
 
+When you actively use voice editing, microphone access is used only to capture that instruction and speech-recognition access is used only to turn it into editable text. Depending on the device, system version, and language support, transcription may be provided by Apple's system speech-recognition service. Yingjian does not send the photo together with the voice instruction. Denying or disabling these permissions does not affect typed instructions or manual editing.
+
 ## 5. Third-party processors
 
 When diagnostics are enabled, Google Firebase provides analytics, crash reporting, and performance monitoring. App stores process ratings, reviews, downloads, and purchase-related data under their own terms and privacy policies.

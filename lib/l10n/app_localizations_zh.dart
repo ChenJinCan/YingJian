@@ -18,6 +18,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get startEditing => '开始修图';
 
   @override
+  String get homeHeroTitle => '让变美更容易';
+
+  @override
+  String get recentProjects => '最近项目';
+
+  @override
+  String get noRecentProjects => '还没有项目，选几张照片开始吧';
+
+  @override
   String get unfinishedProject => '未完成项目';
 
   @override
@@ -527,10 +536,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get analysisPreparing => '正在本地准备三套效果…';
 
   @override
-  String get recommendationsTitle => '先选一个整体方向';
+  String get recommendationsTitle => '选一个喜欢的方向';
 
   @override
-  String get recommendationsSubtitle => '三套效果都在本机生成，不上传照片。选中后可继续细调。';
+  String get recommendationsSubtitle => '三套效果都在本机生成，不上传照片。先看结果，之后随时都能继续修改。';
 
   @override
   String get safeFallbackNotice => '当前使用克制的安全配方；像素级分析能力完成质量验证后再启用。';
@@ -542,7 +551,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get localEffect => '本地效果';
 
   @override
-  String get useThisLook => '使用这套效果';
+  String get useThisLook => '就用这个';
 
   @override
   String get recommendationNaturalClean => '自然干净';
@@ -801,4 +810,57 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get filterNight => '夜景';
+
+  @override
+  String get voiceEditEntry => '说说怎么修';
+
+  @override
+  String get voiceEditPrompt => '还想怎么改？';
+
+  @override
+  String get quickEditBrighter => '更亮一点';
+
+  @override
+  String get quickEditNaturalSkin => '肤色自然一点';
+
+  @override
+  String get manualAdjustments => '手动调整';
+
+  @override
+  String get manualAdjustmentsHint => '需要时再展开全部参数';
+
+  @override
+  String get savePhotos => '保存';
+
+  @override
+  String get voiceEditTitle => '描述你想要的效果';
+
+  @override
+  String get voiceEditHint => '例如：照片亮一点，皮肤自然一点';
+
+  @override
+  String get voiceEditPrivacy => '语音只用于转写指令；修图结果仍由可见参数在本地生成。';
+
+  @override
+  String get voiceEditRecord => '开始说话';
+
+  @override
+  String get voiceEditStop => '完成录音';
+
+  @override
+  String get voiceEditListening => '正在听…';
+
+  @override
+  String get voiceEditApply => '应用修改';
+
+  @override
+  String get voiceEditUnsupported => '暂时无法安全理解这条指令，请换一种说法或手动调整。';
+
+  @override
+  String get voiceEditFailed => '暂时无法使用语音，可以直接输入文字。';
+
+  @override
+  String voiceEditApplied(int count) {
+    return '已应用 $count 项可见参数';
+  }
 }

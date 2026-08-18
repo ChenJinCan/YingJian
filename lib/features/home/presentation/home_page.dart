@@ -75,8 +75,16 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
+        title: Text(
+          context.l10n.appTitle,
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+            letterSpacing: 2,
+          ),
+        ),
         actions: [
           IconButton(
             key: const ValueKey('home-settings'),
@@ -92,54 +100,92 @@ class _HomePageState extends State<HomePage> {
           future: _latestProject,
           builder: (context, snapshot) {
             final project = snapshot.data;
-            return Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      context.l10n.appTitle,
-                      style: Theme.of(context).textTheme.displaySmall,
+            return Stack(
+              children: [
+                Positioned(
+                  top: -130,
+                  left: -90,
+                  right: -90,
+                  child: IgnorePointer(
+                    child: Container(
+                      height: 310,
+                      decoration: BoxDecoration(
+                        gradient: RadialGradient(
+                          colors: [
+                            colors.primary.withValues(alpha: 0.12),
+                            colors.surface.withValues(alpha: 0),
+                          ],
+                        ),
+                      ),
                     ),
-                    const SizedBox(height: 12),
-                    Text(
-                      context.l10n.homeTagline,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 32),
-                    if (snapshot.connectionState == ConnectionState.waiting)
-                      Column(
-                        children: [
-                          const SizedBox.square(
-                            dimension: 24,
+                  ),
+                ),
+                SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 32),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(22, 30, 22, 22),
+                          child: Column(
+                            children: [
+                              const _YingjianMark(),
+                              const SizedBox(height: 20),
+                              Text(
+                                context.l10n.homeHeroTitle,
+                                style: Theme.of(context).textTheme.headlineSmall
+                                    ?.copyWith(fontWeight: FontWeight.w700),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                context.l10n.homeTagline,
+                                textAlign: TextAlign.center,
+                                style: Theme.of(context).textTheme.bodyMedium
+                                    ?.copyWith(color: colors.onSurfaceVariant),
+                              ),
+                              const SizedBox(height: 26),
+                              SizedBox(
+                                width: double.infinity,
+                                child: FilledButton.icon(
+                                  key: const ValueKey('home-start-editing'),
+                                  onPressed: _openEditor,
+                                  icon: const Icon(Icons.add_photo_alternate),
+                                  label: Text(context.l10n.startEditing),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 30),
+                      Text(
+                        context.l10n.recentProjects,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 12),
+                      if (snapshot.connectionState == ConnectionState.waiting)
+                        const SizedBox(
+                          height: 96,
+                          child: Center(
                             child: CircularProgressIndicator(strokeWidth: 2),
                           ),
-                          const SizedBox(height: 16),
-                          FilledButton(
-                            key: const ValueKey('home-start-editing'),
-                            onPressed: _openEditor,
-                            child: Text(context.l10n.startEditing),
-                          ),
-                        ],
-                      )
-                    else if (snapshot.hasError)
-                      _RestoreFailure(onRetry: _reload)
-                    else if (project != null)
-                      _ProjectResumeCard(
-                        project: project,
-                        onContinue: _openEditor,
-                        onStartNew: () => _startNew(project),
-                      )
-                    else
-                      FilledButton(
-                        key: const ValueKey('home-start-editing'),
-                        onPressed: _openEditor,
-                        child: Text(context.l10n.startEditing),
-                      ),
-                  ],
+                        )
+                      else if (snapshot.hasError)
+                        _RestoreFailure(onRetry: _reload)
+                      else if (project != null)
+                        _ProjectResumeCard(
+                          project: project,
+                          onContinue: _openEditor,
+                          onStartNew: () => _startNew(project),
+                        )
+                      else
+                        _EmptyRecentProject(onStart: _openEditor),
+                    ],
+                  ),
                 ),
-              ),
+              ],
             );
           },
         ),
@@ -173,28 +219,106 @@ class _ProjectResumeCard extends StatelessWidget {
     );
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        padding: const EdgeInsets.all(16),
+        child: Row(
           children: [
-            Text(
-              context.l10n.unfinishedProject,
-              style: Theme.of(context).textTheme.titleMedium,
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Icon(Icons.photo_library_outlined, size: 30),
             ),
-            const SizedBox(height: 8),
-            Text(summary),
-            const SizedBox(height: 16),
-            FilledButton(
-              key: const ValueKey('home-resume-project'),
-              onPressed: onContinue,
-              child: Text(context.l10n.continueLastEditing),
-            ),
-            const SizedBox(height: 8),
-            TextButton(
-              onPressed: onStartNew,
-              child: Text(context.l10n.startNewProject),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    context.l10n.unfinishedProject,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    summary,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    alignment: WrapAlignment.end,
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      TextButton(
+                        onPressed: onStartNew,
+                        child: Text(context.l10n.startNewProject),
+                      ),
+                      FilledButton(
+                        key: const ValueKey('home-resume-project'),
+                        onPressed: onContinue,
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(48, 44),
+                        ),
+                        child: Text(context.l10n.continueLastEditing),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _YingjianMark extends StatelessWidget {
+  const _YingjianMark();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      width: 68,
+      height: 68,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: colors.primary.withValues(alpha: 0.1),
+        border: Border.all(color: colors.primary.withValues(alpha: 0.28)),
+      ),
+      child: Icon(Icons.auto_awesome, color: colors.primary, size: 32),
+    );
+  }
+}
+
+class _EmptyRecentProject extends StatelessWidget {
+  const _EmptyRecentProject({required this.onStart});
+
+  final VoidCallback onStart;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: InkWell(
+        onTap: onStart,
+        borderRadius: BorderRadius.circular(22),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            children: [
+              const Icon(Icons.history, size: 28),
+              const SizedBox(width: 14),
+              Expanded(child: Text(context.l10n.noRecentProjects)),
+              const Icon(Icons.chevron_right),
+            ],
+          ),
         ),
       ),
     );

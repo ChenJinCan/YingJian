@@ -7,16 +7,20 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:yingjian/features/editor/application/batch_photo_exporter.dart';
 import 'package:yingjian/features/editor/application/editor_session.dart';
+import 'package:yingjian/features/editor/application/natural_language_edit_interpreter.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
 import 'package:yingjian/features/editor/application/photo_sharer.dart';
+import 'package:yingjian/features/editor/application/speech_transcriber.dart';
 import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_for_platform.dart';
 import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
 import 'package:yingjian/features/editor/domain/quality_enhancement_recipe.dart';
 import 'package:yingjian/features/editor/domain/semantic_editing_recipe.dart';
+import 'package:yingjian/features/editor/infrastructure/method_channel_speech_transcriber.dart';
 import 'package:yingjian/features/editor/presentation/native_photo_preview.dart';
+import 'package:yingjian/features/editor/presentation/voice_edit_sheet.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/recommendations/application/local_recommendation_coordinator.dart';
@@ -26,7 +30,12 @@ import 'package:yingjian/features/recommendations/domain/recipe_catalog.dart';
 import 'package:yingjian/l10n/l10n.dart';
 
 class EditorPage extends StatefulWidget {
-  const EditorPage({super.key});
+  const EditorPage({
+    this.speechTranscriber = const MethodChannelSpeechTranscriber(),
+    super.key,
+  });
+
+  final SpeechTranscriber speechTranscriber;
 
   @override
   State<EditorPage> createState() => _EditorPageState();
@@ -467,6 +476,51 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     } finally {
       _editorSession.load(_session?.editableRecipe ?? EditRecipe.neutral);
     }
+  }
+
+  Future<void> _showVoiceEditSheet() async {
+    if (_exportSummary != null || _exporting || _sharing) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: false,
+      builder: (sheetContext) => VoiceEditSheet(
+        currentRecipe: _editorSession.recipe,
+        interpreter: const LocalNaturalLanguageEditInterpreter(),
+        transcriber: widget.speechTranscriber,
+        onApplied: (result) async {
+          await _commitNaturalLanguageResult(result);
+          if (sheetContext.mounted) Navigator.pop(sheetContext);
+        },
+      ),
+    );
+  }
+
+  Future<void> _applyQuickInstruction(String instruction) async {
+    if (_exportSummary != null || _exporting || _sharing) return;
+    final result = const LocalNaturalLanguageEditInterpreter().interpret(
+      instruction,
+      current: _editorSession.recipe,
+    );
+    if (!result.isApplicable) return;
+    await _commitNaturalLanguageResult(result);
+  }
+
+  Future<void> _commitNaturalLanguageResult(
+    NaturalLanguageEditResult result,
+  ) async {
+    _editorSession.apply(result.recipe);
+    await _persistRecipe();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(context.l10n.voiceEditApplied(result.changes.length)),
+        action: SnackBarAction(
+          label: context.l10n.undo,
+          onPressed: () => unawaited(_undoEdit()),
+        ),
+      ),
+    );
   }
 
   Future<void> _syncCurrentPhotoAdjustmentsToGroup() async {
@@ -1297,17 +1351,81 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         return Scaffold(
           key: const ValueKey('editor-page'),
           appBar: AppBar(
-            title: Text(context.l10n.editorTitle),
+            title: Text(
+              context.l10n.appTitle,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                letterSpacing: 2,
+              ),
+            ),
             actions: photos.isEmpty
                 ? null
                 : [
-                    IconButton(
-                      tooltip: context.l10n.deleteProject,
-                      onPressed: _exporting || _sharing
-                          ? null
-                          : () => unawaited(_deleteProject()),
-                      icon: const Icon(Icons.delete_outline),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: FilledButton(
+                        key: const ValueKey('editor-batch-export'),
+                        onPressed:
+                            editingEnabled &&
+                                !recommendationFlow &&
+                                hasPhotosReadyToExport
+                            ? () => unawaited(_exportBatch())
+                            : null,
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(72, 48),
+                          padding: const EdgeInsets.symmetric(horizontal: 18),
+                        ),
+                        child: Text(context.l10n.savePhotos),
+                      ),
                     ),
+                    PopupMenuButton<String>(
+                      tooltip: MaterialLocalizations.of(
+                        context,
+                      ).showMenuTooltip,
+                      onSelected: (value) {
+                        switch (value) {
+                          case 'undo':
+                            unawaited(_undoEdit());
+                          case 'redo':
+                            unawaited(_redoEdit());
+                          case 'reset':
+                            unawaited(_resetEdit());
+                          case 'delete':
+                            unawaited(_deleteProject());
+                        }
+                      },
+                      itemBuilder: (context) => [
+                        PopupMenuItem(
+                          value: 'undo',
+                          enabled: editingEnabled && session.canUndo,
+                          child: Text(context.l10n.undo),
+                        ),
+                        PopupMenuItem(
+                          value: 'redo',
+                          enabled: editingEnabled && session.canRedo,
+                          child: Text(context.l10n.redo),
+                        ),
+                        PopupMenuItem(
+                          value: 'reset',
+                          enabled: editingEnabled && session.canResetScopedEdit,
+                          child: Text(context.l10n.reset),
+                        ),
+                        const PopupMenuDivider(),
+                        PopupMenuItem(
+                          value: 'delete',
+                          enabled: !_exporting && !_sharing,
+                          child: Text(context.l10n.deleteProject),
+                        ),
+                      ],
+                    ),
+                    if (MediaQuery.sizeOf(context).width >= 700)
+                      IconButton(
+                        tooltip: context.l10n.deleteProject,
+                        onPressed: _exporting || _sharing
+                            ? null
+                            : () => unawaited(_deleteProject()),
+                        icon: const Icon(Icons.delete_outline),
+                      ),
                   ],
           ),
           bottomNavigationBar:
@@ -1326,14 +1444,14 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                   exporting: _exporting,
                   sharing: _sharing,
                   exportSummary: _exportSummary,
-                  hasPhotosReadyToExport: hasPhotosReadyToExport,
-                  photoCount: photos.length,
+                  onVoiceEdit: () => unawaited(_showVoiceEditSheet()),
                   onUndo: () => unawaited(_undoEdit()),
                   onRedo: () => unawaited(_redoEdit()),
                   onReset: () => unawaited(_resetEdit()),
+                  onQuickEdit: (instruction) =>
+                      unawaited(_applyQuickInstruction(instruction)),
                   onRecommendationSelected: (recommendation) =>
                       unawaited(_selectRecommendation(recommendation)),
-                  onExport: () => unawaited(_exportBatch()),
                   onCancelExport: _cancelBatchExport,
                   onContinueEditing: () => unawaited(_continueEditing()),
                 ),
@@ -1887,29 +2005,72 @@ class _PhotoWorkspace extends StatelessWidget {
                     onPreviewed: onRecommendationPreviewed,
                   ),
                 ] else if (exportSummary == null) ...[
-                  SizedBox(
-                    height: MediaQuery.textScalerOf(context).scale(1) > 1.3
-                        ? 56
-                        : 12,
-                  ),
-                  _MobileToolWorkspace(
-                    enabled: editingEnabled,
-                    photoToolsVisible: photoToolsVisible,
-                    portraitAvailable: portraitApplicable,
-                    faceSlimAvailable: faceSlimApplicable,
-                    faceSlimReason: faceSlimReason,
-                    faceSlimTargetCount: faceSlimTargetCount,
-                    faceTargetRegions: faceTargetRegions,
-                    bodyAvailable: bodyApplicable,
-                    bodyTargetCount: bodyTargetCount,
-                    bodyTargetRegions: bodyTargetRegions,
-                    subjectAvailable: portraitApplicable || bodyApplicable,
-                    allowDetailedTools: photoToolsVisible,
-                    photo: selected,
-                    recipe: recipe,
-                    editorSession: editorSession,
-                    onRecipeCommitted: onRecipeCommitted,
-                  ),
+                  const SizedBox(height: 8),
+                  if (MediaQuery.sizeOf(context).width >= 700 &&
+                      MediaQuery.textScalerOf(context).scale(1) <= 1.3)
+                    _MobileToolWorkspace(
+                      enabled: editingEnabled,
+                      photoToolsVisible: photoToolsVisible,
+                      portraitAvailable: portraitApplicable,
+                      faceSlimAvailable: faceSlimApplicable,
+                      faceSlimReason: faceSlimReason,
+                      faceSlimTargetCount: faceSlimTargetCount,
+                      faceTargetRegions: faceTargetRegions,
+                      bodyAvailable: bodyApplicable,
+                      bodyTargetCount: bodyTargetCount,
+                      bodyTargetRegions: bodyTargetRegions,
+                      subjectAvailable: portraitApplicable || bodyApplicable,
+                      allowDetailedTools: photoToolsVisible,
+                      photo: selected,
+                      recipe: recipe,
+                      editorSession: editorSession,
+                      onRecipeCommitted: onRecipeCommitted,
+                    )
+                  else
+                    Card(
+                      child: ExpansionTile(
+                        key: const ValueKey('editor-manual-adjustments'),
+                        maintainState: true,
+                        tilePadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 4,
+                        ),
+                        childrenPadding: const EdgeInsets.fromLTRB(
+                          16,
+                          0,
+                          16,
+                          16,
+                        ),
+                        leading: const Icon(Icons.tune),
+                        title: Text(
+                          context.l10n.manualAdjustments,
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        subtitle: Text(context.l10n.manualAdjustmentsHint),
+                        children: [
+                          _MobileToolWorkspace(
+                            enabled: editingEnabled,
+                            photoToolsVisible: photoToolsVisible,
+                            portraitAvailable: portraitApplicable,
+                            faceSlimAvailable: faceSlimApplicable,
+                            faceSlimReason: faceSlimReason,
+                            faceSlimTargetCount: faceSlimTargetCount,
+                            faceTargetRegions: faceTargetRegions,
+                            bodyAvailable: bodyApplicable,
+                            bodyTargetCount: bodyTargetCount,
+                            bodyTargetRegions: bodyTargetRegions,
+                            subjectAvailable:
+                                portraitApplicable || bodyApplicable,
+                            allowDetailedTools: photoToolsVisible,
+                            photo: selected,
+                            recipe: recipe,
+                            editorSession: editorSession,
+                            onRecipeCommitted: onRecipeCommitted,
+                          ),
+                        ],
+                      ),
+                    ),
                   if (canSyncCurrentPhoto) ...[
                     OutlinedButton.icon(
                       onPressed: editingEnabled
@@ -1962,13 +2123,12 @@ class _EditorCommandBar extends StatelessWidget {
     required this.exporting,
     required this.sharing,
     required this.exportSummary,
-    required this.hasPhotosReadyToExport,
-    required this.photoCount,
+    required this.onVoiceEdit,
     required this.onUndo,
     required this.onRedo,
     required this.onReset,
+    required this.onQuickEdit,
     required this.onRecommendationSelected,
-    required this.onExport,
     required this.onCancelExport,
     required this.onContinueEditing,
   });
@@ -1983,75 +2143,145 @@ class _EditorCommandBar extends StatelessWidget {
   final bool exporting;
   final bool sharing;
   final BatchExportSummary? exportSummary;
-  final bool hasPhotosReadyToExport;
-  final int photoCount;
+  final VoidCallback onVoiceEdit;
   final VoidCallback onUndo;
   final VoidCallback onRedo;
   final VoidCallback onReset;
+  final ValueChanged<String> onQuickEdit;
   final ValueChanged<LocalRecommendation> onRecommendationSelected;
-  final VoidCallback onExport;
   final VoidCallback onCancelExport;
   final VoidCallback onContinueEditing;
 
   @override
   Widget build(BuildContext context) {
     final interactionsBlocked = exporting || sharing || exportSummary != null;
-    final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.3;
-    final historyActions = <Widget>[
-      TextButton(
-        style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-        onPressed: editingEnabled && canUndo ? onUndo : null,
-        child: Text(context.l10n.undo),
-      ),
-      TextButton(
-        style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-        onPressed: editingEnabled && canRedo ? onRedo : null,
-        child: Text(context.l10n.redo),
-      ),
-      TextButton(
-        style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-        onPressed: editingEnabled && isEdited ? onReset : null,
-        child: Text(context.l10n.reset),
-      ),
-    ];
+    final colors = Theme.of(context).colorScheme;
     return Material(
       color: Theme.of(context).colorScheme.surface,
-      elevation: 2,
+      elevation: 0,
       child: SafeArea(
         key: const ValueKey('editor-bottom-command-bar'),
         top: false,
-        minimum: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-        child: largeText && !interactionsBlocked
-            ? Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Wrap(
-                    alignment: WrapAlignment.spaceEvenly,
-                    spacing: 8,
-                    runSpacing: 4,
-                    children: historyActions,
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
+        minimum: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border(top: BorderSide(color: colors.outlineVariant)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: recommendationFlow || interactionsBlocked
+                ? SizedBox(
                     width: double.infinity,
-                    child: _primaryAction(context),
+                    child: _statusAction(context),
+                  )
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (MediaQuery.sizeOf(context).width >= 700 &&
+                          MediaQuery.textScalerOf(context).scale(1) <= 1.3)
+                        Row(
+                          children: [
+                            TextButton(
+                              onPressed: editingEnabled && canUndo
+                                  ? onUndo
+                                  : null,
+                              child: Text(context.l10n.undo),
+                            ),
+                            TextButton(
+                              onPressed: editingEnabled && canRedo
+                                  ? onRedo
+                                  : null,
+                              child: Text(context.l10n.redo),
+                            ),
+                            TextButton(
+                              onPressed: editingEnabled && isEdited
+                                  ? onReset
+                                  : null,
+                              child: Text(context.l10n.reset),
+                            ),
+                            const Spacer(),
+                            OutlinedButton.icon(
+                              key: const ValueKey('voice-edit-entry'),
+                              onPressed: editingEnabled ? onVoiceEdit : null,
+                              icon: const Icon(Icons.mic_none_outlined),
+                              label: Text(context.l10n.voiceEditEntry),
+                            ),
+                          ],
+                        )
+                      else ...[
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              OutlinedButton(
+                                key: const ValueKey('quick-edit-brighter'),
+                                onPressed: editingEnabled
+                                    ? () => onQuickEdit('照片亮一点')
+                                    : null,
+                                style: OutlinedButton.styleFrom(
+                                  minimumSize: const Size(48, 42),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                  ),
+                                ),
+                                child: Text(context.l10n.quickEditBrighter),
+                              ),
+                              const SizedBox(width: 8),
+                              OutlinedButton(
+                                key: const ValueKey('quick-edit-natural-skin'),
+                                onPressed: editingEnabled
+                                    ? () => onQuickEdit('皮肤自然一点')
+                                    : null,
+                                style: OutlinedButton.styleFrom(
+                                  minimumSize: const Size(48, 42),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                  ),
+                                ),
+                                child: Text(context.l10n.quickEditNaturalSkin),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                key: const ValueKey('voice-edit-entry'),
+                                onPressed: editingEnabled ? onVoiceEdit : null,
+                                style: OutlinedButton.styleFrom(
+                                  alignment: Alignment.centerLeft,
+                                  foregroundColor: colors.onSurfaceVariant,
+                                  minimumSize: const Size.fromHeight(50),
+                                ),
+                                child: Text(context.l10n.voiceEditPrompt),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            IconButton.filled(
+                              key: const ValueKey('voice-edit-microphone'),
+                              tooltip: context.l10n.voiceEditEntry,
+                              onPressed: editingEnabled ? onVoiceEdit : null,
+                              constraints: const BoxConstraints.tightFor(
+                                width: 50,
+                                height: 50,
+                              ),
+                              icon: const Icon(Icons.mic_none_outlined),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
                   ),
-                ],
-              )
-            : Row(
-                children: [
-                  if (!interactionsBlocked) ...[
-                    ...historyActions,
-                    const SizedBox(width: 8),
-                  ],
-                  Expanded(child: _primaryAction(context)),
-                ],
-              ),
+          ),
+        ),
       ),
     );
   }
 
-  Widget _primaryAction(BuildContext context) {
+  Widget _statusAction(BuildContext context) {
     if (recommendationFlow) {
       return FilledButton.icon(
         key: const ValueKey('recommendation-use'),
@@ -2100,12 +2330,7 @@ class _EditorCommandBar extends StatelessWidget {
         child: Text(context.l10n.continueEditing),
       );
     }
-    return FilledButton.icon(
-      key: const ValueKey('editor-batch-export'),
-      onPressed: !editingEnabled || !hasPhotosReadyToExport ? null : onExport,
-      icon: const Icon(Icons.file_download_outlined),
-      label: Text(context.l10n.batchExportPhotos(photoCount)),
-    );
+    return const SizedBox.shrink();
   }
 }
 
@@ -2687,6 +2912,19 @@ class _MobileToolWorkspaceState extends State<_MobileToolWorkspace> {
             (widget.portraitAvailable || widget.bodyAvailable)
         ? _MobileToolCategory.retouch
         : _MobileToolCategory.color;
+  }
+
+  @override
+  void didUpdateWidget(covariant _MobileToolWorkspace oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final portraitBecameAvailable =
+        (!oldWidget.portraitAvailable && widget.portraitAvailable) ||
+        (!oldWidget.bodyAvailable && widget.bodyAvailable);
+    if (_selected == _MobileToolCategory.color &&
+        widget.photoToolsVisible &&
+        portraitBecameAvailable) {
+      _selected = _MobileToolCategory.retouch;
+    }
   }
 
   @override
@@ -4081,7 +4319,7 @@ class _AdjustmentToolButton extends StatelessWidget {
       label: label,
       onTap: onTap,
       child: SizedBox(
-        width: 68,
+        width: 64,
         height: largeText ? 104 : 64,
         child: Material(
           color: selected

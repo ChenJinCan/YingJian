@@ -12,6 +12,7 @@
 
 - 稳定产品策略：[产品上下文](product/product-context.md)
 - MVP 范围与验收：[MVP Spec](product/mvp-spec.md)
+- MVP 页面、流程与交互合同：[MVP 交互设计 PRD](product/mvp-interaction-prd.md)
 - 当前候选与开放门禁：[状态快照](product/mvp-session-handoff-2026-08-10.md)
 - 自然人像独特合同：[自然人像纵切](product/natural-portrait-retouch-vertical-slice-spec.md)
 - 几何塑形独特合同：[塑形纵切](product/portrait-reshape-vertical-slice-spec.md)

@@ -11,7 +11,7 @@ void main() {
   test('defaults to system appearance and device locale', () async {
     final settings = await AppSettings.load();
 
-    expect(settings.themeMode, ThemeMode.system);
+    expect(settings.themeMode, ThemeMode.dark);
     expect(settings.locale, isNull);
     expect(settings.diagnosticsEnabled, isFalse);
   });

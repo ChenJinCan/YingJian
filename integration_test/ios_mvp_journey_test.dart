@@ -208,6 +208,39 @@ void main() {
       findsOneWidget,
     );
 
+    final exposureBeforeVoice = (await store.loadLatest())!
+        .effectiveRecipeFor(importedPhoto.id)
+        .exposure;
+    final voiceEntry = find.byKey(const ValueKey('voice-edit-entry'));
+    expect(voiceEntry.hitTestable(), findsOneWidget);
+    await tester.tap(voiceEntry);
+    await tester.pumpAndSettle();
+    expect(find.text('描述你想要的效果'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('voice-edit-text-field')),
+      '照片亮一点',
+    );
+    await tester.tap(find.byKey(const ValueKey('voice-edit-submit')));
+    await tester.pumpAndSettle();
+    expect(
+      (await store.loadLatest())!.effectiveRecipeFor(importedPhoto.id).exposure,
+      closeTo(exposureBeforeVoice + 0.12, 0.0001),
+    );
+    expect(find.text('已应用 1 项可见参数'), findsOneWidget);
+    await tester.tap(find.widgetWithText(SnackBarAction, '撤销'));
+    await tester.pumpAndSettle();
+    expect(
+      (await store.loadLatest())!.effectiveRecipeFor(importedPhoto.id).exposure,
+      exposureBeforeVoice,
+    );
+
+    final manualAdjustments = find.byKey(
+      const ValueKey('editor-manual-adjustments'),
+    );
+    await tester.ensureVisible(manualAdjustments);
+    await tester.tap(manualAdjustments);
+    await tester.pumpAndSettle();
+
     final qualityCategory = find.byKey(
       const ValueKey('editor-tool-category-quality'),
     );
@@ -564,6 +597,9 @@ void main() {
       of: find.byKey(const ValueKey('editor-hsl-blue-saturation')),
       matching: find.byType(Slider),
     );
+    await tester.ensureVisible(blueSaturation);
+    await tester.pumpAndSettle();
+    expect(blueSaturation.hitTestable(), findsOneWidget);
     await tester.drag(blueSaturation, const Offset(70, 0));
     await tester.pumpAndSettle();
     final basicEditing = (await store.loadLatest())!
@@ -613,12 +649,9 @@ void main() {
     expect(semanticEditing.localExposure, greaterThan(0));
     expect(semanticEditing.localAdjustmentStrokes, isNotEmpty);
 
-    await tester.dragUntilVisible(
-      find.byKey(const ValueKey('editor-batch-export')),
-      workspace,
-      const Offset(0, -320),
-    );
-    await tester.tap(find.byKey(const ValueKey('editor-batch-export')));
+    final saveButton = find.byKey(const ValueKey('editor-batch-export'));
+    await tester.ensureVisible(saveButton);
+    await tester.tap(saveButton);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('export-size')));
     await tester.pumpAndSettle();
@@ -800,6 +833,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(store.project!.sharedStyle.intensity, lessThan(1));
 
+      final manualAdjustments = find.byKey(
+        const ValueKey('editor-manual-adjustments'),
+      );
+      await tester.ensureVisible(manualAdjustments);
+      await tester.tap(manualAdjustments);
+      await tester.pumpAndSettle();
+
       final groupFilters = find.byKey(
         const ValueKey('editor-tool-category-filters'),
       );
@@ -868,6 +908,12 @@ void main() {
       );
       await tester.tap(currentPhotoScope);
       await tester.pumpAndSettle();
+      final currentManualAdjustments = find.byKey(
+        const ValueKey('editor-manual-adjustments'),
+      );
+      await tester.ensureVisible(currentManualAdjustments);
+      await tester.tap(currentManualAdjustments);
+      await tester.pumpAndSettle();
       for (final category in <String>[
         'composition',
         'color',
@@ -884,9 +930,12 @@ void main() {
         find.byKey(const ValueKey('editor-photo-ios-runtime-photo-2')),
       );
       await tester.pumpAndSettle();
-      await tester.tap(
-        find.byKey(const ValueKey('editor-adjustment-tab-contrast')),
+      final contrastTab = find.byKey(
+        const ValueKey('editor-adjustment-tab-contrast'),
       );
+      await tester.ensureVisible(contrastTab);
+      await tester.pumpAndSettle();
+      await tester.tap(contrastTab);
       await tester.pumpAndSettle();
       final contrastSlider = find.byKey(
         const ValueKey('editor-adjustment-contrast'),
@@ -907,11 +956,7 @@ void main() {
       );
 
       final exportButton = find.byKey(const ValueKey('editor-batch-export'));
-      await tester.dragUntilVisible(
-        exportButton,
-        workspace,
-        const Offset(0, -340),
-      );
+      await tester.ensureVisible(exportButton);
       await tester.tap(exportButton);
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('export-confirm')));

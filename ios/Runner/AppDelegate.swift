@@ -77,10 +77,12 @@ enum IOSPortraitCapabilityPolicy {
   private var photoPickerChannel: FlutterMethodChannel?
   private var photoInputChannel: FlutterMethodChannel?
   private var photoAnalysisChannel: FlutterMethodChannel?
+  private var speechTranscriptionChannel: FlutterMethodChannel?
   private var photoPreviewRenderer: IOSPhotoPreviewRenderer?
   private let photoExportContext = CIContext(options: [.cacheIntermediates: false])
   private var photoShareInProgress = false
   private let photoPicker = IOSPhotoPicker()
+  private let speechTranscriber = IOSSpeechTranscriber()
 #if DEBUG
   private var portraitMaskSpikeChannel: FlutterMethodChannel?
   private var portraitMaskSpikeStartupError: PortraitMaskSpikeError?
@@ -133,6 +135,7 @@ enum IOSPortraitCapabilityPolicy {
     configurePhotoShare(messenger: registrar.messenger())
     configurePhotoInput(messenger: registrar.messenger())
     configurePhotoAnalysis(messenger: registrar.messenger())
+    configureSpeechTranscription(messenger: registrar.messenger())
     photoPreviewRenderer = IOSPhotoPreviewRenderer(
       messenger: registrar.messenger(),
       textureRegistry: registrar.textures()
@@ -140,6 +143,47 @@ enum IOSPortraitCapabilityPolicy {
 #if DEBUG
     configurePortraitMaskSpike(messenger: registrar.messenger())
 #endif
+  }
+
+  private func configureSpeechTranscription(messenger: FlutterBinaryMessenger) {
+    let channel = FlutterMethodChannel(
+      name: "yingjian/speech_transcription",
+      binaryMessenger: messenger
+    )
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result(FlutterError(
+          code: "speechUnavailable",
+          message: "Speech transcription is unavailable",
+          details: nil
+        ))
+        return
+      }
+      switch call.method {
+      case "startTranscription":
+        guard
+          let arguments = call.arguments as? [String: Any],
+          let localeIdentifier = arguments["localeIdentifier"] as? String,
+          !localeIdentifier.isEmpty
+        else {
+          result(FlutterError(
+            code: "invalidArguments",
+            message: "A locale identifier is required",
+            details: nil
+          ))
+          return
+        }
+        self.speechTranscriber.start(
+          localeIdentifier: localeIdentifier,
+          result: result
+        )
+      case "stopTranscription":
+        self.speechTranscriber.stop(result: result)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+    speechTranscriptionChannel = channel
   }
 
   private func configurePhotoPicker(messenger: FlutterBinaryMessenger) {

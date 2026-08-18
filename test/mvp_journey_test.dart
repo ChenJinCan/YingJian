@@ -72,9 +72,9 @@ void main() {
           expect(find.text('质感风格'), findsOneWidget);
           await tester.tap(find.text('质感风格'));
           await tester.pumpAndSettle();
-          await tester.ensureVisible(find.text('使用这套效果'));
+          await tester.ensureVisible(find.text('就用这个'));
           await tester.pumpAndSettle();
-          await tester.tap(find.text('使用这套效果'));
+          await tester.tap(find.text('就用这个'));
           await tester.pumpAndSettle();
 
           expect(store.project?.flowState, PhotoProjectFlowState.editing);
@@ -85,6 +85,16 @@ void main() {
           expect(store.project?.adaptiveCompensations, hasLength(6));
 
           final workspace = find.byKey(const Key('photo-workspace-scroll'));
+          final manualAdjustments = find.byKey(
+            const ValueKey('editor-manual-adjustments'),
+          );
+          await Scrollable.ensureVisible(
+            tester.element(manualAdjustments),
+            alignment: 0.15,
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(manualAdjustments);
+          await tester.pumpAndSettle();
           final exposureAdjustment = find.byKey(
             const ValueKey('editor-adjustment-exposure'),
           );
@@ -93,7 +103,10 @@ void main() {
             workspace,
             const Offset(0, -240),
           );
-          await tester.drag(workspace, const Offset(0, -96));
+          await Scrollable.ensureVisible(
+            tester.element(exposureAdjustment),
+            alignment: 0.35,
+          );
           await tester.pumpAndSettle();
           await tester.drag(
             find.descendant(
@@ -118,14 +131,30 @@ void main() {
           await tester.pumpAndSettle();
           await tester.tap(find.bySemanticsLabel(RegExp(r'^photo-2\.png')));
           await tester.pumpAndSettle();
+          final reopenedManualAdjustments = find.byKey(
+            const ValueKey('editor-manual-adjustments'),
+          );
+          await Scrollable.ensureVisible(
+            tester.element(reopenedManualAdjustments),
+            alignment: 0.15,
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(reopenedManualAdjustments);
+          await tester.pumpAndSettle();
           await tester.dragUntilVisible(
             find.byKey(const ValueKey('editor-adjustment-tab-contrast')),
             workspace,
             const Offset(0, -260),
           );
-          await tester.tap(
-            find.byKey(const ValueKey('editor-adjustment-tab-contrast')),
+          final contrastTab = find.byKey(
+            const ValueKey('editor-adjustment-tab-contrast'),
           );
+          await Scrollable.ensureVisible(
+            tester.element(contrastTab),
+            alignment: 0.35,
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(contrastTab.hitTestable());
           await tester.pumpAndSettle();
           final contrastAdjustment = find.byKey(
             const ValueKey('editor-adjustment-contrast'),
@@ -147,14 +176,9 @@ void main() {
             isNot(store.project?.effectiveRecipeFor('photo-2').contrast),
           );
 
-          await tester.dragUntilVisible(
-            find.text('批量导出 6 张'),
-            workspace,
-            const Offset(0, -340),
-          );
-          await tester.drag(workspace, const Offset(0, -90));
-          await tester.pumpAndSettle();
-          await tester.tap(find.text('批量导出 6 张'));
+          final savePhotos = find.byKey(const ValueKey('editor-batch-export'));
+          await tester.ensureVisible(savePhotos);
+          await tester.tap(savePhotos);
           await tester.pumpAndSettle();
           expect(find.textContaining('从 6 张只读原图'), findsOneWidget);
           await tester.tap(find.text('开始导出'));
@@ -247,6 +271,18 @@ void main() {
     expect(find.bySemanticsLabel(RegExp(r'^photo-1\.png')), findsWidgets);
 
     final workspace = find.byKey(const Key('photo-workspace-scroll'));
+    await tester.fling(workspace, const Offset(0, -1000), 2000);
+    await tester.pumpAndSettle();
+    final manualAdjustments = find.byKey(
+      const ValueKey('editor-manual-adjustments'),
+    );
+    await Scrollable.ensureVisible(
+      tester.element(manualAdjustments),
+      alignment: 0.15,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(manualAdjustments);
+    await tester.pumpAndSettle();
     final exposureAdjustment = find.byKey(
       const ValueKey('editor-adjustment-exposure'),
     );
@@ -300,6 +336,18 @@ void main() {
     final semanticCategory = find.byKey(
       const ValueKey('editor-tool-category-semantic'),
     );
+    if (semanticCategory.evaluate().isEmpty) {
+      final manualAdjustments = find.byKey(
+        const ValueKey('editor-manual-adjustments'),
+      );
+      await Scrollable.ensureVisible(
+        tester.element(manualAdjustments),
+        alignment: 0.15,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(manualAdjustments);
+      await tester.pumpAndSettle();
+    }
     await tester.ensureVisible(semanticCategory);
     await tester.tap(semanticCategory);
     await tester.pumpAndSettle();
@@ -316,15 +364,12 @@ void main() {
     await tester.tap(find.text('取消').last);
     await tester.pumpAndSettle();
 
-    await tester.dragUntilVisible(
-      find.text('批量导出 6 张'),
-      workspace,
-      const Offset(0, -300),
-    );
+    final savePhotos = find.byKey(const ValueKey('editor-batch-export'));
+    await tester.ensureVisible(savePhotos);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(find.text('批量导出 6 张'), findsOneWidget);
-    expect(tester.getSize(find.text('批量导出 6 张')).height, greaterThan(20));
+    expect(savePhotos, findsOneWidget);
+    expect(tester.getSize(find.text('保存')).height, greaterThan(20));
     _expectCurrentTapSemanticsAtLeast(tester, 48);
     semantics.dispose();
     debugDefaultTargetPlatformOverride = null;

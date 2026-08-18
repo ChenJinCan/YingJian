@@ -249,11 +249,13 @@ struct IOSPortraitMasks {
 /// Landmark-derived local deformation area. The mapping is inverse: every
 /// destination pixel asks for a source coordinate, avoiding holes or seams.
 struct IOSFaceSlimGeometry: Equatable {
-  // CainCamera calibrates lower-face shave at 0.12 and upper-face lift at
-  // 0.05. Keeping both values avoids the uniform squeeze produced by the
-  // earlier generic warp.
-  static let lowerFaceShiftRatio: CGFloat = 0.12
-  static let upperFaceShiftRatio: CGFloat = 0.05
+  // Preserve CainCamera's stronger lower-face shave and softer upper-face
+  // transition, then calibrate the pair against our protected real fixture.
+  // The product slider is capped at 0.5, so these kernel ratios produce a
+  // visible but identity-safe maximum instead of exposing the kernel's full
+  // range directly.
+  static let lowerFaceShiftRatio: CGFloat = 0.36
+  static let upperFaceShiftRatio: CGFloat = 0.21
 
   let centerX: CGFloat
   let halfWidth: CGFloat

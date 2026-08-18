@@ -33,7 +33,7 @@ void main() {
     await tester.tap(find.text('开始修图'));
     await tester.pumpAndSettle();
 
-    expect(find.text('精修工作台'), findsOneWidget);
+    expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
     expect(find.text('选择 1–6 张照片'), findsOneWidget);
   });
 
@@ -389,7 +389,7 @@ void main() {
     addTearDown(laterFrame.dispose);
     await expectLater(laterFrame, matchesReferenceImage(immediateFrame));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('使用这套效果'));
+    await tester.tap(find.byKey(const ValueKey('recommendation-use')));
     await tester.pumpAndSettle();
 
     expect(store.project?.flowState, PhotoProjectFlowState.editing);
@@ -995,9 +995,10 @@ void main() {
     );
     expect(find.text('重做'), findsOneWidget);
 
-    await tester.ensureVisible(find.text('批量导出 1 张'));
+    final saveButton = find.byKey(const ValueKey('editor-batch-export'));
+    await tester.ensureVisible(saveButton);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('批量导出 1 张'));
+    await tester.tap(saveButton);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('export-format')), findsOneWidget);
     expect(find.byKey(const ValueKey('export-size')), findsOneWidget);
@@ -1209,7 +1210,7 @@ void main() {
       );
       await tester.tap(find.text('开始修图'));
       await tester.pumpAndSettle();
-      expect(find.text('精修工作台'), findsOneWidget);
+      expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
       expect(find.byKey(const Key('photo-workspace-scroll')), findsOneWidget);
       for (
         var attempt = 0;
@@ -1486,13 +1487,12 @@ void main() {
 
       await tester.tap(find.text('开始修图'));
       await tester.pumpAndSettle();
-      await tester.dragUntilVisible(
+      await tester.ensureVisible(
         find.byKey(
           const ValueKey('editor-adjustment-tab-naturalBeautification'),
         ),
-        find.byKey(const Key('photo-workspace-scroll')),
-        const Offset(0, -220),
       );
+      await tester.pumpAndSettle();
       final portraitTab = find.byKey(
         const ValueKey('editor-adjustment-tab-naturalBeautification'),
       );
@@ -1533,6 +1533,8 @@ void main() {
       final colorCategory = find.byKey(
         const ValueKey('editor-tool-category-color'),
       );
+      await Scrollable.ensureVisible(tester.element(colorCategory));
+      await tester.pumpAndSettle();
       await tester.tap(colorCategory);
       await tester.pumpAndSettle();
       expect(exposureTab, findsOneWidget);
@@ -2172,13 +2174,14 @@ void main() {
       final groupIntensity = find.byKey(
         const ValueKey('editor-group-style-intensity'),
       );
+      expect(find.textContaining('保留每张照片的独立补偿'), findsOneWidget);
       await tester.dragUntilVisible(
         groupIntensity,
         find.byKey(const Key('photo-workspace-scroll')),
         const Offset(0, -180),
       );
+      await tester.pumpAndSettle();
       expect(groupIntensity, findsOneWidget);
-      expect(find.textContaining('保留每张照片的独立补偿'), findsOneWidget);
       final groupIntensitySlider = find.descendant(
         of: groupIntensity,
         matching: find.byType(Slider),
@@ -2520,17 +2523,8 @@ void main() {
 
     await tester.tap(find.text('开始修图'));
     await tester.pumpAndSettle();
-    await tester.dragUntilVisible(
-      find.text('批量导出 2 张'),
-      find.byKey(const Key('photo-workspace-scroll')),
-      const Offset(0, -320),
-    );
-    await tester.drag(
-      find.byKey(const Key('photo-workspace-scroll')),
-      const Offset(0, -80),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('批量导出 2 张'));
+    final saveButton = find.byKey(const ValueKey('editor-batch-export'));
+    await tester.tap(saveButton);
     await tester.pumpAndSettle();
     await tester.tap(find.text('开始导出'));
     await tester.pumpAndSettle();
@@ -2590,18 +2584,9 @@ void main() {
     );
     await tester.tap(find.text('开始修图'));
     await tester.pumpAndSettle();
-    await tester.dragUntilVisible(
-      find.text('批量导出 1 张'),
-      find.byKey(const Key('photo-workspace-scroll')),
-      const Offset(0, -300),
-    );
-    await tester.drag(
-      find.byKey(const Key('photo-workspace-scroll')),
-      const Offset(0, -80),
-    );
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('批量导出 1 张'));
-    await tester.tap(find.text('批量导出 1 张'));
+    final saveButton = find.byKey(const ValueKey('editor-batch-export'));
+    await tester.ensureVisible(saveButton);
+    await tester.tap(saveButton);
     await tester.pumpAndSettle();
     await tester.tap(find.text('开始导出'));
     await tester.pumpAndSettle();
@@ -2649,17 +2634,8 @@ void main() {
     );
     await tester.tap(find.text('开始修图'));
     await tester.pumpAndSettle();
-    await tester.dragUntilVisible(
-      find.text('批量导出 2 张'),
-      find.byKey(const Key('photo-workspace-scroll')),
-      const Offset(0, -300),
-    );
-    await tester.drag(
-      find.byKey(const Key('photo-workspace-scroll')),
-      const Offset(0, -80),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('批量导出 2 张'));
+    final saveButton = find.byKey(const ValueKey('editor-batch-export'));
+    await tester.tap(saveButton);
     await tester.pumpAndSettle();
     await tester.tap(find.text('开始导出'));
     for (
@@ -2766,18 +2742,9 @@ void main() {
     );
     await tester.tap(find.text('开始修图'));
     await tester.pumpAndSettle();
-    await tester.dragUntilVisible(
-      find.text('批量导出 1 张'),
-      find.byKey(const Key('photo-workspace-scroll')),
-      const Offset(0, -300),
-    );
-    await tester.drag(
-      find.byKey(const Key('photo-workspace-scroll')),
-      const Offset(0, -80),
-    );
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('批量导出 1 张'));
-    await tester.tap(find.text('批量导出 1 张'));
+    final saveButton = find.byKey(const ValueKey('editor-batch-export'));
+    await tester.ensureVisible(saveButton);
+    await tester.tap(saveButton);
     await tester.pumpAndSettle();
     await tester.tap(find.text('开始导出'));
     await tester.pump(const Duration(milliseconds: 300));
@@ -2881,6 +2848,8 @@ void main() {
       find.byKey(const ValueKey('editor-bottom-command-bar')),
       findsOneWidget,
     );
+    await tester.tap(find.byKey(const ValueKey('editor-manual-adjustments')));
+    await tester.pumpAndSettle();
     final composition = find.byKey(
       const ValueKey('editor-tool-category-composition'),
     );
@@ -2952,13 +2921,9 @@ Future<MemoryPhotoProjectStore> _pumpSinglePhotoExport(
   );
   await tester.tap(find.text('开始修图'));
   await tester.pumpAndSettle();
-  await tester.dragUntilVisible(
-    find.text('批量导出 1 张'),
-    find.byKey(const Key('photo-workspace-scroll')),
-    const Offset(0, -300),
-  );
-  await tester.pumpAndSettle();
-  await tester.tap(find.text('批量导出 1 张'));
+  final saveButton = find.byKey(const ValueKey('editor-batch-export'));
+  await tester.ensureVisible(saveButton);
+  await tester.tap(saveButton);
   await tester.pumpAndSettle();
   await tester.tap(find.text('开始导出'));
   await tester.pumpAndSettle();
