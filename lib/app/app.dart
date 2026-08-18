@@ -47,7 +47,9 @@ class _YingjianAppState extends State<YingjianApp> {
         AppLocalizations.delegate,
       ],
       supportedLocales: AppLocalizations.supportedLocales,
-      initialRoute: AppRoutes.home,
+      initialRoute: settings.onboardingComplete
+          ? AppRoutes.home
+          : AppRoutes.onboarding,
       navigatorObservers: [_navigatorObserver!],
       onGenerateRoute: AppRouter.onGenerateRoute,
     );

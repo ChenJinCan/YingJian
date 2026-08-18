@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:yingjian/features/editor/presentation/editor_page.dart';
 import 'package:yingjian/features/home/presentation/home_page.dart';
+import 'package:yingjian/features/onboarding/presentation/onboarding_page.dart';
 import 'package:yingjian/features/settings/presentation/legal_document_page.dart';
 import 'package:yingjian/features/settings/presentation/settings_page.dart';
 import 'package:yingjian/l10n/l10n.dart';
 
 abstract final class AppRoutes {
+  static const onboarding = '/onboarding';
   static const home = '/';
   static const editor = '/editor';
   static const settings = '/settings';
@@ -18,8 +20,12 @@ abstract final class AppRouter {
 
   static Route<void> onGenerateRoute(RouteSettings settings) {
     return switch (settings.name) {
+      AppRoutes.onboarding => _page(const OnboardingPage(), settings),
       AppRoutes.home => _page(const HomePage(), settings),
-      AppRoutes.editor => _page(const EditorPage(), settings),
+      AppRoutes.editor => _page(
+        EditorPage(startWithImport: settings.arguments == true),
+        settings,
+      ),
       AppRoutes.settings => _page(const SettingsPage(), settings),
       AppRoutes.privacy => _page(
         const LegalDocumentPage(type: LegalDocumentType.privacy),

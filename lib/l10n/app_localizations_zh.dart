@@ -21,6 +21,36 @@ class AppLocalizationsZh extends AppLocalizations {
   String get homeHeroTitle => '让变美更容易';
 
   @override
+  String get homeSupporting => '选几张照片，说出你想要的感觉。映见会先修好一张，再让整组自然统一。';
+
+  @override
+  String get homePrimaryAction => '选择照片开始';
+
+  @override
+  String get homeStepChoose => '选照片';
+
+  @override
+  String get homeStepDescribe => '说想法';
+
+  @override
+  String get homeStepSave => '存整组';
+
+  @override
+  String get homeGuideSemantics => '使用步骤：选照片，说想法，保存整组';
+
+  @override
+  String get onboardingPromise => '先选照片，再说出你想要的感觉。映见会把一张修好，也让整组自然统一。';
+
+  @override
+  String get onboardingPrivacy => '默认在手机本地处理，不会上传你的照片';
+
+  @override
+  String get onboardingContinue => '开始使用';
+
+  @override
+  String get onboardingSaveFailed => '暂时无法保存首次使用状态，请重试。';
+
+  @override
   String get recentProjects => '最近项目';
 
   @override
@@ -31,6 +61,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get continueLastEditing => '继续上次编辑';
+
+  @override
+  String get openProject => '打开项目';
 
   @override
   String get startNewProject => '开始新项目';
@@ -831,6 +864,12 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get adjustPhoto => '自己调';
+
+  @override
+  String get quickAdjust => '快速调整';
+
+  @override
+  String get allTools => '全部工具';
 
   @override
   String get savePhotos => '保存';

@@ -28,9 +28,13 @@ void main() {
 
     expect(find.text('映见'), findsOneWidget);
     expect(find.text('一张精修，整组好看'), findsOneWidget);
-    expect(find.text('开始修图'), findsOneWidget);
+    expect(find.text('选择照片开始'), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-journey-guide')), findsOneWidget);
+    expect(find.text('选照片'), findsOneWidget);
+    expect(find.text('说想法'), findsOneWidget);
+    expect(find.text('存整组'), findsOneWidget);
 
-    await tester.tap(find.text('开始修图'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
@@ -43,7 +47,7 @@ void main() {
     await tester.pumpWidget(buildTestApp(settings));
 
     expect(find.text('Yingjian'), findsOneWidget);
-    expect(find.text('Start editing'), findsOneWidget);
+    expect(find.text('Choose photos to begin'), findsOneWidget);
   });
 
   testWidgets('English unfinished-project count uses singular grammar', (
@@ -100,6 +104,7 @@ void main() {
 
     expect(find.text('未完成项目'), findsOneWidget);
     expect(find.text('继续上次编辑'), findsOneWidget);
+    expect(find.text('打开项目'), findsOneWidget);
     expect(find.text('开始新项目'), findsOneWidget);
     expect(find.textContaining('1 张照片'), findsOneWidget);
     expect(find.textContaining('14:30'), findsOneWidget);
@@ -127,6 +132,7 @@ void main() {
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
     await tester.pumpAndSettle();
 
+    await tester.ensureVisible(find.text('开始新项目'));
     await tester.tap(find.text('开始新项目'));
     await tester.pumpAndSettle();
     expect(find.textContaining('系统相册原图不会被删除'), findsOneWidget);
@@ -159,11 +165,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('开始修图'));
-    await tester.pumpAndSettle();
-    expect(find.text('选择 1–6 张照片'), findsOneWidget);
-
-    await tester.tap(find.text('选择照片'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('photo-preview-photo-1')), findsOneWidget);
@@ -211,9 +213,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('开始修图'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('选择照片'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
 
     expect(find.text('可用照片.png'), findsOneWidget);
@@ -236,9 +236,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('开始修图'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('选择照片'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('损坏照片.jpg'), findsOneWidget);
@@ -256,9 +254,7 @@ void main() {
       buildTestApp(settings, photoImporter: FakePhotoImporter()),
     );
 
-    await tester.tap(find.text('开始修图'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('选择照片'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
 
     expect(find.text('未添加任何照片'), findsOneWidget);
@@ -273,10 +269,9 @@ void main() {
     final settings = await AppSettings.load();
     await tester.pumpWidget(buildTestApp(settings, photoImporter: importer));
 
-    await tester.tap(find.text('开始修图'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('选择照片'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
     final progress = find.semantics.byPredicate(
       (node) =>
@@ -322,9 +317,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('开始修图'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('选择照片'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
     await tester.drag(
       find.byKey(const Key('photo-workspace-scroll')),
@@ -441,16 +434,14 @@ void main() {
     );
 
     await tester.pumpWidget(app());
-    await tester.tap(find.text('开始修图'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('选择照片'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
     expect(analyzer.calls, 1);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
     await tester.pumpWidget(app());
-    await tester.tap(find.text('开始修图'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
 
     expect(analyzer.calls, 1);
@@ -492,9 +483,7 @@ void main() {
         ),
       );
 
-      await tester.tap(find.text('开始修图'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('选择照片'));
+      await tester.tap(find.byKey(const ValueKey('home-start-editing')));
       await tester.pumpAndSettle();
 
       expect(find.textContaining('这套推荐预览暂不可用'), findsOneWidget);
@@ -556,10 +545,9 @@ void main() {
         photoAnalysisCache: cache,
       ),
     );
-    await tester.tap(find.text('开始修图'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('选择照片'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     await analyzer.started.future;
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
@@ -631,10 +619,9 @@ void main() {
         photoAnalyzer: analyzer,
       ),
     );
-    await tester.tap(find.text('开始修图'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('选择照片'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     await analyzer.started.future;
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
@@ -683,10 +670,9 @@ void main() {
         photoAnalyzer: analyzer,
       ),
     );
-    await tester.tap(find.text('开始修图'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('选择照片'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     await analyzer.started.future;
 
     await tester.pumpWidget(const SizedBox.shrink());
@@ -729,10 +715,9 @@ void main() {
         photoAnalysisCache: cache,
       ),
     );
-    await tester.tap(find.text('开始修图'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('选择照片'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     await analyzer.started.future;
 
     await tester.tap(find.byTooltip('删除项目'));
@@ -785,10 +770,9 @@ void main() {
         photoAnalyzer: _CountingPhotoAnalyzer(),
       ),
     );
-    await tester.tap(find.text('开始修图'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('选择照片'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     await store.analysisSaveStarted.future;
 
     await tester.tap(find.byTooltip('删除项目'));
@@ -837,10 +821,9 @@ void main() {
         photoAnalyzer: analyzer,
       ),
     );
-    await tester.tap(find.text('开始修图'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('选择照片'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     await analyzer.started.future;
 
     await tester.tap(find.byTooltip('移除照片'));
@@ -903,10 +886,9 @@ void main() {
         photoAnalyzer: _CountingPhotoAnalyzer(),
       ),
     );
-    await tester.tap(find.text('开始修图'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('选择照片'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     await store.analysisSaveStarted.future;
 
     await tester.tap(find.byTooltip('移除照片'));
@@ -964,7 +946,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('开始修图'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
 
     expect(find.text('周末人像.png'), findsOneWidget);
@@ -1156,7 +1138,7 @@ void main() {
           photoPreviewRenderer: FakePhotoPreviewRenderer.unsupported(),
         ),
       );
-      await tester.tap(find.text('开始修图'));
+      await tester.tap(find.byKey(const ValueKey('home-start-editing')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
       expect(find.byKey(const Key('photo-workspace-scroll')), findsOneWidget);
@@ -1237,7 +1219,7 @@ void main() {
       SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
       final settings = await AppSettings.load();
       await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
-      await tester.tap(find.text('开始修图'));
+      await tester.tap(find.byKey(const ValueKey('home-start-editing')));
       await tester.pumpAndSettle();
 
       final compositionCategory = find.byKey(
@@ -1316,7 +1298,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('开始修图'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('当前效果预览暂不可用'), findsOneWidget);
@@ -1433,7 +1415,7 @@ void main() {
         ),
       );
 
-      await tester.tap(find.text('开始修图'));
+      await tester.tap(find.byKey(const ValueKey('home-start-editing')));
       await tester.pumpAndSettle();
       await tester.ensureVisible(
         find.byKey(
@@ -2018,7 +2000,7 @@ void main() {
           photoPreviewRenderer: FakePhotoPreviewRenderer.supported(),
         ),
       );
-      await tester.tap(find.text('开始修图'));
+      await tester.tap(find.byKey(const ValueKey('home-start-editing')));
       await tester.pumpAndSettle();
 
       expect(analyzer.calls, 1);
@@ -2112,7 +2094,7 @@ void main() {
       final settings = await AppSettings.load();
       await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
 
-      await tester.tap(find.text('开始修图'));
+      await tester.tap(find.byKey(const ValueKey('home-start-editing')));
       await tester.pumpAndSettle();
 
       expect(find.text('第 1 / 2 张 · 编辑整组'), findsOneWidget);
@@ -2262,7 +2244,7 @@ void main() {
     final settings = await AppSettings.load();
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
 
-    await tester.tap(find.text('开始修图'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
     await tester.dragUntilVisible(
       find.text('同步当前调整到整组'),
@@ -2342,7 +2324,7 @@ void main() {
     final settings = await AppSettings.load();
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
 
-    await tester.tap(find.text('开始修图'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
 
     expect(find.text('第 4 / 6 张 · 仅当前照片'), findsOneWidget);
@@ -2359,7 +2341,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
-    await tester.tap(find.text('开始修图'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
 
     expect(find.text('第 4 / 6 张 · 编辑整组'), findsOneWidget);
@@ -2397,7 +2379,7 @@ void main() {
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
     final settings = await AppSettings.load();
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
-    await tester.tap(find.text('开始修图'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
 
     await tester.drag(
@@ -2419,7 +2401,7 @@ void main() {
       buildTestApp(settings, photoProjectStore: _FailingProjectStore()),
     );
 
-    await tester.tap(find.text('开始修图'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
 
     expect(find.text('无法恢复上次项目'), findsOneWidget);
@@ -2469,7 +2451,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('开始修图'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
     final saveButton = find.byKey(const ValueKey('editor-batch-export'));
     await tester.tap(saveButton);
@@ -2530,7 +2512,7 @@ void main() {
         photoExporter: _AlwaysFailPhotoExporter(),
       ),
     );
-    await tester.tap(find.text('开始修图'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
     final saveButton = find.byKey(const ValueKey('editor-batch-export'));
     await tester.ensureVisible(saveButton);
@@ -2580,7 +2562,7 @@ void main() {
     await tester.pumpWidget(
       buildTestApp(settings, photoProjectStore: store, photoExporter: exporter),
     );
-    await tester.tap(find.text('开始修图'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
     final saveButton = find.byKey(const ValueKey('editor-batch-export'));
     await tester.tap(saveButton);
@@ -2689,7 +2671,7 @@ void main() {
         photoSharer: sharer,
       ),
     );
-    await tester.tap(find.text('开始修图'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
     final saveButton = find.byKey(const ValueKey('editor-batch-export'));
     await tester.ensureVisible(saveButton);
@@ -2740,7 +2722,7 @@ void main() {
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
     final settings = await AppSettings.load();
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
-    await tester.tap(find.text('开始修图'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('删除项目'));
@@ -2753,6 +2735,29 @@ void main() {
     expect(store.project, isNull);
     expect(find.text('选择 1–6 张照片'), findsOneWidget);
     expect(photoFile.existsSync(), isTrue);
+  });
+
+  testWidgets('home guidance remains clear at two-times dynamic text', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(() async {
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+      await tester.binding.setSurfaceSize(null);
+    });
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+
+    await tester.pumpWidget(buildTestApp(settings));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('home-start-editing')), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-journey-guide')), findsOneWidget);
+    expect(find.text('选照片'), findsOneWidget);
+    expect(find.text('说想法'), findsOneWidget);
+    expect(find.text('存整组'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('editor remains operable at two-times dynamic text', (
@@ -2790,7 +2795,7 @@ void main() {
     final settings = await AppSettings.load();
 
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
-    await tester.tap(find.text('开始修图'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
 
     expect(
@@ -2868,7 +2873,7 @@ Future<MemoryPhotoProjectStore> _pumpSinglePhotoExport(
       photoSharer: sharer,
     ),
   );
-  await tester.tap(find.text('开始修图'));
+  await tester.tap(find.byKey(const ValueKey('home-start-editing')));
   await tester.pumpAndSettle();
   final saveButton = find.byKey(const ValueKey('editor-batch-export'));
   await tester.ensureVisible(saveButton);

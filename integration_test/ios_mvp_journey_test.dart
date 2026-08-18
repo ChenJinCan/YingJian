@@ -26,6 +26,32 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets(
+    'first launch enters onboarding and continues through production routing',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final settings = await AppSettings.load();
+
+      await tester.pumpWidget(buildTestApp(settings));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('onboarding-page')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('onboarding-privacy')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('legal-document-privacy')),
+        findsOneWidget,
+      );
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('onboarding-continue')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('home-start-editing')), findsOneWidget);
+      expect(settings.onboardingComplete, isTrue);
+    },
+  );
+
+  testWidgets(
     'iOS runtime opens privacy and terms through production settings navigation',
     (tester) async {
       SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
@@ -119,9 +145,6 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
-
-    await tester.tap(find.byKey(const ValueKey('editor-select-photos')));
-    await tester.pumpAndSettle();
     final importedProject = await store.loadLatest();
     final importedPhoto = importedProject!.photos.single;
     expect(analyzer.photoIds, ['ios-runtime-photo']);
@@ -721,13 +744,14 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-resume-project')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
-    expect(
-      find.byKey(ValueKey('photo-preview-${importedPhoto.id}')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const ValueKey('editor-save-success')), findsOneWidget);
+    expect(find.text('1 张照片已保存到相册'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('save-finish')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('home-start-editing')), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
-    expect(restoredPreviewRenderer.disposeCount, greaterThan(0));
+    expect(restoredPreviewRenderer.disposeCount, 0);
   });
 
   testWidgets(
@@ -770,8 +794,6 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('editor-select-photos')));
       await tester.pumpAndSettle();
 
       expect(store.project?.photos, hasLength(6));

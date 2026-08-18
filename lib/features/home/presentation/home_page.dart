@@ -33,8 +33,10 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  Future<void> _openEditor() async {
-    await Navigator.of(context).pushNamed(AppRoutes.editor);
+  Future<void> _openEditor({bool startWithImport = false}) async {
+    await Navigator.of(
+      context,
+    ).pushNamed(AppRoutes.editor, arguments: startWithImport);
     if (mounted) _reload();
   }
 
@@ -70,7 +72,7 @@ class _HomePageState extends State<HomePage> {
     }
     if (!mounted) return;
     _reload();
-    await _openEditor();
+    await _openEditor(startWithImport: true);
   }
 
   @override
@@ -78,13 +80,7 @@ class _HomePageState extends State<HomePage> {
     final colors = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          context.l10n.appTitle,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w700,
-            letterSpacing: 2,
-          ),
-        ),
+        title: null,
         actions: [
           IconButton(
             key: const ValueKey('home-settings'),
@@ -103,16 +99,16 @@ class _HomePageState extends State<HomePage> {
             return Stack(
               children: [
                 Positioned(
-                  top: -130,
-                  left: -90,
-                  right: -90,
+                  top: -180,
+                  left: -160,
+                  right: -40,
                   child: IgnorePointer(
                     child: Container(
-                      height: 310,
+                      height: 420,
                       decoration: BoxDecoration(
                         gradient: RadialGradient(
                           colors: [
-                            colors.primary.withValues(alpha: 0.12),
+                            colors.primary.withValues(alpha: 0.15),
                             colors.surface.withValues(alpha: 0),
                           ],
                         ),
@@ -121,67 +117,79 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
                 SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 32),
+                  padding: const EdgeInsets.fromLTRB(24, 14, 24, 36),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Card(
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(22, 30, 22, 22),
-                          child: Column(
-                            children: [
-                              const _YingjianMark(),
-                              const SizedBox(height: 20),
-                              Text(
-                                context.l10n.homeHeroTitle,
-                                style: Theme.of(context).textTheme.headlineSmall
-                                    ?.copyWith(fontWeight: FontWeight.w700),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                context.l10n.homeTagline,
-                                textAlign: TextAlign.center,
-                                style: Theme.of(context).textTheme.bodyMedium
-                                    ?.copyWith(color: colors.onSurfaceVariant),
-                              ),
-                              const SizedBox(height: 26),
-                              SizedBox(
-                                width: double.infinity,
-                                child: FilledButton.icon(
-                                  key: const ValueKey('home-start-editing'),
-                                  onPressed: _openEditor,
-                                  icon: const Icon(Icons.add_photo_alternate),
-                                  label: Text(context.l10n.startEditing),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: _YingjianMark(),
                       ),
-                      const SizedBox(height: 30),
+                      const SizedBox(height: 34),
                       Text(
-                        context.l10n.recentProjects,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w700),
+                        context.l10n.homeHeroTitle,
+                        style: Theme.of(context).textTheme.displaySmall
+                            ?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              height: 1.08,
+                              letterSpacing: -1.1,
+                            ),
                       ),
                       const SizedBox(height: 12),
-                      if (snapshot.connectionState == ConnectionState.waiting)
-                        const SizedBox(
-                          height: 96,
-                          child: Center(
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        )
-                      else if (snapshot.hasError)
-                        _RestoreFailure(onRetry: _reload)
-                      else if (project != null)
+                      Text(
+                        context.l10n.homeTagline,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          color: colors.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        context.l10n.homeSupporting,
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          color: colors.onSurfaceVariant,
+                          height: 1.55,
+                        ),
+                      ),
+                      const SizedBox(height: 34),
+                      FilledButton.icon(
+                        key: const ValueKey('home-start-editing'),
+                        onPressed: project == null
+                            ? () => _openEditor(startWithImport: true)
+                            : _openEditor,
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(60),
+                        ),
+                        icon: const Icon(Icons.add_photo_alternate_outlined),
+                        label: Text(
+                          project == null
+                              ? context.l10n.homePrimaryAction
+                              : context.l10n.continueLastEditing,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      const _HomeJourneyGuide(),
+                      if (snapshot.connectionState ==
+                          ConnectionState.waiting) ...[
+                        const SizedBox(height: 32),
+                        const LinearProgressIndicator(minHeight: 2),
+                      ] else if (snapshot.hasError) ...[
+                        const SizedBox(height: 32),
+                        _RestoreFailure(onRetry: _reload),
+                      ] else if (project != null) ...[
+                        const SizedBox(height: 42),
+                        Text(
+                          context.l10n.recentProjects,
+                          style: Theme.of(context).textTheme.labelLarge
+                              ?.copyWith(color: colors.onSurfaceVariant),
+                        ),
+                        const SizedBox(height: 10),
                         _ProjectResumeCard(
                           project: project,
                           onContinue: _openEditor,
                           onStartNew: () => _startNew(project),
-                        )
-                      else
-                        _EmptyRecentProject(onStart: _openEditor),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -265,7 +273,7 @@ class _ProjectResumeCard extends StatelessWidget {
                         style: FilledButton.styleFrom(
                           minimumSize: const Size(48, 44),
                         ),
-                        child: Text(context.l10n.continueLastEditing),
+                        child: Text(context.l10n.openProject),
                       ),
                     ],
                   ),
@@ -285,40 +293,79 @@ class _YingjianMark extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Container(
-      width: 68,
-      height: 68,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: colors.primary.withValues(alpha: 0.1),
-        border: Border.all(color: colors.primary.withValues(alpha: 0.28)),
-      ),
-      child: Icon(Icons.auto_awesome, color: colors.primary, size: 32),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: colors.primary.withValues(alpha: 0.12),
+            border: Border.all(color: colors.primary.withValues(alpha: 0.34)),
+          ),
+          child: Icon(Icons.auto_awesome, color: colors.primary, size: 20),
+        ),
+        const SizedBox(width: 12),
+        Text(
+          context.l10n.appTitle,
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+            letterSpacing: 3,
+          ),
+        ),
+      ],
     );
   }
 }
 
-class _EmptyRecentProject extends StatelessWidget {
-  const _EmptyRecentProject({required this.onStart});
-
-  final VoidCallback onStart;
+class _HomeJourneyGuide extends StatelessWidget {
+  const _HomeJourneyGuide();
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: InkWell(
-        onTap: onStart,
-        borderRadius: BorderRadius.circular(22),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Row(
-            children: [
-              const Icon(Icons.history, size: 28),
-              const SizedBox(width: 14),
-              Expanded(child: Text(context.l10n.noRecentProjects)),
-              const Icon(Icons.chevron_right),
+    final colors = Theme.of(context).colorScheme;
+    final steps = [
+      (Icons.photo_library_outlined, context.l10n.homeStepChoose),
+      (Icons.mic_none_outlined, context.l10n.homeStepDescribe),
+      (Icons.done_all, context.l10n.homeStepSave),
+    ];
+    return Semantics(
+      key: const ValueKey('home-journey-guide'),
+      container: true,
+      label: context.l10n.homeGuideSemantics,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: colors.surfaceContainerLow.withValues(alpha: 0.72),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: colors.outlineVariant),
+        ),
+        child: Row(
+          children: [
+            for (var index = 0; index < steps.length; index++) ...[
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(steps[index].$1, size: 20, color: colors.primary),
+                    const SizedBox(height: 6),
+                    Text(
+                      steps[index].$2,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.labelMedium,
+                    ),
+                  ],
+                ),
+              ),
+              if (index < steps.length - 1)
+                Icon(
+                  Icons.chevron_right,
+                  size: 18,
+                  color: colors.onSurfaceVariant,
+                ),
             ],
-          ),
+          ],
         ),
       ),
     );

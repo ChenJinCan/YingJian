@@ -32,10 +32,12 @@ import 'package:yingjian/l10n/l10n.dart';
 class EditorPage extends StatefulWidget {
   const EditorPage({
     this.speechTranscriber = const MethodChannelSpeechTranscriber(),
+    this.startWithImport = false,
     super.key,
   });
 
   final SpeechTranscriber speechTranscriber;
+  final bool startWithImport;
 
   @override
   State<EditorPage> createState() => _EditorPageState();
@@ -81,6 +83,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   Future<void>? _analysisCompletion;
   Future<void> _lifecycleAnalysisUpdates = Future.value();
   _EditFeedback? _editFeedback;
+  bool _handledStartWithImport = false;
 
   @override
   void initState() {
@@ -159,7 +162,19 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       store: context.read<PhotoProjectStore>(),
     );
     _session = session;
-    unawaited(_restoreProject(session));
+    unawaited(_initializeSession(session));
+  }
+
+  Future<void> _initializeSession(PhotoProjectSession session) async {
+    await _restoreProject(session);
+    if (!mounted ||
+        _handledStartWithImport ||
+        !widget.startWithImport ||
+        session.photos.isNotEmpty) {
+      return;
+    }
+    _handledStartWithImport = true;
+    await _importPhotos();
   }
 
   Future<void> _restoreProject(PhotoProjectSession session) async {
@@ -1991,7 +2006,7 @@ class _PhotoWorkspace extends StatelessWidget {
                                       )
                                     : null,
                                 icon: const Icon(Icons.tune, size: 20),
-                                label: Text(context.l10n.adjustPhoto),
+                                label: Text(context.l10n.allTools),
                               ),
                             ),
                           if (photos.length > 1)
@@ -2705,7 +2720,7 @@ class _BeginnerAdjustSheet extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            context.l10n.adjustPhoto,
+            context.l10n.quickAdjust,
             style: Theme.of(context).textTheme.titleLarge,
           ),
           const SizedBox(height: 6),
@@ -2994,7 +3009,7 @@ class _EditorCommandBar extends StatelessWidget {
                             key: const ValueKey('editor-manual-entry'),
                             onPressed: editingEnabled ? onManualEdit : null,
                             icon: const Icon(Icons.tune, size: 18),
-                            label: Text(context.l10n.adjustPhoto),
+                            label: Text(context.l10n.quickAdjust),
                           ),
                         ),
                       ],

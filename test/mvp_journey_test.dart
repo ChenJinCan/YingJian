@@ -51,9 +51,7 @@ void main() {
           );
 
           expect(find.textContaining('登录'), findsNothing);
-          await tester.tap(find.text('开始修图'));
-          await tester.pumpAndSettle();
-          await tester.tap(find.text('选择照片'));
+          await tester.tap(find.byKey(const ValueKey('home-start-editing')));
           await tester.pumpAndSettle();
 
           expect(store.project?.photos, hasLength(6));
@@ -280,7 +278,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('开始修图'));
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.text('1 / 6'), findsOneWidget);

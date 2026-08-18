@@ -21,6 +21,41 @@ class AppLocalizationsEn extends AppLocalizations {
   String get homeHeroTitle => 'Make beauty easier';
 
   @override
+  String get homeSupporting =>
+      'Choose a few photos and describe the feeling you want. Yingjian refines one, then keeps the whole set naturally consistent.';
+
+  @override
+  String get homePrimaryAction => 'Choose photos to begin';
+
+  @override
+  String get homeStepChoose => 'Choose photos';
+
+  @override
+  String get homeStepDescribe => 'Describe it';
+
+  @override
+  String get homeStepSave => 'Save the set';
+
+  @override
+  String get homeGuideSemantics =>
+      'Three steps: choose photos, describe the result, and save the set';
+
+  @override
+  String get onboardingPromise =>
+      'Choose photos, then describe the feeling you want. Yingjian refines one and keeps the whole set naturally consistent.';
+
+  @override
+  String get onboardingPrivacy =>
+      'Photos stay on this device by default and are not uploaded';
+
+  @override
+  String get onboardingContinue => 'Get started';
+
+  @override
+  String get onboardingSaveFailed =>
+      'We could not save your first-use choice. Please try again.';
+
+  @override
   String get recentProjects => 'Recent projects';
 
   @override
@@ -32,6 +67,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get continueLastEditing => 'Continue last editing';
+
+  @override
+  String get openProject => 'Open project';
 
   @override
   String get startNewProject => 'Start a new project';
@@ -881,6 +919,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get adjustPhoto => 'Adjust myself';
+
+  @override
+  String get quickAdjust => 'Quick adjustments';
+
+  @override
+  String get allTools => 'All tools';
 
   @override
   String get savePhotos => 'Save';

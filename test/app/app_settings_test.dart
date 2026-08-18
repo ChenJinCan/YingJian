@@ -14,6 +14,24 @@ void main() {
     expect(settings.themeMode, ThemeMode.dark);
     expect(settings.locale, isNull);
     expect(settings.diagnosticsEnabled, isFalse);
+    expect(settings.onboardingComplete, isFalse);
+  });
+
+  test('persists onboarding completion', () async {
+    final settings = await AppSettings.load();
+
+    await settings.completeOnboarding();
+    final restored = await AppSettings.load();
+
+    expect(restored.onboardingComplete, isTrue);
+  });
+
+  test('existing app preferences bypass one-time onboarding', () async {
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+
+    final settings = await AppSettings.load();
+
+    expect(settings.onboardingComplete, isTrue);
   });
 
   test('persists an explicit diagnostics choice', () async {

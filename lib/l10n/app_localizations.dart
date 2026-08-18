@@ -122,6 +122,66 @@ abstract class AppLocalizations {
   /// **'让变美更容易'**
   String get homeHeroTitle;
 
+  /// No description provided for @homeSupporting.
+  ///
+  /// In zh, this message translates to:
+  /// **'选几张照片，说出你想要的感觉。映见会先修好一张，再让整组自然统一。'**
+  String get homeSupporting;
+
+  /// No description provided for @homePrimaryAction.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择照片开始'**
+  String get homePrimaryAction;
+
+  /// No description provided for @homeStepChoose.
+  ///
+  /// In zh, this message translates to:
+  /// **'选照片'**
+  String get homeStepChoose;
+
+  /// No description provided for @homeStepDescribe.
+  ///
+  /// In zh, this message translates to:
+  /// **'说想法'**
+  String get homeStepDescribe;
+
+  /// No description provided for @homeStepSave.
+  ///
+  /// In zh, this message translates to:
+  /// **'存整组'**
+  String get homeStepSave;
+
+  /// No description provided for @homeGuideSemantics.
+  ///
+  /// In zh, this message translates to:
+  /// **'使用步骤：选照片，说想法，保存整组'**
+  String get homeGuideSemantics;
+
+  /// No description provided for @onboardingPromise.
+  ///
+  /// In zh, this message translates to:
+  /// **'先选照片，再说出你想要的感觉。映见会把一张修好，也让整组自然统一。'**
+  String get onboardingPromise;
+
+  /// No description provided for @onboardingPrivacy.
+  ///
+  /// In zh, this message translates to:
+  /// **'默认在手机本地处理，不会上传你的照片'**
+  String get onboardingPrivacy;
+
+  /// No description provided for @onboardingContinue.
+  ///
+  /// In zh, this message translates to:
+  /// **'开始使用'**
+  String get onboardingContinue;
+
+  /// No description provided for @onboardingSaveFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂时无法保存首次使用状态，请重试。'**
+  String get onboardingSaveFailed;
+
   /// No description provided for @recentProjects.
   ///
   /// In zh, this message translates to:
@@ -145,6 +205,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'继续上次编辑'**
   String get continueLastEditing;
+
+  /// No description provided for @openProject.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开项目'**
+  String get openProject;
 
   /// No description provided for @startNewProject.
   ///
@@ -1681,6 +1747,18 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'自己调'**
   String get adjustPhoto;
+
+  /// No description provided for @quickAdjust.
+  ///
+  /// In zh, this message translates to:
+  /// **'快速调整'**
+  String get quickAdjust;
+
+  /// No description provided for @allTools.
+  ///
+  /// In zh, this message translates to:
+  /// **'全部工具'**
+  String get allTools;
 
   /// No description provided for @savePhotos.
   ///

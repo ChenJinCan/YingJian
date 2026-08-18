@@ -6,16 +6,21 @@ class AppSettings extends ChangeNotifier {
     _themeMode = _readThemeMode();
     _locale = _readLocale();
     _diagnosticsEnabled = _preferences.getBool(_diagnosticsEnabledKey) ?? false;
+    _onboardingComplete =
+        _preferences.getBool(_onboardingCompleteKey) ??
+        _hasExistingAppPreference();
   }
 
   static const _themeModeKey = 'app.theme_mode';
   static const _localeKey = 'app.locale';
   static const _diagnosticsEnabledKey = 'privacy.diagnostics_enabled';
+  static const _onboardingCompleteKey = 'app.onboarding_complete';
 
   final SharedPreferences _preferences;
   late ThemeMode _themeMode;
   late Locale? _locale;
   late bool _diagnosticsEnabled;
+  late bool _onboardingComplete;
 
   static Future<AppSettings> load() async {
     final preferences = await SharedPreferences.getInstance();
@@ -25,6 +30,17 @@ class AppSettings extends ChangeNotifier {
   ThemeMode get themeMode => _themeMode;
   Locale? get locale => _locale;
   bool get diagnosticsEnabled => _diagnosticsEnabled;
+  bool get onboardingComplete => _onboardingComplete;
+
+  Future<void> completeOnboarding() async {
+    if (_onboardingComplete) return;
+    final saved = await _preferences.setBool(_onboardingCompleteKey, true);
+    if (!saved) {
+      throw StateError('Unable to persist onboarding completion');
+    }
+    _onboardingComplete = true;
+    notifyListeners();
+  }
 
   Future<void> setThemeMode(ThemeMode value) async {
     if (_themeMode == value) {
@@ -93,5 +109,11 @@ class AppSettings extends ChangeNotifier {
       scriptCode: second?.length == 4 ? second : null,
       countryCode: second?.length == 4 ? third : second,
     );
+  }
+
+  bool _hasExistingAppPreference() {
+    return _preferences.containsKey(_themeModeKey) ||
+        _preferences.containsKey(_localeKey) ||
+        _preferences.containsKey(_diagnosticsEnabledKey);
   }
 }
