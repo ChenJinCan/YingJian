@@ -324,5 +324,8 @@
   "saveCurrentPhoto": "Save current photo",
   "saveSuccess": "{count} photos saved to Photos",
   "@saveSuccess": {"placeholders": {"count": {"type": "int"}}},
-  "finish": "Done"
+  "finish": "Done",
+  "fullscreenPreview": "View full screen",
+  "fullscreenAdjusted": "Edited",
+  "fullscreenPreviewHint": "Tap to return · Hold for original"
 }

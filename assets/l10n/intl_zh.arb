@@ -326,5 +326,8 @@
   "saveCurrentPhoto": "保存当前 1 张",
   "saveSuccess": "{count} 张照片已保存到相册",
   "@saveSuccess": {"placeholders": {"count": {"type": "int"}}},
-  "finish": "完成"
+  "finish": "完成",
+  "fullscreenPreview": "全屏查看",
+  "fullscreenAdjusted": "调整后",
+  "fullscreenPreviewHint": "轻点返回调整 · 按住看原图"
 }

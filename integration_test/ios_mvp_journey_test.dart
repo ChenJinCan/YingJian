@@ -270,6 +270,21 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
     await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('editor-tools-dock')), findsOneWidget);
+    expect(find.byKey(const ValueKey('editor-preview-stage')), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey('editor-preview-fullscreen')).hitTestable(),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('editor-fullscreen-preview')),
+      findsOneWidget,
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('editor-fullscreen-preview-surface')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('editor-tools-dock')), findsOneWidget);
 
     final qualityCategory = find.byKey(
       const ValueKey('editor-tool-category-quality'),
@@ -406,10 +421,6 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.byKey(const ValueKey('editor-portrait-tool-status')),
-      findsOneWidget,
-    );
-    expect(
       find.byKey(const ValueKey('editor-reset-current-adjustment')),
       findsOneWidget,
     );
@@ -432,13 +443,11 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(bodyTargetSelector, findsOneWidget);
-    final secondBodyOverlay = find.byKey(
-      const ValueKey('portrait-target-overlay-1'),
-    );
-    expect(secondBodyOverlay, findsOneWidget);
-    expect(tester.getSize(secondBodyOverlay).width, greaterThanOrEqualTo(44));
-    expect(tester.getSize(secondBodyOverlay).height, greaterThanOrEqualTo(44));
-    await tester.tap(secondBodyOverlay);
+    await tester.tap(bodyTargetSelector);
+    await tester.pumpAndSettle();
+    final secondBodyTarget = find.byKey(const ValueKey('editor-body-target-1'));
+    expect(secondBodyTarget, findsOneWidget);
+    await tester.tap(secondBodyTarget);
     await tester.pumpAndSettle();
     final bodySlimControl = find.descendant(
       of: find.byKey(const ValueKey('editor-adjustment-bodySlim')),
@@ -468,14 +477,6 @@ void main() {
     expect(visibleFaceSlimTab.hitTestable(), findsOneWidget);
     await tester.tap(visibleFaceSlimTab);
     await tester.pumpAndSettle();
-    expect(
-      find.byKey(const ValueKey('editor-face-slim-target-0')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const ValueKey('editor-face-slim-target-1')),
-      findsOneWidget,
-    );
     final faceTargetSelector = find.byKey(
       const ValueKey('editor-face-target-selector'),
     );
@@ -502,15 +503,11 @@ void main() {
     await tester.drag(faceSlimControl, const Offset(90, 0));
     await tester.pumpAndSettle();
     final secondFaceTarget = find.byKey(
-      const ValueKey('portrait-target-overlay-1'),
+      const ValueKey('editor-face-slim-target-1'),
     );
-    await tester.dragUntilVisible(
-      secondFaceTarget,
-      workspace,
-      const Offset(0, 180),
-    );
+    await tester.tap(faceTargetSelector);
     await tester.pumpAndSettle();
-    expect(secondFaceTarget.hitTestable(), findsOneWidget);
+    expect(secondFaceTarget, findsOneWidget);
     await tester.tap(secondFaceTarget);
     await tester.pumpAndSettle();
     await tester.dragUntilVisible(
@@ -679,7 +676,7 @@ void main() {
     expect(semanticEditing.localExposure, greaterThan(0));
     expect(semanticEditing.localAdjustmentStrokes, isNotEmpty);
 
-    await tester.tap(find.byIcon(Icons.close));
+    await tester.tap(find.byKey(const ValueKey('editor-tools-done')));
     await tester.pumpAndSettle();
     final saveButton = find.byKey(const ValueKey('editor-batch-export'));
     await tester.ensureVisible(saveButton);
@@ -973,7 +970,7 @@ void main() {
         ),
       );
 
-      await tester.tap(find.byIcon(Icons.close));
+      await tester.tap(find.byKey(const ValueKey('editor-tools-done')));
       await tester.pumpAndSettle();
       final exportButton = find.byKey(const ValueKey('editor-batch-export'));
       await tester.ensureVisible(exportButton);

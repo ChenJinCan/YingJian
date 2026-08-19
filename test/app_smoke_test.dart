@@ -193,6 +193,84 @@ void main() {
     expect(find.text('无法读取这张照片'), findsNothing);
   });
 
+  testWidgets(
+    'manual adjustments keep the photo visible and support fullscreen',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final photoFile = File(
+        'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+        'Icon-App-1024x1024@1x.png',
+      );
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoImporter: FakePhotoImporter([
+            ProjectPhoto(
+              id: 'manual-dock-photo',
+              localPath: photoFile.path,
+              originalName: '全屏预览.png',
+            ),
+          ]),
+          photoPreviewRenderer: FakePhotoPreviewRenderer.supported(),
+        ),
+      );
+
+      await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('editor-bottom-command-bar')),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('recommendation-use')).hitTestable(),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('recommendation-use')), findsNothing);
+      expect(
+        tester.getSize(find.byKey(const ValueKey('editor-page'))).width,
+        lessThan(700),
+      );
+      await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('editor-preview-stage')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('editor-tools-dock')), findsOneWidget);
+      expect(find.byKey(const ValueKey('editor-tools-sheet')), findsNothing);
+
+      await tester.tap(
+        find.byKey(const ValueKey('editor-preview-fullscreen')).hitTestable(),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('editor-fullscreen-preview')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('editor-tools-dock')), findsNothing);
+      expect(find.byKey(const ValueKey('editor-batch-export')), findsNothing);
+
+      await tester.tap(
+        find.byKey(const ValueKey('editor-fullscreen-preview-surface')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('editor-fullscreen-preview')),
+        findsNothing,
+      );
+      expect(find.byKey(const ValueKey('editor-tools-dock')), findsOneWidget);
+    },
+  );
+
   testWidgets('a rejected photo is explained while valid photos continue', (
     tester,
   ) async {

@@ -942,4 +942,13 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get finish => '完成';
+
+  @override
+  String get fullscreenPreview => '全屏查看';
+
+  @override
+  String get fullscreenAdjusted => '调整后';
+
+  @override
+  String get fullscreenPreviewHint => '轻点返回调整 · 按住看原图';
 }

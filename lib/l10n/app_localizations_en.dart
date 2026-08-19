@@ -998,4 +998,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get finish => 'Done';
+
+  @override
+  String get fullscreenPreview => 'View full screen';
+
+  @override
+  String get fullscreenAdjusted => 'Edited';
+
+  @override
+  String get fullscreenPreviewHint => 'Tap to return · Hold for original';
 }

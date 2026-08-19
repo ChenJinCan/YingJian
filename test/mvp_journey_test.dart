@@ -85,28 +85,9 @@ void main() {
           await tester.tap(find.byKey(const ValueKey('editor-manual-entry')));
           await tester.pumpAndSettle();
           expect(
-            find.byKey(const ValueKey('editor-manual-sheet')),
+            find.byKey(const ValueKey('editor-tools-dock')),
             findsOneWidget,
           );
-          expect(find.text('亮一点'), findsOneWidget);
-          expect(find.text('暖一点'), findsOneWidget);
-          expect(find.text('自然肤色'), findsOneWidget);
-          expect(find.text('皮肤更细腻'), findsOneWidget);
-          expect(find.text('脸小一点'), findsOneWidget);
-          expect(find.text('身形更自然'), findsOneWidget);
-          await tester.tap(
-            find.byKey(const ValueKey('manual-action-brighter')),
-          );
-          await tester.pumpAndSettle();
-          expect(
-            find.byKey(const ValueKey('editor-feedback-pill')),
-            findsOneWidget,
-          );
-          await tester.tap(find.byKey(const ValueKey('editor-feedback-undo')));
-          await tester.pumpAndSettle();
-
-          await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
-          await tester.pumpAndSettle();
           var workspace = find.byKey(const Key('photo-workspace-scroll'));
           final exposureAdjustment = find.byKey(
             const ValueKey('editor-adjustment-exposure'),
@@ -132,11 +113,10 @@ void main() {
           final sharedExposure = store.project!.sharedStyle.recipe.exposure;
           expect(sharedExposure, isNot(0));
 
-          await tester.dragUntilVisible(
-            find.text('仅当前照片'),
-            workspace,
-            const Offset(0, 320),
+          await tester.tap(
+            find.byKey(const ValueKey('editor-scope-menu')).hitTestable(),
           );
+          await tester.pumpAndSettle();
           await tester.tap(find.text('仅当前照片'));
           await tester.pumpAndSettle();
           await tester.fling(
@@ -183,7 +163,7 @@ void main() {
             isNot(store.project?.effectiveRecipeFor('photo-2').contrast),
           );
 
-          await tester.tap(find.byIcon(Icons.close));
+          await tester.tap(find.byKey(const ValueKey('editor-tools-done')));
           await tester.pumpAndSettle();
           final savePhotos = find.byKey(const ValueKey('editor-batch-export'));
           await tester.ensureVisible(savePhotos);
@@ -322,20 +302,13 @@ void main() {
     expect(maximumExposure.hasAction(SemanticsAction.decrease), isTrue);
     _expectCurrentTapSemanticsAtLeast(tester, 48);
 
-    final currentPhotoScope = find.byKey(
-      const ValueKey('editor-scope-currentPhoto'),
-    );
-    await tester.dragUntilVisible(
-      currentPhotoScope,
-      workspace,
-      const Offset(0, 300),
-    );
-    await Scrollable.ensureVisible(
-      tester.element(currentPhotoScope),
-      alignment: 0.15,
+    await tester.tap(
+      find.byKey(const ValueKey('editor-scope-menu')).hitTestable(),
     );
     await tester.pumpAndSettle();
-    await tester.tap(currentPhotoScope.hitTestable());
+    await tester.tap(
+      find.byKey(const ValueKey('editor-scope-currentPhoto')).hitTestable(),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
     await tester.pumpAndSettle();

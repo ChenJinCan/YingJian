@@ -1891,6 +1891,24 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'完成'**
   String get finish;
+
+  /// No description provided for @fullscreenPreview.
+  ///
+  /// In zh, this message translates to:
+  /// **'全屏查看'**
+  String get fullscreenPreview;
+
+  /// No description provided for @fullscreenAdjusted.
+  ///
+  /// In zh, this message translates to:
+  /// **'调整后'**
+  String get fullscreenAdjusted;
+
+  /// No description provided for @fullscreenPreviewHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'轻点返回调整 · 按住看原图'**
+  String get fullscreenPreviewHint;
 }
 
 class _AppLocalizationsDelegate
