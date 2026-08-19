@@ -79,139 +79,138 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(
-        title: null,
-        actions: [
-          IconButton(
-            key: const ValueKey('home-settings'),
-            tooltip: context.l10n.settings,
-            onPressed: () =>
-                Navigator.of(context).pushNamed(AppRoutes.settings),
-            icon: const Icon(Icons.settings_outlined),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: FutureBuilder<PhotoProject?>(
-          future: _latestProject,
-          builder: (context, snapshot) {
-            final project = snapshot.data;
-            return Stack(
-              children: [
-                Positioned(
-                  top: -180,
-                  left: -160,
-                  right: -40,
-                  child: IgnorePointer(
-                    child: Container(
-                      height: 420,
-                      decoration: BoxDecoration(
-                        gradient: RadialGradient(
-                          colors: [
-                            colors.primary.withValues(alpha: 0.15),
-                            colors.surface.withValues(alpha: 0),
-                          ],
-                        ),
-                      ),
+      body: FutureBuilder<PhotoProject?>(
+        future: _latestProject,
+        builder: (context, snapshot) {
+          final project = snapshot.data;
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              IgnorePointer(
+                child: DecoratedBox(
+                  key: const ValueKey('home-full-screen-background'),
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      center: const Alignment(-0.72, -1.02),
+                      radius: 1.12,
+                      colors: [
+                        colors.primary.withValues(alpha: 0.16),
+                        colors.surface,
+                      ],
                     ),
                   ),
                 ),
-                SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(24, 14, 24, 36),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const Align(
-                        alignment: Alignment.centerLeft,
-                        child: _YingjianMark(),
+              ),
+              SafeArea(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(
+                        24,
+                        kToolbarHeight + 14,
+                        24,
+                        36,
                       ),
-                      const SizedBox(height: 34),
-                      Text(
-                        context.l10n.homeHeroTitle,
-                        style: Theme.of(context).textTheme.displaySmall
-                            ?.copyWith(
-                              fontWeight: FontWeight.w800,
-                              height: 1.08,
-                              letterSpacing: -1.1,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const Align(
+                            alignment: Alignment.centerLeft,
+                            child: _YingjianMark(),
+                          ),
+                          const SizedBox(height: 34),
+                          Text(
+                            context.l10n.homeHeroTitle,
+                            style: Theme.of(context).textTheme.displaySmall
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  height: 1.08,
+                                  letterSpacing: -1.1,
+                                ),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            context.l10n.homeTagline,
+                            style: Theme.of(context).textTheme.titleLarge
+                                ?.copyWith(
+                                  color: colors.primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            context.l10n.homeSupporting,
+                            style: Theme.of(context).textTheme.bodyLarge
+                                ?.copyWith(
+                                  color: colors.onSurfaceVariant,
+                                  height: 1.55,
+                                ),
+                          ),
+                          const SizedBox(height: 34),
+                          FilledButton.icon(
+                            key: const ValueKey('home-start-editing'),
+                            onPressed: project == null
+                                ? () => _openEditor(startWithImport: true)
+                                : () => _startNew(project),
+                            style: FilledButton.styleFrom(
+                              minimumSize: const Size.fromHeight(60),
                             ),
+                            icon: const Icon(
+                              Icons.add_photo_alternate_outlined,
+                            ),
+                            label: Text(context.l10n.homePrimaryAction),
+                          ),
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) ...[
+                            const SizedBox(height: 32),
+                            const LinearProgressIndicator(minHeight: 2),
+                          ] else if (snapshot.hasError) ...[
+                            const SizedBox(height: 32),
+                            _RestoreFailure(onRetry: _reload),
+                          ] else if (project != null) ...[
+                            const SizedBox(height: 42),
+                            Text(
+                              context.l10n.recentProjects,
+                              style: Theme.of(context).textTheme.labelLarge
+                                  ?.copyWith(color: colors.onSurfaceVariant),
+                            ),
+                            const SizedBox(height: 10),
+                            _ProjectResumeCard(
+                              project: project,
+                              onContinue: _openEditor,
+                            ),
+                          ],
+                        ],
                       ),
-                      const SizedBox(height: 12),
-                      Text(
-                        context.l10n.homeTagline,
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          color: colors.primary,
-                          fontWeight: FontWeight.w600,
-                        ),
+                    ),
+                    Positioned(
+                      top: 0,
+                      right: 8,
+                      child: IconButton(
+                        key: const ValueKey('home-settings'),
+                        tooltip: context.l10n.settings,
+                        onPressed: () =>
+                            Navigator.of(context).pushNamed(AppRoutes.settings),
+                        icon: const Icon(Icons.settings_outlined),
                       ),
-                      const SizedBox(height: 12),
-                      Text(
-                        context.l10n.homeSupporting,
-                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: colors.onSurfaceVariant,
-                          height: 1.55,
-                        ),
-                      ),
-                      const SizedBox(height: 34),
-                      FilledButton.icon(
-                        key: const ValueKey('home-start-editing'),
-                        onPressed: project == null
-                            ? () => _openEditor(startWithImport: true)
-                            : _openEditor,
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size.fromHeight(60),
-                        ),
-                        icon: const Icon(Icons.add_photo_alternate_outlined),
-                        label: Text(
-                          project == null
-                              ? context.l10n.homePrimaryAction
-                              : context.l10n.continueLastEditing,
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      const _HomeJourneyGuide(),
-                      if (snapshot.connectionState ==
-                          ConnectionState.waiting) ...[
-                        const SizedBox(height: 32),
-                        const LinearProgressIndicator(minHeight: 2),
-                      ] else if (snapshot.hasError) ...[
-                        const SizedBox(height: 32),
-                        _RestoreFailure(onRetry: _reload),
-                      ] else if (project != null) ...[
-                        const SizedBox(height: 42),
-                        Text(
-                          context.l10n.recentProjects,
-                          style: Theme.of(context).textTheme.labelLarge
-                              ?.copyWith(color: colors.onSurfaceVariant),
-                        ),
-                        const SizedBox(height: 10),
-                        _ProjectResumeCard(
-                          project: project,
-                          onContinue: _openEditor,
-                          onStartNew: () => _startNew(project),
-                        ),
-                      ],
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
-            );
-          },
-        ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 }
 
 class _ProjectResumeCard extends StatelessWidget {
-  const _ProjectResumeCard({
-    required this.project,
-    required this.onContinue,
-    required this.onStartNew,
-  });
+  const _ProjectResumeCard({required this.project, required this.onContinue});
 
   final PhotoProject project;
   final VoidCallback onContinue;
-  final VoidCallback onStartNew;
 
   @override
   Widget build(BuildContext context) {
@@ -258,24 +257,16 @@ class _ProjectResumeCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Wrap(
-                    alignment: WrapAlignment.end,
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      TextButton(
-                        onPressed: onStartNew,
-                        child: Text(context.l10n.startNewProject),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton(
+                      key: const ValueKey('home-resume-project'),
+                      onPressed: onContinue,
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(48, 44),
                       ),
-                      FilledButton(
-                        key: const ValueKey('home-resume-project'),
-                        onPressed: onContinue,
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size(48, 44),
-                        ),
-                        child: Text(context.l10n.openProject),
-                      ),
-                    ],
+                      child: Text(context.l10n.continueLastEditing),
+                    ),
                   ),
                 ],
               ),
@@ -315,59 +306,6 @@ class _YingjianMark extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _HomeJourneyGuide extends StatelessWidget {
-  const _HomeJourneyGuide();
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final steps = [
-      (Icons.photo_library_outlined, context.l10n.homeStepChoose),
-      (Icons.mic_none_outlined, context.l10n.homeStepDescribe),
-      (Icons.done_all, context.l10n.homeStepSave),
-    ];
-    return Semantics(
-      key: const ValueKey('home-journey-guide'),
-      container: true,
-      label: context.l10n.homeGuideSemantics,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        decoration: BoxDecoration(
-          color: colors.surfaceContainerLow.withValues(alpha: 0.72),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: colors.outlineVariant),
-        ),
-        child: Row(
-          children: [
-            for (var index = 0; index < steps.length; index++) ...[
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(steps[index].$1, size: 20, color: colors.primary),
-                    const SizedBox(height: 6),
-                    Text(
-                      steps[index].$2,
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.labelMedium,
-                    ),
-                  ],
-                ),
-              ),
-              if (index < steps.length - 1)
-                Icon(
-                  Icons.chevron_right,
-                  size: 18,
-                  color: colors.onSurfaceVariant,
-                ),
-            ],
-          ],
-        ),
-      ),
     );
   }
 }

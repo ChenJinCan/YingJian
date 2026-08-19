@@ -29,10 +29,19 @@ void main() {
     expect(find.text('映见'), findsOneWidget);
     expect(find.text('一张精修，整组好看'), findsOneWidget);
     expect(find.text('选择照片开始'), findsOneWidget);
-    expect(find.byKey(const ValueKey('home-journey-guide')), findsOneWidget);
-    expect(find.text('选照片'), findsOneWidget);
-    expect(find.text('说想法'), findsOneWidget);
-    expect(find.text('存整组'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('home-full-screen-background')),
+      findsOneWidget,
+    );
+    final backgroundRect = tester.getRect(
+      find.byKey(const ValueKey('home-full-screen-background')),
+    );
+    expect(backgroundRect.top, 0);
+    expect(
+      backgroundRect.bottom,
+      tester.view.physicalSize.height / tester.view.devicePixelRatio,
+    );
+    expect(find.byKey(const ValueKey('home-journey-guide')), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
@@ -103,9 +112,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('未完成项目'), findsOneWidget);
+    expect(find.text('选择照片开始'), findsOneWidget);
     expect(find.text('继续上次编辑'), findsOneWidget);
-    expect(find.text('打开项目'), findsOneWidget);
-    expect(find.text('开始新项目'), findsOneWidget);
     expect(find.textContaining('1 张照片'), findsOneWidget);
     expect(find.textContaining('14:30'), findsOneWidget);
   });
@@ -132,8 +140,10 @@ void main() {
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
     await tester.pumpAndSettle();
 
-    await tester.ensureVisible(find.text('开始新项目'));
-    await tester.tap(find.text('开始新项目'));
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('home-start-editing')),
+    );
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
     expect(find.textContaining('系统相册原图不会被删除'), findsOneWidget);
     expect(store.project, project);
@@ -2737,9 +2747,7 @@ void main() {
     expect(photoFile.existsSync(), isTrue);
   });
 
-  testWidgets('home guidance remains clear at two-times dynamic text', (
-    tester,
-  ) async {
+  testWidgets('home remains clear at two-times dynamic text', (tester) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     tester.platformDispatcher.textScaleFactorTestValue = 2;
     addTearDown(() async {
@@ -2753,10 +2761,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('home-start-editing')), findsOneWidget);
-    expect(find.byKey(const ValueKey('home-journey-guide')), findsOneWidget);
-    expect(find.text('选照片'), findsOneWidget);
-    expect(find.text('说想法'), findsOneWidget);
-    expect(find.text('存整组'), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-journey-guide')), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

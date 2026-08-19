@@ -20,7 +20,9 @@ final class _OnboardingPageState extends State<OnboardingPage> {
     try {
       await context.read<AppSettings>().completeOnboarding();
       if (!mounted) return;
-      await Navigator.of(context).pushReplacementNamed(AppRoutes.home);
+      await Navigator.of(
+        context,
+      ).pushNamedAndRemoveUntil(AppRoutes.home, (_) => false);
     } on Object {
       if (!mounted) return;
       setState(() => _saving = false);
@@ -35,26 +37,26 @@ final class _OnboardingPageState extends State<OnboardingPage> {
     final colors = Theme.of(context).colorScheme;
     return Scaffold(
       key: const ValueKey('onboarding-page'),
-      body: SafeArea(
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      colors.primary.withValues(alpha: 0.18),
-                      colors.surface.withValues(alpha: 0),
-                      colors.surface,
-                    ],
-                    stops: const [0, 0.46, 1],
-                  ),
-                ),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          DecoratedBox(
+            key: const ValueKey('onboarding-full-screen-background'),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  colors.primary.withValues(alpha: 0.18),
+                  colors.surface.withValues(alpha: 0),
+                  colors.surface,
+                ],
+                stops: const [0, 0.46, 1],
               ),
             ),
-            Padding(
+          ),
+          SafeArea(
+            child: Padding(
               padding: const EdgeInsets.fromLTRB(28, 32, 28, 20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -88,31 +90,6 @@ final class _OnboardingPageState extends State<OnboardingPage> {
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       color: colors.onSurfaceVariant,
                       height: 1.5,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  Semantics(
-                    container: true,
-                    label: context.l10n.onboardingPrivacy,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: colors.surfaceContainerHighest.withValues(
-                          alpha: 0.7,
-                        ),
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Row(
-                          children: [
-                            Icon(Icons.lock_outline, color: colors.primary),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(context.l10n.onboardingPrivacy),
-                            ),
-                          ],
-                        ),
-                      ),
                     ),
                   ),
                   const Spacer(),
@@ -152,8 +129,8 @@ final class _OnboardingPageState extends State<OnboardingPage> {
                 ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

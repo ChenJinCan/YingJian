@@ -134,41 +134,11 @@ abstract class AppLocalizations {
   /// **'选择照片开始'**
   String get homePrimaryAction;
 
-  /// No description provided for @homeStepChoose.
-  ///
-  /// In zh, this message translates to:
-  /// **'选照片'**
-  String get homeStepChoose;
-
-  /// No description provided for @homeStepDescribe.
-  ///
-  /// In zh, this message translates to:
-  /// **'说想法'**
-  String get homeStepDescribe;
-
-  /// No description provided for @homeStepSave.
-  ///
-  /// In zh, this message translates to:
-  /// **'存整组'**
-  String get homeStepSave;
-
-  /// No description provided for @homeGuideSemantics.
-  ///
-  /// In zh, this message translates to:
-  /// **'使用步骤：选照片，说想法，保存整组'**
-  String get homeGuideSemantics;
-
   /// No description provided for @onboardingPromise.
   ///
   /// In zh, this message translates to:
   /// **'先选照片，再说出你想要的感觉。映见会把一张修好，也让整组自然统一。'**
   String get onboardingPromise;
-
-  /// No description provided for @onboardingPrivacy.
-  ///
-  /// In zh, this message translates to:
-  /// **'默认在手机本地处理，不会上传你的照片'**
-  String get onboardingPrivacy;
 
   /// No description provided for @onboardingContinue.
   ///
@@ -205,12 +175,6 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'继续上次编辑'**
   String get continueLastEditing;
-
-  /// No description provided for @openProject.
-  ///
-  /// In zh, this message translates to:
-  /// **'打开项目'**
-  String get openProject;
 
   /// No description provided for @startNewProject.
   ///

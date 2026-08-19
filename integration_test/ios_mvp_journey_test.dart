@@ -35,6 +35,11 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const ValueKey('onboarding-page')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('onboarding-full-screen-background')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('不会上传你的照片'), findsNothing);
       await tester.tap(find.byKey(const ValueKey('onboarding-privacy')));
       await tester.pumpAndSettle();
       expect(
@@ -47,6 +52,12 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('onboarding-continue')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('home-start-editing')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('home-full-screen-background')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('home-journey-guide')), findsNothing);
+      expect(find.byType(BackButton), findsNothing);
       expect(settings.onboardingComplete, isTrue);
     },
   );

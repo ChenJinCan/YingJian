@@ -27,22 +27,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get homePrimaryAction => '选择照片开始';
 
   @override
-  String get homeStepChoose => '选照片';
-
-  @override
-  String get homeStepDescribe => '说想法';
-
-  @override
-  String get homeStepSave => '存整组';
-
-  @override
-  String get homeGuideSemantics => '使用步骤：选照片，说想法，保存整组';
-
-  @override
   String get onboardingPromise => '先选照片，再说出你想要的感觉。映见会把一张修好，也让整组自然统一。';
-
-  @override
-  String get onboardingPrivacy => '默认在手机本地处理，不会上传你的照片';
 
   @override
   String get onboardingContinue => '开始使用';
@@ -61,9 +46,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get continueLastEditing => '继续上次编辑';
-
-  @override
-  String get openProject => '打开项目';
 
   @override
   String get startNewProject => '开始新项目';
