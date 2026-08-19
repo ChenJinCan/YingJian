@@ -22,10 +22,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get homeSupporting =>
-      'Choose a few photos and describe the feeling you want. Yingjian refines one, then keeps the whole set naturally consistent.';
+      'Choose a photo and tell us how you want it changed';
 
   @override
-  String get homePrimaryAction => 'Choose photos to begin';
+  String get homePrimaryAction => 'Choose photos';
 
   @override
   String get onboardingPromise =>
@@ -585,7 +585,11 @@ class AppLocalizationsEn extends AppLocalizations {
       'This document cannot be loaded right now';
 
   @override
-  String get analysisPreparing => 'Preparing three local looks…';
+  String get analysisPreparing => 'Looking at your photos…';
+
+  @override
+  String get analysisPreparingSubtitle =>
+      'Preparing a look that suits this set';
 
   @override
   String get recommendationsTitle => 'Choose a direction you like';
@@ -891,6 +895,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get quickEditNaturalSkin => 'Natural skin';
 
   @override
+  String get quickEditAtmosphere => 'Add more atmosphere';
+
+  @override
   String get manualAdjustments => 'Manual adjustments';
 
   @override
@@ -908,6 +915,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get savePhotos => 'Save';
+
+  @override
+  String get saveOptionsTitle => 'Ready to save';
+
+  @override
+  String get saveOptionsSubtitle => 'Choose which photos to save';
 
   @override
   String get voiceEditTitle => 'What would you like to change?';
@@ -989,11 +1002,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get saveCurrentPhoto => 'Save current photo';
+  String get saveCurrentPhoto => 'Save only this photo';
 
   @override
   String saveSuccess(int count) {
-    return '$count photos saved to Photos';
+    return 'Saved $count photos';
   }
 
   @override

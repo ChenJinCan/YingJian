@@ -125,13 +125,13 @@ abstract class AppLocalizations {
   /// No description provided for @homeSupporting.
   ///
   /// In zh, this message translates to:
-  /// **'选几张照片，说出你想要的感觉。映见会先修好一张，再让整组自然统一。'**
+  /// **'选张照片，说说想怎么改'**
   String get homeSupporting;
 
   /// No description provided for @homePrimaryAction.
   ///
   /// In zh, this message translates to:
-  /// **'选择照片开始'**
+  /// **'选择照片'**
   String get homePrimaryAction;
 
   /// No description provided for @onboardingPromise.
@@ -1133,8 +1133,14 @@ abstract class AppLocalizations {
   /// No description provided for @analysisPreparing.
   ///
   /// In zh, this message translates to:
-  /// **'正在本地准备三套效果…'**
+  /// **'正在看照片…'**
   String get analysisPreparing;
+
+  /// No description provided for @analysisPreparingSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在准备适合这组照片的效果'**
+  String get analysisPreparingSubtitle;
 
   /// No description provided for @recommendationsTitle.
   ///
@@ -1694,6 +1700,12 @@ abstract class AppLocalizations {
   /// **'肤色自然一点'**
   String get quickEditNaturalSkin;
 
+  /// No description provided for @quickEditAtmosphere.
+  ///
+  /// In zh, this message translates to:
+  /// **'整体更有氛围'**
+  String get quickEditAtmosphere;
+
   /// No description provided for @manualAdjustments.
   ///
   /// In zh, this message translates to:
@@ -1729,6 +1741,18 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'保存'**
   String get savePhotos;
+
+  /// No description provided for @saveOptionsTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'完成优化'**
+  String get saveOptionsTitle;
+
+  /// No description provided for @saveOptionsSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择要保存的照片'**
+  String get saveOptionsSubtitle;
 
   /// No description provided for @voiceEditTitle.
   ///
@@ -1877,13 +1901,13 @@ abstract class AppLocalizations {
   /// No description provided for @saveCurrentPhoto.
   ///
   /// In zh, this message translates to:
-  /// **'保存当前 1 张'**
+  /// **'仅保存这张'**
   String get saveCurrentPhoto;
 
   /// No description provided for @saveSuccess.
   ///
   /// In zh, this message translates to:
-  /// **'{count} 张照片已保存到相册'**
+  /// **'已保存 {count} 张照片'**
   String saveSuccess(int count);
 
   /// No description provided for @finish.

@@ -59,28 +59,13 @@ void main() {
             store.project?.analysisStates.values,
             everyElement(PhotoAnalysisState.fallback),
           );
-          expect(
-            store.project?.flowState,
-            PhotoProjectFlowState.choosingRecommendation,
-          );
-          expect(find.text('自然干净'), findsOneWidget);
-          expect(find.text('氛围色彩'), findsOneWidget);
-          await tester.drag(find.byType(ListView).last, const Offset(-220, 0));
-          await tester.pumpAndSettle();
-          expect(find.text('质感风格'), findsOneWidget);
-          await tester.tap(find.text('质感风格'));
-          await tester.pumpAndSettle();
-          await tester.ensureVisible(find.text('就用这个'));
-          await tester.pumpAndSettle();
-          await tester.tap(find.text('就用这个'));
-          await tester.pumpAndSettle();
-
           expect(store.project?.flowState, PhotoProjectFlowState.editing);
           expect(
             store.project?.sharedStyle.family,
-            SharedStyleFamily.texturedStyle,
+            SharedStyleFamily.naturalClean,
           );
           expect(store.project?.adaptiveCompensations, hasLength(6));
+          expect(find.text('自然干净'), findsNothing);
 
           await tester.tap(find.byKey(const ValueKey('editor-manual-entry')));
           await tester.pumpAndSettle();
@@ -124,8 +109,6 @@ void main() {
             const Offset(-300, 0),
             1200,
           );
-          await tester.pumpAndSettle();
-          await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
           await tester.pumpAndSettle();
           workspace = find.byKey(const Key('photo-workspace-scroll'));
           await tester.dragUntilVisible(
@@ -174,7 +157,7 @@ void main() {
             findsOneWidget,
           );
           expect(find.text('保存全部 6 张'), findsOneWidget);
-          expect(find.text('保存当前 1 张'), findsOneWidget);
+          expect(find.text('仅保存这张'), findsOneWidget);
           await tester.tap(find.byKey(const ValueKey('save-all')));
           await tester.pumpAndSettle();
 
@@ -261,7 +244,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(find.text('1 / 6'), findsOneWidget);
+    expect(find.text('1/6'), findsOneWidget);
     expect(find.byKey(const ValueKey('editor-open-tools')), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
@@ -309,8 +292,6 @@ void main() {
     await tester.tap(
       find.byKey(const ValueKey('editor-scope-currentPhoto')).hitTestable(),
     );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
     await tester.pumpAndSettle();
     workspace = find.byKey(const Key('photo-workspace-scroll'));
     final semanticCategory = find.byKey(

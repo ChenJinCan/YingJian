@@ -1,10 +1,9 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' show SemanticsAction, SemanticsFlag, Tristate;
+import 'dart:ui' show SemanticsAction, SemanticsFlag;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
@@ -27,8 +26,8 @@ void main() {
     await tester.pumpWidget(buildTestApp(settings));
 
     expect(find.text('映见'), findsOneWidget);
-    expect(find.text('一张精修，整组好看'), findsOneWidget);
-    expect(find.text('选择照片开始'), findsOneWidget);
+    expect(find.text('选张照片，说说想怎么改'), findsOneWidget);
+    expect(find.text('选择照片'), findsOneWidget);
     expect(
       find.byKey(const ValueKey('home-full-screen-background')),
       findsOneWidget,
@@ -56,7 +55,7 @@ void main() {
     await tester.pumpWidget(buildTestApp(settings));
 
     expect(find.text('Yingjian'), findsOneWidget);
-    expect(find.text('Choose photos to begin'), findsOneWidget);
+    expect(find.text('Choose photos'), findsOneWidget);
   });
 
   testWidgets('English unfinished-project count uses singular grammar', (
@@ -112,8 +111,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('未完成项目'), findsOneWidget);
-    expect(find.text('选择照片开始'), findsOneWidget);
-    expect(find.text('继续上次编辑'), findsOneWidget);
+    expect(find.text('选择照片'), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-resume-project')), findsOneWidget);
     expect(find.textContaining('1 张照片'), findsOneWidget);
     expect(find.textContaining('14:30'), findsOneWidget);
   });
@@ -184,10 +183,7 @@ void main() {
       find.byKey(const ValueKey('editor-bottom-command-bar')),
       findsOneWidget,
     );
-    expect(
-      find.byKey(const ValueKey('recommendation-use')).hitTestable(),
-      findsOneWidget,
-    );
+    expect(find.byKey(const ValueKey('voice-edit-entry')), findsOneWidget);
     expect(find.text('周末人像.png'), findsOneWidget);
     expect(find.text('1/6'), findsOneWidget);
     expect(find.text('无法读取这张照片'), findsNothing);
@@ -227,11 +223,10 @@ void main() {
         find.byKey(const ValueKey('editor-bottom-command-bar')),
         findsOneWidget,
       );
-      await tester.tap(
-        find.byKey(const ValueKey('recommendation-use')).hitTestable(),
+      expect(
+        find.byKey(const ValueKey('editor-quick-brighter')),
+        findsOneWidget,
       );
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('recommendation-use')), findsNothing);
       expect(
         tester.getSize(find.byKey(const ValueKey('editor-page'))).width,
         lessThan(700),
@@ -372,123 +367,47 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('user chooses one of three local recommendation directions', (
+  testWidgets('import applies the safest local look without another decision', (
     tester,
   ) async {
-    tester.platformDispatcher.accessibilityFeaturesTestValue =
-        const FakeAccessibilityFeatures(disableAnimations: true);
-    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
     final photoFile = File(
       'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
       'Icon-App-1024x1024@1x.png',
     );
     final store = MemoryPhotoProjectStore();
     final previewRenderer = FakePhotoPreviewRenderer.supported();
-    const frameKey = ValueKey('reduced-motion-frame');
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
     final settings = await AppSettings.load();
     await tester.pumpWidget(
-      RepaintBoundary(
-        key: frameKey,
-        child: buildTestApp(
-          settings,
-          photoProjectStore: store,
-          photoPreviewRenderer: previewRenderer,
-          photoImporter: FakePhotoImporter([
-            ProjectPhoto(
-              id: 'photo-1',
-              localPath: photoFile.path,
-              originalName: '推荐样片.png',
-            ),
-          ]),
-        ),
+      buildTestApp(
+        settings,
+        photoProjectStore: store,
+        photoPreviewRenderer: previewRenderer,
+        photoImporter: FakePhotoImporter([
+          ProjectPhoto(
+            id: 'photo-1',
+            localPath: photoFile.path,
+            originalName: '推荐样片.png',
+          ),
+        ]),
       ),
     );
 
     await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
-    await tester.drag(
-      find.byKey(const Key('photo-workspace-scroll')),
-      const Offset(0, -520),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('自然干净'), findsOneWidget);
-    expect(find.text('氛围色彩'), findsOneWidget);
-    expect(find.text('质感风格'), findsOneWidget);
-    expect(find.text('主推荐'), findsOneWidget);
-    expect(find.text('备选'), findsNWidgets(2));
-    expect(
-      find.byKey(const ValueKey('recommendation-preview-naturalClean')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const ValueKey('recommendation-preview-atmosphericColor')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const ValueKey('recommendation-preview-texturedStyle')),
-      findsOneWidget,
-    );
-    expect(previewRenderer.maxEdges.where((edge) => edge == 384), hasLength(3));
     expect(previewRenderer.maxEdges, contains(2048));
-    expect(find.textContaining('不上传照片'), findsOneWidget);
-    expect(find.text('均衡克制的安全回退'), findsOneWidget);
-    expect(find.text('安全增加轻微暖意'), findsOneWidget);
-    expect(find.text('克制增强质感，不激进锐化'), findsOneWidget);
-    final initialPreviewPipeline = previewRenderer.updates.isNotEmpty
-        ? previewRenderer.updates.last
-        : previewRenderer.creates.last;
-    final initialAdjustments =
-        initialPreviewPipeline.toPlatformArguments()['adjustments']!
-            as Map<String, double>;
-    expect(
-      initialAdjustments.values.any((value) => value != 0),
-      isTrue,
-      reason: 'The first selected recommendation must be the visible preview.',
-    );
-    expect(
-      store.project?.flowState,
-      PhotoProjectFlowState.choosingRecommendation,
-    );
-
-    final atmosphereOption = find.semantics.byLabel(RegExp('氛围色彩'));
-    expect(atmosphereOption, findsOne);
-    tester.semantics.tap(atmosphereOption);
-    await tester.pump();
-    expect(
-      atmosphereOption.evaluate().single.flagsCollection.isSelected,
-      Tristate.isTrue,
-    );
-    final frame = tester.firstRenderObject<RenderRepaintBoundary>(
-      find.byKey(frameKey),
-    );
-    final immediateFrame = await frame.toImage();
-    addTearDown(immediateFrame.dispose);
-    await tester.pump(const Duration(milliseconds: 80));
-    final laterFrame = await frame.toImage();
-    addTearDown(laterFrame.dispose);
-    await expectLater(laterFrame, matchesReferenceImage(immediateFrame));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('recommendation-use')));
-    await tester.pumpAndSettle();
-
     expect(store.project?.flowState, PhotoProjectFlowState.editing);
-    expect(
-      store.project?.selectedRecommendationId,
-      contains('atmosphere-warm'),
-    );
-    expect(
-      store.project?.sharedStyle.family,
-      SharedStyleFamily.atmosphericColor,
-    );
+    expect(store.project?.selectedRecommendationId, contains('clean-balanced'));
+    expect(store.project?.sharedStyle.family, SharedStyleFamily.naturalClean);
     expect(
       store.project?.adaptiveCompensations['photo-1']?.source,
       AdaptiveCompensationSource.safeFallbackV1,
     );
+    expect(find.byKey(const ValueKey('voice-edit-entry')), findsOneWidget);
+    expect(find.text('自然干净'), findsNothing);
   });
 
-  testWidgets('restored recommendations reuse project-local analysis', (
+  testWidgets('restored project reuses analysis before opening the editor', (
     tester,
   ) async {
     final photoFile = File(
@@ -533,67 +452,49 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(analyzer.calls, 1);
-    await tester.dragUntilVisible(
-      find.text('自然干净'),
-      find.byKey(const Key('photo-workspace-scroll')),
-      const Offset(0, -200),
-    );
-    expect(find.text('自然干净'), findsOneWidget);
-    expect(find.text('氛围色彩'), findsOneWidget);
-    expect(find.text('质感风格'), findsOneWidget);
-    expect(find.textContaining('本机像素分析'), findsOneWidget);
-    expect(find.text('平衡检测到的曝光'), findsOneWidget);
-    expect(find.text('修正检测到的偏色'), findsOneWidget);
-    expect(find.text('保留细节与局部反差'), findsOneWidget);
+    expect(store.project?.flowState, PhotoProjectFlowState.editing);
+    expect(find.byKey(const ValueKey('voice-edit-entry')), findsOneWidget);
   });
 
-  testWidgets(
-    'an unavailable recommendation preview is explicit and retryable',
-    (tester) async {
-      final photoFile = File(
-        'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
-        'Icon-App-1024x1024@1x.png',
-      );
-      final renderer = FakePhotoPreviewRenderer.unsupported();
-      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
-      final settings = await AppSettings.load();
-      await tester.pumpWidget(
-        buildTestApp(
-          settings,
-          photoPreviewRenderer: renderer,
-          photoImporter: FakePhotoImporter([
-            ProjectPhoto(
-              id: 'photo-preview-failure',
-              localPath: photoFile.path,
-              originalName: '推荐预览失败.png',
-            ),
-          ]),
-        ),
-      );
+  testWidgets('an unavailable edited preview is explicit and retryable', (
+    tester,
+  ) async {
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final renderer = FakePhotoPreviewRenderer.unsupported();
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoPreviewRenderer: renderer,
+        photoImporter: FakePhotoImporter([
+          ProjectPhoto(
+            id: 'photo-preview-failure',
+            localPath: photoFile.path,
+            originalName: '推荐预览失败.png',
+          ),
+        ]),
+      ),
+    );
 
-      await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-      await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+    await tester.pumpAndSettle();
 
-      expect(find.textContaining('这套推荐预览暂不可用'), findsOneWidget);
-      expect(find.textContaining('原图不受影响'), findsOneWidget);
-      expect(find.byKey(const ValueKey('photo-preview-retry')), findsOneWidget);
-      final createCountBeforeRetry = renderer.creates.length;
+    expect(find.textContaining('预览'), findsWidgets);
+    expect(find.textContaining('原图不受影响'), findsOneWidget);
+    expect(find.byKey(const ValueKey('photo-preview-retry')), findsOneWidget);
+    final createCountBeforeRetry = renderer.creates.length;
 
-      await tester.tap(find.byKey(const ValueKey('photo-preview-retry')));
-      await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('photo-preview-retry')));
+    await tester.pumpAndSettle();
 
-      expect(renderer.creates.length, createCountBeforeRetry + 1);
-      expect(find.textContaining('这套推荐预览暂不可用'), findsOneWidget);
-      await tester.dragUntilVisible(
-        find.text('自然干净'),
-        find.byKey(const Key('photo-workspace-scroll')),
-        const Offset(0, -200),
-      );
-      expect(find.text('自然干净'), findsOneWidget);
-      expect(find.text('氛围色彩'), findsOneWidget);
-      expect(find.text('质感风格'), findsOneWidget);
-    },
-  );
+    expect(renderer.creates.length, createCountBeforeRetry + 1);
+    expect(find.textContaining('预览'), findsWidgets);
+    expect(find.byKey(const ValueKey('voice-edit-entry')), findsOneWidget);
+  });
 
   testWidgets('backgrounding analysis discards a late native result', (
     tester,
@@ -659,16 +560,8 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
 
-    expect(
-      store.project?.flowState,
-      PhotoProjectFlowState.choosingRecommendation,
-    );
-    await tester.dragUntilVisible(
-      find.text('自然干净'),
-      find.byKey(const Key('photo-workspace-scroll')),
-      const Offset(0, -200),
-    );
-    expect(find.text('自然干净'), findsOneWidget);
+    expect(store.project?.flowState, PhotoProjectFlowState.editing);
+    expect(find.byKey(const ValueKey('voice-edit-entry')), findsOneWidget);
   });
 
   testWidgets('rapid resume waits for the serialized lifecycle fallback', (
@@ -722,10 +615,7 @@ void main() {
     store.completeFallbackSave();
     await tester.pumpAndSettle();
 
-    expect(
-      store.project?.flowState,
-      PhotoProjectFlowState.choosingRecommendation,
-    );
+    expect(store.project?.flowState, PhotoProjectFlowState.editing);
     expect(tester.takeException(), isNull);
   });
 
@@ -923,17 +813,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(store.project?.photos.map((photo) => photo.id), ['photo-2']);
-    expect(
-      store.project?.flowState,
-      PhotoProjectFlowState.choosingRecommendation,
-    );
+    expect(store.project?.flowState, PhotoProjectFlowState.editing);
     expect(analyzer.calls, greaterThanOrEqualTo(2));
-    await tester.dragUntilVisible(
-      find.text('自然干净'),
-      find.byKey(const Key('photo-workspace-scroll')),
-      const Offset(0, -200),
-    );
-    expect(find.text('自然干净'), findsOneWidget);
+    expect(find.byKey(const ValueKey('voice-edit-entry')), findsOneWidget);
   });
 
   testWidgets('photo removal drains a claimed analysis state save', (
@@ -990,10 +872,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(store.project?.photos.map((photo) => photo.id), ['photo-2']);
-    expect(
-      store.project?.flowState,
-      PhotoProjectFlowState.choosingRecommendation,
-    );
+    expect(store.project?.flowState, PhotoProjectFlowState.editing);
     expect(tester.takeException(), isNull);
   });
 
@@ -1078,7 +957,7 @@ void main() {
 
     expect(exporter.exportedPhoto, photo);
     expect(exporter.exportedRecipe?.exposure, greaterThan(0));
-    expect(find.text('1 张照片已保存到相册'), findsOneWidget);
+    expect(find.text('已保存 1 张照片'), findsOneWidget);
     final exportStatesBeforeShare = Map.of(store.project!.exportStates);
     await tester.ensureVisible(find.byKey(const ValueKey('save-share')));
     await tester.tap(find.byKey(const ValueKey('save-share')));
@@ -1102,7 +981,7 @@ void main() {
     await _pumpUntilText(tester, '已取消分享，保存结果不受影响');
 
     expect(find.text('已取消分享，保存结果不受影响'), findsOneWidget);
-    expect(find.text('1 张照片已保存到相册'), findsOneWidget);
+    expect(find.text('已保存 1 张照片'), findsOneWidget);
     expect(find.text('分享已保存照片'), findsOneWidget);
     expect(store.project?.exportStates, exportStatesBeforeShare);
     await tester.tap(find.byKey(const ValueKey('save-finish')));
@@ -1134,7 +1013,7 @@ void main() {
     await _pumpUntilText(tester, '暂时无法分享，保存结果不受影响');
 
     expect(find.text('暂时无法分享，保存结果不受影响'), findsOneWidget);
-    expect(find.text('1 张照片已保存到相册'), findsOneWidget);
+    expect(find.text('已保存 1 张照片'), findsOneWidget);
     expect(find.text('分享已保存照片'), findsOneWidget);
     expect(store.project?.exportStates, exportStatesBeforeShare);
   });

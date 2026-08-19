@@ -21,10 +21,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get homeHeroTitle => '让变美更容易';
 
   @override
-  String get homeSupporting => '选几张照片，说出你想要的感觉。映见会先修好一张，再让整组自然统一。';
+  String get homeSupporting => '选张照片，说说想怎么改';
 
   @override
-  String get homePrimaryAction => '选择照片开始';
+  String get homePrimaryAction => '选择照片';
 
   @override
   String get onboardingPromise => '先选照片，再说出你想要的感觉。映见会把一张修好，也让整组自然统一。';
@@ -548,7 +548,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get legalDocumentLoadFailed => '暂时无法加载此文档';
 
   @override
-  String get analysisPreparing => '正在本地准备三套效果…';
+  String get analysisPreparing => '正在看照片…';
+
+  @override
+  String get analysisPreparingSubtitle => '正在准备适合这组照片的效果';
 
   @override
   String get recommendationsTitle => '选一个喜欢的方向';
@@ -839,6 +842,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get quickEditNaturalSkin => '肤色自然一点';
 
   @override
+  String get quickEditAtmosphere => '整体更有氛围';
+
+  @override
   String get manualAdjustments => '手动调整';
 
   @override
@@ -855,6 +861,12 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get savePhotos => '保存';
+
+  @override
+  String get saveOptionsTitle => '完成优化';
+
+  @override
+  String get saveOptionsSubtitle => '选择要保存的照片';
 
   @override
   String get voiceEditTitle => '想怎么改？';
@@ -933,11 +945,11 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get saveCurrentPhoto => '保存当前 1 张';
+  String get saveCurrentPhoto => '仅保存这张';
 
   @override
   String saveSuccess(int count) {
-    return '$count 张照片已保存到相册';
+    return '已保存 $count 张照片';
   }
 
   @override

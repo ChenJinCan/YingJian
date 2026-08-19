@@ -83,12 +83,6 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
     }
   }
 
-  void _applySuggestion(String instruction) {
-    _controller.text = instruction;
-    _controller.selection = TextSelection.collapsed(offset: instruction.length);
-    setState(() => _error = null);
-  }
-
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
@@ -120,46 +114,36 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
               context.l10n.voiceEditTitle,
               style: Theme.of(context).textTheme.titleLarge,
             ),
-            const SizedBox(height: 6),
-            Text(
-              context.l10n.voiceEditPrivacy,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
-            ),
             const SizedBox(height: 14),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
+            Row(
               children: [
-                ActionChip(
-                  key: const ValueKey('quick-edit-brighter'),
-                  onPressed: _applying || _listening
-                      ? null
-                      : () => _applySuggestion('照片亮一点'),
-                  label: Text(context.l10n.quickEditBrighter),
+                Expanded(
+                  child: TextField(
+                    key: const ValueKey('voice-edit-text-field'),
+                    controller: _controller,
+                    minLines: 1,
+                    maxLines: 2,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => unawaited(_submit()),
+                    decoration: InputDecoration(
+                      hintText: context.l10n.voiceEditHint,
+                    ),
+                  ),
                 ),
-                ActionChip(
-                  key: const ValueKey('quick-edit-natural-skin'),
-                  onPressed: _applying || _listening
-                      ? null
-                      : () => _applySuggestion('皮肤自然一点'),
-                  label: Text(context.l10n.quickEditNaturalSkin),
+                const SizedBox(width: 10),
+                IconButton.filled(
+                  key: const ValueKey('voice-edit-record'),
+                  tooltip: _listening
+                      ? context.l10n.voiceEditStop
+                      : context.l10n.voiceEditRecord,
+                  onPressed: _applying ? null : _toggleListening,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 54,
+                    height: 54,
+                  ),
+                  icon: Icon(_listening ? Icons.stop : Icons.mic_outlined),
                 ),
               ],
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              key: const ValueKey('voice-edit-text-field'),
-              controller: _controller,
-              minLines: 2,
-              maxLines: 4,
-              textInputAction: TextInputAction.done,
-              onSubmitted: (_) => unawaited(_submit()),
-              decoration: InputDecoration(
-                hintText: context.l10n.voiceEditHint,
-                border: const OutlineInputBorder(),
-              ),
             ),
             if (_listening) ...[
               const SizedBox(height: 12),
@@ -189,42 +173,20 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
                 ),
               ),
             ],
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    key: const ValueKey('voice-edit-record'),
-                    onPressed: _applying ? null : _toggleListening,
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size.fromHeight(48),
-                    ),
-                    icon: Icon(_listening ? Icons.stop : Icons.mic_outlined),
-                    label: Text(
-                      _listening
-                          ? context.l10n.voiceEditStop
-                          : context.l10n.voiceEditRecord,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.icon(
-                    key: const ValueKey('voice-edit-submit'),
-                    onPressed: _applying || _listening ? null : _submit,
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(48),
-                    ),
-                    icon: _applying
-                        ? const SizedBox.square(
-                            dimension: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.auto_fix_high_outlined),
-                    label: Text(context.l10n.voiceEditApply),
-                  ),
-                ),
-              ],
+            const SizedBox(height: 14),
+            FilledButton.icon(
+              key: const ValueKey('voice-edit-submit'),
+              onPressed: _applying || _listening ? null : _submit,
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+              ),
+              icon: _applying
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.auto_fix_high_outlined),
+              label: Text(context.l10n.voiceEditApply),
             ),
           ],
         ),

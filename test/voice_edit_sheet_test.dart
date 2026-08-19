@@ -61,32 +61,24 @@ void main() {
     expect(field.controller?.text, '照片亮一点');
   });
 
-  testWidgets('a suggestion fills the request before explicit apply', (
+  testWidgets('the compact sheet keeps one clear text and voice entry', (
     tester,
   ) async {
-    NaturalLanguageEditResult? applied;
     await tester.pumpWidget(
       _TestHost(
         child: VoiceEditSheet(
           currentRecipe: EditRecipe.neutral,
           interpreter: const LocalNaturalLanguageEditInterpreter(),
           transcriber: _FakeSpeechTranscriber(),
-          onApplied: (result) => applied = result,
+          onApplied: (_) {},
         ),
       ),
     );
 
-    await tester.tap(find.byKey(const ValueKey('quick-edit-brighter')));
-    await tester.pump();
-    final field = tester.widget<TextField>(
-      find.byKey(const ValueKey('voice-edit-text-field')),
-    );
-    expect(field.controller?.text, '照片亮一点');
-    expect(applied, isNull);
-
-    await tester.tap(find.byKey(const ValueKey('voice-edit-submit')));
-    await tester.pump();
-    expect(applied?.recipe.exposure, 0.12);
+    expect(find.byKey(const ValueKey('voice-edit-text-field')), findsOneWidget);
+    expect(find.byKey(const ValueKey('voice-edit-record')), findsOneWidget);
+    expect(find.byKey(const ValueKey('voice-edit-submit')), findsOneWidget);
+    expect(find.byType(ActionChip), findsNothing);
   });
 }
 

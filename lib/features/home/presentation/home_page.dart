@@ -108,53 +108,33 @@ class _HomePageState extends State<HomePage> {
                     SingleChildScrollView(
                       padding: const EdgeInsets.fromLTRB(
                         24,
-                        kToolbarHeight + 14,
+                        kToolbarHeight + 28,
                         24,
                         36,
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          const Align(
-                            alignment: Alignment.centerLeft,
-                            child: _YingjianMark(),
-                          ),
-                          const SizedBox(height: 34),
-                          Text(
-                            context.l10n.homeHeroTitle,
-                            style: Theme.of(context).textTheme.displaySmall
-                                ?.copyWith(
-                                  fontWeight: FontWeight.w800,
-                                  height: 1.08,
-                                  letterSpacing: -1.1,
-                                ),
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            context.l10n.homeTagline,
-                            style: Theme.of(context).textTheme.titleLarge
-                                ?.copyWith(
-                                  color: colors.primary,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                          ),
-                          const SizedBox(height: 12),
+                          const SizedBox(height: 64),
+                          const Center(child: _YingjianMark()),
+                          const SizedBox(height: 18),
                           Text(
                             context.l10n.homeSupporting,
-                            style: Theme.of(context).textTheme.bodyLarge
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodyMedium
                                 ?.copyWith(
                                   color: colors.onSurfaceVariant,
-                                  height: 1.55,
+                                  height: 1.45,
                                 ),
                           ),
-                          const SizedBox(height: 34),
+                          const SizedBox(height: 26),
                           FilledButton.icon(
                             key: const ValueKey('home-start-editing'),
                             onPressed: project == null
                                 ? () => _openEditor(startWithImport: true)
                                 : () => _startNew(project),
                             style: FilledButton.styleFrom(
-                              minimumSize: const Size.fromHeight(60),
+                              minimumSize: const Size.fromHeight(54),
                             ),
                             icon: const Icon(
                               Icons.add_photo_alternate_outlined,
@@ -169,7 +149,7 @@ class _HomePageState extends State<HomePage> {
                             const SizedBox(height: 32),
                             _RestoreFailure(onRetry: _reload),
                           ] else if (project != null) ...[
-                            const SizedBox(height: 42),
+                            const SizedBox(height: 72),
                             Text(
                               context.l10n.recentProjects,
                               style: Theme.of(context).textTheme.labelLarge
@@ -225,53 +205,51 @@ class _ProjectResumeCard extends StatelessWidget {
       ),
     );
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(16),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        key: const ValueKey('home-resume-project'),
+        onTap: onContinue,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainerHigh,
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: const Icon(Icons.photo_library_outlined, size: 28),
               ),
-              child: const Icon(Icons.photo_library_outlined, size: 30),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    context.l10n.unfinishedProject,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    summary,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: FilledButton(
-                      key: const ValueKey('home-resume-project'),
-                      onPressed: onContinue,
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(48, 44),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      context.l10n.unfinishedProject,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
                       ),
-                      child: Text(context.l10n.continueLastEditing),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 5),
+                    Text(
+                      summary,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+              const SizedBox(width: 8),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -288,8 +266,8 @@ class _YingjianMark extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: 42,
-          height: 42,
+          width: 46,
+          height: 46,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: colors.primary.withValues(alpha: 0.12),
@@ -297,12 +275,12 @@ class _YingjianMark extends StatelessWidget {
           ),
           child: Icon(Icons.auto_awesome, color: colors.primary, size: 20),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 14),
         Text(
           context.l10n.appTitle,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
             fontWeight: FontWeight.w700,
-            letterSpacing: 3,
+            letterSpacing: 4,
           ),
         ),
       ],

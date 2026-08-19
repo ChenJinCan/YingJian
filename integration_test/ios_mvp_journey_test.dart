@@ -187,37 +187,15 @@ void main() {
       (snapshotPhotos.single! as Map<String, Object?>)['localPath'],
       'media/ios-runtime-photo.png',
     );
-    expect(find.text('自然干净'), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('recommendation-preview-naturalClean')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const ValueKey('recommendation-preview-atmosphericColor')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const ValueKey('recommendation-preview-texturedStyle')),
-      findsOneWidget,
-    );
+    expect(find.text('自然干净'), findsNothing);
     expect(find.byKey(const ValueKey('editor-preview-stage')), findsOneWidget);
     expect(
       find.byKey(const ValueKey('editor-bottom-command-bar')),
       findsOneWidget,
     );
-    expect(
-      find.byKey(const ValueKey('recommendation-use')).hitTestable(),
-      findsOneWidget,
-    );
+    expect(find.byKey(const ValueKey('voice-edit-entry')), findsOneWidget);
     expect(previewRenderer.textureSmoothingStrengths, contains(0.5));
-    expect(previewRenderer.maxEdges.where((edge) => edge == 384), hasLength(3));
     expect(previewRenderer.maxEdges, contains(2048));
-
-    final useRecommendation = find.byKey(const ValueKey('recommendation-use'));
-    await tester.ensureVisible(useRecommendation);
-    await tester.pumpAndSettle();
-    await tester.tap(useRecommendation);
-    await tester.pumpAndSettle();
     expect(
       (await store.loadLatest())?.flowState,
       PhotoProjectFlowState.editing,
@@ -727,7 +705,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
     }
     expect(saveSuccess, findsOneWidget);
-    expect(find.text('1 张照片已保存到相册'), findsOneWidget);
+    expect(find.text('已保存 1 张照片'), findsOneWidget);
     expect(await source.readAsBytes(), sourceBytes);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
@@ -753,7 +731,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
     expect(find.byKey(const ValueKey('editor-save-success')), findsOneWidget);
-    expect(find.text('1 张照片已保存到相册'), findsOneWidget);
+    expect(find.text('已保存 1 张照片'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('save-finish')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('home-start-editing')), findsOneWidget);
@@ -809,52 +787,13 @@ void main() {
         store.project?.analysisStates.values,
         everyElement(PhotoAnalysisState.fallback),
       );
-      expect(
-        find.byKey(const ValueKey('recommendation-texturedStyle')),
-        findsOneWidget,
-      );
-      var workspace = find.byKey(const ValueKey('photo-workspace-scroll'));
-      final naturalRecommendation = find.byKey(
-        const ValueKey('recommendation-naturalClean'),
-      );
-      final naturalRecommendationLabel = find
-          .descendant(of: naturalRecommendation, matching: find.byType(Text))
-          .first;
-      await tester.dragUntilVisible(
-        naturalRecommendationLabel,
-        workspace,
-        const Offset(0, -260),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(naturalRecommendationLabel);
-      await tester.pumpAndSettle();
-      final useRecommendation = find.byKey(
-        const ValueKey('recommendation-use'),
-      );
-      await tester.dragUntilVisible(
-        useRecommendation,
-        workspace,
-        const Offset(0, -220),
-      );
-      await tester.tap(useRecommendation);
-      await tester.pumpAndSettle();
-
       expect(store.project?.flowState, PhotoProjectFlowState.editing);
       expect(store.project?.sharedStyle.family, SharedStyleFamily.naturalClean);
       expect(store.project?.adaptiveCompensations, hasLength(6));
 
       await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
       await tester.pumpAndSettle();
-      workspace = find.byKey(const ValueKey('photo-workspace-scroll'));
-      final groupIntensity = find.byKey(
-        const ValueKey('editor-group-style-intensity'),
-      );
-      await tester.fling(workspace, const Offset(0, 1000), 2000);
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(groupIntensity);
-      await tester.drag(groupIntensity, const Offset(-70, 0));
-      await tester.pumpAndSettle();
-      expect(store.project!.sharedStyle.intensity, lessThan(1));
+      var workspace = find.byKey(const ValueKey('photo-workspace-scroll'));
 
       final groupFilters = find.byKey(
         const ValueKey('editor-tool-category-filters'),
@@ -914,23 +853,19 @@ void main() {
       final sharedExposure = store.project!.sharedStyle.recipe.exposure;
       expect(sharedExposure, isNot(exposureBefore));
 
-      final currentPhotoScope = find.byKey(
-        const ValueKey('editor-scope-currentPhoto'),
+      await tester.tap(
+        find.byKey(const ValueKey('editor-scope-menu')).hitTestable(),
       );
-      await tester.dragUntilVisible(
-        currentPhotoScope,
-        workspace,
-        const Offset(0, 260),
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('editor-scope-currentPhoto')).hitTestable(),
       );
-      await tester.tap(currentPhotoScope);
       await tester.pumpAndSettle();
       await tester.fling(
         find.byKey(const ValueKey('editor-swipe-photos')),
         const Offset(-500, 0),
         1200,
       );
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
       await tester.pumpAndSettle();
       workspace = find.byKey(const ValueKey('photo-workspace-scroll'));
       for (final category in <String>[

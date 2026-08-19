@@ -61,4 +61,12 @@ void main() {
     expect(result.recipe, current);
     expect(result.changes, isEmpty);
   });
+
+  test('atmosphere suggestion maps to a bounded visible parameter', () {
+    final result = interpreter.interpret('整体更有氛围', current: EditRecipe.neutral);
+
+    expect(result.isApplicable, isTrue);
+    expect(result.recipe.saturation, 0.1);
+    expect(result.changes.single.parameter, EditableParameter.saturation);
+  });
 }

@@ -381,6 +381,13 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           }
         });
       }
+      if (_isCurrentAnalysisRun(cancellation, projectId) &&
+          exposeRecommendations &&
+          preparation.recommendations.isNotEmpty &&
+          session.project?.flowState ==
+              PhotoProjectFlowState.choosingRecommendation) {
+        await _selectRecommendation(preparation.recommendations.first);
+      }
     } finally {
       completion.complete();
       if (identical(_analysisCompletion, completion.future)) {
@@ -1403,7 +1410,12 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
               ? null
               : AppBar(
                   title: MediaQuery.sizeOf(context).width < 700
-                      ? null
+                      ? photos.isEmpty
+                            ? null
+                            : Text(
+                                '${_selectedIndex + 1}/${photos.length}',
+                                style: Theme.of(context).textTheme.labelLarge,
+                              )
                       : Text(
                           context.l10n.appTitle,
                           style: Theme.of(context).textTheme.titleMedium
@@ -1530,13 +1542,9 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                   sharing: _sharing,
                   exportSummary: _exportSummary,
                   feedback: _editFeedback,
-                  canSyncFeedback:
-                      session.canSyncCurrentPhotoAdjustmentsToGroup,
                   onVoiceEdit: () => unawaited(_showVoiceEditSheet()),
                   onManualEdit: () =>
                       setState(() => _manualToolsVisible = true),
-                  onSyncFeedback: () =>
-                      unawaited(_syncCurrentPhotoAdjustmentsToGroup()),
                   onUndo: () => unawaited(_undoEdit()),
                   onRedo: () => unawaited(_redoEdit()),
                   onReset: () => unawaited(_resetEdit()),
@@ -1898,74 +1906,31 @@ class _PhotoWorkspace extends StatelessWidget {
                     ? Stack(
                         fit: StackFit.expand,
                         children: [
-                          GestureDetector(
-                            key: const ValueKey('editor-swipe-photos'),
-                            onHorizontalDragEnd: photos.length <= 1
-                                ? null
-                                : (details) {
-                                    final velocity =
-                                        details.primaryVelocity ?? 0;
-                                    if (velocity < -250 &&
-                                        selectedIndex < photos.length - 1) {
-                                      onSelected(selectedIndex + 1);
-                                    } else if (velocity > 250 &&
-                                        selectedIndex > 0) {
-                                      onSelected(selectedIndex - 1);
-                                    }
-                                  },
-                            child: SizedBox.expand(child: previewCard),
+                          Semantics(
+                            key: const ValueKey('editor-preview-fullscreen'),
+                            button: !recommendationFlow,
+                            child: GestureDetector(
+                              key: const ValueKey('editor-swipe-photos'),
+                              behavior: HitTestBehavior.opaque,
+                              onTap: recommendationFlow
+                                  ? null
+                                  : onOpenFullscreen,
+                              onHorizontalDragEnd: photos.length <= 1
+                                  ? null
+                                  : (details) {
+                                      final velocity =
+                                          details.primaryVelocity ?? 0;
+                                      if (velocity < -250 &&
+                                          selectedIndex < photos.length - 1) {
+                                        onSelected(selectedIndex + 1);
+                                      } else if (velocity > 250 &&
+                                          selectedIndex > 0) {
+                                        onSelected(selectedIndex - 1);
+                                      }
+                                    },
+                              child: SizedBox.expand(child: previewCard),
+                            ),
                           ),
-                          if (!recommendationFlow && exportSummary == null)
-                            Positioned(
-                              left: 12,
-                              bottom: 12,
-                              child: FilledButton.tonalIcon(
-                                key: const ValueKey('editor-open-tools'),
-                                onPressed:
-                                    editingEnabled && !interactionsBlocked
-                                    ? onOpenTools
-                                    : null,
-                                icon: const Icon(Icons.tune, size: 20),
-                                label: Text(context.l10n.allTools),
-                              ),
-                            ),
-                          if (!recommendationFlow && exportSummary == null)
-                            Positioned(
-                              right: 12,
-                              bottom: 12,
-                              child: IconButton.filledTonal(
-                                key: const ValueKey(
-                                  'editor-preview-fullscreen',
-                                ),
-                                tooltip: context.l10n.fullscreenPreview,
-                                onPressed: onOpenFullscreen,
-                                icon: const Icon(Icons.fullscreen_rounded),
-                              ),
-                            ),
-                          if (photos.length > 1)
-                            Positioned(
-                              bottom: 16,
-                              left: 0,
-                              right: 0,
-                              child: Center(
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    color: Theme.of(context).colorScheme.surface
-                                        .withValues(alpha: 0.88),
-                                    borderRadius: BorderRadius.circular(99),
-                                  ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 6,
-                                    ),
-                                    child: Text(
-                                      '${selectedIndex + 1} / ${photos.length}',
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
                         ],
                       )
                     : AspectRatio(aspectRatio: 4 / 3, child: previewCard),
@@ -2226,24 +2191,7 @@ class _PhotoWorkspace extends StatelessWidget {
                   ],
                   if (exportSummary == null && recommendationFlow) ...[
                     const SizedBox(height: 12),
-                    _RecommendationPanel(
-                      preparing: preparingRecommendations,
-                      recommendations: recommendations,
-                      sourcePath: selected.localPath,
-                      previewRecipes: [
-                        for (final recommendation in recommendations)
-                          project
-                              .copyWith(
-                                sharedStyle: recommendation.sharedStyle,
-                                adaptiveCompensations:
-                                    recommendation.adaptiveCompensations,
-                              )
-                              .effectiveRecipeFor(selected.id),
-                      ],
-                      previewRenderer: previewRenderer,
-                      selectedIndex: selectedRecommendationIndex,
-                      onPreviewed: onRecommendationPreviewed,
-                    ),
+                    const _PreparationStatusCard(),
                   ] else if (exportSummary == null) ...[
                     const SizedBox(height: 8),
                     if (MediaQuery.sizeOf(context).width >= 700 &&
@@ -2408,8 +2356,8 @@ class _EditorToolsDock extends StatelessWidget {
     return SizedBox(
       key: const ValueKey('editor-tools-dock'),
       height: largeText
-          ? min(390, MediaQuery.sizeOf(context).height * 0.48)
-          : min(300, MediaQuery.sizeOf(context).height * 0.36),
+          ? min(350, MediaQuery.sizeOf(context).height * 0.42)
+          : min(270, MediaQuery.sizeOf(context).height * 0.32),
       child: Material(
         color: colors.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
@@ -2529,16 +2477,9 @@ class _EditFeedback {
 }
 
 class _ResultFeedbackPill extends StatelessWidget {
-  const _ResultFeedbackPill({
-    required this.feedback,
-    required this.canSync,
-    required this.onSync,
-    required this.onUndo,
-  });
+  const _ResultFeedbackPill({required this.feedback, required this.onUndo});
 
   final _EditFeedback feedback;
-  final bool canSync;
-  final VoidCallback onSync;
   final VoidCallback onUndo;
 
   @override
@@ -2560,12 +2501,6 @@ class _ResultFeedbackPill extends StatelessWidget {
               Icon(Icons.check_circle_outline, color: colors.primary, size: 20),
               const SizedBox(width: 8),
               Expanded(child: Text(feedback.message)),
-              if (canSync)
-                TextButton(
-                  key: const ValueKey('editor-feedback-sync'),
-                  onPressed: onSync,
-                  child: Text(context.l10n.syncAllPhotos),
-                ),
               TextButton(
                 key: const ValueKey('editor-feedback-undo'),
                 onPressed: onUndo,
@@ -2593,8 +2528,15 @@ class _SaveOptionsSheet extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          context.l10n.savePhotos,
+          context.l10n.saveOptionsTitle,
           style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(height: 6),
+        Text(
+          context.l10n.saveOptionsSubtitle,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
         const SizedBox(height: 18),
         FilledButton(
@@ -2607,11 +2549,6 @@ class _SaveOptionsSheet extends StatelessWidget {
           key: const ValueKey('save-current'),
           onPressed: () => Navigator.pop(context, _SaveScope.current),
           child: Text(context.l10n.saveCurrentPhoto),
-        ),
-        TextButton(
-          key: const ValueKey('save-cancel'),
-          onPressed: () => Navigator.pop(context),
-          child: Text(context.l10n.cancel),
         ),
       ],
     ),
@@ -2695,10 +2632,8 @@ class _EditorCommandBar extends StatelessWidget {
     required this.sharing,
     required this.exportSummary,
     required this.feedback,
-    required this.canSyncFeedback,
     required this.onVoiceEdit,
     required this.onManualEdit,
-    required this.onSyncFeedback,
     required this.onUndo,
     required this.onRedo,
     required this.onReset,
@@ -2719,10 +2654,8 @@ class _EditorCommandBar extends StatelessWidget {
   final bool sharing;
   final BatchExportSummary? exportSummary;
   final _EditFeedback? feedback;
-  final bool canSyncFeedback;
   final VoidCallback onVoiceEdit;
   final VoidCallback onManualEdit;
-  final VoidCallback onSyncFeedback;
   final VoidCallback onUndo;
   final VoidCallback onRedo;
   final VoidCallback onReset;
@@ -2760,8 +2693,6 @@ class _EditorCommandBar extends StatelessWidget {
                       if (feedback != null) ...[
                         _ResultFeedbackPill(
                           feedback: feedback!,
-                          canSync: canSyncFeedback,
-                          onSync: onSyncFeedback,
                           onUndo: onUndo,
                         ),
                         const SizedBox(height: 10),
@@ -2826,14 +2757,50 @@ class _EditorCommandBar extends StatelessWidget {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 4),
-                        Align(
-                          alignment: Alignment.center,
-                          child: TextButton.icon(
-                            key: const ValueKey('editor-manual-entry'),
-                            onPressed: editingEnabled ? onManualEdit : null,
-                            icon: const Icon(Icons.tune, size: 18),
-                            label: Text(context.l10n.quickAdjust),
+                        const SizedBox(height: 8),
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              _QuickEditChip(
+                                key: const ValueKey('editor-quick-brighter'),
+                                label: context.l10n.quickEditBrighter,
+                                onPressed: editingEnabled
+                                    ? () => onQuickEdit('照片亮一点')
+                                    : null,
+                              ),
+                              const SizedBox(width: 8),
+                              _QuickEditChip(
+                                key: const ValueKey(
+                                  'editor-quick-natural-skin',
+                                ),
+                                label: context.l10n.quickEditNaturalSkin,
+                                onPressed: editingEnabled
+                                    ? () => onQuickEdit('皮肤自然一点')
+                                    : null,
+                              ),
+                              const SizedBox(width: 8),
+                              _QuickEditChip(
+                                key: const ValueKey('editor-quick-atmosphere'),
+                                label: context.l10n.quickEditAtmosphere,
+                                onPressed: editingEnabled
+                                    ? () => onQuickEdit('整体更有氛围')
+                                    : null,
+                              ),
+                            ],
+                          ),
+                        ),
+                        Semantics(
+                          key: const ValueKey('editor-open-tools'),
+                          button: true,
+                          child: Align(
+                            alignment: Alignment.center,
+                            child: TextButton.icon(
+                              key: const ValueKey('editor-manual-entry'),
+                              onPressed: editingEnabled ? onManualEdit : null,
+                              icon: const Icon(Icons.tune, size: 18),
+                              label: Text(context.l10n.adjustPhoto),
+                            ),
                           ),
                         ),
                       ],
@@ -2847,16 +2814,24 @@ class _EditorCommandBar extends StatelessWidget {
 
   Widget _statusAction(BuildContext context) {
     if (recommendationFlow) {
-      return FilledButton.icon(
-        key: const ValueKey('recommendation-use'),
-        onPressed: preparingRecommendations || selectedRecommendation == null
-            ? null
-            : () => onRecommendationSelected(selectedRecommendation!),
-        icon: const Icon(Icons.check),
-        label: Text(
-          preparingRecommendations
-              ? context.l10n.analysisPreparing
-              : context.l10n.useThisLook,
+      return Semantics(
+        key: const ValueKey('editor-preparing-status'),
+        liveRegion: true,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox.square(
+              dimension: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 12),
+            Flexible(
+              child: Text(
+                context.l10n.analysisPreparing,
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+            ),
+          ],
         ),
       );
     }
@@ -2896,6 +2871,24 @@ class _EditorCommandBar extends StatelessWidget {
     }
     return const SizedBox.shrink();
   }
+}
+
+class _QuickEditChip extends StatelessWidget {
+  const _QuickEditChip({
+    required this.label,
+    required this.onPressed,
+    super.key,
+  });
+
+  final String label;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) => ActionChip(
+    onPressed: onPressed,
+    label: Text(label),
+    visualDensity: VisualDensity.compact,
+  );
 }
 
 class _ExportSummaryCard extends StatelessWidget {
@@ -2993,6 +2986,39 @@ class _ExportSummaryCard extends StatelessWidget {
   return (Icons.hourglass_empty, context.l10n.photoStatusUnprocessed);
 }
 
+class _PreparationStatusCard extends StatelessWidget {
+  const _PreparationStatusCard();
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    key: const ValueKey('editor-preparation-details'),
+    liveRegion: true,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+      child: Column(
+        children: [
+          Text(
+            context.l10n.analysisPreparing,
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            context.l10n.analysisPreparingSubtitle,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+// Kept as a non-default diagnostic surface for wide layouts and focused tests.
+// ignore: unused_element
 class _RecommendationPanel extends StatelessWidget {
   const _RecommendationPanel({
     required this.preparing,

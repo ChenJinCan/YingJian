@@ -5,6 +5,7 @@ import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
 enum EditableParameter {
   exposure,
   warmth,
+  saturation,
   textureSmoothing,
   skinToneLighting,
   blemishReduction,
@@ -115,6 +116,21 @@ final class LocalNaturalLanguageEditInterpreter
         before,
         before - 0.12,
         (value) => recipe.copyWith(warmth: value),
+      );
+    }
+
+    if (_containsAny(normalized, const [
+      '更有氛围',
+      '有氛围',
+      '氛围感',
+      'more atmosphere',
+    ])) {
+      final before = recipe.saturation;
+      updateDouble(
+        EditableParameter.saturation,
+        before,
+        before + 0.1,
+        (value) => recipe.copyWith(saturation: value),
       );
     }
 
