@@ -1,5 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
+import 'package:yingjian/features/editor/domain/edit_target.dart';
+import 'package:yingjian/features/editor/domain/editing_core.dart';
+import 'package:yingjian/features/editor/domain/platform_meta_op_capabilities.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 
@@ -122,7 +125,15 @@ final class BoundedBatchPhotoExporter {
         await session.setPhotoExportState(photo.id, PhotoExportState.running);
         try {
           final recipe = session.effectiveRecipeFor(photo.id);
-          final exported = exporter is ConfigurablePhotoExporter
+          final exported = exporter is CanonicalPhotoExporter
+              ? await (exporter as CanonicalPhotoExporter).exportCanonical(
+                  photo: photo,
+                  recipe: recipe,
+                  editState: project.renderStateFor(photo.id, recipe: recipe),
+                  editContext: _renderContext(project, photo.id),
+                  options: options,
+                )
+              : exporter is ConfigurablePhotoExporter
               ? await (exporter as ConfigurablePhotoExporter).exportWithOptions(
                   photo: photo,
                   recipe: recipe,
@@ -152,5 +163,32 @@ final class BoundedBatchPhotoExporter {
     } finally {
       _running = false;
     }
+  }
+
+  EditContext _renderContext(PhotoProject project, String photoId) {
+    final capabilities = metaOpCapabilitiesForTargetPlatform(
+      defaultTargetPlatform,
+    );
+    final targets =
+        project.targetRegistries[photoId]?.targets.values
+            .where((target) => target.status == EditTargetStatus.active)
+            .toList(growable: false) ??
+        const <StableEditTarget>[];
+    return EditContext(
+      platform: capabilities.platform,
+      photoIds: project.photos.map((photo) => photo.id).toSet(),
+      targetIds: targets.map((target) => target.id).toSet(),
+      applicability: {
+        'photo',
+        if (targets.any((target) => target.kind == EditTargetKind.face)) 'face',
+        if (targets.any((target) => target.kind == EditTargetKind.body)) 'body',
+      },
+      resourceIds: project.editingResources.resources.keys.toSet(),
+      resourceByteLengths: {
+        for (final resource in project.editingResources.resources.values)
+          resource.id: resource.byteLength,
+      },
+      metaOpCapabilities: capabilities,
+    );
   }
 }

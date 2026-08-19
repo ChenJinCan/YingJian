@@ -2,9 +2,16 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yingjian/features/editor/application/ai_edit_planner.dart';
 import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/edit_target.dart';
+import 'package:yingjian/features/editor/domain/editing_core.dart';
+import 'package:yingjian/features/editor/domain/editing_resource.dart';
+import 'package:yingjian/features/editor/domain/meta_op.dart';
 import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
+import 'package:yingjian/features/editor/domain/quality_enhancement_recipe.dart';
+import 'package:yingjian/features/editor/domain/semantic_editing_recipe.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 
@@ -294,6 +301,16 @@ void main() {
           session.project?.adaptiveCompensations['photo-2']?.recipe,
           EditRecipe(exposure: -0.1),
         );
+        expect(session.project?.undoHistory, hasLength(1));
+        expect(session.project?.editState.version, 1);
+        await session.undoEdit();
+        expect(session.project?.sharedStyle.recipe, EditRecipe.neutral);
+        expect(session.project?.editState, EditState.empty);
+        await session.redoEdit();
+        expect(
+          session.project?.sharedStyle.recipe,
+          EditRecipe(exposure: 0.2, warmth: 0.1),
+        );
         await session.setEditingScope(
           ProjectEditingScope.currentPhoto,
           photoId: 'photo-2',
@@ -307,7 +324,7 @@ void main() {
           35,
         );
 
-        await session.commitEdit(EditRecipe.neutral);
+        await session.commitLegacyRecipeForTesting(EditRecipe.neutral);
         expect(
           session.effectiveRecipeFor('photo-2').portraitRecipe.isNeutral,
           isTrue,
@@ -343,45 +360,48 @@ void main() {
       expect(session.project, saved);
     });
 
-    test('a new recommendation replaces stale edit and export state', () async {
-      final saved = _twoPhotoProject().copyWith(
-        flowState: PhotoProjectFlowState.choosingRecommendation,
-        photoOverrides: {
-          'photo-2': PhotoOverride(recipe: EditRecipe(contrast: 0.3)),
-        },
-        exportStates: const {
-          'photo-1': PhotoExportState.saved,
-          'photo-2': PhotoExportState.saved,
-        },
-        undoHistory: [
-          ProjectEditOperation(
-            scope: ProjectEditingScope.currentPhoto,
-            photoId: 'photo-2',
-            beforeRecipe: EditRecipe.neutral,
-            afterRecipe: EditRecipe(contrast: 0.3),
-          ),
-        ],
-      );
-      final store = _MemoryPhotoProjectStore()..savedProject = saved;
-      final session = PhotoProjectSession(
-        importer: _FakePhotoImporter(const []),
-        store: store,
-      );
-      await session.restore();
+    test(
+      'a new recommendation preserves prior edits and resets export state',
+      () async {
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.choosingRecommendation,
+          photoOverrides: {
+            'photo-2': PhotoOverride(recipe: EditRecipe(contrast: 0.3)),
+          },
+          exportStates: const {
+            'photo-1': PhotoExportState.saved,
+            'photo-2': PhotoExportState.saved,
+          },
+          undoHistory: [
+            ProjectEditOperation(
+              scope: ProjectEditingScope.currentPhoto,
+              photoId: 'photo-2',
+              beforeRecipe: EditRecipe.neutral,
+              afterRecipe: EditRecipe(contrast: 0.3),
+            ),
+          ],
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
 
-      await session.selectRecommendation(
-        recommendationId: 'texture-01',
-        sharedStyle: SharedStyle(recipe: EditRecipe(warmth: -0.2)),
-      );
+        await session.selectRecommendation(
+          recommendationId: 'texture-01',
+          sharedStyle: SharedStyle(recipe: EditRecipe(warmth: -0.2)),
+        );
 
-      expect(session.project?.photoOverrides, isEmpty);
-      expect(session.project?.undoHistory, isEmpty);
-      expect(session.project?.redoHistory, isEmpty);
-      expect(session.project?.exportStates, {
-        'photo-1': PhotoExportState.notQueued,
-        'photo-2': PhotoExportState.notQueued,
-      });
-    });
+        expect(session.project?.photoOverrides['photo-2'], isNotNull);
+        expect(session.project?.undoHistory, hasLength(1));
+        expect(session.project?.redoHistory, isEmpty);
+        expect(session.project?.exportStates, {
+          'photo-1': PhotoExportState.notQueued,
+          'photo-2': PhotoExportState.notQueued,
+        });
+      },
+    );
 
     test('persists an explicit current-photo editing scope', () async {
       final saved = _twoPhotoProject().copyWith(
@@ -407,53 +427,57 @@ void main() {
       expect(restored.focusPhotoId, 'photo-2');
     });
 
-    test('current photo can replace and reset a shared group filter', () async {
-      final sharedBasic = BasicEditingRecipe(
-        filter: PhotoFilter.cinematic,
-        filterStrength: 60,
-        hsl: {HslChannel.blue: HslAdjustment(saturation: -12)},
-      );
-      final saved = _twoPhotoProject().copyWith(
-        flowState: PhotoProjectFlowState.editing,
-        selectedRecommendationId: 'group-filter',
-        sharedStyle: SharedStyle(
-          recipe: EditRecipe(basicEditingRecipe: sharedBasic),
-        ),
-      );
-      final store = _MemoryPhotoProjectStore()..savedProject = saved;
-      final session = PhotoProjectSession(
-        importer: _FakePhotoImporter(const []),
-        store: store,
-      );
-      await session.restore();
+    test(
+      'legacy current-photo filter override is not a canonical reset',
+      () async {
+        final sharedBasic = BasicEditingRecipe(
+          filter: PhotoFilter.cinematic,
+          filterStrength: 60,
+          hsl: {HslChannel.blue: HslAdjustment(saturation: -12)},
+        );
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'group-filter',
+          sharedStyle: SharedStyle(
+            recipe: EditRecipe(basicEditingRecipe: sharedBasic),
+          ),
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
 
-      await session.setEditingScope(
-        ProjectEditingScope.currentPhoto,
-        photoId: 'photo-2',
-      );
-      expect(
-        session.editableRecipe.basicEditingRecipe.filter,
-        PhotoFilter.cinematic,
-      );
+        await session.setEditingScope(
+          ProjectEditingScope.currentPhoto,
+          photoId: 'photo-2',
+        );
+        expect(
+          session.editableRecipe.basicEditingRecipe.filter,
+          PhotoFilter.cinematic,
+        );
 
-      await session.commitEdit(EditRecipe.neutral);
-      expect(
-        session.effectiveRecipeFor('photo-1').basicEditingRecipe.filter,
-        PhotoFilter.cinematic,
-      );
-      expect(
-        session.effectiveRecipeFor('photo-2').basicEditingRecipe.filter,
-        PhotoFilter.none,
-      );
-      expect(session.project?.photoOverrides, contains('photo-2'));
+        await session.commitLegacyRecipeForTesting(EditRecipe.neutral);
+        expect(
+          session.effectiveRecipeFor('photo-1').basicEditingRecipe.filter,
+          PhotoFilter.cinematic,
+        );
+        expect(
+          session.effectiveRecipeFor('photo-2').basicEditingRecipe.filter,
+          PhotoFilter.none,
+        );
+        expect(session.project?.photoOverrides, contains('photo-2'));
 
-      await session.resetScopedEdit();
-      expect(session.project?.photoOverrides, isNot(contains('photo-2')));
-      expect(
-        session.effectiveRecipeFor('photo-2').basicEditingRecipe.filter,
-        PhotoFilter.cinematic,
-      );
-    });
+        expect(session.canResetScopedEdit, isFalse);
+        await session.resetScopedEdit();
+        expect(session.project?.photoOverrides, contains('photo-2'));
+        expect(
+          session.effectiveRecipeFor('photo-2').basicEditingRecipe.filter,
+          PhotoFilter.none,
+        );
+      },
+    );
 
     test(
       'syncs a current filter to the group without promoting photo geometry',
@@ -482,7 +506,7 @@ void main() {
           photoId: 'photo-2',
         );
         final crop = CropGeometry(left: 0.1, right: 0.9);
-        await session.commitEdit(
+        await session.commitLegacyRecipeForTesting(
           EditRecipe(
             basicEditingRecipe: BasicEditingRecipe(
               flipHorizontal: true,
@@ -552,7 +576,7 @@ void main() {
         );
 
         await session.setEditingScope(ProjectEditingScope.group);
-        await session.commitEdit(
+        await session.commitLegacyRecipeForTesting(
           session.editableRecipe.copyWith(
             basicEditingRecipe: BasicEditingRecipe(
               filter: PhotoFilter.cinematic,
@@ -588,7 +612,7 @@ void main() {
         );
         await session.restore();
 
-        await session.commitEdit(EditRecipe(contrast: 0.3));
+        await session.commitLegacyRecipeForTesting(EditRecipe(contrast: 0.3));
 
         expect(
           session.project?.effectiveRecipeFor('photo-1'),
@@ -618,6 +642,859 @@ void main() {
           EditRecipe(contrast: 0.3),
         );
         expect(restoredSession.canRedo, isFalse);
+      },
+    );
+
+    test(
+      'routes a shareable exposure meta op to the group without a scope choice',
+      () async {
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'clean-natural-01',
+          editingScope: ProjectEditingScope.currentPhoto,
+          focusPhotoId: 'photo-2',
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+
+        final result = await session.commitMetaOp(
+          address: const OpAddress(
+            metaOpId: MetaOpIds.exposure,
+            metaOpVersion: 1,
+            parameterId: 'value',
+            scope: EditScope.group,
+          ),
+          value: 0.4,
+          context: EditContext.ios,
+        );
+
+        expect(result, isA<AcceptedEdit>());
+        expect(session.project!.sharedStyle.recipe.exposure, 0.4);
+        expect(session.project!.editingScope, ProjectEditingScope.currentPhoto);
+        expect(session.effectiveRecipeFor('photo-1').exposure, 0.4);
+        expect(session.effectiveRecipeFor('photo-2').exposure, 0.4);
+        expect(session.project!.undoHistory, hasLength(1));
+        expect(
+          session.project!.undoHistory.single.scope,
+          ProjectEditingScope.group,
+        );
+
+        await session.undoEdit();
+        expect(session.project!.sharedStyle.recipe.exposure, 0);
+        expect(session.effectiveRecipeFor('photo-1').exposure, 0);
+        expect(session.effectiveRecipeFor('photo-2').exposure, 0);
+        expect(session.project!.editingScope, ProjectEditingScope.currentPhoto);
+      },
+    );
+
+    test(
+      'commits a multi-parameter recommendation as one atomic transaction',
+      () async {
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'clean-natural-01',
+          editingScope: ProjectEditingScope.currentPhoto,
+          focusPhotoId: 'photo-2',
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        const exposure = OpAddress(
+          metaOpId: MetaOpIds.exposure,
+          metaOpVersion: 1,
+          parameterId: 'value',
+          scope: EditScope.group,
+        );
+        const contrast = OpAddress(
+          metaOpId: MetaOpIds.contrast,
+          metaOpVersion: 1,
+          parameterId: 'value',
+          scope: EditScope.group,
+        );
+
+        final rejected = await session.commitMetaOps(
+          changes: const [
+            MetaOpChange(address: exposure, value: 0.2),
+            MetaOpChange(address: contrast, value: 2.0),
+          ],
+          source: EditSource.recommendation,
+          context: EditContext.ios,
+        );
+
+        expect(rejected, isA<RejectedEdit>());
+        expect(session.project!.sharedStyle.recipe, EditRecipe.neutral);
+        expect(session.project!.undoHistory, isEmpty);
+
+        final accepted = await session.commitMetaOps(
+          changes: const [
+            MetaOpChange(address: exposure, value: 0.2),
+            MetaOpChange(address: contrast, value: 0.3),
+          ],
+          source: EditSource.recommendation,
+          context: EditContext.ios,
+        );
+
+        expect(accepted, isA<AcceptedEdit>());
+        expect(session.project!.editState.version, 1);
+        expect(session.project!.editState.valueAt(exposure), 0.2);
+        expect(session.project!.editState.valueAt(contrast), 0.3);
+        expect(session.project!.sharedStyle.recipe.exposure, 0.2);
+        expect(session.project!.sharedStyle.recipe.contrast, 0.3);
+        expect(session.project!.undoHistory, hasLength(1));
+        await session.undoEdit();
+        expect(session.project!.editState.version, 0);
+        expect(session.project!.editState.values, isEmpty);
+        expect(session.project!.sharedStyle.recipe, EditRecipe.neutral);
+        await session.redoEdit();
+        expect(session.project!.editState.version, 1);
+        expect(session.project!.editState.valueAt(exposure), 0.2);
+      },
+    );
+
+    test(
+      'commits composition geometry to one photo as one transaction',
+      () async {
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'clean-natural-01',
+          editingScope: ProjectEditingScope.currentPhoto,
+          focusPhotoId: 'photo-2',
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        OpAddress address(String parameterId) => OpAddress(
+          metaOpId: MetaOpIds.compositionGeometry,
+          metaOpVersion: 1,
+          parameterId: parameterId,
+          scope: EditScope.currentPhoto,
+          photoId: 'photo-2',
+        );
+
+        final result = await session.commitMetaOps(
+          changes: [
+            MetaOpChange(address: address('left'), value: 0.1),
+            MetaOpChange(address: address('right'), value: 0.9),
+            MetaOpChange(address: address('quarterTurns'), value: 1),
+            MetaOpChange(address: address('flipHorizontal'), value: true),
+          ],
+          source: EditSource.manual,
+          context: const EditContext(
+            platform: EditPlatform.ios,
+            photoIds: {'photo-2'},
+          ),
+        );
+
+        expect(result, isA<AcceptedEdit>());
+        expect(
+          session.effectiveRecipeFor('photo-1').crop,
+          CropGeometry.original,
+        );
+        expect(session.effectiveRecipeFor('photo-2').crop.left, 0.1);
+        expect(session.effectiveRecipeFor('photo-2').crop.right, 0.9);
+        expect(session.effectiveRecipeFor('photo-2').crop.quarterTurns, 1);
+        expect(
+          session
+              .effectiveRecipeFor('photo-2')
+              .basicEditingRecipe
+              .flipHorizontal,
+          isTrue,
+        );
+        expect(session.project!.undoHistory, hasLength(1));
+
+        await session.undoEdit();
+        expect(session.effectiveRecipeFor('photo-2'), EditRecipe.neutral);
+      },
+    );
+
+    test('manual composition reset preserves the photo look', () async {
+      final look = BasicEditingRecipe(
+        filter: PhotoFilter.cinematic,
+        filterStrength: 55,
+        hsl: {HslChannel.orange: HslAdjustment(saturation: 18)},
+        flipHorizontal: true,
+        perspectiveVertical: 12,
+      );
+      final saved = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'clean-natural-01',
+        editingScope: ProjectEditingScope.currentPhoto,
+        focusPhotoId: 'photo-2',
+        photoOverrides: {
+          'photo-2': PhotoOverride(
+            recipe: EditRecipe(basicEditingRecipe: look),
+          ),
+        },
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+
+      final before = session.editableRecipe;
+      final result = await session.commitManualRecipe(
+        desiredRecipe: before.copyWith(
+          crop: CropGeometry.original,
+          basicEditingRecipe: before.basicEditingRecipe.copyWith(
+            flipHorizontal: false,
+            flipVertical: false,
+            perspectiveHorizontal: 0,
+            perspectiveVertical: 0,
+          ),
+        ),
+        context: const EditContext(
+          platform: EditPlatform.ios,
+          photoIds: {'photo-1', 'photo-2'},
+        ),
+      );
+
+      expect(result.result, isA<AcceptedEdit>());
+      final current = session.effectiveRecipeFor('photo-2');
+      expect(current.basicEditingRecipe.flipHorizontal, isFalse);
+      expect(current.basicEditingRecipe.perspectiveVertical, 0);
+      expect(current.basicEditingRecipe.filter, PhotoFilter.cinematic);
+      expect(current.basicEditingRecipe.filterStrength, 55);
+      expect(current.basicEditingRecipe.hsl[HslChannel.orange]?.saturation, 18);
+    });
+
+    test(
+      'commits filter and HSL to the group as one undoable transaction',
+      () async {
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'clean-natural-01',
+          editingScope: ProjectEditingScope.currentPhoto,
+          focusPhotoId: 'photo-2',
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        OpAddress address(String id, String parameterId) => OpAddress(
+          metaOpId: id,
+          metaOpVersion: 1,
+          parameterId: parameterId,
+          scope: EditScope.group,
+        );
+
+        final rejected = await session.commitMetaOps(
+          changes: [
+            MetaOpChange(
+              address: address(MetaOpIds.filter, 'filter'),
+              value: 'none',
+            ),
+            MetaOpChange(
+              address: address(MetaOpIds.filter, 'strength'),
+              value: 55.0,
+            ),
+          ],
+          source: EditSource.manual,
+          context: EditContext.ios,
+        );
+        expect(rejected, isA<RejectedEdit>());
+        expect(session.project!.sharedStyle.recipe, EditRecipe.neutral);
+        expect(session.project!.undoHistory, isEmpty);
+
+        final accepted = await session.commitMetaOps(
+          changes: [
+            MetaOpChange(
+              address: address(MetaOpIds.filter, 'filter'),
+              value: 'film',
+            ),
+            MetaOpChange(
+              address: address(MetaOpIds.filter, 'strength'),
+              value: 55.0,
+            ),
+            MetaOpChange(
+              address: address(MetaOpIds.hslBlue, 'saturation'),
+              value: -18.0,
+            ),
+          ],
+          source: EditSource.manual,
+          context: EditContext.ios,
+        );
+
+        expect(accepted, isA<AcceptedEdit>());
+        for (final photoId in ['photo-1', 'photo-2']) {
+          final basic = session.effectiveRecipeFor(photoId).basicEditingRecipe;
+          expect(basic.filter, PhotoFilter.film);
+          expect(basic.filterStrength, 55);
+          expect(basic.hsl[HslChannel.blue]?.saturation, -18);
+        }
+        expect(session.project!.undoHistory, hasLength(1));
+        await session.undoEdit();
+        expect(session.project!.sharedStyle.recipe, EditRecipe.neutral);
+      },
+    );
+
+    test(
+      'commits quality output to one photo as one undoable transaction',
+      () async {
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'clean-natural-01',
+          editingScope: ProjectEditingScope.currentPhoto,
+          focusPhotoId: 'photo-2',
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        OpAddress address(String id) => OpAddress(
+          metaOpId: id,
+          metaOpVersion: 1,
+          parameterId: 'value',
+          scope: EditScope.currentPhoto,
+          photoId: 'photo-2',
+        );
+
+        final result = await session.commitMetaOps(
+          changes: [
+            MetaOpChange(address: address(MetaOpIds.noiseReduction), value: 28),
+            MetaOpChange(
+              address: address(MetaOpIds.detailSharpening),
+              value: 16,
+            ),
+          ],
+          source: EditSource.manual,
+          context: const EditContext(
+            platform: EditPlatform.ios,
+            photoIds: {'photo-2'},
+          ),
+        );
+
+        expect(result, isA<AcceptedEdit>());
+        expect(
+          session.effectiveRecipeFor('photo-1').qualityEnhancementRecipe,
+          QualityEnhancementRecipe.neutral,
+        );
+        final quality = session
+            .effectiveRecipeFor('photo-2')
+            .qualityEnhancementRecipe;
+        expect(quality.noiseReduction, 28);
+        expect(quality.detailSharpening, 16);
+        expect(session.project!.undoHistory, hasLength(1));
+        await session.undoEdit();
+        expect(
+          session.effectiveRecipeFor('photo-2').qualityEnhancementRecipe,
+          QualityEnhancementRecipe.neutral,
+        );
+      },
+    );
+
+    test('persists, suspends, and explicitly rebinds stable targets', () async {
+      const originalDetection = DetectedEditTarget(
+        photoId: 'photo-2',
+        kind: EditTargetKind.face,
+        analysisVersion: 'vision-v1',
+        region: NormalizedEditRegion(
+          left: 0.1,
+          top: 0.2,
+          right: 0.35,
+          bottom: 0.65,
+        ),
+      );
+      const replacementDetection = DetectedEditTarget(
+        photoId: 'photo-2',
+        kind: EditTargetKind.face,
+        analysisVersion: 'vision-v2',
+        region: NormalizedEditRegion(
+          left: 0.55,
+          top: 0.18,
+          right: 0.82,
+          bottom: 0.66,
+        ),
+      );
+      final originalRegistry = EditTargetRegistry.seed(const [
+        originalDetection,
+      ]);
+      final targetId = originalRegistry.targets.keys.single;
+      final saved = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'clean-natural-01',
+        editingScope: ProjectEditingScope.currentPhoto,
+        focusPhotoId: 'photo-2',
+        targetRegistries: {'photo-2': originalRegistry},
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+
+      await session.reconcileEditTargets('photo-2', const []);
+      expect(
+        session.project!.targetRegistries['photo-2']!.target(targetId).status,
+        EditTargetStatus.suspended,
+      );
+      expect(session.project!.undoHistory, isEmpty);
+
+      await session.rebindEditTarget(
+        photoId: 'photo-2',
+        targetId: targetId,
+        detection: replacementDetection,
+      );
+      var target = session.project!.targetRegistries['photo-2']!.target(
+        targetId,
+      );
+      expect(target.id, targetId);
+      expect(target.region, replacementDetection.region);
+      expect(target.status, EditTargetStatus.active);
+      expect(
+        session.project!.undoHistory.single.kind,
+        ProjectEditOperationKind.targetRebind,
+      );
+      final restored = PhotoProject.fromJson(store.savedProject!.toJson());
+      expect(restored.undoHistory, session.project!.undoHistory);
+      expect(restored.targetRegistries, session.project!.targetRegistries);
+      expect(restored, session.project);
+
+      await session.undoEdit();
+      target = session.project!.targetRegistries['photo-2']!.target(targetId);
+      expect(target.region, originalDetection.region);
+      expect(target.status, EditTargetStatus.suspended);
+      await session.redoEdit();
+      target = session.project!.targetRegistries['photo-2']!.target(targetId);
+      expect(target.region, replacementDetection.region);
+      expect(target.status, EditTargetStatus.active);
+    });
+
+    test(
+      'commits targeted portrait meta ops as one undoable transaction',
+      () async {
+        const detection = DetectedEditTarget(
+          photoId: 'photo-2',
+          kind: EditTargetKind.face,
+          analysisVersion: 'vision-v1',
+          region: NormalizedEditRegion(
+            left: 0.1,
+            top: 0.2,
+            right: 0.35,
+            bottom: 0.65,
+          ),
+        );
+        final registry = EditTargetRegistry.seed(const [detection]);
+        final target = registry.targets.values.single;
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'clean-natural-01',
+          editingScope: ProjectEditingScope.currentPhoto,
+          focusPhotoId: 'photo-2',
+          targetRegistries: {'photo-2': registry},
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        OpAddress address(String id) => OpAddress(
+          metaOpId: id,
+          metaOpVersion: 1,
+          parameterId: 'value',
+          scope: EditScope.currentPhoto,
+          photoId: 'photo-2',
+          targetId: target.id,
+        );
+
+        final result = await session.commitMetaOps(
+          changes: [
+            MetaOpChange(address: address(MetaOpIds.skinSmooth), value: 0.42),
+            MetaOpChange(
+              address: address(MetaOpIds.skinToneLighting),
+              value: 0.25,
+            ),
+            MetaOpChange(
+              address: address(MetaOpIds.blemishReduction),
+              value: 0.18,
+            ),
+          ],
+          source: EditSource.manual,
+          context: EditContext(
+            platform: EditPlatform.ios,
+            photoIds: const {'photo-2'},
+            targetIds: {target.id},
+            applicability: const {'photo', 'face'},
+          ),
+        );
+
+        expect(result, isA<AcceptedEdit>());
+        final adjustment = session
+            .effectiveRecipeFor('photo-2')
+            .targetedPortraitRecipe
+            .adjustments[target.id]!;
+        expect(adjustment.textureSmoothing, 42);
+        expect(adjustment.skinToneLighting, 25);
+        expect(adjustment.blemishReduction, 18);
+        expect(session.project!.undoHistory, hasLength(1));
+        await session.undoEdit();
+        expect(
+          session
+              .effectiveRecipeFor('photo-2')
+              .targetedPortraitRecipe
+              .isNeutral,
+          isTrue,
+        );
+      },
+    );
+
+    test(
+      'commits background and local values as one undoable transaction',
+      () async {
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'clean-natural-01',
+          editingScope: ProjectEditingScope.currentPhoto,
+          focusPhotoId: 'photo-2',
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        OpAddress address(String parameterId) => OpAddress(
+          metaOpId: MetaOpIds.semanticAdjustments,
+          metaOpVersion: 1,
+          parameterId: parameterId,
+          scope: EditScope.currentPhoto,
+          photoId: 'photo-2',
+        );
+
+        final result = await session.commitMetaOps(
+          changes: [
+            MetaOpChange(
+              address: address('background'),
+              value: BackgroundTreatment.white.name,
+            ),
+            MetaOpChange(address: address('localExposure'), value: 35),
+          ],
+          source: EditSource.manual,
+          context: const EditContext(
+            platform: EditPlatform.ios,
+            photoIds: {'photo-2'},
+          ),
+        );
+
+        expect(result, isA<AcceptedEdit>());
+        final semantic = session
+            .effectiveRecipeFor('photo-2')
+            .semanticEditingRecipe;
+        expect(semantic.background, BackgroundTreatment.white);
+        expect(semantic.localExposure, 35);
+        expect(session.project!.undoHistory, hasLength(1));
+        await session.undoEdit();
+        expect(
+          session.effectiveRecipeFor('photo-2').semanticEditingRecipe,
+          SemanticEditingRecipe.neutral,
+        );
+      },
+    );
+
+    test(
+      'keeps an image resource through current undo and redo ownership',
+      () async {
+        const sha =
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+        const resourceId = 'resource-v1-$sha';
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'clean-natural-01',
+          editingScope: ProjectEditingScope.currentPhoto,
+          focusPhotoId: 'photo-2',
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        OpAddress address(String parameterId) => OpAddress(
+          metaOpId: MetaOpIds.semanticAdjustments,
+          metaOpVersion: 1,
+          parameterId: parameterId,
+          scope: EditScope.currentPhoto,
+          photoId: 'photo-2',
+        );
+
+        final result = await session.commitMetaOps(
+          changes: [
+            MetaOpChange(address: address('background'), value: 'image'),
+            MetaOpChange(
+              address: address('backgroundImageResource'),
+              value: resourceId,
+            ),
+          ],
+          source: EditSource.manual,
+          context: const EditContext(
+            platform: EditPlatform.ios,
+            photoIds: {'photo-2'},
+          ),
+          editingResources: const [
+            ImportedEditingResource(
+              descriptor: EditingResourceDescriptor(
+                id: resourceId,
+                kind: EditingResourceKind.backgroundImage,
+                relativePath: 'resources/aa/$sha.jpg',
+                contentSha256: sha,
+                byteLength: 2048,
+              ),
+              localPath: '/app/resources/aa/$sha.jpg',
+            ),
+          ],
+        );
+
+        expect(result, isA<AcceptedEdit>());
+        expect(
+          session
+              .effectiveRecipeFor('photo-2')
+              .semanticEditingRecipe
+              .backgroundImagePath,
+          '/app/resources/aa/$sha.jpg',
+        );
+        expect(
+          session.project!.editingResources.referenceCount(
+            resourceId,
+            EditingResourceOwner.currentState,
+          ),
+          1,
+        );
+        expect(
+          session.project!.editingResources.referenceCount(
+            resourceId,
+            EditingResourceOwner.undoHistory,
+          ),
+          1,
+        );
+
+        await session.undoEdit();
+        expect(
+          session.project!.editingResources.referenceCount(
+            resourceId,
+            EditingResourceOwner.currentState,
+          ),
+          0,
+        );
+        expect(
+          session.project!.editingResources.referenceCount(
+            resourceId,
+            EditingResourceOwner.redoHistory,
+          ),
+          1,
+        );
+
+        await session.redoEdit();
+        expect(
+          session.project!.editingResources.referenceCount(
+            resourceId,
+            EditingResourceOwner.currentState,
+          ),
+          1,
+        );
+
+        const exposureAddress = OpAddress(
+          metaOpId: MetaOpIds.exposure,
+          metaOpVersion: 1,
+          parameterId: 'value',
+          scope: EditScope.group,
+        );
+        for (var index = 0; index < 19; index++) {
+          await session.commitMetaOp(
+            address: exposureAddress,
+            value: index.isEven ? 0.1 : 0.2,
+            context: EditContext.ios,
+          );
+        }
+        expect(session.project!.editCheckpoints.single.editCount, 20);
+        expect(
+          session.project!.editingResources.referenceCount(
+            resourceId,
+            EditingResourceOwner.checkpoint,
+          ),
+          1,
+        );
+      },
+    );
+
+    test('commits a mask resource as one undoable transaction', () async {
+      const sha =
+          'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+      const resourceId = 'resource-v1-$sha';
+      final saved = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'clean-natural-01',
+        editingScope: ProjectEditingScope.currentPhoto,
+        focusPhotoId: 'photo-2',
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+      const address = OpAddress(
+        metaOpId: MetaOpIds.semanticAdjustments,
+        metaOpVersion: 1,
+        parameterId: 'subjectMaskResource',
+        scope: EditScope.currentPhoto,
+        photoId: 'photo-2',
+      );
+      const payload = <Object>[
+        {
+          'operation': 'paint',
+          'radius': 0.04,
+          'points': [
+            [0.5, 0.5],
+          ],
+        },
+      ];
+
+      final result = await session.commitMetaOps(
+        changes: const [MetaOpChange(address: address, value: resourceId)],
+        source: EditSource.manual,
+        context: const EditContext(
+          platform: EditPlatform.ios,
+          photoIds: {'photo-2'},
+        ),
+        editingResources: const [
+          ImportedEditingResource(
+            descriptor: EditingResourceDescriptor(
+              id: resourceId,
+              kind: EditingResourceKind.subjectMask,
+              relativePath: 'resources/bb/$sha.json',
+              contentSha256: sha,
+              byteLength: 96,
+            ),
+            localPath: '/app/resources/bb/$sha.json',
+            payload: payload,
+          ),
+        ],
+      );
+
+      expect(result, isA<AcceptedEdit>());
+      final semantic = session
+          .effectiveRecipeFor('photo-2')
+          .semanticEditingRecipe;
+      expect(semantic.subjectMaskResourceId, resourceId);
+      expect(semantic.subjectMaskStrokes, hasLength(1));
+      expect(
+        session.project!.editingResources.references(
+          EditingResourceOwner.currentState,
+        ),
+        contains(resourceId),
+      );
+      await session.undoEdit();
+      expect(
+        session
+            .effectiveRecipeFor('photo-2')
+            .semanticEditingRecipe
+            .subjectMaskStrokes,
+        isEmpty,
+      );
+      expect(
+        session.project!.editingResources.references(
+          EditingResourceOwner.redoHistory,
+        ),
+        contains(resourceId),
+      );
+      await session.redoEdit();
+      expect(
+        session
+            .effectiveRecipeFor('photo-2')
+            .semanticEditingRecipe
+            .subjectMaskResourceId,
+        resourceId,
+      );
+    });
+
+    test(
+      'reclaims a redo-only resource when a new edit ends the branch',
+      () async {
+        const sha =
+            'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+        const resourceId = 'resource-v1-$sha';
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'clean-natural-01',
+          focusPhotoId: 'photo-2',
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        OpAddress backgroundAddress(String parameterId) => OpAddress(
+          metaOpId: MetaOpIds.semanticAdjustments,
+          metaOpVersion: 1,
+          parameterId: parameterId,
+          scope: EditScope.currentPhoto,
+          photoId: 'photo-2',
+        );
+        await session.commitMetaOps(
+          changes: [
+            MetaOpChange(
+              address: backgroundAddress('background'),
+              value: 'image',
+            ),
+            MetaOpChange(
+              address: backgroundAddress('backgroundImageResource'),
+              value: resourceId,
+            ),
+          ],
+          source: EditSource.manual,
+          context: const EditContext(
+            platform: EditPlatform.ios,
+            photoIds: {'photo-2'},
+          ),
+          editingResources: const [
+            ImportedEditingResource(
+              descriptor: EditingResourceDescriptor(
+                id: resourceId,
+                kind: EditingResourceKind.backgroundImage,
+                relativePath: 'resources/bb/$sha.jpg',
+                contentSha256: sha,
+                byteLength: 1024,
+              ),
+              localPath: '/app/resources/bb/$sha.jpg',
+            ),
+          ],
+        );
+        await session.undoEdit();
+
+        await session.commitMetaOp(
+          address: const OpAddress(
+            metaOpId: MetaOpIds.exposure,
+            metaOpVersion: 1,
+            parameterId: 'value',
+            scope: EditScope.group,
+          ),
+          value: 0.1,
+          context: EditContext.ios,
+        );
+
+        expect(session.project!.redoHistory, isEmpty);
+        expect(
+          session.project!.editingResources.resources.containsKey(resourceId),
+          isFalse,
+        );
       },
     );
 
@@ -658,6 +1535,269 @@ void main() {
       },
     );
 
+    test('keeps only the latest one hundred undoable transactions', () async {
+      final saved = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'clean-natural-01',
+        focusPhotoId: 'photo-1',
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+      const address = OpAddress(
+        metaOpId: MetaOpIds.exposure,
+        metaOpVersion: 1,
+        parameterId: 'value',
+        scope: EditScope.group,
+      );
+
+      for (var index = 0; index < 105; index++) {
+        final result = await session.commitMetaOp(
+          address: address,
+          value: index.isEven ? 0.1 : 0.2,
+          context: EditContext.ios,
+        );
+        expect(result, isA<AcceptedEdit>());
+      }
+
+      expect(
+        session.project!.undoHistory,
+        hasLength(PhotoProject.maxEditHistoryCount),
+      );
+      expect(session.project!.foldedEditCount, 5);
+      expect(session.project!.historyBaseSnapshot, isNotNull);
+      expect(session.project!.editCheckpoints.map((value) => value.editCount), [
+        20,
+        40,
+        60,
+        80,
+        100,
+      ]);
+      expect(session.project!.hasValidHistoryReplay, isTrue);
+      expect(
+        PhotoProject.fromJson(session.project!.toJson()).hasValidHistoryReplay,
+        isTrue,
+      );
+      expect(session.project!.sharedStyle.recipe.exposure, 0.1);
+      for (var index = 0; index < PhotoProject.maxEditHistoryCount; index++) {
+        await session.undoEdit();
+      }
+      expect(session.canUndo, isFalse);
+      expect(session.project!.sharedStyle.recipe.exposure, 0.1);
+      expect(session.project!.redoHistory, hasLength(100));
+      expect(session.project!.hasValidHistoryReplay, isTrue);
+    });
+
+    test('rejects a persisted project whose history cannot replay', () async {
+      final saved = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'clean-natural-01',
+        focusPhotoId: 'photo-1',
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+      await session.commitMetaOp(
+        address: const OpAddress(
+          metaOpId: MetaOpIds.exposure,
+          metaOpVersion: 1,
+          parameterId: 'value',
+          scope: EditScope.group,
+        ),
+        value: 0.2,
+        context: EditContext.ios,
+      );
+
+      final valid = session.project!;
+      final corrupted = valid.copyWith(
+        sharedStyle: SharedStyle(
+          recipe: EditRecipe.neutral,
+          family: valid.sharedStyle.family,
+          intensity: valid.sharedStyle.intensity,
+        ),
+      );
+
+      expect(
+        () => PhotoProject.fromJson(corrupted.toJson()),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test(
+      'persists an explainable AI history summary without prompts',
+      () async {
+        const detection = DetectedEditTarget(
+          photoId: 'photo-1',
+          kind: EditTargetKind.face,
+          analysisVersion: 'vision-v1',
+          region: NormalizedEditRegion(
+            left: 0.1,
+            top: 0.2,
+            right: 0.4,
+            bottom: 0.7,
+          ),
+        );
+        final registry = EditTargetRegistry.seed(const [detection]);
+        final targetId = registry.targets.keys.single;
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'clean-natural-01',
+          focusPhotoId: 'photo-1',
+          targetRegistries: {'photo-1': registry},
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        final address = OpAddress(
+          metaOpId: MetaOpIds.skinSmooth,
+          metaOpVersion: 1,
+          parameterId: 'value',
+          scope: EditScope.currentPhoto,
+          photoId: 'photo-1',
+          targetId: targetId,
+        );
+
+        final result = await session.commitMetaOps(
+          changes: [MetaOpChange(address: address, value: 0.18)],
+          source: EditSource.ai,
+          context: EditContext(
+            platform: EditPlatform.ios,
+            photoIds: const {'photo-1'},
+            targetIds: {targetId},
+            applicability: const {'photo', 'face'},
+          ),
+        );
+
+        expect(result, isA<AcceptedEdit>());
+        final operation = session.project!.undoHistory.single;
+        expect(operation.source, EditSource.ai);
+        expect(operation.changedAddresses, [address]);
+        final json = operation.toJson();
+        expect(json['source'], 'ai');
+        expect(json['changedAddresses'], hasLength(1));
+        expect(json.toString(), isNot(contains('prompt')));
+        expect(ProjectEditOperation.fromJson(json), operation);
+      },
+    );
+
+    test('edit state version is stable until editable state changes', () {
+      const detection = DetectedEditTarget(
+        photoId: 'photo-1',
+        kind: EditTargetKind.face,
+        analysisVersion: 'vision-v1',
+        region: NormalizedEditRegion(
+          left: 0.1,
+          top: 0.2,
+          right: 0.4,
+          bottom: 0.7,
+        ),
+      );
+      final project = _twoPhotoProject().copyWith(
+        targetRegistries: {
+          'photo-1': EditTargetRegistry.seed(const [detection]),
+        },
+      );
+      final first = project.editStateVersion;
+
+      expect(project.editStateVersion, first);
+      expect(PhotoProject.fromJson(project.toJson()).editStateVersion, first);
+      expect(project.copyWith(groupScrollOffset: 18).editStateVersion, first);
+    });
+
+    test('keeps an unknown-meta-op project read-only in the session', () async {
+      final protected = _twoPhotoProject().copyWith(
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'clean-natural-01',
+        unknownMetaOps: const [
+          {
+            'id': 'future.generative_relight',
+            'version': 7,
+            'payload': {'mode': 'cinematic'},
+          },
+        ],
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = protected;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+
+      await expectLater(
+        session.commitMetaOp(
+          address: const OpAddress(
+            metaOpId: MetaOpIds.exposure,
+            metaOpVersion: 1,
+            parameterId: 'value',
+            scope: EditScope.group,
+          ),
+          value: 0.2,
+          context: EditContext.ios,
+        ),
+        throwsA(isA<StateError>()),
+      );
+
+      expect(session.project, protected);
+      expect(store.savedProject, protected);
+    });
+
+    test(
+      'applies one current AI proposal and rejects its stale reuse',
+      () async {
+        final saved = _twoPhotoProject().copyWith(
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: 'clean-natural-01',
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        const address = OpAddress(
+          metaOpId: MetaOpIds.exposure,
+          metaOpVersion: 1,
+          parameterId: 'value',
+          scope: EditScope.group,
+        );
+        final proposal = AiEditProposal(
+          baseStateVersion: session.project!.editStateVersion,
+          changes: const [MetaOpChange(address: address, value: 0.2)],
+          summary: const [MetaOpIds.exposure],
+        );
+
+        final accepted = await session.commitAiProposal(
+          proposal,
+          context: EditContext.ios,
+        );
+        final stale = await session.commitAiProposal(
+          proposal,
+          context: EditContext.ios,
+        );
+
+        expect(accepted, isA<AcceptedEdit>());
+        expect(stale, isA<RejectedEdit>());
+        expect(
+          (stale as RejectedEdit).reason,
+          EditRejection.duplicateTransaction,
+        );
+        expect(proposal.proposalId, startsWith('proposal-v1-'));
+        expect(proposal.idempotencyKey, startsWith('ai-edit-v1-'));
+        expect(session.project!.sharedStyle.recipe.exposure, 0.2);
+        expect(session.project!.undoHistory, hasLength(1));
+        expect(session.project!.undoHistory.single.source, EditSource.ai);
+      },
+    );
+
     test(
       'resets the group recipe and intensity as one undoable edit',
       () async {
@@ -681,11 +1821,13 @@ void main() {
           store: store,
         );
         await session.restore();
+        final beforeResetVersion = session.project!.editState.version;
 
         await session.resetScopedEdit();
 
         expect(session.project!.sharedStyle.recipe, EditRecipe.neutral);
         expect(session.project!.sharedStyle.intensity, 1);
+        expect(session.project!.editState.version, beforeResetVersion + 1);
         expect(session.project!.undoHistory, hasLength(1));
         await session.undoEdit();
         expect(session.project!.sharedStyle, saved.sharedStyle);
@@ -695,25 +1837,31 @@ void main() {
       },
     );
 
-    test('allows resetting a neutral group with stale intensity', () async {
-      final store = _MemoryPhotoProjectStore()
-        ..savedProject = _twoPhotoProject().copyWith(
-          flowState: PhotoProjectFlowState.editing,
-          selectedRecommendationId: 'neutral-strength',
-          sharedStyle: SharedStyle(intensity: 0.4, recipe: EditRecipe.neutral),
+    test(
+      'stale legacy intensity is not exposed as a canonical reset',
+      () async {
+        final store = _MemoryPhotoProjectStore()
+          ..savedProject = _twoPhotoProject().copyWith(
+            flowState: PhotoProjectFlowState.editing,
+            selectedRecommendationId: 'neutral-strength',
+            sharedStyle: SharedStyle(
+              intensity: 0.4,
+              recipe: EditRecipe.neutral,
+            ),
+          );
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
         );
-      final session = PhotoProjectSession(
-        importer: _FakePhotoImporter(const []),
-        store: store,
-      );
-      await session.restore();
+        await session.restore();
 
-      expect(session.canResetScopedEdit, isTrue);
-      await session.resetScopedEdit();
+        expect(session.canResetScopedEdit, isFalse);
+        await session.resetScopedEdit();
 
-      expect(session.project!.sharedStyle.intensity, 1);
-      expect(session.canResetScopedEdit, isFalse);
-    });
+        expect(session.project!.sharedStyle.intensity, 0.4);
+        expect(session.canResetScopedEdit, isFalse);
+      },
+    );
 
     test(
       'syncs current color adjustments to the group as one undoable operation',
@@ -793,7 +1941,7 @@ void main() {
     );
 
     test(
-      'restores a current-photo override without discarding adaptive portrait compensation',
+      'legacy portrait override is not exposed as a canonical reset',
       () async {
         final adaptivePortrait = PortraitRetouchRecipe(textureSmoothing: 35);
         final saved = _twoPhotoProject().copyWith(
@@ -823,17 +1971,13 @@ void main() {
 
         await session.resetScopedEdit();
 
-        expect(session.project?.photoOverrides, isEmpty);
+        expect(session.canResetScopedEdit, isFalse);
+        expect(session.project?.photoOverrides, contains('photo-2'));
         expect(
           session.effectiveRecipeFor('photo-2').portraitRecipe.textureSmoothing,
           35,
         );
-        expect(session.project?.undoHistory, hasLength(1));
-        final restored = PhotoProject.fromJson(session.project!.toJson());
-        expect(
-          restored.undoHistory.single.kind,
-          ProjectEditOperationKind.resetCurrentPhotoOverride,
-        );
+        expect(session.project?.undoHistory, isEmpty);
 
         await session.undoEdit();
         expect(
@@ -841,7 +1985,7 @@ void main() {
           saved.photoOverrides['photo-2']?.recipe,
         );
         await session.redoEdit();
-        expect(session.project?.photoOverrides, isEmpty);
+        expect(session.project?.photoOverrides, contains('photo-2'));
         expect(
           session.effectiveRecipeFor('photo-2').portraitRecipe.textureSmoothing,
           35,
@@ -945,7 +2089,7 @@ void main() {
         store.failOnSave = true;
 
         await expectLater(
-          session.commitEdit(EditRecipe(exposure: 0.3)),
+          session.commitLegacyRecipeForTesting(EditRecipe(exposure: 0.3)),
           throwsA(isA<FileSystemException>()),
         );
 
@@ -1054,7 +2198,7 @@ void main() {
         await session.restore();
         final recipe = EditRecipe(exposure: 0.3, contrast: 0.2, warmth: -0.1);
 
-        await session.commitEdit(recipe);
+        await session.commitLegacyRecipeForTesting(recipe);
 
         expect(session.project?.photoOverrides['photo-1']?.recipe, recipe);
         expect(store.savedProject?.undoHistory, hasLength(1));

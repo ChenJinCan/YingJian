@@ -98,7 +98,40 @@ void main() {
     expect(EditRecipe.neutral.semanticEditingRecipe.isNeutral, isTrue);
   });
 
-  test('custom background requires an app-owned image path', () {
+  test('round trips content identities for vector editing resources', () {
+    const subjectId =
+        'resource-v1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const localId =
+        'resource-v1-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    const eraseId =
+        'resource-v1-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
+    final recipe = SemanticEditingRecipe(
+      subjectMaskStrokes: [
+        MaskStroke(
+          operation: MaskBrushOperation.paint,
+          radius: 0.03,
+          points: const [NormalizedPoint(0.5, 0.5)],
+        ),
+      ],
+      subjectMaskResourceId: subjectId,
+      localAdjustmentStrokes: [
+        MaskStroke(
+          operation: MaskBrushOperation.erase,
+          radius: 0.04,
+          points: const [NormalizedPoint(0.4, 0.6)],
+        ),
+      ],
+      localMaskResourceId: localId,
+      eraseStrokes: [
+        EraseStroke(radius: 0.05, points: const [NormalizedPoint(0.3, 0.7)]),
+      ],
+      eraseMaskResourceId: eraseId,
+    );
+
+    expect(SemanticEditingRecipe.fromJson(recipe.toJson()), recipe);
+  });
+
+  test('custom background requires an app-owned path and content identity', () {
     expect(
       () => SemanticEditingRecipe(background: BackgroundTreatment.image),
       throwsArgumentError,
@@ -106,8 +139,14 @@ void main() {
     final recipe = SemanticEditingRecipe(
       background: BackgroundTreatment.image,
       backgroundImagePath: '/app/media/background.jpg',
+      backgroundImageResourceId:
+          'resource-v1-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
     );
     expect(recipe.backgroundImagePath, '/app/media/background.jpg');
+    expect(
+      recipe.backgroundImageResourceId,
+      'resource-v1-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    );
     expect(SemanticEditingRecipe.fromJson(recipe.toJson()), recipe);
   });
 }

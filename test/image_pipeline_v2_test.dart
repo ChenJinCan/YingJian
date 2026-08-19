@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/compiled_image_pipeline.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_for_platform.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_v2.dart';
 
@@ -11,7 +12,7 @@ void main() {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     expect(
       imagePipelineForCurrentPlatform(EditRecipe.neutral),
-      isA<ImagePipelineV2>(),
+      isA<CompiledImagePipeline>(),
     );
   });
 

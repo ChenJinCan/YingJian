@@ -1,10 +1,13 @@
 import 'package:flutter/services.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/editing_core.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_for_platform.dart';
+import 'package:yingjian/features/editor/domain/legacy_edit_recipe_adapter.dart';
+import 'package:yingjian/features/editor/domain/render_plan.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 
-final class MethodChannelPhotoExporter implements ConfigurablePhotoExporter {
+final class MethodChannelPhotoExporter implements CanonicalPhotoExporter {
   MethodChannelPhotoExporter({
     this.channel = const MethodChannel('yingjian/photo_export'),
   });
@@ -26,8 +29,35 @@ final class MethodChannelPhotoExporter implements ConfigurablePhotoExporter {
     required ProjectPhoto photo,
     required EditRecipe recipe,
     required PhotoExportOptions options,
+  }) => exportCanonical(
+    photo: photo,
+    recipe: recipe,
+    editState: const LegacyEditRecipeAdapter().read(recipe, photoId: photo.id),
+    editContext: EditContext.ios,
+    options: options,
+  );
+
+  @override
+  Future<ExportedPhoto> exportCanonical({
+    required ProjectPhoto photo,
+    required EditRecipe recipe,
+    required EditState editState,
+    required EditContext editContext,
+    required PhotoExportOptions options,
   }) async {
-    final pipeline = imagePipelineForCurrentPlatform(recipe);
+    final pipeline = imagePipelineForCurrentPlatform(
+      recipe,
+      sourceId: photo.id,
+      editState: editState,
+      context: editContext,
+      outputRequirements: RenderOutputRequirements.export(
+        format: options.format.name,
+        quality: options.quality.name,
+        maxEdge: options.size == PhotoExportSize.longEdge
+            ? options.longEdgePixels
+            : null,
+      ),
+    );
     final response = await channel
         .invokeMapMethod<String, Object?>('exportPhoto', <String, Object?>{
           'sourcePath': photo.localPath,

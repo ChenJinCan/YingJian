@@ -649,6 +649,31 @@ class RunnerTests: XCTestCase {
     XCTAssertNil(IOSImagePipeline(arguments: booleanStrength))
   }
 
+  func testImagePipelineConsumesAndValidatesRenderPlanEnvelope() {
+    let valid: [String: Any] = ["renderPlanV1": [
+      "protocolVersion": 1,
+      "planId": "rp1-1234abcd",
+      "sourceId": "photo-1",
+      "stateRevision": 3,
+      "stages": [],
+      "requiredCapabilities": [],
+      "outputRequirements": [
+        "purpose": "preview",
+        "colorSpace": "srgb",
+        "format": "display",
+        "quality": "interactive",
+      ],
+      "backendPayload": pipelineV2(),
+    ]]
+    XCTAssertNotNil(IOSImagePipeline(arguments: valid))
+
+    var invalid = valid
+    var renderPlan = invalid["renderPlanV1"] as! [String: Any]
+    renderPlan["planId"] = "not-a-plan"
+    invalid["renderPlanV1"] = renderPlan
+    XCTAssertNil(IOSImagePipeline(arguments: invalid))
+  }
+
   func testImagePipelineV3AcceptsBoundedFaceAndBodySlimStrengths() {
     let neutral = IOSImagePipeline(arguments: pipelineV3())
     XCTAssertEqual(neutral?.faceSlimStrength, 0)
@@ -1025,7 +1050,8 @@ class RunnerTests: XCTestCase {
     )
     let backgroundPipeline = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV10(
       background: "image",
-      backgroundImagePath: backgroundURL.path
+      backgroundImagePath: backgroundURL.path,
+      backgroundImageResourceId: "resource-v1-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     )))
     let black = CIImage(color: .black).cropped(to: extent)
     let subjectMask = CIImage(color: .white)
@@ -1045,6 +1071,108 @@ class RunnerTests: XCTestCase {
     ))
     let backgroundPixel = (50 * 100 + 75) * 4
     XCTAssertGreaterThan(backgroundBytes[backgroundPixel], backgroundBytes[backgroundPixel + 1])
+  }
+
+  func testImagePipelineV10AcceptsVersionFourContentResourceIdentities() throws {
+    let resourceId =
+      "resource-v1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    var arguments = pipelineV10(localAdjustmentStrokes: [[
+      "operation": "paint", "radius": 0.08, "points": [[0.25, 0.5]],
+    ]])
+    var semantic = try XCTUnwrap(
+      arguments["semanticEditingRecipeV2"] as? [String: Any]
+    )
+    semantic["recipeVersion"] = 4
+    semantic["subjectMaskResourceId"] = ""
+    semantic["localMaskResourceId"] = resourceId
+    semantic["eraseMaskResourceId"] = ""
+    arguments["semanticEditingRecipeV2"] = semantic
+
+    XCTAssertNotNil(IOSImagePipeline(arguments: arguments))
+
+    semantic["localMaskResourceId"] = "unsafe-path"
+    arguments["semanticEditingRecipeV2"] = semantic
+    XCTAssertNil(IOSImagePipeline(arguments: arguments))
+  }
+
+  func testImagePipelineV11ValidatesStableTargetPortraitContract() throws {
+    let adjustment: [String: Any] = [
+      "targetId": "target-v1-1234abcd",
+      "region": ["left": 0.1, "top": 0.3, "right": 0.4, "bottom": 0.8],
+      "textureSmoothing": 42,
+      "skinToneLighting": 25,
+      "blemishReduction": 18,
+    ]
+    let pipeline = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV11(
+      adjustments: [adjustment]
+    )))
+    XCTAssertEqual(pipeline.targetedPortraitAdjustments.count, 1)
+    XCTAssertEqual(pipeline.targetedPortraitAdjustments.first?.targetId, "target-v1-1234abcd")
+    XCTAssertEqual(pipeline.targetedPortraitAdjustments.first?.textureSmoothing, 42)
+    XCTAssertEqual(pipeline.targetedPortraitAdjustments.first?.skinToneLighting, 25)
+    XCTAssertEqual(pipeline.targetedPortraitAdjustments.first?.blemishReduction, 18)
+
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV11(
+      adjustments: [adjustment, adjustment]
+    )))
+    var invalidId = adjustment
+    invalidId["targetId"] = "face-0"
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV11(adjustments: [invalidId])))
+    var fractional = adjustment
+    fractional["textureSmoothing"] = 10.5
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV11(adjustments: [fractional])))
+    var invalidRegion = adjustment
+    invalidRegion["region"] = ["left": 0.7, "top": 0.3, "right": 0.4, "bottom": 0.8]
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV11(adjustments: [invalidRegion])))
+  }
+
+  func testImagePipelineV11AppliesPortraitOnlyToMatchedStableTarget() throws {
+    let extent = CGRect(x: 0, y: 0, width: 100, height: 100)
+    let source = CIImage(
+      color: CIColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1)
+    ).cropped(to: extent)
+    let black = CIImage(color: .black).cropped(to: extent)
+    func mask(_ rect: CGRect) -> CIImage {
+      CIImage(color: .white).cropped(to: rect).composited(over: black)
+    }
+    func target(_ rect: CGRect) -> IOSFaceSlimTargetContext {
+      IOSFaceSlimTargetContext(
+        geometry: IOSFaceSlimGeometry(
+          centerX: rect.midX, halfWidth: rect.width / 2,
+          lowerY: rect.minY, upperY: rect.maxY
+        ),
+        mask: mask(rect),
+        features: IOSFaceFeatureGeometry(
+          faceBounds: rect,
+          leftEye: CGPoint(x: rect.minX + 8, y: rect.maxY - 12),
+          rightEye: CGPoint(x: rect.maxX - 8, y: rect.maxY - 12),
+          nose: CGPoint(x: rect.midX, y: rect.midY),
+          mouth: CGPoint(x: rect.midX, y: rect.minY + 10)
+        )
+      )
+    }
+    let left = CGRect(x: 10, y: 20, width: 30, height: 50)
+    let right = CGRect(x: 60, y: 20, width: 30, height: 50)
+    let context = IOSPortraitRetouchContext(
+      effectiveMask: nil,
+      faceSlimTargets: [target(left), target(right)]
+    )
+    let pipeline = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV11(
+      adjustments: [[
+        "targetId": "target-v1-1234abcd",
+        "region": ["left": 0.1, "top": 0.3, "right": 0.4, "bottom": 0.8],
+        "textureSmoothing": 0,
+        "skinToneLighting": 60,
+        "blemishReduction": 0,
+      ]]
+    )))
+    let bytes = try rgbaBytes(
+      pipeline.applying(to: source, extent: extent, portraitContext: context)
+    )
+    let leftPixel = (45 * 100 + 25) * 4
+    let rightPixel = (45 * 100 + 75) * 4
+    XCTAssertGreaterThan(bytes[leftPixel], 51)
+    XCTAssertEqual(Array(bytes[rightPixel..<(rightPixel + 3)]), [51, 51, 51])
   }
 
   func testPhotoExportOptionsValidateFormatSizeAndQuality() {
@@ -3402,6 +3530,7 @@ class RunnerTests: XCTestCase {
   private func pipelineV10(
     background: String = "original",
     backgroundImagePath: String = "",
+    backgroundImageResourceId: String = "",
     backgroundBlur: NSNumber = 0,
     subjectExposure: NSNumber = 0,
     subjectSaturation: NSNumber = 0,
@@ -3416,9 +3545,10 @@ class RunnerTests: XCTestCase {
     var pipeline = pipelineV8()
     pipeline["schemaVersion"] = 10
     pipeline["semanticEditingRecipeV2"] = [
-      "recipeVersion": 2,
+      "recipeVersion": 3,
       "background": background,
       "backgroundImagePath": backgroundImagePath,
+      "backgroundImageResourceId": backgroundImageResourceId,
       "backgroundBlur": backgroundBlur,
       "subjectExposure": subjectExposure,
       "subjectSaturation": subjectSaturation,
@@ -3429,6 +3559,18 @@ class RunnerTests: XCTestCase {
       "subjectMaskStrokes": subjectMaskStrokes,
       "localAdjustmentStrokes": localAdjustmentStrokes,
       "eraseStrokes": eraseStrokes,
+    ]
+    return pipeline
+  }
+
+  private func pipelineV11(
+    adjustments: [[String: Any]] = []
+  ) -> [String: Any] {
+    var pipeline = pipelineV10()
+    pipeline["schemaVersion"] = 11
+    pipeline["targetedPortraitRecipeV1"] = [
+      "schemaVersion": 1,
+      "adjustments": adjustments,
     ]
     return pipeline
   }

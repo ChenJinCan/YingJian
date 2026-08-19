@@ -89,6 +89,7 @@ struct IOSPhotoFileRenderer {
       ?? (pipeline.textureSmoothing > 0
         || pipeline.skinToneLighting > 0
         || pipeline.blemishReduction > 0
+        || !pipeline.targetedPortraitAdjustments.isEmpty
         || pipeline.portraitStrength > 0
         || pipeline.faceSlimStrengths.contains(where: { $0 > 0 })
         || pipeline.bodySlimStrength > 0
@@ -532,6 +533,15 @@ enum IOSSemanticEditor {
   }
 }
 
+struct IOSTargetedPortraitAdjustment: Equatable {
+  let targetId: String
+  /// Normalized coordinates with a top-left origin, matching Flutter analysis.
+  let region: CGRect
+  let textureSmoothing: Int
+  let skinToneLighting: Int
+  let blemishReduction: Int
+}
+
 struct IOSImagePipeline {
   let schemaVersion: Int
   let exposureEV: Double
@@ -569,15 +579,27 @@ struct IOSImagePipeline {
   let selectedBodyGeometryIndex: Int
   let bodyGeometryTargets: [IOSBodyGeometryParameters]
   let semanticEditing: IOSSemanticEditingParameters
+  let targetedPortraitAdjustments: [IOSTargetedPortraitAdjustment]
   let crop: CGRect
   let quarterTurns: Int
   let straightenDegrees: Double
 
   init?(arguments: Any?) {
+    guard let envelope = arguments as? [String: Any] else { return nil }
+    let pipeline: [String: Any]
+    if let renderPlan = envelope["renderPlanV1"] {
+      guard
+        Self.isValidRenderPlan(renderPlan),
+        let plan = renderPlan as? [String: Any],
+        let backendPayload = plan["backendPayload"] as? [String: Any]
+      else { return nil }
+      pipeline = backendPayload
+    } else {
+      pipeline = envelope
+    }
     guard
-      let pipeline = arguments as? [String: Any],
       let schemaVersion = Self.exactInteger(pipeline["schemaVersion"]),
-      (1...10).contains(schemaVersion),
+      (1...11).contains(schemaVersion),
       pipeline["workingColorSpace"] as? String == "srgb",
       let adjustments = pipeline["adjustments"] as? [String: Any],
       let exposureEV = Self.finiteNumber(adjustments["exposureEv"]),
@@ -633,6 +655,7 @@ struct IOSImagePipeline {
         slimming: 0, height: 0, shoulders: 0, waist: 0, legs: 0
       )]
       semanticEditing = .neutral
+      targetedPortraitAdjustments = []
       crop = CGRect(x: 0, y: 0, width: 1, height: 1)
       quarterTurns = 0
       straightenDegrees = 0
@@ -882,18 +905,32 @@ struct IOSImagePipeline {
       guard
         pipeline["semanticEditingRecipeV1"] == nil,
         let semantic = pipeline["semanticEditingRecipeV2"] as? [String: Any],
-        Set(semantic.keys) == Set([
+        let semanticVersion = Self.exactInteger(semantic["recipeVersion"]),
+        (3...4).contains(semanticVersion)
+      else { return nil }
+      var semanticKeys = Set([
           "recipeVersion", "background", "backgroundBlur",
-          "backgroundImagePath",
+          "backgroundImagePath", "backgroundImageResourceId",
           "subjectExposure", "subjectSaturation", "backgroundExposure",
           "backgroundSaturation", "localExposure", "localSaturation",
           "subjectMaskStrokes", "localAdjustmentStrokes", "eraseStrokes",
-        ]),
-        Self.exactInteger(semantic["recipeVersion"]) == 2,
+        ])
+      if semanticVersion >= 4 {
+        semanticKeys.formUnion([
+          "subjectMaskResourceId", "localMaskResourceId", "eraseMaskResourceId",
+        ])
+      }
+      guard
+        Set(semantic.keys) == semanticKeys,
         let background = semantic["background"] as? String,
         Self.supportedBackgroundTreatments.contains(background),
         let backgroundImagePath = semantic["backgroundImagePath"] as? String,
         (background == "image") == !backgroundImagePath.isEmpty,
+        let backgroundImageResourceId = semantic["backgroundImageResourceId"] as? String,
+        (background == "image") == (backgroundImageResourceId.range(
+          of: "^resource-v1-[0-9a-f]{64}$",
+          options: .regularExpression
+        ) != nil),
         let backgroundBlur = Self.percentage(semantic["backgroundBlur"]),
         let subjectExposure = Self.signedPercentage(semantic["subjectExposure"]),
         let subjectSaturation = Self.signedPercentage(semantic["subjectSaturation"]),
@@ -911,6 +948,19 @@ struct IOSImagePipeline {
         rawEraseStrokes.count <= 20,
         let eraseStrokes = Self.parseEraseStrokes(rawEraseStrokes)
       else { return nil }
+      if semanticVersion >= 4 {
+        guard
+          let subjectMaskResourceId = semantic["subjectMaskResourceId"] as? String,
+          let localMaskResourceId = semantic["localMaskResourceId"] as? String,
+          let eraseMaskResourceId = semantic["eraseMaskResourceId"] as? String,
+          [subjectMaskResourceId, localMaskResourceId, eraseMaskResourceId].allSatisfy({
+            $0.isEmpty || $0.range(
+              of: "^resource-v1-[0-9a-f]{64}$",
+              options: .regularExpression
+            ) != nil
+          })
+        else { return nil }
+      }
       semanticEditing = IOSSemanticEditingParameters(
         background: background, backgroundImagePath: backgroundImagePath,
         backgroundBlur: backgroundBlur,
@@ -955,6 +1005,19 @@ struct IOSImagePipeline {
     } else {
       semanticEditing = .neutral
     }
+    if schemaVersion >= 11 {
+      guard
+        let targeted = pipeline["targetedPortraitRecipeV1"] as? [String: Any],
+        Set(targeted.keys) == Set(["schemaVersion", "adjustments"]),
+        Self.exactInteger(targeted["schemaVersion"]) == 1,
+        let rawAdjustments = targeted["adjustments"] as? [Any],
+        rawAdjustments.count <= 6,
+        let parsed = Self.parseTargetedPortraitAdjustments(rawAdjustments)
+      else { return nil }
+      targetedPortraitAdjustments = parsed
+    } else {
+      targetedPortraitAdjustments = []
+    }
     crop = CGRect(
       x: values[0],
       y: values[1],
@@ -970,6 +1033,30 @@ struct IOSImagePipeline {
       return nil
     }
     return Int(exactly: double)
+  }
+
+  private static func isValidRenderPlan(_ value: Any) -> Bool {
+    guard
+      let plan = value as? [String: Any],
+      exactInteger(plan["protocolVersion"]) == 1,
+      let planId = plan["planId"] as? String,
+      planId.range(of: #"^rp1-[a-f0-9]{8}$"#, options: .regularExpression) != nil,
+      let sourceId = plan["sourceId"] as? String,
+      !sourceId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+      let revision = exactInteger(plan["stateRevision"]), revision >= 0,
+      let stages = plan["stages"] as? [Any],
+      let capabilities = plan["requiredCapabilities"] as? [Any],
+      let output = plan["outputRequirements"] as? [String: Any],
+      let purpose = output["purpose"] as? String,
+      purpose == "preview" || purpose == "export",
+      output["colorSpace"] as? String == "srgb",
+      output["format"] is String,
+      output["quality"] is String,
+      plan["backendPayload"] is [String: Any],
+      stages.allSatisfy({ $0 is [String: Any] }),
+      capabilities.allSatisfy({ $0 is String })
+    else { return false }
+    return true
   }
 
   private static func finiteNumber(_ value: Any?) -> Double? {
@@ -1060,6 +1147,49 @@ struct IOSImagePipeline {
       ))
     }
     return parsed
+  }
+
+  private static func parseTargetedPortraitAdjustments(
+    _ rawAdjustments: [Any]
+  ) -> [IOSTargetedPortraitAdjustment]? {
+    var parsed: [IOSTargetedPortraitAdjustment] = []
+    var targetIds = Set<String>()
+    for raw in rawAdjustments {
+      guard
+        let adjustment = raw as? [String: Any],
+        Set(adjustment.keys) == Set([
+          "targetId", "region", "textureSmoothing",
+          "skinToneLighting", "blemishReduction",
+        ]),
+        let targetId = adjustment["targetId"] as? String,
+        isStableTargetId(targetId),
+        targetIds.insert(targetId).inserted,
+        let rawRegion = adjustment["region"] as? [String: Any],
+        Set(rawRegion.keys) == Set(["left", "top", "right", "bottom"]),
+        let left = finiteNumber(rawRegion["left"]),
+        let top = finiteNumber(rawRegion["top"]),
+        let right = finiteNumber(rawRegion["right"]),
+        let bottom = finiteNumber(rawRegion["bottom"]),
+        [left, top, right, bottom].allSatisfy({ (0.0...1.0).contains($0) }),
+        right > left, bottom > top,
+        let textureSmoothing = percentage(adjustment["textureSmoothing"]),
+        let skinToneLighting = percentage(adjustment["skinToneLighting"]),
+        let blemishReduction = percentage(adjustment["blemishReduction"])
+      else { return nil }
+      parsed.append(IOSTargetedPortraitAdjustment(
+        targetId: targetId,
+        region: CGRect(x: left, y: top, width: right - left, height: bottom - top),
+        textureSmoothing: textureSmoothing,
+        skinToneLighting: skinToneLighting,
+        blemishReduction: blemishReduction
+      ))
+    }
+    return parsed
+  }
+
+  private static func isStableTargetId(_ value: String) -> Bool {
+    guard value.hasPrefix("target-v1-"), value.count == 18 else { return false }
+    return value.dropFirst(10).allSatisfy { $0.isHexDigit && !$0.isUppercase }
   }
 
   private static let supportedFilters: Set<String> = [
@@ -1155,6 +1285,55 @@ struct IOSImagePipeline {
       greenScale: exposureScale,
       blueScale: exposureScale * blueWarmthScale
     )
+  }
+
+  private func matchedFaceTargetIndex(
+    for adjustment: IOSTargetedPortraitAdjustment,
+    targets: [IOSFaceSlimTargetContext],
+    extent: CGRect,
+    excluding usedIndices: Set<Int>
+  ) -> Int? {
+    guard extent.width > 0, extent.height > 0 else { return nil }
+    func normalizedTopLeft(_ bounds: CGRect) -> CGRect {
+      CGRect(
+        x: (bounds.minX - extent.minX) / extent.width,
+        y: 1 - ((bounds.maxY - extent.minY) / extent.height),
+        width: bounds.width / extent.width,
+        height: bounds.height / extent.height
+      )
+    }
+    func intersectionOverUnion(_ left: CGRect, _ right: CGRect) -> CGFloat {
+      let intersection = left.intersection(right)
+      guard !intersection.isNull, intersection.width > 0, intersection.height > 0 else {
+        return 0
+      }
+      let intersectionArea = intersection.width * intersection.height
+      let unionArea = left.width * left.height + right.width * right.height - intersectionArea
+      return unionArea > 0 ? intersectionArea / unionArea : 0
+    }
+    let candidates = targets.indices.compactMap { index -> (Int, CGFloat, CGFloat)? in
+      guard !usedIndices.contains(index) else { return nil }
+      let region = normalizedTopLeft(targets[index].features.faceBounds)
+      let iou = intersectionOverUnion(adjustment.region, region)
+      let centerDistance = hypot(
+        adjustment.region.midX - region.midX,
+        adjustment.region.midY - region.midY
+      )
+      return (index, iou, centerDistance)
+    }.sorted { left, right in
+      if abs(left.1 - right.1) > 0.000_001 { return left.1 > right.1 }
+      return left.2 < right.2
+    }
+    guard let best = candidates.first, best.1 >= 0.65, best.2 <= 0.08 else {
+      return nil
+    }
+    if candidates.count > 1 {
+      let runnerUp = candidates[1]
+      guard best.1 - runnerUp.1 >= 0.10 || runnerUp.2 - best.2 >= 0.04 else {
+        return nil
+      }
+    }
+    return best.0
   }
 
   func applying(
@@ -1431,6 +1610,45 @@ struct IOSImagePipeline {
           strength: portraitStrength,
           extent: extent
         )
+      }
+    }
+    if schemaVersion >= 11, let portraitContext {
+      var usedTargetIndices = Set<Int>()
+      for adjustment in targetedPortraitAdjustments {
+        guard let targetIndex = matchedFaceTargetIndex(
+          for: adjustment,
+          targets: portraitContext.faceSlimTargets,
+          extent: extent,
+          excluding: usedTargetIndices
+        ) else {
+          continue
+        }
+        usedTargetIndices.insert(targetIndex)
+        let mask = portraitContext.faceSlimTargets[targetIndex].mask
+        if adjustment.blemishReduction > 0 {
+          output = IOSBlemishReductionCandidate.applying(
+            to: output,
+            strength: Double(adjustment.blemishReduction) / 100,
+            effectiveFaceMask: mask,
+            extent: extent
+          )
+        }
+        if adjustment.skinToneLighting > 0 {
+          output = IOSPortraitRetoucher.applyingSkinToneLighting(
+            to: output,
+            strength: Double(adjustment.skinToneLighting) / 100,
+            mask: mask,
+            extent: extent
+          )
+        }
+        if adjustment.textureSmoothing > 0 {
+          output = IOSPortraitRetoucher.applyingTextureSmoothing(
+            to: output,
+            strength: Double(adjustment.textureSmoothing) / 100,
+            mask: mask,
+            extent: extent
+          )
+        }
       }
     }
     if schemaVersion >= 9 && semanticEditing != .neutral {

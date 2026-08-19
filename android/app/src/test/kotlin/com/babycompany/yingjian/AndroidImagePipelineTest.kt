@@ -79,6 +79,36 @@ class AndroidImagePipelineTest {
         }
     }
 
+    @Test
+    fun `render plan envelope is consumed and validated`() {
+        val valid = mapOf(
+            "renderPlanV1" to mapOf(
+                "protocolVersion" to 1,
+                "planId" to "rp1-1234abcd",
+                "sourceId" to "photo-1",
+                "stateRevision" to 3,
+                "stages" to emptyList<Map<String, Any>>(),
+                "requiredCapabilities" to emptyList<String>(),
+                "outputRequirements" to mapOf(
+                    "purpose" to "preview",
+                    "colorSpace" to "srgb",
+                    "format" to "display",
+                    "quality" to "interactive",
+                ),
+                "backendPayload" to v2(),
+            ),
+        )
+        assertEquals(2, AndroidImagePipeline.parse(valid).schemaVersion)
+
+        val invalid = valid.toMutableMap().apply {
+            this["renderPlanV1"] =
+                (this["renderPlanV1"] as Map<String, Any>) + ("planId" to "not-a-plan")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            AndroidImagePipeline.parse(invalid)
+        }
+    }
+
     private fun v2(
         schemaVersion: Number = 2,
         crop: List<Double> = listOf(0.2, 0.1, 0.8, 0.6),

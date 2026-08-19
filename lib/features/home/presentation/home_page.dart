@@ -1,3 +1,6 @@
+import 'dart:io';
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:yingjian/app/navigation/app_router.dart';
@@ -94,7 +97,7 @@ class _HomePageState extends State<HomePage> {
                       center: const Alignment(-0.72, -1.02),
                       radius: 1.12,
                       colors: [
-                        colors.primary.withValues(alpha: 0.16),
+                        colors.primary.withValues(alpha: 0.05),
                         colors.surface,
                       ],
                     ),
@@ -107,55 +110,36 @@ class _HomePageState extends State<HomePage> {
                   children: [
                     SingleChildScrollView(
                       padding: const EdgeInsets.fromLTRB(
-                        24,
-                        kToolbarHeight + 28,
-                        24,
-                        36,
+                        20,
+                        kToolbarHeight + 22,
+                        20,
+                        28,
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          const SizedBox(height: 64),
-                          const Center(child: _YingjianMark()),
-                          const SizedBox(height: 18),
-                          Text(
-                            context.l10n.homeSupporting,
-                            textAlign: TextAlign.center,
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(
-                                  color: colors.onSurfaceVariant,
-                                  height: 1.45,
-                                ),
-                          ),
-                          const SizedBox(height: 26),
-                          FilledButton.icon(
-                            key: const ValueKey('home-start-editing'),
-                            onPressed: project == null
+                          const SizedBox(height: 14),
+                          _HomeHero(
+                            project: project,
+                            onStart: project == null
                                 ? () => _openEditor(startWithImport: true)
                                 : () => _startNew(project),
-                            style: FilledButton.styleFrom(
-                              minimumSize: const Size.fromHeight(54),
-                            ),
-                            icon: const Icon(
-                              Icons.add_photo_alternate_outlined,
-                            ),
-                            label: Text(context.l10n.homePrimaryAction),
                           ),
                           if (snapshot.connectionState ==
                               ConnectionState.waiting) ...[
-                            const SizedBox(height: 32),
+                            const SizedBox(height: 24),
                             const LinearProgressIndicator(minHeight: 2),
                           ] else if (snapshot.hasError) ...[
-                            const SizedBox(height: 32),
+                            const SizedBox(height: 24),
                             _RestoreFailure(onRetry: _reload),
                           ] else if (project != null) ...[
-                            const SizedBox(height: 72),
+                            const SizedBox(height: 28),
                             Text(
                               context.l10n.recentProjects,
                               style: Theme.of(context).textTheme.labelLarge
                                   ?.copyWith(color: colors.onSurfaceVariant),
                             ),
-                            const SizedBox(height: 10),
+                            const SizedBox(height: 12),
                             _ProjectResumeCard(
                               project: project,
                               onContinue: _openEditor,
@@ -166,13 +150,21 @@ class _HomePageState extends State<HomePage> {
                     ),
                     Positioned(
                       top: 0,
+                      left: 20,
                       right: 8,
-                      child: IconButton(
-                        key: const ValueKey('home-settings'),
-                        tooltip: context.l10n.settings,
-                        onPressed: () =>
-                            Navigator.of(context).pushNamed(AppRoutes.settings),
-                        icon: const Icon(Icons.settings_outlined),
+                      child: Row(
+                        children: [
+                          const _YingjianMark(compact: true),
+                          const Spacer(),
+                          IconButton(
+                            key: const ValueKey('home-settings'),
+                            tooltip: context.l10n.settings,
+                            onPressed: () => Navigator.of(
+                              context,
+                            ).pushNamed(AppRoutes.settings),
+                            icon: const Icon(Icons.settings_outlined),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -184,6 +176,111 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
+}
+
+class _HomeHero extends StatelessWidget {
+  const _HomeHero({required this.project, required this.onStart});
+
+  final PhotoProject? project;
+  final VoidCallback onStart;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final photo = project?.photos.firstOrNull;
+    return SizedBox(
+      height: 360,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(26),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (photo == null)
+              const _EmptyHeroBackdrop()
+            else
+              Image.file(
+                File(photo.localPath),
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => const _EmptyHeroBackdrop(),
+              ),
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.transparent, Color(0xCC0B0D0E)],
+                  stops: [0.32, 1],
+                ),
+              ),
+            ),
+            Positioned(
+              left: 22,
+              right: 22,
+              bottom: 22,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    context.l10n.homeHeroTitle,
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    context.l10n.homeTagline,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: FilledButton.icon(
+                      key: const ValueKey('home-start-editing'),
+                      onPressed: onStart,
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(184, 48),
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                      ),
+                      icon: const Icon(
+                        Icons.add_photo_alternate_outlined,
+                        size: 19,
+                      ),
+                      label: Text(context.l10n.homePrimaryAction),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyHeroBackdrop extends StatelessWidget {
+  const _EmptyHeroBackdrop();
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: const BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFF242118), Color(0xFF111315), Color(0xFF0B0D0E)],
+      ),
+    ),
+    child: Align(
+      alignment: const Alignment(0.62, -0.54),
+      child: Icon(
+        Icons.auto_awesome_rounded,
+        size: 42,
+        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.38),
+      ),
+    ),
+  );
 }
 
 class _ProjectResumeCard extends StatelessWidget {
@@ -213,15 +310,7 @@ class _ProjectResumeCard extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
-              Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainerHigh,
-                  borderRadius: BorderRadius.circular(15),
-                ),
-                child: const Icon(Icons.photo_library_outlined, size: 28),
-              ),
+              _ProjectThumbnailStack(photos: project.photos),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
@@ -246,7 +335,7 @@ class _ProjectResumeCard extends StatelessWidget {
               const SizedBox(width: 8),
               Icon(
                 Icons.chevron_right_rounded,
-                color: Theme.of(context).colorScheme.primary,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ],
           ),
@@ -256,8 +345,50 @@ class _ProjectResumeCard extends StatelessWidget {
   }
 }
 
+class _ProjectThumbnailStack extends StatelessWidget {
+  const _ProjectThumbnailStack({required this.photos});
+
+  final List<ProjectPhoto> photos;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 78,
+    height: 64,
+    child: Stack(
+      children: [
+        for (var index = min(2, photos.length - 1); index >= 0; index--)
+          Positioned(
+            left: index * 9,
+            top: index * 3,
+            child: Container(
+              width: 54,
+              height: 58,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.surface,
+                  width: 2,
+                ),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Image.file(
+                File(photos[index].localPath),
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) =>
+                    const Icon(Icons.photo_outlined, size: 22),
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
 class _YingjianMark extends StatelessWidget {
-  const _YingjianMark();
+  const _YingjianMark({this.compact = false});
+
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -266,16 +397,20 @@ class _YingjianMark extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: 46,
-          height: 46,
+          width: compact ? 28 : 46,
+          height: compact ? 28 : 46,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: colors.primary.withValues(alpha: 0.12),
             border: Border.all(color: colors.primary.withValues(alpha: 0.34)),
           ),
-          child: Icon(Icons.auto_awesome, color: colors.primary, size: 20),
+          child: Icon(
+            Icons.auto_awesome,
+            color: colors.primary,
+            size: compact ? 14 : 20,
+          ),
         ),
-        const SizedBox(width: 14),
+        SizedBox(width: compact ? 9 : 14),
         Text(
           context.l10n.appTitle,
           style: Theme.of(context).textTheme.headlineSmall?.copyWith(

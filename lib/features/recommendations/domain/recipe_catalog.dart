@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/legacy_edit_recipe_adapter.dart';
+import 'package:yingjian/features/editor/domain/meta_op.dart';
 import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
@@ -198,15 +200,41 @@ class LocalRecommendation {
   final SharedStyle sharedStyle;
   final Map<String, AdaptiveCompensation> adaptiveCompensations;
   final RecommendationReason reason;
+
+  Set<String> get requiredMetaOpIds {
+    const adapter = LegacyEditRecipeAdapter();
+    return Set.unmodifiable({
+      ...adapter
+          .read(sharedStyle.recipe)
+          .values
+          .keys
+          .map((address) => address.metaOpId),
+      for (final compensation in adaptiveCompensations.values)
+        ...adapter
+            .read(compensation.recipe)
+            .values
+            .keys
+            .map((address) => address.metaOpId),
+    });
+  }
 }
 
 final class LocalRecommendationEngine {
-  LocalRecommendationEngine({List<RecipeCatalogEntry>? catalog})
-    : catalog = List.unmodifiable(catalog ?? MvpRecipeCatalog.entries) {
+  LocalRecommendationEngine({
+    List<RecipeCatalogEntry>? catalog,
+    Set<String>? availableMetaOpIds,
+  }) : catalog = List.unmodifiable(catalog ?? MvpRecipeCatalog.entries),
+       availableMetaOpIds = Set.unmodifiable(
+         availableMetaOpIds ??
+             MetaOpCatalog.standard.definitions
+                 .map((definition) => definition.id)
+                 .toSet(),
+       ) {
     _validateCatalog(this.catalog);
   }
 
   final List<RecipeCatalogEntry> catalog;
+  final Set<String> availableMetaOpIds;
 
   List<LocalRecommendation> recommend({
     required List<ProjectPhoto> photos,
@@ -235,17 +263,17 @@ final class LocalRecommendationEngine {
     );
     final values = analyses.values.toList(growable: false);
     final selected = <RecipeCatalogEntry>[
-      _safeEntry(
+      ?_safeEntry(
         preferredId: allFallback ? 'clean-balanced' : _naturalId(values),
         family: SharedStyleFamily.naturalClean,
         analyses: values,
       ),
-      _safeEntry(
+      ?_safeEntry(
         preferredId: allFallback ? 'atmosphere-warm' : _atmosphereId(values),
         family: SharedStyleFamily.atmosphericColor,
         analyses: values,
       ),
-      _safeEntry(
+      ?_safeEntry(
         preferredId: allFallback ? 'texture-gentle' : _textureId(values),
         family: SharedStyleFamily.texturedStyle,
         analyses: values,
@@ -281,7 +309,7 @@ final class LocalRecommendationEngine {
   RecipeCatalogEntry _entry(String id) =>
       catalog.singleWhere((entry) => entry.id == id);
 
-  RecipeCatalogEntry _safeEntry({
+  RecipeCatalogEntry? _safeEntry({
     required String preferredId,
     required SharedStyleFamily family,
     required List<LocalPhotoAnalysis> analyses,
@@ -292,13 +320,27 @@ final class LocalRecommendationEngine {
         'Preferred recipe $preferredId belongs to another family',
       );
     }
-    if (_isSafeFor(preferred, analyses)) return preferred;
-    return catalog.firstWhere(
-      (entry) => entry.family == family && _isSafeFor(entry, analyses),
-      orElse: () => throw StateError(
-        'No safe ${family.name} recipe exists for the current analysis',
-      ),
-    );
+    if (_isAvailable(preferred) && _isSafeFor(preferred, analyses)) {
+      return preferred;
+    }
+    for (final entry in catalog) {
+      if (entry.family == family &&
+          _isAvailable(entry) &&
+          _isSafeFor(entry, analyses)) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  bool _isAvailable(RecipeCatalogEntry entry) {
+    const adapter = LegacyEditRecipeAdapter();
+    final required = adapter
+        .read(entry.recipe)
+        .values
+        .keys
+        .map((address) => address.metaOpId);
+    return required.every(availableMetaOpIds.contains);
   }
 
   bool _isSafeFor(RecipeCatalogEntry entry, List<LocalPhotoAnalysis> analyses) {
@@ -366,16 +408,20 @@ final class LocalRecommendationEngine {
       : 'texture-crisp';
 
   AdaptiveCompensation _compensation(LocalPhotoAnalysis analysis) {
-    final exposure = switch (analysis.exposure) {
-      ExposureCondition.underexposed => 0.15,
-      ExposureCondition.overexposed => -0.12,
-      _ => 0.0,
-    };
-    final warmth = switch (analysis.whiteBalance) {
-      WhiteBalanceCondition.warmCast => -0.08,
-      WhiteBalanceCondition.coolCast => 0.08,
-      _ => 0.0,
-    };
+    final exposure = !availableMetaOpIds.contains(MetaOpIds.exposure)
+        ? 0.0
+        : switch (analysis.exposure) {
+            ExposureCondition.underexposed => 0.15,
+            ExposureCondition.overexposed => -0.12,
+            _ => 0.0,
+          };
+    final warmth = !availableMetaOpIds.contains(MetaOpIds.warmth)
+        ? 0.0
+        : switch (analysis.whiteBalance) {
+            WhiteBalanceCondition.warmCast => -0.08,
+            WhiteBalanceCondition.coolCast => 0.08,
+            _ => 0.0,
+          };
     return AdaptiveCompensation(
       recipe: EditRecipe(exposure: exposure, warmth: warmth),
       source: analysis.usesSafeFallback

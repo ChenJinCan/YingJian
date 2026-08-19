@@ -1,8 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/editor/application/editor_session.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/editing_core.dart';
+import 'package:yingjian/features/editor/domain/meta_op.dart';
 import 'package:yingjian/features/editor/domain/portrait_geometry_recipe.dart';
 import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
+import 'package:yingjian/features/editor/domain/platform_meta_op_capabilities.dart';
 
 void main() {
   group('EditRecipe', () {
@@ -130,6 +133,67 @@ void main() {
       expect(session.canUndo, isFalse);
     });
 
+    test('previews exposure through the meta-op contract as one undo step', () {
+      final session = EditorSession(initialRecipe: EditRecipe(warmth: 0.25));
+      const address = OpAddress(
+        metaOpId: MetaOpIds.exposure,
+        metaOpVersion: 1,
+        parameterId: 'value',
+        scope: EditScope.group,
+      );
+
+      session.beginAdjustment();
+      expect(session.previewMetaOp(address, 0.2), isA<AcceptedEdit>());
+      expect(session.previewMetaOp(address, 0.6), isA<AcceptedEdit>());
+      expect(session.recipe.exposure, 0.6);
+      expect(session.recipe.warmth, 0.25);
+
+      final rejected = session.previewMetaOp(address, 2) as RejectedEdit;
+      expect(rejected.reason, EditRejection.outOfRange);
+      expect(session.recipe.exposure, 0.6);
+
+      session.commitAdjustment();
+      session.undo();
+      expect(session.recipe, EditRecipe(warmth: 0.25));
+
+      expect(session.applyMetaOp(address, 0.4), isA<AcceptedEdit>());
+      expect(session.applyMetaOp(address, 0), isA<AcceptedEdit>());
+      expect(session.recipe.exposure, 0);
+      session.undo();
+      expect(session.recipe.exposure, 0.4);
+    });
+
+    test(
+      'previews current-photo quality through the same meta-op contract',
+      () {
+        final session = EditorSession()
+          ..setPlatformCapabilities(iosMetaOpCapabilities);
+        const address = OpAddress(
+          metaOpId: MetaOpIds.noiseReduction,
+          metaOpVersion: 1,
+          parameterId: 'value',
+          scope: EditScope.currentPhoto,
+          photoId: 'photo-1',
+        );
+
+        session.beginAdjustment();
+        expect(session.previewMetaOp(address, 20), isA<AcceptedEdit>());
+        expect(session.previewMetaOp(address, 45), isA<AcceptedEdit>());
+        expect(session.recipe.qualityEnhancementRecipe.noiseReduction, 45);
+        session.commitAdjustment();
+        session.undo();
+        expect(session.recipe.qualityEnhancementRecipe.noiseReduction, 0);
+      },
+    );
+
+    test('search discovers only meta ops admitted for this session', () {
+      final session = EditorSession();
+
+      expect(session.searchAvailableMetaOps('饱和度'), [MetaOpIds.saturation]);
+      expect(session.searchAvailableMetaOps('磨皮'), isEmpty);
+      expect(session.searchAvailableMetaOps('不存在'), isEmpty);
+    });
+
     test('portrait target focus is not an undoable effect by itself', () {
       final session = EditorSession(
         initialRecipe: EditRecipe(
@@ -209,6 +273,23 @@ void main() {
       session.apply(EditRecipe(contrast: 0.3));
 
       expect(session.canRedo, isFalse);
+    });
+
+    test('recent AI meta ops lead the next manual tool opening', () {
+      final session = EditorSession();
+
+      session.load(
+        EditRecipe(saturation: 0.2, warmth: 0.1),
+        prioritizedMetaOpIds: const [MetaOpIds.saturation, MetaOpIds.warmth],
+      );
+
+      expect(session.orderedManualMetaOpIds().take(5), [
+        MetaOpIds.saturation,
+        MetaOpIds.warmth,
+        MetaOpIds.exposure,
+        MetaOpIds.highlights,
+        MetaOpIds.shadows,
+      ]);
     });
   });
 }

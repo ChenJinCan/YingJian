@@ -1,24 +1,18 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:yingjian/features/editor/application/natural_language_edit_interpreter.dart';
 import 'package:yingjian/features/editor/application/speech_transcriber.dart';
-import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/l10n/l10n.dart';
 
 class VoiceEditSheet extends StatefulWidget {
   const VoiceEditSheet({
-    required this.currentRecipe,
-    required this.interpreter,
     required this.transcriber,
-    required this.onApplied,
+    required this.onSubmit,
     super.key,
   });
 
-  final EditRecipe currentRecipe;
-  final NaturalLanguageEditInterpreter interpreter;
   final SpeechTranscriber transcriber;
-  final FutureOr<void> Function(NaturalLanguageEditResult result) onApplied;
+  final FutureOr<bool> Function(String intent) onSubmit;
 
   @override
   State<VoiceEditSheet> createState() => _VoiceEditSheetState();
@@ -64,11 +58,7 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
 
   Future<void> _submit() async {
     if (_applying || _listening) return;
-    final result = widget.interpreter.interpret(
-      _controller.text,
-      current: widget.currentRecipe,
-    );
-    if (!result.isApplicable) {
+    if (_controller.text.trim().isEmpty) {
       setState(() => _error = context.l10n.voiceEditUnsupported);
       return;
     }
@@ -77,7 +67,10 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
       _error = null;
     });
     try {
-      await widget.onApplied(result);
+      final applied = await widget.onSubmit(_controller.text.trim());
+      if (!applied && mounted) {
+        setState(() => _error = context.l10n.voiceEditUnsupported);
+      }
     } finally {
       if (mounted) setState(() => _applying = false);
     }

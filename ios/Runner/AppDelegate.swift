@@ -953,6 +953,44 @@ private final class IOSPhotoPreviewRenderer {
 
   private func handle(call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
+    case "getMetaOpCapabilities":
+      result([
+        "platform": "ios",
+        "operations": [
+          metaOpCapability(id: "composition.geometry", maxTargets: 0),
+          metaOpCapability(id: "tone.exposure", maxTargets: 0),
+          metaOpCapability(id: "tone.highlights", maxTargets: 0),
+          metaOpCapability(id: "tone.shadows", maxTargets: 0),
+          metaOpCapability(id: "tone.contrast", maxTargets: 0),
+          metaOpCapability(id: "color.warmth", maxTargets: 0),
+          metaOpCapability(id: "color.tint", maxTargets: 0),
+          metaOpCapability(id: "color.saturation", maxTargets: 0),
+          metaOpCapability(id: "tone.clarity", maxTargets: 0),
+          metaOpCapability(id: "style.filter", maxTargets: 0),
+          metaOpCapability(id: "color.hsl.red", maxTargets: 0),
+          metaOpCapability(id: "color.hsl.orange", maxTargets: 0),
+          metaOpCapability(id: "color.hsl.yellow", maxTargets: 0),
+          metaOpCapability(id: "color.hsl.green", maxTargets: 0),
+          metaOpCapability(id: "color.hsl.cyan", maxTargets: 0),
+          metaOpCapability(id: "color.hsl.blue", maxTargets: 0),
+          metaOpCapability(id: "color.hsl.purple", maxTargets: 0),
+          metaOpCapability(id: "color.hsl.magenta", maxTargets: 0),
+          metaOpCapability(id: "quality.noise_reduction", maxTargets: 0),
+          metaOpCapability(id: "quality.low_light_recovery", maxTargets: 0),
+          metaOpCapability(id: "quality.haze_removal", maxTargets: 0),
+          metaOpCapability(id: "quality.detail_sharpening", maxTargets: 0),
+          metaOpCapability(id: "portrait.skin_smooth", maxTargets: 6),
+          metaOpCapability(id: "portrait.skin_tone_lighting", maxTargets: 6),
+          metaOpCapability(id: "portrait.blemish_reduction", maxTargets: 6),
+          metaOpCapability(id: "portrait.face_geometry", maxTargets: 3),
+          metaOpCapability(id: "portrait.body_geometry", maxTargets: 3),
+          metaOpCapability(
+            id: "semantic.background_local",
+            maxTargets: 0,
+            maxResourceBytes: 50 * 1_024 * 1_024
+          ),
+        ],
+      ])
     case "createPreview":
       createPreview(arguments: call.arguments, result: result)
     case "updatePreview":
@@ -962,6 +1000,21 @@ private final class IOSPhotoPreviewRenderer {
     default:
       result(FlutterMethodNotImplemented)
     }
+  }
+
+  private func metaOpCapability(
+    id: String,
+    maxTargets: Int,
+    maxResourceBytes: Int = 0
+  ) -> [String: Any] {
+    [
+      "id": id,
+      "version": 1,
+      "preview": true,
+      "export": true,
+      "maxTargets": maxTargets,
+      "maxResourceBytes": maxResourceBytes,
+    ]
   }
 
   private func createPreview(arguments: Any?, result: @escaping FlutterResult) {

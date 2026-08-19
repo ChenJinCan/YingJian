@@ -5,6 +5,8 @@ import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
 import 'package:yingjian/features/editor/domain/portrait_geometry_recipe.dart';
 import 'package:yingjian/features/editor/domain/quality_enhancement_recipe.dart';
 import 'package:yingjian/features/editor/domain/semantic_editing_recipe.dart';
+import 'package:yingjian/features/editor/domain/targeted_portrait_recipe.dart';
+import 'package:yingjian/features/editor/domain/targeted_geometry_recipe.dart';
 
 @immutable
 final class CropGeometry {
@@ -178,6 +180,10 @@ class EditRecipe {
     BasicEditingRecipe basicEditingRecipe = BasicEditingRecipe.neutral,
     PortraitGeometryRecipe? portraitGeometryRecipe,
     SemanticEditingRecipe semanticEditingRecipe = SemanticEditingRecipe.neutral,
+    TargetedPortraitRecipe targetedPortraitRecipe =
+        TargetedPortraitRecipe.neutral,
+    TargetedGeometryRecipe targetedGeometryRecipe =
+        TargetedGeometryRecipe.neutral,
     CropGeometry crop = CropGeometry.original,
   }) {
     for (final entry in <String, double>{
@@ -245,6 +251,8 @@ class EditRecipe {
       basicEditingRecipe: basicEditingRecipe,
       portraitGeometryRecipe: resolvedPortraitGeometryRecipe,
       semanticEditingRecipe: semanticEditingRecipe,
+      targetedPortraitRecipe: targetedPortraitRecipe,
+      targetedGeometryRecipe: targetedGeometryRecipe,
       crop: crop,
     );
   }
@@ -266,6 +274,8 @@ class EditRecipe {
     required this.basicEditingRecipe,
     required this.portraitGeometryRecipe,
     required this.semanticEditingRecipe,
+    required this.targetedPortraitRecipe,
+    required this.targetedGeometryRecipe,
     required this.crop,
   });
 
@@ -288,6 +298,8 @@ class EditRecipe {
   final BasicEditingRecipe basicEditingRecipe;
   final PortraitGeometryRecipe portraitGeometryRecipe;
   final SemanticEditingRecipe semanticEditingRecipe;
+  final TargetedPortraitRecipe targetedPortraitRecipe;
+  final TargetedGeometryRecipe targetedGeometryRecipe;
   final CropGeometry crop;
 
   bool get isLegacyColorOnly =>
@@ -304,6 +316,8 @@ class EditRecipe {
       basicEditingRecipe.isNeutral &&
       portraitGeometryRecipe.isNeutral &&
       semanticEditingRecipe.isNeutral &&
+      targetedPortraitRecipe.isNeutral &&
+      targetedGeometryRecipe.isNeutral &&
       crop.isOriginal;
 
   bool get hasColorAdjustments =>
@@ -333,6 +347,8 @@ class EditRecipe {
     'basicEditingRecipe': basicEditingRecipe.toJson(),
     'portraitGeometryRecipe': portraitGeometryRecipe.toJson(),
     'semanticEditingRecipe': semanticEditingRecipe.toJson(),
+    'targetedPortraitRecipe': targetedPortraitRecipe.toJson(),
+    'targetedGeometryRecipe': targetedGeometryRecipe.toJson(),
     'crop': crop.toJson(),
   };
 
@@ -402,6 +418,26 @@ class EditRecipe {
         : throw const FormatException(
             'Invalid semantic editing recipe payload',
           );
+    final rawTargetedPortraitRecipe = json['targetedPortraitRecipe'];
+    final targetedPortraitRecipe = rawTargetedPortraitRecipe == null
+        ? TargetedPortraitRecipe.neutral
+        : rawTargetedPortraitRecipe is Map
+        ? TargetedPortraitRecipe.fromJson(
+            Map<String, Object?>.from(rawTargetedPortraitRecipe),
+          )
+        : throw const FormatException(
+            'Invalid targeted portrait recipe payload',
+          );
+    final rawTargetedGeometryRecipe = json['targetedGeometryRecipe'];
+    final targetedGeometryRecipe = rawTargetedGeometryRecipe == null
+        ? TargetedGeometryRecipe.neutral
+        : rawTargetedGeometryRecipe is Map
+        ? TargetedGeometryRecipe.fromJson(
+            Map<String, Object?>.from(rawTargetedGeometryRecipe),
+          )
+        : throw const FormatException(
+            'Invalid targeted geometry recipe payload',
+          );
     return EditRecipe(
       exposure: (json['exposure'] as num?)?.toDouble() ?? 0,
       highlights: (json['highlights'] as num?)?.toDouble() ?? 0,
@@ -420,6 +456,8 @@ class EditRecipe {
       basicEditingRecipe: basicEditingRecipe,
       portraitGeometryRecipe: portraitGeometryRecipe,
       semanticEditingRecipe: semanticEditingRecipe,
+      targetedPortraitRecipe: targetedPortraitRecipe,
+      targetedGeometryRecipe: targetedGeometryRecipe,
       crop: json['crop'] is Map<String, Object?>
           ? CropGeometry.fromJson(json['crop']! as Map<String, Object?>)
           : CropGeometry.original,
@@ -444,6 +482,8 @@ class EditRecipe {
     BasicEditingRecipe? basicEditingRecipe,
     PortraitGeometryRecipe? portraitGeometryRecipe,
     SemanticEditingRecipe? semanticEditingRecipe,
+    TargetedPortraitRecipe? targetedPortraitRecipe,
+    TargetedGeometryRecipe? targetedGeometryRecipe,
     CropGeometry? crop,
   }) {
     var resolvedGeometry =
@@ -525,6 +565,10 @@ class EditRecipe {
       portraitGeometryRecipe: resolvedGeometry,
       semanticEditingRecipe:
           semanticEditingRecipe ?? this.semanticEditingRecipe,
+      targetedPortraitRecipe:
+          targetedPortraitRecipe ?? this.targetedPortraitRecipe,
+      targetedGeometryRecipe:
+          targetedGeometryRecipe ?? this.targetedGeometryRecipe,
       crop: crop ?? this.crop,
     );
   }
@@ -554,6 +598,8 @@ class EditRecipe {
       other.basicEditingRecipe == basicEditingRecipe &&
       other.portraitGeometryRecipe == portraitGeometryRecipe &&
       other.semanticEditingRecipe == semanticEditingRecipe &&
+      other.targetedPortraitRecipe == targetedPortraitRecipe &&
+      other.targetedGeometryRecipe == targetedGeometryRecipe &&
       other.crop == crop;
 
   @override
@@ -574,6 +620,8 @@ class EditRecipe {
     basicEditingRecipe,
     portraitGeometryRecipe,
     semanticEditingRecipe,
+    targetedPortraitRecipe,
+    targetedGeometryRecipe,
     crop,
   );
 }

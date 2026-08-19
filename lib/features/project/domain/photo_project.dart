@@ -1,9 +1,34 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/edit_target.dart';
+import 'package:yingjian/features/editor/domain/editing_core.dart';
+import 'package:yingjian/features/editor/domain/editing_resource.dart';
+import 'package:yingjian/features/editor/domain/legacy_edit_recipe_adapter.dart';
+import 'package:yingjian/features/editor/domain/meta_op.dart';
 import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
+import 'package:yingjian/features/editor/domain/targeted_geometry_recipe.dart';
+import 'package:yingjian/features/editor/domain/targeted_portrait_recipe.dart';
 
 const Object _notProvided = Object();
+
+List<ProjectEditOperation> _boundedHistory(
+  List<ProjectEditOperation> operations,
+) => operations.length <= PhotoProject.maxEditHistoryCount
+    ? operations
+    : operations.sublist(operations.length - PhotoProject.maxEditHistoryCount);
+
+List<Map<String, Object?>> _copyUnknownMetaOps(
+  Iterable<Map<String, Object?>> values,
+) => List.unmodifiable(
+  values.map(
+    (value) => Map<String, Object?>.unmodifiable(
+      Map<String, Object?>.from(jsonDecode(jsonEncode(value)) as Map),
+    ),
+  ),
+);
 
 enum PhotoInputFormat { jpeg, png, heic, unknown }
 
@@ -170,12 +195,14 @@ enum ProjectEditOperationKind {
   scopedEdit,
   syncCurrentPhotoToGroup,
   resetCurrentPhotoOverride,
+  targetRebind,
 }
 
 @immutable
 class ProjectEditOperation {
-  const ProjectEditOperation({
+  ProjectEditOperation({
     this.kind = ProjectEditOperationKind.scopedEdit,
+    this.source = EditSource.manual,
     required this.scope,
     required this.beforeRecipe,
     required this.afterRecipe,
@@ -184,9 +211,15 @@ class ProjectEditOperation {
     this.photoId,
     this.beforePhotoOverrideRecipe,
     this.afterPhotoOverrideRecipe,
-  });
+    this.beforeTargetRegistry,
+    this.afterTargetRegistry,
+    this.beforeSnapshot,
+    this.afterSnapshot,
+    List<OpAddress> changedAddresses = const [],
+  }) : changedAddresses = List.unmodifiable(changedAddresses);
 
   final ProjectEditOperationKind kind;
+  final EditSource source;
   final ProjectEditingScope scope;
   final String? photoId;
   final EditRecipe beforeRecipe;
@@ -195,15 +228,45 @@ class ProjectEditOperation {
   final double afterSharedIntensity;
   final EditRecipe? beforePhotoOverrideRecipe;
   final EditRecipe? afterPhotoOverrideRecipe;
+  final EditTargetRegistry? beforeTargetRegistry;
+  final EditTargetRegistry? afterTargetRegistry;
+  final ProjectEditSnapshot? beforeSnapshot;
+  final ProjectEditSnapshot? afterSnapshot;
+  final List<OpAddress> changedAddresses;
+
+  ProjectEditOperation withSnapshots({
+    required ProjectEditSnapshot before,
+    required ProjectEditSnapshot after,
+  }) => ProjectEditOperation(
+    kind: kind,
+    source: source,
+    scope: scope,
+    beforeRecipe: beforeRecipe,
+    afterRecipe: afterRecipe,
+    beforeSharedIntensity: beforeSharedIntensity,
+    afterSharedIntensity: afterSharedIntensity,
+    photoId: photoId,
+    beforePhotoOverrideRecipe: beforePhotoOverrideRecipe,
+    afterPhotoOverrideRecipe: afterPhotoOverrideRecipe,
+    beforeTargetRegistry: beforeTargetRegistry,
+    afterTargetRegistry: afterTargetRegistry,
+    beforeSnapshot: before,
+    afterSnapshot: after,
+    changedAddresses: changedAddresses,
+  );
 
   Map<String, Object> toJson() {
     final value = <String, Object>{
       'kind': kind.name,
+      'source': source.name,
       'scope': scope.name,
       'beforeRecipe': beforeRecipe.toJson(),
       'afterRecipe': afterRecipe.toJson(),
       'beforeSharedIntensity': beforeSharedIntensity,
       'afterSharedIntensity': afterSharedIntensity,
+      'changedAddresses': changedAddresses
+          .map((address) => address.toJson())
+          .toList(),
     };
     if (photoId != null) value['photoId'] = photoId!;
     if (beforePhotoOverrideRecipe != null) {
@@ -211,6 +274,16 @@ class ProjectEditOperation {
     }
     if (afterPhotoOverrideRecipe != null) {
       value['afterPhotoOverrideRecipe'] = afterPhotoOverrideRecipe!.toJson();
+    }
+    if (beforeTargetRegistry != null) {
+      value['beforeTargetRegistry'] = beforeTargetRegistry!.toJson();
+    }
+    if (afterTargetRegistry != null) {
+      value['afterTargetRegistry'] = afterTargetRegistry!.toJson();
+    }
+    if (beforeSnapshot != null) {
+      value['beforeSnapshot'] = beforeSnapshot!.toJson();
+      value['afterSnapshot'] = afterSnapshot!.toJson();
     }
     return value;
   }
@@ -228,6 +301,13 @@ class ProjectEditOperation {
               json['kind'],
               ProjectEditOperationKind.values,
               'edit operation kind',
+            ),
+      source: json['source'] == null
+          ? EditSource.migration
+          : PhotoProject._enumValue(
+              json['source'],
+              EditSource.values,
+              'edit operation source',
             ),
       scope: scope,
       photoId: json['photoId'] as String?,
@@ -253,6 +333,35 @@ class ProjectEditOperation {
               json['afterPhotoOverrideRecipe']! as Map<String, Object?>,
             )
           : null,
+      beforeTargetRegistry: json['beforeTargetRegistry'] is Map
+          ? EditTargetRegistry.fromJson(
+              Map<String, Object?>.from(json['beforeTargetRegistry']! as Map),
+            )
+          : null,
+      afterTargetRegistry: json['afterTargetRegistry'] is Map
+          ? EditTargetRegistry.fromJson(
+              Map<String, Object?>.from(json['afterTargetRegistry']! as Map),
+            )
+          : null,
+      beforeSnapshot: json['beforeSnapshot'] is Map
+          ? ProjectEditSnapshot.fromJson(
+              Map<String, Object?>.from(json['beforeSnapshot']! as Map),
+            )
+          : null,
+      afterSnapshot: json['afterSnapshot'] is Map
+          ? ProjectEditSnapshot.fromJson(
+              Map<String, Object?>.from(json['afterSnapshot']! as Map),
+            )
+          : null,
+      changedAddresses: json['changedAddresses'] is List
+          ? (json['changedAddresses']! as List)
+                .map(
+                  (value) => OpAddress.fromJson(
+                    Map<String, Object?>.from(value! as Map),
+                  ),
+                )
+                .toList()
+          : const [],
     );
   }
 
@@ -260,6 +369,7 @@ class ProjectEditOperation {
   bool operator ==(Object other) =>
       other is ProjectEditOperation &&
       other.kind == kind &&
+      other.source == source &&
       other.scope == scope &&
       other.photoId == photoId &&
       other.beforeRecipe == beforeRecipe &&
@@ -267,11 +377,17 @@ class ProjectEditOperation {
       other.beforeSharedIntensity == beforeSharedIntensity &&
       other.afterSharedIntensity == afterSharedIntensity &&
       other.beforePhotoOverrideRecipe == beforePhotoOverrideRecipe &&
-      other.afterPhotoOverrideRecipe == afterPhotoOverrideRecipe;
+      other.afterPhotoOverrideRecipe == afterPhotoOverrideRecipe &&
+      other.beforeTargetRegistry == beforeTargetRegistry &&
+      other.afterTargetRegistry == afterTargetRegistry &&
+      other.beforeSnapshot == beforeSnapshot &&
+      other.afterSnapshot == afterSnapshot &&
+      listEquals(other.changedAddresses, changedAddresses);
 
   @override
   int get hashCode => Object.hash(
     kind,
+    source,
     scope,
     photoId,
     beforeRecipe,
@@ -280,6 +396,11 @@ class ProjectEditOperation {
     afterSharedIntensity,
     beforePhotoOverrideRecipe,
     afterPhotoOverrideRecipe,
+    beforeTargetRegistry,
+    afterTargetRegistry,
+    beforeSnapshot,
+    afterSnapshot,
+    Object.hashAll(changedAddresses),
   );
 }
 
@@ -584,6 +705,138 @@ class PhotoGroupSyncPlan {
 }
 
 @immutable
+final class ProjectEditSnapshot {
+  ProjectEditSnapshot({
+    required this.sharedStyle,
+    Map<String, AdaptiveCompensation> adaptiveCompensations = const {},
+    required Map<String, PhotoOverride> photoOverrides,
+    required Map<String, EditTargetRegistry> targetRegistries,
+    EditState? editState,
+  }) : adaptiveCompensations = Map.unmodifiable(adaptiveCompensations),
+       photoOverrides = Map.unmodifiable(photoOverrides),
+       targetRegistries = Map.unmodifiable(targetRegistries),
+       editState =
+           editState ??
+           PhotoProject.deriveEditState(
+             sharedStyle: sharedStyle,
+             photoOverrides: photoOverrides,
+             targetRegistries: targetRegistries,
+           );
+
+  factory ProjectEditSnapshot.fromProject(PhotoProject project) =>
+      ProjectEditSnapshot(
+        sharedStyle: project.sharedStyle,
+        adaptiveCompensations: project.adaptiveCompensations,
+        photoOverrides: project.photoOverrides,
+        targetRegistries: project.targetRegistries,
+        editState: project.editState,
+      );
+
+  final SharedStyle sharedStyle;
+  final Map<String, AdaptiveCompensation> adaptiveCompensations;
+  final Map<String, PhotoOverride> photoOverrides;
+  final Map<String, EditTargetRegistry> targetRegistries;
+  final EditState editState;
+
+  Map<String, Object> toJson() => {
+    'sharedStyle': sharedStyle.toJson(),
+    'adaptiveCompensations': adaptiveCompensations.map(
+      (photoId, layer) => MapEntry(photoId, layer.toJson()),
+    ),
+    'photoOverrides': photoOverrides.map(
+      (photoId, layer) => MapEntry(photoId, layer.toJson()),
+    ),
+    'targetRegistries': targetRegistries.map(
+      (photoId, registry) => MapEntry(photoId, registry.toJson()),
+    ),
+    'editState': editState.toJson(),
+  };
+
+  factory ProjectEditSnapshot.fromJson(Map<String, Object?> json) =>
+      ProjectEditSnapshot(
+        sharedStyle: SharedStyle.fromJson(
+          Map<String, Object?>.from(json['sharedStyle']! as Map),
+        ),
+        adaptiveCompensations: PhotoProject._layerMap(
+          json['adaptiveCompensations'],
+          AdaptiveCompensation.fromJson,
+        ),
+        photoOverrides: PhotoProject._layerMap(
+          json['photoOverrides'],
+          PhotoOverride.fromJson,
+        ),
+        targetRegistries: PhotoProject._layerMap(
+          json['targetRegistries'],
+          EditTargetRegistry.fromJson,
+        ),
+        editState: json['editState'] is Map
+            ? EditState.fromJson(
+                Map<String, Object?>.from(json['editState']! as Map),
+              )
+            : null,
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is ProjectEditSnapshot &&
+      other.sharedStyle == sharedStyle &&
+      mapEquals(other.adaptiveCompensations, adaptiveCompensations) &&
+      mapEquals(other.photoOverrides, photoOverrides) &&
+      mapEquals(other.targetRegistries, targetRegistries) &&
+      other.editState == editState;
+
+  @override
+  int get hashCode => Object.hash(
+    sharedStyle,
+    Object.hashAllUnordered(adaptiveCompensations.entries),
+    Object.hashAllUnordered(
+      photoOverrides.entries.map(
+        (entry) => Object.hash(entry.key, entry.value),
+      ),
+    ),
+    Object.hashAllUnordered(
+      targetRegistries.entries.map(
+        (entry) => Object.hash(entry.key, entry.value),
+      ),
+    ),
+    editState,
+  );
+}
+
+@immutable
+final class ProjectEditCheckpoint {
+  const ProjectEditCheckpoint({
+    required this.editCount,
+    required this.snapshot,
+  });
+
+  final int editCount;
+  final ProjectEditSnapshot snapshot;
+
+  Map<String, Object> toJson() => {
+    'editCount': editCount,
+    'snapshot': snapshot.toJson(),
+  };
+
+  factory ProjectEditCheckpoint.fromJson(Map<String, Object?> json) =>
+      ProjectEditCheckpoint(
+        editCount: (json['editCount']! as num).toInt(),
+        snapshot: ProjectEditSnapshot.fromJson(
+          Map<String, Object?>.from(json['snapshot']! as Map),
+        ),
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is ProjectEditCheckpoint &&
+      other.editCount == editCount &&
+      other.snapshot == snapshot;
+
+  @override
+  int get hashCode => Object.hash(editCount, snapshot);
+}
+
+@immutable
 class PhotoProject {
   PhotoProject({
     required this.id,
@@ -594,11 +847,19 @@ class PhotoProject {
     SharedStyle? sharedStyle,
     Map<String, AdaptiveCompensation> adaptiveCompensations = const {},
     Map<String, PhotoOverride> photoOverrides = const {},
+    Map<String, EditTargetRegistry> targetRegistries = const {},
     Map<String, PhotoAnalysisState> analysisStates = const {},
     Map<String, PhotoExportState> exportStates = const {},
+    EditingResourceRegistry? editingResources,
+    EditState? editState,
     ProjectEditingScope? editingScope,
     List<ProjectEditOperation> undoHistory = const [],
     List<ProjectEditOperation> redoHistory = const [],
+    this.foldedEditCount = 0,
+    this.historyBaseSnapshot,
+    List<ProjectEditCheckpoint> editCheckpoints = const [],
+    List<Map<String, Object?>> unknownMetaOps = const [],
+    List<String> recentTransactionIds = const [],
     this.flowState = PhotoProjectFlowState.editing,
     this.focusPhotoId,
     this.selectedRecommendationId,
@@ -608,6 +869,7 @@ class PhotoProject {
            sharedStyle ?? SharedStyle(recipe: recipe ?? EditRecipe.neutral),
        adaptiveCompensations = Map.unmodifiable(adaptiveCompensations),
        photoOverrides = Map.unmodifiable(photoOverrides),
+       targetRegistries = Map.unmodifiable(targetRegistries),
        analysisStates = Map.unmodifiable({
          for (final photo in photos)
            photo.id: analysisStates[photo.id] ?? PhotoAnalysisState.pending,
@@ -616,8 +878,27 @@ class PhotoProject {
          for (final photo in photos)
            photo.id: exportStates[photo.id] ?? PhotoExportState.notQueued,
        }),
-       undoHistory = List.unmodifiable(undoHistory),
-       redoHistory = List.unmodifiable(redoHistory),
+       editingResources = editingResources ?? EditingResourceRegistry.empty,
+       editState =
+           editState ??
+           deriveEditState(
+             sharedStyle:
+                 sharedStyle ??
+                 SharedStyle(recipe: recipe ?? EditRecipe.neutral),
+             photoOverrides: photoOverrides,
+             targetRegistries: targetRegistries,
+           ),
+       undoHistory = List.unmodifiable(_boundedHistory(undoHistory)),
+       redoHistory = List.unmodifiable(_boundedHistory(redoHistory)),
+       editCheckpoints = List.unmodifiable(editCheckpoints),
+       unknownMetaOps = _copyUnknownMetaOps(unknownMetaOps),
+       recentTransactionIds = List.unmodifiable(
+         recentTransactionIds.length <= maxEditHistoryCount
+             ? recentTransactionIds
+             : recentTransactionIds.sublist(
+                 recentTransactionIds.length - maxEditHistoryCount,
+               ),
+       ),
        editingScope =
            editingScope ??
            (photos.length == 1
@@ -639,6 +920,34 @@ class PhotoProject {
         'groupScrollOffset',
         'Group scroll offset must be finite and non-negative',
       );
+    }
+    if (foldedEditCount < 0) {
+      throw RangeError.value(foldedEditCount, 'foldedEditCount');
+    }
+    if (recentTransactionIds.any((id) => id.trim().isEmpty) ||
+        recentTransactionIds.toSet().length != recentTransactionIds.length) {
+      throw ArgumentError.value(
+        recentTransactionIds,
+        'recentTransactionIds',
+        'Transaction ids must be non-empty and unique',
+      );
+    }
+    if (historyBaseSnapshot == null && editCheckpoints.isNotEmpty) {
+      throw ArgumentError(
+        'Checkpoints require a history base snapshot and vice versa',
+      );
+    }
+    var previousCheckpoint = foldedEditCount;
+    for (final checkpoint in editCheckpoints) {
+      if (checkpoint.editCount <= previousCheckpoint ||
+          checkpoint.editCount % checkpointInterval != 0) {
+        throw ArgumentError.value(
+          checkpoint,
+          'editCheckpoints',
+          'Checkpoints must be ordered twenty-edit boundaries',
+        );
+      }
+      previousCheckpoint = checkpoint.editCount;
     }
     final photoIds = photos.map((photo) => photo.id).toSet();
     if (photoIds.length != photos.length) {
@@ -682,6 +991,7 @@ class PhotoProject {
     final foreignLayerIds = {
       ...adaptiveCompensations.keys,
       ...photoOverrides.keys,
+      ...targetRegistries.keys,
       ...analysisStates.keys,
       ...exportStates.keys,
     }.difference(photoIds);
@@ -691,6 +1001,17 @@ class PhotoProject {
         'layers',
         'Every layer must reference a project photo',
       );
+    }
+    for (final entry in targetRegistries.entries) {
+      if (entry.value.targets.values.any(
+        (target) => target.photoId != entry.key,
+      )) {
+        throw ArgumentError.value(
+          entry,
+          'targetRegistries',
+          'Every stable target must belong to its registry photo',
+        );
+      }
     }
     for (final operation in [...undoHistory, ...redoHistory]) {
       final photoId = operation.photoId;
@@ -728,6 +1049,18 @@ class PhotoProject {
               operation.afterPhotoOverrideRecipe == null &&
               operation.beforeRecipe == operation.beforePhotoOverrideRecipe &&
               operation.beforeSharedIntensity == operation.afterSharedIntensity,
+        ProjectEditOperationKind.targetRebind =>
+          operation.scope == ProjectEditingScope.currentPhoto &&
+              photoId != null &&
+              photoIds.contains(photoId) &&
+              operation.beforeRecipe == operation.afterRecipe &&
+              operation.beforeSharedIntensity ==
+                  operation.afterSharedIntensity &&
+              operation.beforePhotoOverrideRecipe == null &&
+              operation.afterPhotoOverrideRecipe == null &&
+              operation.beforeTargetRegistry != null &&
+              operation.afterTargetRegistry != null &&
+              operation.beforeTargetRegistry != operation.afterTargetRegistry,
       };
       if (!operation.beforeSharedIntensity.isFinite ||
           operation.beforeSharedIntensity < 0 ||
@@ -746,11 +1079,13 @@ class PhotoProject {
   }
 
   static const maxPhotoCount = 6;
+  static const maxEditHistoryCount = 100;
   // V9 separates the shareable filter/HSL look from per-photo basic geometry,
   // so flips and perspective never freeze later group-style edits. V8's
   // broader overridesBasicEditing flag is accepted as a conservative look
   // override during migration.
-  static const schemaVersion = 9;
+  static const schemaVersion = 13;
+  static const checkpointInterval = 20;
 
   final String id;
   final DateTime createdAt;
@@ -759,11 +1094,19 @@ class PhotoProject {
   final SharedStyle sharedStyle;
   final Map<String, AdaptiveCompensation> adaptiveCompensations;
   final Map<String, PhotoOverride> photoOverrides;
+  final Map<String, EditTargetRegistry> targetRegistries;
   final Map<String, PhotoAnalysisState> analysisStates;
   final Map<String, PhotoExportState> exportStates;
+  final EditingResourceRegistry editingResources;
+  final EditState editState;
   final ProjectEditingScope editingScope;
   final List<ProjectEditOperation> undoHistory;
   final List<ProjectEditOperation> redoHistory;
+  final int foldedEditCount;
+  final ProjectEditSnapshot? historyBaseSnapshot;
+  final List<ProjectEditCheckpoint> editCheckpoints;
+  final List<Map<String, Object?>> unknownMetaOps;
+  final List<String> recentTransactionIds;
   final PhotoProjectFlowState flowState;
   final String? focusPhotoId;
   final String? selectedRecommendationId;
@@ -773,7 +1116,68 @@ class PhotoProject {
   /// global recipe to explicit group/current-photo scopes.
   EditRecipe get recipe => sharedStyle.recipe;
 
+  bool get requiresUpdate =>
+      unknownMetaOps.isNotEmpty ||
+      [...undoHistory, ...redoHistory].any(
+        (operation) => operation.changedAddresses.any((address) {
+          final definition = MetaOpCatalog.standard.find(address.metaOpId);
+          return definition == null ||
+              definition.version != address.metaOpVersion;
+        }),
+      );
+  bool get isReadOnly => requiresUpdate;
+  bool get canExport => !requiresUpdate;
+  int get editStateVersion => editState.version;
+
+  bool get hasConsistentEditState {
+    final derived = deriveEditState(
+      sharedStyle: sharedStyle,
+      photoOverrides: photoOverrides,
+      targetRegistries: targetRegistries,
+    );
+    return mapEquals(derived.values, editState.values);
+  }
+
+  static EditState deriveEditState({
+    required SharedStyle sharedStyle,
+    required Map<String, PhotoOverride> photoOverrides,
+    required Map<String, EditTargetRegistry> targetRegistries,
+  }) {
+    const adapter = LegacyEditRecipeAdapter();
+    final values = <OpAddress, Object>{
+      ...adapter.read(sharedStyle.recipe).values,
+    };
+    for (final entry in photoOverrides.entries) {
+      final photoValues = adapter
+          .read(
+            entry.value.recipe,
+            photoId: entry.key,
+            targetRegistry: targetRegistries[entry.key],
+          )
+          .values;
+      values.addEntries(
+        photoValues.entries.where(
+          (entry) => entry.key.scope == EditScope.currentPhoto,
+        ),
+      );
+    }
+    return EditState(values: Map.unmodifiable(values));
+  }
+
+  EditState renderStateFor(String photoId, {EditRecipe? recipe}) {
+    if (!photos.any((photo) => photo.id == photoId)) {
+      throw ArgumentError.value(photoId, 'photoId', 'Unknown project photo');
+    }
+    final projected = const LegacyEditRecipeAdapter().read(
+      recipe ?? effectiveRecipeFor(photoId),
+      photoId: photoId,
+      targetRegistry: targetRegistries[photoId],
+    );
+    return EditState(version: editState.version, values: projected.values);
+  }
+
   bool canTransitionTo(PhotoProjectFlowState nextState) {
+    if (requiresUpdate && nextState != flowState) return false;
     if (!flowState.canTransitionTo(nextState)) return false;
     if (flowState == nextState) return true;
     if (flowState == PhotoProjectFlowState.analyzing &&
@@ -822,6 +1226,7 @@ class PhotoProject {
   }
 
   bool canTransitionPhotoExport(String photoId, PhotoExportState nextState) {
+    if (!canExport) return false;
     final previous = exportStates[photoId];
     if (previous == null || !previous.canTransitionTo(nextState)) return false;
     if (flowState == PhotoProjectFlowState.editing) {
@@ -830,7 +1235,35 @@ class PhotoProject {
     return flowState == PhotoProjectFlowState.exporting;
   }
 
-  bool get canMutateInputs => flowState != PhotoProjectFlowState.exporting;
+  bool get canMutateInputs =>
+      !requiresUpdate && flowState != PhotoProjectFlowState.exporting;
+
+  bool get hasValidHistoryReplay {
+    final base = historyBaseSnapshot;
+    if (base == null) {
+      return foldedEditCount == 0 &&
+          editCheckpoints.isEmpty &&
+          undoHistory.isEmpty &&
+          redoHistory.isEmpty;
+    }
+    var cursor = base;
+    var editCount = foldedEditCount;
+    final checkpoints = {
+      for (final checkpoint in editCheckpoints)
+        checkpoint.editCount: checkpoint.snapshot,
+    };
+    for (final operation in undoHistory) {
+      if (operation.beforeSnapshot != cursor ||
+          operation.afterSnapshot == null) {
+        return false;
+      }
+      cursor = operation.afterSnapshot!;
+      editCount += 1;
+      final checkpoint = checkpoints[editCount];
+      if (checkpoint != null && checkpoint != cursor) return false;
+    }
+    return cursor == ProjectEditSnapshot.fromProject(this);
+  }
 
   PhotoGroupSyncPlan? planPhotoAdjustmentsToGroup(String photoId) {
     if (!photos.any((photo) => photo.id == photoId)) {
@@ -969,6 +1402,27 @@ class PhotoProject {
         photoOverride != null || (storedOverride?.overridesBasicLook ?? false);
     final overridesCrop =
         photoOverride != null || (storedOverride?.overridesCrop ?? false);
+    final activeTargetIds =
+        targetRegistries[photoId]?.targets.values
+            .where((target) => target.status == EditTargetStatus.active)
+            .map((target) => target.id)
+            .toSet() ??
+        const <String>{};
+    final storedTargetedGeometry =
+        override?.targetedGeometryRecipe ?? TargetedGeometryRecipe.neutral;
+    final activeTargetedGeometry = storedTargetedGeometry.retainTargets(
+      activeTargetIds,
+    );
+    final portraitGeometry = storedTargetedGeometry.isNeutral
+        ? override?.portraitGeometryRecipe ??
+              EditRecipe.neutral.portraitGeometryRecipe
+        : activeTargetedGeometry.project(
+            targetRegistries[photoId],
+            selectedFaceIndex:
+                override?.portraitGeometryRecipe.selectedFaceIndex ?? 0,
+            selectedBodyIndex:
+                override?.portraitGeometryRecipe.selectedBodyIndex ?? 0,
+          );
     return EditRecipe(
       exposure: _sumAndClamp(
         shared.exposure * sharedIntensity,
@@ -1029,12 +1483,14 @@ class PhotoProject {
         geometry: override?.basicEditingRecipe ?? BasicEditingRecipe.neutral,
         look: overridesBasicLook ? override!.basicEditingRecipe : sharedBasic,
       ),
-      portraitGeometryRecipe:
-          override?.portraitGeometryRecipe ??
-          EditRecipe.neutral.portraitGeometryRecipe,
+      portraitGeometryRecipe: portraitGeometry,
       semanticEditingRecipe:
           override?.semanticEditingRecipe ??
           EditRecipe.neutral.semanticEditingRecipe,
+      targetedPortraitRecipe:
+          (override?.targetedPortraitRecipe ?? TargetedPortraitRecipe.neutral)
+              .retainTargets(activeTargetIds),
+      targetedGeometryRecipe: activeTargetedGeometry,
       crop: overridesCrop ? override!.crop : shared.crop,
     );
   }
@@ -1049,6 +1505,7 @@ class PhotoProject {
         .toDouble();
     return EditRecipe(
       portraitRecipe: adaptiveLayer?.portraitRecipe,
+      targetedPortraitRecipe: TargetedPortraitRecipe.neutral,
       basicEditingRecipe: _scaledSharedBasic(
         sharedStyle.recipe.basicEditingRecipe,
         sharedIntensity,
@@ -1080,11 +1537,19 @@ class PhotoProject {
     SharedStyle? sharedStyle,
     Map<String, AdaptiveCompensation>? adaptiveCompensations,
     Map<String, PhotoOverride>? photoOverrides,
+    Map<String, EditTargetRegistry>? targetRegistries,
     Map<String, PhotoAnalysisState>? analysisStates,
     Map<String, PhotoExportState>? exportStates,
+    EditingResourceRegistry? editingResources,
+    EditState? editState,
     ProjectEditingScope? editingScope,
     List<ProjectEditOperation>? undoHistory,
     List<ProjectEditOperation>? redoHistory,
+    int? foldedEditCount,
+    Object? historyBaseSnapshot = _notProvided,
+    List<ProjectEditCheckpoint>? editCheckpoints,
+    List<Map<String, Object?>>? unknownMetaOps,
+    List<String>? recentTransactionIds,
     PhotoProjectFlowState? flowState,
     Object? focusPhotoId = _notProvided,
     Object? selectedRecommendationId = _notProvided,
@@ -1107,11 +1572,21 @@ class PhotoProject {
       adaptiveCompensations:
           adaptiveCompensations ?? this.adaptiveCompensations,
       photoOverrides: photoOverrides ?? this.photoOverrides,
+      targetRegistries: targetRegistries ?? this.targetRegistries,
       analysisStates: analysisStates ?? this.analysisStates,
       exportStates: exportStates ?? this.exportStates,
+      editingResources: editingResources ?? this.editingResources,
+      editState: editState ?? this.editState,
       editingScope: editingScope ?? this.editingScope,
       undoHistory: undoHistory ?? this.undoHistory,
       redoHistory: redoHistory ?? this.redoHistory,
+      foldedEditCount: foldedEditCount ?? this.foldedEditCount,
+      historyBaseSnapshot: historyBaseSnapshot == _notProvided
+          ? this.historyBaseSnapshot
+          : historyBaseSnapshot as ProjectEditSnapshot?,
+      editCheckpoints: editCheckpoints ?? this.editCheckpoints,
+      unknownMetaOps: unknownMetaOps ?? this.unknownMetaOps,
+      recentTransactionIds: recentTransactionIds ?? this.recentTransactionIds,
       flowState: flowState ?? this.flowState,
       focusPhotoId: focusPhotoId == _notProvided
           ? this.focusPhotoId
@@ -1138,12 +1613,17 @@ class PhotoProject {
       'photoOverrides': photoOverrides.map(
         (photoId, layer) => MapEntry(photoId, layer.toJson()),
       ),
+      'targetRegistries': targetRegistries.map(
+        (photoId, registry) => MapEntry(photoId, registry.toJson()),
+      ),
       'analysisStates': analysisStates.map(
         (photoId, state) => MapEntry(photoId, state.name),
       ),
       'exportStates': exportStates.map(
         (photoId, state) => MapEntry(photoId, state.name),
       ),
+      'editingResources': editingResources.toJson(),
+      'editState': editState.toJson(),
       'editingScope': editingScope.name,
       'groupScrollOffset': groupScrollOffset,
       'undoHistory': undoHistory
@@ -1152,12 +1632,22 @@ class PhotoProject {
       'redoHistory': redoHistory
           .map((operation) => operation.toJson())
           .toList(),
+      'foldedEditCount': foldedEditCount,
+      'editCheckpoints': editCheckpoints
+          .map((checkpoint) => checkpoint.toJson())
+          .toList(),
+      if (unknownMetaOps.isNotEmpty) 'unknownMetaOps': unknownMetaOps,
+      if (recentTransactionIds.isNotEmpty)
+        'recentTransactionIds': recentTransactionIds,
     };
     if (focusPhotoId != null) {
       value['focusPhotoId'] = focusPhotoId!;
     }
     if (selectedRecommendationId != null) {
       value['selectedRecommendationId'] = selectedRecommendationId!;
+    }
+    if (historyBaseSnapshot != null) {
+      value['historyBaseSnapshot'] = historyBaseSnapshot!.toJson();
     }
     return value;
   }
@@ -1190,7 +1680,7 @@ class PhotoProject {
     if (flowState == null) {
       throw FormatException('Unsupported project flow state $flowStateName');
     }
-    return PhotoProject(
+    final project = PhotoProject(
       id: json['id']! as String,
       createdAt: DateTime.parse(json['createdAt']! as String),
       updatedAt: DateTime.parse(json['updatedAt']! as String),
@@ -1208,12 +1698,25 @@ class PhotoProject {
         AdaptiveCompensation.fromJson,
       ),
       photoOverrides: _layerMap(json['photoOverrides'], PhotoOverride.fromJson),
+      targetRegistries: storedVersion < 10
+          ? const {}
+          : _layerMap(json['targetRegistries'], EditTargetRegistry.fromJson),
       analysisStates: storedVersion < 3
           ? const {}
           : _enumMap(json['analysisStates'], PhotoAnalysisState.values),
       exportStates: storedVersion < 3
           ? const {}
           : _enumMap(json['exportStates'], PhotoExportState.values),
+      editingResources: storedVersion < 11
+          ? EditingResourceRegistry.empty
+          : EditingResourceRegistry.fromJson(
+              Map<String, Object?>.from(json['editingResources']! as Map),
+            ),
+      editState: storedVersion < 13
+          ? null
+          : EditState.fromJson(
+              Map<String, Object?>.from(json['editState']! as Map),
+            ),
       editingScope: storedVersion < 4
           ? null
           : _enumValue(
@@ -1227,11 +1730,122 @@ class PhotoProject {
       redoHistory: storedVersion < 4
           ? const []
           : _operationList(json['redoHistory']),
+      foldedEditCount: storedVersion < 12
+          ? 0
+          : (json['foldedEditCount']! as num).toInt(),
+      historyBaseSnapshot:
+          storedVersion < 12 || json['historyBaseSnapshot'] == null
+          ? null
+          : ProjectEditSnapshot.fromJson(
+              Map<String, Object?>.from(json['historyBaseSnapshot']! as Map),
+            ),
+      editCheckpoints: storedVersion < 12
+          ? const []
+          : (json['editCheckpoints']! as List)
+                .map(
+                  (value) => ProjectEditCheckpoint.fromJson(
+                    Map<String, Object?>.from(value! as Map),
+                  ),
+                )
+                .toList(),
+      unknownMetaOps: json['unknownMetaOps'] is List
+          ? (json['unknownMetaOps']! as List)
+                .map((value) => Map<String, Object?>.from(value! as Map))
+                .toList()
+          : const [],
+      recentTransactionIds: storedVersion < 13
+          ? const []
+          : (json['recentTransactionIds'] as List<Object?>? ?? const [])
+                .cast<String>(),
       groupScrollOffset: storedVersion < 5
           ? 0
           : (json['groupScrollOffset'] as num?)?.toDouble() ?? 0,
     );
+    if (storedVersion < 12) {
+      return _migrateLegacyHistory(project);
+    }
+    if (storedVersion >= 13 && !project.hasConsistentEditState) {
+      throw const FormatException(
+        'Photo project edit state does not match its render projection',
+      );
+    }
+    if (!project.hasValidHistoryReplay) {
+      throw const FormatException(
+        'Photo project history does not reproduce the current edit state',
+      );
+    }
+    return project;
   }
+
+  static PhotoProject _migrateLegacyHistory(PhotoProject project) {
+    if (project.undoHistory.isEmpty && project.redoHistory.isEmpty) {
+      return project;
+    }
+    final canReplay =
+        project.redoHistory.isEmpty &&
+        project.undoHistory.every(
+          (operation) =>
+              operation.kind == ProjectEditOperationKind.scopedEdit &&
+              operation.scope == ProjectEditingScope.group &&
+              operation.photoId == null,
+        );
+    if (!canReplay) return _freezeLegacyHistory(project);
+
+    var cursor = ProjectEditSnapshot.fromProject(project);
+    final reversed = <ProjectEditOperation>[];
+    for (final operation in project.undoHistory.reversed) {
+      if (cursor.sharedStyle.recipe != operation.afterRecipe ||
+          cursor.sharedStyle.intensity != operation.afterSharedIntensity) {
+        return _freezeLegacyHistory(project);
+      }
+      final before = ProjectEditSnapshot(
+        sharedStyle: SharedStyle(
+          recipe: operation.beforeRecipe,
+          family: cursor.sharedStyle.family,
+          intensity: operation.beforeSharedIntensity,
+        ),
+        adaptiveCompensations: cursor.adaptiveCompensations,
+        photoOverrides: cursor.photoOverrides,
+        targetRegistries: cursor.targetRegistries,
+      );
+      reversed.add(operation.withSnapshots(before: before, after: cursor));
+      cursor = before;
+    }
+    final history = reversed.reversed.toList(growable: false);
+    final checkpoints = <ProjectEditCheckpoint>[];
+    for (
+      var index = checkpointInterval;
+      index <= history.length;
+      index += checkpointInterval
+    ) {
+      checkpoints.add(
+        ProjectEditCheckpoint(
+          editCount: index,
+          snapshot: history[index - 1].afterSnapshot!,
+        ),
+      );
+    }
+    final migrated = project.copyWith(
+      undoHistory: history,
+      redoHistory: const [],
+      foldedEditCount: 0,
+      historyBaseSnapshot: cursor,
+      editCheckpoints: checkpoints,
+    );
+    return migrated.hasValidHistoryReplay
+        ? migrated
+        : _freezeLegacyHistory(project);
+  }
+
+  static PhotoProject _freezeLegacyHistory(PhotoProject project) =>
+      project.copyWith(
+        undoHistory: const [],
+        redoHistory: const [],
+        foldedEditCount:
+            project.undoHistory.length + project.redoHistory.length,
+        historyBaseSnapshot: ProjectEditSnapshot.fromProject(project),
+        editCheckpoints: const [],
+      );
 
   @override
   bool operator ==(Object other) {
@@ -1242,11 +1856,19 @@ class PhotoProject {
         other.sharedStyle == sharedStyle &&
         mapEquals(other.adaptiveCompensations, adaptiveCompensations) &&
         mapEquals(other.photoOverrides, photoOverrides) &&
+        mapEquals(other.targetRegistries, targetRegistries) &&
         mapEquals(other.analysisStates, analysisStates) &&
         mapEquals(other.exportStates, exportStates) &&
+        other.editingResources == editingResources &&
+        other.editState == editState &&
         other.editingScope == editingScope &&
         listEquals(other.undoHistory, undoHistory) &&
         listEquals(other.redoHistory, redoHistory) &&
+        other.foldedEditCount == foldedEditCount &&
+        other.historyBaseSnapshot == historyBaseSnapshot &&
+        listEquals(other.editCheckpoints, editCheckpoints) &&
+        jsonEncode(other.unknownMetaOps) == jsonEncode(unknownMetaOps) &&
+        listEquals(other.recentTransactionIds, recentTransactionIds) &&
         other.flowState == flowState &&
         other.focusPhotoId == focusPhotoId &&
         other.selectedRecommendationId == selectedRecommendationId &&
@@ -1255,24 +1877,32 @@ class PhotoProject {
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     id,
     createdAt,
     updatedAt,
     sharedStyle,
     Object.hashAllUnordered(adaptiveCompensations.entries),
     Object.hashAllUnordered(photoOverrides.entries),
+    Object.hashAllUnordered(targetRegistries.entries),
     Object.hashAllUnordered(analysisStates.entries),
     Object.hashAllUnordered(exportStates.entries),
+    editingResources,
+    editState,
     editingScope,
     Object.hashAll(undoHistory),
     Object.hashAll(redoHistory),
+    foldedEditCount,
+    historyBaseSnapshot,
+    Object.hashAll(editCheckpoints),
+    jsonEncode(unknownMetaOps),
+    Object.hashAll(recentTransactionIds),
     flowState,
     focusPhotoId,
     selectedRecommendationId,
     groupScrollOffset,
     Object.hashAll(photos),
-  );
+  ]);
 
   static double _sumAndClamp(double first, double? second, double? third) {
     return (first + (second ?? 0) + (third ?? 0)).clamp(-1.0, 1.0);

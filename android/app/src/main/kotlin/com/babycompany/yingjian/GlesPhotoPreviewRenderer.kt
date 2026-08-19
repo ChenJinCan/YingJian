@@ -57,12 +57,37 @@ class GlesPhotoPreviewRenderer(
 
     private fun handleMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
+            "getMetaOpCapabilities" -> result.success(
+                mapOf(
+                    "platform" to "android",
+                    "operations" to listOf(
+                        metaOpCapability("composition.geometry"),
+                        metaOpCapability("tone.exposure"),
+                        metaOpCapability("tone.highlights"),
+                        metaOpCapability("tone.shadows"),
+                        metaOpCapability("tone.contrast"),
+                        metaOpCapability("color.warmth"),
+                        metaOpCapability("color.tint"),
+                        metaOpCapability("color.saturation"),
+                        metaOpCapability("tone.clarity"),
+                    ),
+                ),
+            )
             "createPreview" -> createPreview(call, result)
             "updatePreview" -> updatePreview(call, result)
             "disposePreview" -> disposePreview(call, result)
             else -> result.notImplemented()
         }
     }
+
+    private fun metaOpCapability(id: String): Map<String, Any> = mapOf(
+        "id" to id,
+        "version" to 1,
+        "preview" to true,
+        "export" to true,
+        "maxTargets" to 0,
+        "maxResourceBytes" to 0,
+    )
 
     private fun createPreview(call: MethodCall, result: MethodChannel.Result) {
         val sourcePath = call.argument<String>("sourcePath")

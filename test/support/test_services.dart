@@ -1,12 +1,19 @@
+import 'dart:io';
+
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 import 'package:yingjian/app/app.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
+import 'package:yingjian/features/editor/application/meta_op_capabilities_provider.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
 import 'package:yingjian/features/editor/application/photo_sharer.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/editing_resource.dart';
+import 'package:yingjian/features/editor/domain/content_sha256.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline.dart';
+import 'package:yingjian/features/editor/domain/meta_op_availability.dart';
+import 'package:yingjian/features/editor/domain/platform_meta_op_capabilities.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/recommendations/application/photo_analysis_cache.dart';
@@ -27,6 +34,7 @@ Widget buildTestApp(
   PhotoSharer? photoSharer,
   PhotoAnalyzer? photoAnalyzer,
   PhotoAnalysisCache? photoAnalysisCache,
+  PlatformMetaOpCapabilities? metaOpCapabilities,
 }) {
   final observability = AppObservability(FakeObservabilityBackend());
   return MultiProvider(
@@ -43,8 +51,13 @@ Widget buildTestApp(
       Provider<PhotoExporter>.value(
         value: photoExporter ?? FakePhotoExporter(),
       ),
+      Provider<MetaOpCapabilitiesProvider>.value(
+        value: StaticMetaOpCapabilitiesProvider(
+          metaOpCapabilities ?? androidMetaOpCapabilities,
+        ),
+      ),
       Provider<PhotoPreviewRenderer>.value(
-        value: photoPreviewRenderer ?? FakePhotoPreviewRenderer.unsupported(),
+        value: photoPreviewRenderer ?? FakePhotoPreviewRenderer.supported(),
       ),
       Provider<PhotoSharer>.value(value: photoSharer ?? FakePhotoSharer()),
       Provider<PhotoAnalyzer>.value(
@@ -143,11 +156,14 @@ final class FakePhotoSharer implements PhotoSharer {
   }
 }
 
-final class FakePhotoImporter implements PhotoImporter {
+final class FakePhotoImporter implements EditingResourceImporter {
   FakePhotoImporter([this.photos = const [], this.failures = const []]);
 
   final List<ProjectPhoto> photos;
   final List<PhotoImportFailure> failures;
+  int editingResourceImportCount = 0;
+  ImportedEditingResource? lastImportedEditingResource;
+  final List<String> discardedEditingResourceIds = [];
 
   @override
   Future<PhotoImportBatch> importPhotos({required int limit}) async {
@@ -155,6 +171,59 @@ final class FakePhotoImporter implements PhotoImporter {
       photos: photos.take(limit).toList(),
       failures: failures,
     );
+  }
+
+  @override
+  Future<ImportedEditingResource?> importEditingResource(
+    EditingResourceKind kind,
+  ) async {
+    editingResourceImportCount += 1;
+    if (photos.isEmpty) return null;
+    final photo = photos.first;
+    final sha = photo.contentSha256;
+    if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(sha)) return null;
+    final extension = photo.localPath.toLowerCase().endsWith('.png')
+        ? '.png'
+        : '.jpg';
+    return lastImportedEditingResource = ImportedEditingResource(
+      descriptor: EditingResourceDescriptor(
+        id: 'resource-v1-$sha',
+        kind: kind,
+        relativePath: 'resources/${sha.substring(0, 2)}/$sha$extension',
+        contentSha256: sha,
+        byteLength: File(photo.localPath).lengthSync(),
+      ),
+      localPath: photo.localPath,
+    );
+  }
+
+  @override
+  Future<ImportedEditingResource> storeEditingResource({
+    required EditingResourceKind kind,
+    required List<int> bytes,
+    String extension = '.json',
+    Object? payload,
+  }) async {
+    editingResourceImportCount += 1;
+    final sha = ContentSha256.ofBytes(bytes);
+    return lastImportedEditingResource = ImportedEditingResource(
+      descriptor: EditingResourceDescriptor(
+        id: 'resource-v1-$sha',
+        kind: kind,
+        relativePath: 'resources/${sha.substring(0, 2)}/$sha$extension',
+        contentSha256: sha,
+        byteLength: bytes.length,
+      ),
+      localPath: photos.isEmpty
+          ? '/tmp/$sha$extension'
+          : photos.first.localPath,
+      payload: payload,
+    );
+  }
+
+  @override
+  Future<void> discardEditingResource(ImportedEditingResource resource) async {
+    discardedEditingResourceIds.add(resource.descriptor.id);
   }
 }
 

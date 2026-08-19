@@ -33,8 +33,9 @@ data class AndroidImagePipeline(
 
     companion object {
         fun parse(arguments: Any?): AndroidImagePipeline {
-            val pipeline = arguments as? Map<*, *>
+            val envelope = arguments as? Map<*, *>
                 ?: throw IllegalArgumentException("Missing image pipeline")
+            val pipeline = envelope["renderPlanV1"]?.let(::validatedBackendPayload) ?: envelope
             val schemaVersion = exactInteger(
                 pipeline["schemaVersion"],
                 "Missing image pipeline version",
@@ -157,6 +158,24 @@ data class AndroidImagePipeline(
                     number == floor(number),
             ) { "Image pipeline integer field is invalid" }
             return number.toInt()
+        }
+
+        private fun validatedBackendPayload(value: Any?): Map<*, *> {
+            val plan = value as? Map<*, *>
+                ?: throw IllegalArgumentException("Invalid render plan")
+            require(exactInteger(plan["protocolVersion"], "Missing render plan version") == 1)
+            require((plan["planId"] as? String)?.matches(Regex("^rp1-[a-f0-9]{8}$")) == true)
+            require((plan["sourceId"] as? String)?.isNotBlank() == true)
+            require(exactInteger(plan["stateRevision"], "Missing state revision") >= 0)
+            require((plan["stages"] as? List<*>)?.all { it is Map<*, *> } == true)
+            require((plan["requiredCapabilities"] as? List<*>)?.all { it is String } == true)
+            val output = plan["outputRequirements"] as? Map<*, *>
+                ?: throw IllegalArgumentException("Missing render output requirements")
+            require(output["purpose"] == "preview" || output["purpose"] == "export")
+            require(output["colorSpace"] == "srgb")
+            require(output["format"] is String && output["quality"] is String)
+            return plan["backendPayload"] as? Map<*, *>
+                ?: throw IllegalArgumentException("Missing render backend payload")
         }
     }
 }

@@ -1,9 +1,47 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
+import 'package:yingjian/features/editor/application/ai_edit_planner.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/edit_target.dart';
+import 'package:yingjian/features/editor/domain/editing_core.dart';
+import 'package:yingjian/features/editor/domain/editing_resource.dart';
+import 'package:yingjian/features/editor/domain/legacy_edit_recipe_adapter.dart';
+import 'package:yingjian/features/editor/domain/meta_op.dart';
+import 'package:yingjian/features/editor/domain/semantic_editing_recipe.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 
 abstract interface class PhotoImporter {
   Future<PhotoImportBatch> importPhotos({required int limit});
+}
+
+@immutable
+final class ImportedEditingResource {
+  const ImportedEditingResource({
+    required this.descriptor,
+    required this.localPath,
+    this.payload,
+  });
+
+  final EditingResourceDescriptor descriptor;
+  final String localPath;
+  final Object? payload;
+}
+
+abstract interface class EditingResourceImporter implements PhotoImporter {
+  Future<ImportedEditingResource?> importEditingResource(
+    EditingResourceKind kind,
+  );
+
+  Future<ImportedEditingResource> storeEditingResource({
+    required EditingResourceKind kind,
+    required List<int> bytes,
+    String extension = '.json',
+    Object? payload,
+  });
+
+  Future<void> discardEditingResource(ImportedEditingResource resource);
 }
 
 enum PhotoImportFailureReason {
@@ -56,6 +94,29 @@ abstract interface class PhotoProjectLifecycleStore
 
 enum PhotoImportResult { imported, canceled, rejected, limitReached }
 
+@immutable
+final class PreparedMetaOpPreview {
+  const PreparedMetaOpPreview({
+    required this.recipe,
+    required this.state,
+    required this.context,
+    required this.sourceId,
+  });
+
+  final EditRecipe recipe;
+  final EditState state;
+  final EditContext context;
+  final String sourceId;
+}
+
+@immutable
+final class ManualEditCommit {
+  const ManualEditCommit({required this.result, required this.appliedToGroup});
+
+  final EditResult result;
+  final bool appliedToGroup;
+}
+
 class PhotoProjectSession extends ChangeNotifier {
   factory PhotoProjectSession({
     required PhotoImporter importer,
@@ -63,10 +124,11 @@ class PhotoProjectSession extends ChangeNotifier {
     DateTime Function()? now,
     String Function()? createId,
   }) {
+    final clock = now ?? DateTime.now;
     return PhotoProjectSession._(
       importer,
       store,
-      now ?? DateTime.now,
+      () => clock().toUtc(),
       createId ?? _defaultId,
     );
   }
@@ -77,6 +139,9 @@ class PhotoProjectSession extends ChangeNotifier {
   final PhotoProjectStore _store;
   final DateTime Function() _now;
   final String Function() _createId;
+
+  static const _editingCore = EditingCore();
+  static const _legacyAdapter = LegacyEditRecipeAdapter();
 
   PhotoProject? _project;
   Object? _restoreError;
@@ -93,20 +158,28 @@ class PhotoProjectSession extends ChangeNotifier {
       ? PhotoProjectFlowState.importing
       : _project?.flowState ?? PhotoProjectFlowState.empty;
   List<PhotoImportFailure> get importFailures => _importFailures;
-  bool get canUndo => _project?.undoHistory.isNotEmpty ?? false;
-  bool get canRedo => _project?.redoHistory.isNotEmpty ?? false;
-  bool get canEdit => _project?.flowState == PhotoProjectFlowState.editing;
+  bool get canUndo =>
+      !(_project?.isReadOnly ?? true) &&
+      (_project?.undoHistory.isNotEmpty ?? false);
+  bool get canRedo =>
+      !(_project?.isReadOnly ?? true) &&
+      (_project?.redoHistory.isNotEmpty ?? false);
+  bool get canEdit =>
+      !(_project?.isReadOnly ?? true) &&
+      _project?.flowState == PhotoProjectFlowState.editing;
   bool get canResetScopedEdit {
     final current = _project;
     if (current == null || current.flowState != PhotoProjectFlowState.editing) {
       return false;
     }
     if (current.editingScope == ProjectEditingScope.group) {
-      return current.sharedStyle.recipe != EditRecipe.neutral ||
-          current.sharedStyle.intensity != 1;
+      return current.sharedStyle.recipe != EditRecipe.neutral;
     }
     final photoId = current.focusPhotoId ?? current.photos.first.id;
-    return current.photoOverrides.containsKey(photoId);
+    return current.editState.values.keys.any(
+      (address) =>
+          address.scope == EditScope.currentPhoto && address.photoId == photoId,
+    );
   }
 
   bool get canSyncCurrentPhotoAdjustmentsToGroup {
@@ -123,11 +196,8 @@ class PhotoProjectSession extends ChangeNotifier {
   EditRecipe get editableRecipe {
     final current = _project;
     if (current == null) return EditRecipe.neutral;
-    if (current.editingScope == ProjectEditingScope.group) {
-      return current.sharedStyle.recipe;
-    }
     final photoId = current.focusPhotoId ?? current.photos.first.id;
-    return _editablePhotoRecipe(current, photoId);
+    return current.effectiveRecipeFor(photoId);
   }
 
   EditRecipe effectiveRecipeFor(String photoId) {
@@ -136,9 +206,10 @@ class PhotoProjectSession extends ChangeNotifier {
 
   EditRecipe previewRecipeFor(String photoId, EditRecipe editableRecipe) {
     final current = _requirePhoto(photoId);
-    return current.editingScope == ProjectEditingScope.group
-        ? current.effectiveRecipeFor(photoId, sharedRecipe: editableRecipe)
-        : current.effectiveRecipeFor(photoId, photoOverride: editableRecipe);
+    final focusedPhotoId = current.focusPhotoId ?? current.photos.first.id;
+    return photoId == focusedPhotoId
+        ? editableRecipe
+        : current.effectiveRecipeFor(photoId);
   }
 
   Future<void> restore() async {
@@ -264,24 +335,41 @@ class PhotoProjectSession extends ChangeNotifier {
         'Recommendation id must not be empty',
       );
     }
-    final next = current.copyWith(
-      updatedAt: _now(),
-      flowState: PhotoProjectFlowState.editing,
-      selectedRecommendationId: recommendationId,
-      sharedStyle: sharedStyle,
-      adaptiveCompensations: adaptiveCompensations,
-      photoOverrides: const {},
-      exportStates: {
-        for (final photo in current.photos)
-          photo.id: PhotoExportState.notQueued,
-      },
-      editingScope: current.photos.length == 1
-          ? ProjectEditingScope.currentPhoto
-          : ProjectEditingScope.group,
-      undoHistory: const [],
-      redoHistory: const [],
+    final transition = _legacyAdapter.tryEncodeTransition(
+      before: current.sharedStyle.recipe,
+      after: sharedStyle.recipe,
+      photoId: current.photos.first.id,
     );
-    await _saveAndPublish(next);
+    if (transition == null) {
+      throw StateError('Recommendation has no admitted MetaOp transition');
+    }
+    if (transition.changes.isEmpty) {
+      await _saveAndPublish(
+        current.copyWith(
+          updatedAt: _now(),
+          flowState: PhotoProjectFlowState.editing,
+          selectedRecommendationId: recommendationId,
+          adaptiveCompensations: adaptiveCompensations,
+          editingScope: ProjectEditingScope.currentPhoto,
+          focusPhotoId: current.focusPhotoId ?? current.photos.first.id,
+        ),
+      );
+      return;
+    }
+    final result = await commitMetaOps(
+      changes: transition.changes,
+      source: EditSource.recommendation,
+      context: EditContext(
+        platform: EditContext.ios.platform,
+        photoIds: current.photos.map((photo) => photo.id).toSet(),
+      ),
+      recommendationId: recommendationId,
+      recommendationStyle: sharedStyle,
+      recommendationCompensations: adaptiveCompensations,
+    );
+    if (result is RejectedEdit) {
+      throw StateError('Recommendation rejected: ${result.reason.name}');
+    }
   }
 
   Future<void> setEditingScope(
@@ -322,7 +410,10 @@ class PhotoProjectSession extends ChangeNotifier {
     await _saveAndPublish(next);
   }
 
-  Future<void> commitEdit(EditRecipe recipe) async {
+  /// Test-only bridge for legacy project fixtures. Production editing paths
+  /// must submit admitted MetaOp transactions through [commitMetaOps].
+  @visibleForTesting
+  Future<void> commitLegacyRecipeForTesting(EditRecipe recipe) async {
     final current = _project;
     if (current == null) {
       throw StateError('A project is required before committing an edit');
@@ -345,15 +436,569 @@ class PhotoProjectSession extends ChangeNotifier {
       beforeSharedIntensity: current.sharedStyle.intensity,
       afterSharedIntensity: current.sharedStyle.intensity,
     );
-    final next = _applyOperation(
+    final rawNext = _applyOperation(
       current,
       operation,
       recipe,
-      sharedIntensity: current.sharedStyle.intensity,
-      undoHistory: [...current.undoHistory, operation],
+      sharedIntensity: operation.afterSharedIntensity,
+      undoHistory: current.undoHistory,
       redoHistory: const [],
     );
+    final next = _finalizeNewOperation(current, rawNext, operation);
     await _saveAndPublish(next);
+  }
+
+  Future<EditResult> commitMetaOp({
+    required OpAddress address,
+    required Object value,
+    required EditContext context,
+  }) => commitMetaOps(
+    changes: [MetaOpChange(address: address, value: value)],
+    source: EditSource.manual,
+    context: context,
+  );
+
+  PreparedMetaOpPreview? prepareMetaOpsForPreview({
+    required List<MetaOpChange> changes,
+    required EditSource source,
+    required EditContext context,
+  }) {
+    final current = _project;
+    if (current == null || changes.isEmpty) return null;
+    final firstAddress = changes.first.address;
+    if (changes.any(
+      (change) =>
+          change.address.scope != firstAddress.scope ||
+          change.address.photoId != firstAddress.photoId,
+    )) {
+      return null;
+    }
+    final focusPhotoId = current.focusPhotoId ?? current.photos.first.id;
+    final resolvedPhotoId = firstAddress.scope == EditScope.currentPhoto
+        ? firstAddress.photoId ?? focusPhotoId
+        : null;
+    final sourceRecipe = resolvedPhotoId == null
+        ? current.sharedStyle.recipe
+        : _editablePhotoRecipe(current, resolvedPhotoId);
+    final targetRegistry = resolvedPhotoId == null
+        ? null
+        : current.targetRegistries[resolvedPhotoId];
+    final activeTargetIds = targetRegistry?.targets.values
+        .where((target) => target.status == EditTargetStatus.active)
+        .map((target) => target.id)
+        .toSet();
+    final effectiveContext = EditContext(
+      platform: context.platform,
+      photoIds: context.photoIds,
+      targetIds: activeTargetIds == null
+          ? context.targetIds
+          : context.targetIds.intersection(activeTargetIds),
+      capabilities: context.capabilities,
+      applicability: context.applicability,
+      resourceIds: {
+        ...context.resourceIds,
+        ...current.editingResources.resources.keys,
+      },
+      resourceByteLengths: {
+        ...context.resourceByteLengths,
+        for (final resource in current.editingResources.resources.values)
+          resource.id: resource.byteLength,
+      },
+      metaOpCapabilities: context.metaOpCapabilities,
+    );
+    final result = _editingCore.apply(
+      state: current.editState,
+      transaction: EditTransaction(
+        id: 'preview-${current.id}-${current.editState.version + 1}',
+        baseVersion: current.editState.version,
+        source: source,
+        changes: changes,
+      ),
+      context: effectiveContext,
+    );
+    if (result is! AcceptedEdit) return null;
+    var recipe = sourceRecipe;
+    for (final change in changes) {
+      recipe = _legacyAdapter.writeKnownValue(
+        recipe: recipe,
+        address: change.address,
+        state: result.state,
+        targetRegistry: targetRegistry,
+      );
+    }
+    final projectedProject = resolvedPhotoId == null
+        ? current.copyWith(
+            sharedStyle: SharedStyle(
+              recipe: recipe,
+              family: current.sharedStyle.family,
+              intensity: current.sharedStyle.intensity,
+            ),
+            editState: result.state,
+          )
+        : current.copyWith(
+            photoOverrides: {
+              ...current.photoOverrides,
+              resolvedPhotoId: PhotoOverride(
+                recipe: recipe,
+                overridesBasicLook:
+                    current.photoOverrides[resolvedPhotoId]?.overridesBasicLook,
+                overridesCrop:
+                    current.photoOverrides[resolvedPhotoId]?.overridesCrop,
+              ),
+            },
+            editState: result.state,
+          );
+    return PreparedMetaOpPreview(
+      recipe: projectedProject.effectiveRecipeFor(focusPhotoId),
+      state: result.state,
+      context: effectiveContext,
+      sourceId: focusPhotoId,
+    );
+  }
+
+  PreparedMetaOpPreview? prepareRecommendationForPreview({
+    required SharedStyle sharedStyle,
+    required Map<String, AdaptiveCompensation> adaptiveCompensations,
+    required EditContext context,
+  }) {
+    final current = _project;
+    if (current == null) return null;
+    final transition = _legacyAdapter.tryEncodeTransition(
+      before: current.sharedStyle.recipe,
+      after: sharedStyle.recipe,
+      photoId: current.photos.first.id,
+    );
+    if (transition == null || transition.changes.isEmpty) return null;
+    final prepared = prepareMetaOpsForPreview(
+      changes: transition.changes,
+      source: EditSource.recommendation,
+      context: context,
+    );
+    if (prepared == null) return null;
+    final focusPhotoId = current.focusPhotoId ?? current.photos.first.id;
+    final projected = current.copyWith(
+      sharedStyle: sharedStyle,
+      adaptiveCompensations: adaptiveCompensations,
+      editState: prepared.state,
+    );
+    return PreparedMetaOpPreview(
+      recipe: projected.effectiveRecipeFor(focusPhotoId),
+      state: prepared.state,
+      context: prepared.context,
+      sourceId: focusPhotoId,
+    );
+  }
+
+  Future<ManualEditCommit> commitManualRecipe({
+    required EditRecipe desiredRecipe,
+    required EditContext context,
+    EditingResourceImporter? resourceImporter,
+  }) async {
+    final current = _project;
+    if (current == null) {
+      throw StateError('A project is required before committing an edit');
+    }
+    final photoId = current.focusPhotoId ?? current.photos.first.id;
+    final beforeRecipe = editableRecipe;
+    final beforeSemantic = beforeRecipe.semanticEditingRecipe;
+    var afterSemantic = desiredRecipe.semanticEditingRecipe;
+    final pendingResources = <ImportedEditingResource>[];
+
+    Future<String?> storeMaskResource({
+      required EditingResourceKind kind,
+      required List<Object> payload,
+    }) async {
+      if (payload.isEmpty) return null;
+      if (resourceImporter == null) {
+        throw StateError('Editing resource storage is unavailable');
+      }
+      final imported = await resourceImporter.storeEditingResource(
+        kind: kind,
+        bytes: utf8.encode(
+          jsonEncode({
+            'schemaVersion': 1,
+            'kind': kind.name,
+            'strokes': payload,
+          }),
+        ),
+        payload: payload,
+      );
+      pendingResources.add(imported);
+      return imported.descriptor.id;
+    }
+
+    try {
+      if (!listEquals(
+        beforeSemantic.subjectMaskStrokes,
+        afterSemantic.subjectMaskStrokes,
+      )) {
+        afterSemantic = afterSemantic.copyWith(
+          subjectMaskResourceId: await storeMaskResource(
+            kind: EditingResourceKind.subjectMask,
+            payload: afterSemantic.subjectMaskStrokes
+                .map<Object>((stroke) => stroke.toJson())
+                .toList(growable: false),
+          ),
+        );
+      }
+      if (!listEquals(
+        beforeSemantic.localAdjustmentStrokes,
+        afterSemantic.localAdjustmentStrokes,
+      )) {
+        afterSemantic = afterSemantic.copyWith(
+          localMaskResourceId: await storeMaskResource(
+            kind: EditingResourceKind.localMask,
+            payload: afterSemantic.localAdjustmentStrokes
+                .map<Object>((stroke) => stroke.toJson())
+                .toList(growable: false),
+          ),
+        );
+      }
+      if (!listEquals(
+        beforeSemantic.eraseStrokes,
+        afterSemantic.eraseStrokes,
+      )) {
+        afterSemantic = afterSemantic.copyWith(
+          eraseMaskResourceId: await storeMaskResource(
+            kind: EditingResourceKind.eraseMask,
+            payload: afterSemantic.eraseStrokes
+                .map<Object>((stroke) => stroke.toJson())
+                .toList(growable: false),
+          ),
+        );
+      }
+      desiredRecipe = desiredRecipe.copyWith(
+        semanticEditingRecipe: afterSemantic,
+      );
+      final transition = _legacyAdapter.tryEncodeTransition(
+        before: beforeRecipe,
+        after: desiredRecipe,
+        photoId: photoId,
+        targetRegistry: current.targetRegistries[photoId],
+      );
+      final imageResourceChanged =
+          afterSemantic.background == BackgroundTreatment.image &&
+          afterSemantic.backgroundImageResourceId != null &&
+          (beforeSemantic.background != afterSemantic.background ||
+              beforeSemantic.backgroundImageResourceId !=
+                  afterSemantic.backgroundImageResourceId);
+      final changes = imageResourceChanged
+          ? [
+              MetaOpChange(
+                address: OpAddress(
+                  metaOpId: MetaOpIds.semanticAdjustments,
+                  metaOpVersion: 1,
+                  parameterId: 'background',
+                  scope: EditScope.currentPhoto,
+                  photoId: photoId,
+                ),
+                value: BackgroundTreatment.image.name,
+              ),
+              MetaOpChange(
+                address: OpAddress(
+                  metaOpId: MetaOpIds.semanticAdjustments,
+                  metaOpVersion: 1,
+                  parameterId: 'backgroundImageResource',
+                  scope: EditScope.currentPhoto,
+                  photoId: photoId,
+                ),
+                value: afterSemantic.backgroundImageResourceId!,
+              ),
+            ]
+          : transition?.changes;
+      if (changes == null || changes.isEmpty) {
+        if (desiredRecipe != beforeRecipe) {
+          throw StateError('Manual edit has no admitted MetaOp transition');
+        }
+        return const ManualEditCommit(
+          result: RejectedEdit(reason: EditRejection.emptyTransaction),
+          appliedToGroup: false,
+        );
+      }
+      if (afterSemantic.background == BackgroundTreatment.image &&
+          afterSemantic.backgroundImageResourceId != null &&
+          afterSemantic.backgroundImagePath != null) {
+        final resourceId = afterSemantic.backgroundImageResourceId!;
+        final sha = resourceId.substring('resource-v1-'.length);
+        final path = afterSemantic.backgroundImagePath!;
+        final marker =
+            '${Platform.pathSeparator}resources${Platform.pathSeparator}';
+        final markerIndex = path.lastIndexOf(marker);
+        final relativePath = markerIndex >= 0
+            ? path.substring(markerIndex + 1)
+            : 'resources/${sha.substring(0, 2)}/$sha${_resourceExtension(path)}';
+        pendingResources.add(
+          ImportedEditingResource(
+            descriptor: EditingResourceDescriptor(
+              id: resourceId,
+              kind: EditingResourceKind.backgroundImage,
+              relativePath: relativePath.replaceAll(
+                Platform.pathSeparator,
+                '/',
+              ),
+              contentSha256: sha,
+              byteLength: File(path).lengthSync(),
+            ),
+            localPath: path,
+          ),
+        );
+      }
+      final result = await commitMetaOps(
+        changes: changes,
+        source: EditSource.manual,
+        context: context,
+        editingResources: pendingResources,
+      );
+      if (result is RejectedEdit) {
+        throw StateError('Meta op rejected: ${result.reason.name}');
+      }
+      return ManualEditCommit(
+        result: result,
+        appliedToGroup: changes.any(
+          (change) => change.address.scope == EditScope.group,
+        ),
+      );
+    } on Object {
+      final registeredIds =
+          _project?.editingResources.resources.keys.toSet() ?? const <String>{};
+      if (resourceImporter != null) {
+        for (final resource in pendingResources) {
+          if (!registeredIds.contains(resource.descriptor.id)) {
+            try {
+              await resourceImporter.discardEditingResource(resource);
+            } on Object {
+              // Cleanup is best effort; the project remains at its safe state.
+            }
+          }
+        }
+      }
+      rethrow;
+    }
+  }
+
+  static String _resourceExtension(String path) {
+    final name = path.split(Platform.pathSeparator).last;
+    final dot = name.lastIndexOf('.');
+    if (dot < 0) return '.jpg';
+    final extension = name.substring(dot).toLowerCase();
+    return const {'.jpg', '.jpeg', '.png', '.heic'}.contains(extension)
+        ? extension
+        : '.jpg';
+  }
+
+  Future<EditResult> commitAiProposal(
+    AiEditProposal proposal, {
+    required EditContext context,
+    Iterable<ImportedEditingResource> editingResources = const [],
+  }) {
+    final current = _project;
+    if (current == null) {
+      throw StateError('A project is required before committing an AI edit');
+    }
+    if (current.recentTransactionIds.contains(proposal.idempotencyKey)) {
+      return Future.value(
+        const RejectedEdit(reason: EditRejection.duplicateTransaction),
+      );
+    }
+    if (proposal.baseStateVersion != current.editStateVersion) {
+      return Future.value(
+        const RejectedEdit(reason: EditRejection.staleVersion),
+      );
+    }
+    return commitMetaOps(
+      changes: proposal.changes,
+      source: EditSource.ai,
+      context: context,
+      editingResources: editingResources,
+      transactionId: proposal.idempotencyKey,
+    );
+  }
+
+  Future<EditResult> commitMetaOps({
+    required List<MetaOpChange> changes,
+    required EditSource source,
+    required EditContext context,
+    Iterable<ImportedEditingResource> editingResources = const [],
+    String? transactionId,
+    String? recommendationId,
+    SharedStyle? recommendationStyle,
+    Map<String, AdaptiveCompensation>? recommendationCompensations,
+    ProjectEditOperationKind operationKind =
+        ProjectEditOperationKind.scopedEdit,
+    EditRecipe? beforePhotoOverrideRecipe,
+    double? afterSharedIntensity,
+  }) async {
+    final current = _project;
+    if (current == null) {
+      throw StateError('A project is required before committing an edit');
+    }
+    final selectingRecommendation =
+        source == EditSource.recommendation &&
+        current.flowState == PhotoProjectFlowState.choosingRecommendation;
+    if (current.flowState != PhotoProjectFlowState.editing &&
+        !selectingRecommendation) {
+      throw StateError('Edits can only be committed while editing');
+    }
+    if (changes.isEmpty) {
+      return const RejectedEdit(reason: EditRejection.emptyTransaction);
+    }
+    final resolvedTransactionId =
+        transactionId ??
+        'project-${current.id}-${source.name}-${current.editState.version + 1}-${_createId()}';
+    if (current.recentTransactionIds.contains(resolvedTransactionId)) {
+      return const RejectedEdit(reason: EditRejection.duplicateTransaction);
+    }
+    final firstAddress = changes.first.address;
+    final hasMixedDestinations = changes.any(
+      (change) =>
+          change.address.scope != firstAddress.scope ||
+          change.address.photoId != firstAddress.photoId,
+    );
+    if (hasMixedDestinations) {
+      return RejectedEdit(
+        reason: EditRejection.invalidScope,
+        address: firstAddress,
+      );
+    }
+    final resolvedPhotoId = firstAddress.scope == EditScope.currentPhoto
+        ? firstAddress.photoId ??
+              current.focusPhotoId ??
+              current.photos.first.id
+        : null;
+    final sourceRecipe = resolvedPhotoId == null
+        ? current.sharedStyle.recipe
+        : _editablePhotoRecipe(current, resolvedPhotoId);
+    final targetRegistry = resolvedPhotoId == null
+        ? null
+        : current.targetRegistries[resolvedPhotoId];
+    final activeTargetIds = targetRegistry?.targets.values
+        .where((target) => target.status == EditTargetStatus.active)
+        .map((target) => target.id)
+        .toSet();
+    final state = current.editState;
+    final importedResources = editingResources.toList(growable: false);
+    final registeredResourceIds = {
+      ...current.editingResources.resources.keys,
+      ...importedResources.map((resource) => resource.descriptor.id),
+    };
+    final resourceByteLengths = <String, int>{
+      ...context.resourceByteLengths,
+      for (final resource in current.editingResources.resources.values)
+        resource.id: resource.byteLength,
+      for (final resource in importedResources)
+        resource.descriptor.id: resource.descriptor.byteLength,
+    };
+    final result = _editingCore.apply(
+      state: state,
+      transaction: EditTransaction(
+        id: resolvedTransactionId,
+        baseVersion: state.version,
+        source: source,
+        changes: changes,
+      ),
+      context: EditContext(
+        platform: context.platform,
+        photoIds: context.photoIds,
+        targetIds: activeTargetIds == null
+            ? context.targetIds
+            : context.targetIds.intersection(activeTargetIds),
+        capabilities: context.capabilities,
+        applicability: context.applicability,
+        resourceIds: {...context.resourceIds, ...registeredResourceIds},
+        resourceByteLengths: resourceByteLengths,
+        metaOpCapabilities: context.metaOpCapabilities,
+      ),
+    );
+    if (result is! AcceptedEdit) return result;
+    var recipe = sourceRecipe;
+    final resourcePaths = <String, String>{
+      if (sourceRecipe.semanticEditingRecipe case final semantic
+          when semantic.backgroundImageResourceId != null &&
+              semantic.backgroundImagePath != null)
+        semantic.backgroundImageResourceId!: semantic.backgroundImagePath!,
+      for (final resource in importedResources)
+        resource.descriptor.id: resource.localPath,
+    };
+    final resourcePayloads = <String, Object>{
+      for (final resource in importedResources)
+        if (resource.payload != null) resource.descriptor.id: resource.payload!,
+    };
+    for (final change in changes) {
+      recipe = _legacyAdapter.writeKnownValue(
+        recipe: recipe,
+        address: change.address,
+        state: result.state,
+        targetRegistry: targetRegistry,
+        resourcePaths: resourcePaths,
+        resourcePayloads: resourcePayloads,
+      );
+    }
+    if (recipe == sourceRecipe) return result;
+
+    final scope = firstAddress.scope == EditScope.group
+        ? ProjectEditingScope.group
+        : ProjectEditingScope.currentPhoto;
+    final photoId = scope == ProjectEditingScope.currentPhoto
+        ? resolvedPhotoId
+        : null;
+    final operation = ProjectEditOperation(
+      kind: operationKind,
+      source: source,
+      scope: scope,
+      photoId: photoId,
+      beforeRecipe: sourceRecipe,
+      afterRecipe: recipe,
+      beforeSharedIntensity: current.sharedStyle.intensity,
+      afterSharedIntensity:
+          afterSharedIntensity ?? current.sharedStyle.intensity,
+      beforePhotoOverrideRecipe: beforePhotoOverrideRecipe,
+      changedAddresses: result.summary.changedAddresses,
+    );
+    var next = _applyOperation(
+      current,
+      operation,
+      recipe,
+      sharedIntensity: operation.afterSharedIntensity,
+      undoHistory: current.undoHistory,
+      redoHistory: const [],
+    );
+    var registry = current.editingResources;
+    for (final resource in importedResources) {
+      registry = registry.register(resource.descriptor);
+    }
+    next = next.copyWith(
+      editingResources: registry,
+      editState: result.state,
+      flowState: selectingRecommendation
+          ? PhotoProjectFlowState.editing
+          : next.flowState,
+      selectedRecommendationId: selectingRecommendation
+          ? recommendationId
+          : next.selectedRecommendationId,
+      sharedStyle: selectingRecommendation
+          ? SharedStyle(
+              recipe: next.sharedStyle.recipe,
+              family: recommendationStyle?.family ?? current.sharedStyle.family,
+              intensity: recommendationStyle?.intensity ?? 1,
+            )
+          : next.sharedStyle,
+      adaptiveCompensations: selectingRecommendation
+          ? recommendationCompensations ?? const {}
+          : next.adaptiveCompensations,
+      editingScope: selectingRecommendation
+          ? ProjectEditingScope.currentPhoto
+          : next.editingScope,
+      focusPhotoId: selectingRecommendation
+          ? current.focusPhotoId ?? current.photos.first.id
+          : next.focusPhotoId,
+      recentTransactionIds: [
+        ...current.recentTransactionIds,
+        resolvedTransactionId,
+      ],
+    );
+    next = _finalizeNewOperation(current, next, operation);
+    await _saveAndPublish(next);
+    return result;
   }
 
   Future<void> commitSharedIntensity(double intensity) async {
@@ -378,18 +1023,19 @@ class PhotoProjectSession extends ChangeNotifier {
       beforeSharedIntensity: current.sharedStyle.intensity,
       afterSharedIntensity: intensity,
     );
-    final next = _applyOperation(
+    final rawNext = _applyOperation(
       current,
       operation,
       operation.afterRecipe,
       sharedIntensity: operation.afterSharedIntensity,
-      undoHistory: [...current.undoHistory, operation],
+      undoHistory: current.undoHistory,
       redoHistory: const [],
     );
+    final next = _finalizeNewOperation(current, rawNext, operation);
     await _saveAndPublish(next);
   }
 
-  Future<void> resetScopedEdit() async {
+  Future<void> resetScopedEdit({EditContext context = EditContext.ios}) async {
     final current = _project;
     if (current == null) {
       throw StateError('A project is required before resetting an edit');
@@ -399,47 +1045,50 @@ class PhotoProjectSession extends ChangeNotifier {
     }
     if (current.editingScope == ProjectEditingScope.group) {
       if (!canResetScopedEdit) return;
-      final operation = ProjectEditOperation(
-        scope: ProjectEditingScope.group,
-        beforeRecipe: current.sharedStyle.recipe,
-        afterRecipe: EditRecipe.neutral,
-        beforeSharedIntensity: current.sharedStyle.intensity,
+      final transition = _legacyAdapter.tryEncodeTransition(
+        before: current.sharedStyle.recipe,
+        after: EditRecipe.neutral,
+        photoId: current.photos.first.id,
+      );
+      if (transition == null || transition.changes.isEmpty) return;
+      final result = await commitMetaOps(
+        changes: transition.changes,
+        source: EditSource.manual,
+        context: context,
         afterSharedIntensity: 1,
       );
-      final next = _applyOperation(
-        current,
-        operation,
-        operation.afterRecipe,
-        sharedIntensity: operation.afterSharedIntensity,
-        undoHistory: [...current.undoHistory, operation],
-        redoHistory: const [],
-      );
-      await _saveAndPublish(next);
+      if (result is RejectedEdit) {
+        throw StateError('Reset rejected: ${result.reason.name}');
+      }
       return;
     }
     final photoId = current.focusPhotoId ?? current.photos.first.id;
     final override = current.photoOverrides[photoId]?.recipe;
     if (override == null) return;
     final baseline = _photoOverrideBaseline(current, photoId);
-    final operation = ProjectEditOperation(
-      kind: ProjectEditOperationKind.resetCurrentPhotoOverride,
-      scope: ProjectEditingScope.currentPhoto,
+    final transition = _legacyAdapter.tryEncodeTransition(
+      before: override,
+      after: baseline,
       photoId: photoId,
-      beforeRecipe: override,
-      afterRecipe: baseline,
-      beforeSharedIntensity: current.sharedStyle.intensity,
-      afterSharedIntensity: current.sharedStyle.intensity,
+      targetRegistry: current.targetRegistries[photoId],
+    );
+    if (transition == null) {
+      throw StateError('Reset has no admitted MetaOp transition');
+    }
+    final localChanges = transition.changes
+        .where((change) => change.address.scope == EditScope.currentPhoto)
+        .toList(growable: false);
+    if (localChanges.isEmpty) return;
+    final result = await commitMetaOps(
+      changes: localChanges,
+      source: EditSource.manual,
+      context: context,
+      operationKind: ProjectEditOperationKind.resetCurrentPhotoOverride,
       beforePhotoOverrideRecipe: override,
     );
-    final next = _applyOperation(
-      current,
-      operation,
-      baseline,
-      sharedIntensity: current.sharedStyle.intensity,
-      undoHistory: [...current.undoHistory, operation],
-      redoHistory: const [],
-    );
-    await _saveAndPublish(next);
+    if (result is RejectedEdit) {
+      throw StateError('Reset rejected: ${result.reason.name}');
+    }
   }
 
   Future<void> syncCurrentPhotoAdjustmentsToGroup() async {
@@ -466,15 +1115,16 @@ class PhotoProjectSession extends ChangeNotifier {
       beforePhotoOverrideRecipe: override,
       afterPhotoOverrideRecipe: plan.remainingPhotoOverride,
     );
-    final next = _applyOperation(
+    final rawNext = _applyOperation(
       current,
       operation,
       plan.sharedStyle.recipe,
       sharedIntensity: plan.sharedStyle.intensity,
       syncedPhotoOverride: plan.remainingPhotoOverride,
-      undoHistory: [...current.undoHistory, operation],
+      undoHistory: current.undoHistory,
       redoHistory: const [],
     );
+    final next = _finalizeNewOperation(current, rawNext, operation);
     await _saveAndPublish(next);
   }
 
@@ -485,17 +1135,22 @@ class PhotoProjectSession extends ChangeNotifier {
       throw StateError('Edit history can only change while editing');
     }
     final operation = current.undoHistory.last;
-    final next = _applyOperation(
+    var next = _applyOperation(
       current,
       operation,
       operation.beforeRecipe,
       sharedIntensity: operation.beforeSharedIntensity,
       syncedPhotoOverride: operation.beforePhotoOverrideRecipe,
+      targetRegistry: operation.beforeTargetRegistry,
       undoHistory: current.undoHistory.sublist(
         0,
         current.undoHistory.length - 1,
       ),
       redoHistory: [...current.redoHistory, operation],
+    );
+    next = next.copyWith(
+      editState: operation.beforeSnapshot!.editState,
+      adaptiveCompensations: operation.beforeSnapshot!.adaptiveCompensations,
     );
     await _saveAndPublish(next);
   }
@@ -507,17 +1162,22 @@ class PhotoProjectSession extends ChangeNotifier {
       throw StateError('Edit history can only change while editing');
     }
     final operation = current.redoHistory.last;
-    final next = _applyOperation(
+    var next = _applyOperation(
       current,
       operation,
       operation.afterRecipe,
       sharedIntensity: operation.afterSharedIntensity,
       syncedPhotoOverride: operation.afterPhotoOverrideRecipe,
+      targetRegistry: operation.afterTargetRegistry,
       undoHistory: [...current.undoHistory, operation],
       redoHistory: current.redoHistory.sublist(
         0,
         current.redoHistory.length - 1,
       ),
+    );
+    next = next.copyWith(
+      editState: operation.afterSnapshot!.editState,
+      adaptiveCompensations: operation.afterSnapshot!.adaptiveCompensations,
     );
     await _saveAndPublish(next);
   }
@@ -596,6 +1256,76 @@ class PhotoProjectSession extends ChangeNotifier {
     }
     final states = Map.of(current.analysisStates)..[photoId] = state;
     final next = current.copyWith(updatedAt: _now(), analysisStates: states);
+    await _saveAndPublish(next);
+  }
+
+  Future<void> reconcileEditTargets(
+    String photoId,
+    Iterable<DetectedEditTarget> detections,
+  ) async {
+    final current = _requirePhoto(photoId);
+    final incoming = detections.toList(growable: false);
+    if (incoming.any((detection) => detection.photoId != photoId)) {
+      throw ArgumentError.value(
+        incoming,
+        'detections',
+        'Every detection must belong to the selected photo',
+      );
+    }
+    final previous = current.targetRegistries[photoId];
+    final nextRegistry = previous == null
+        ? EditTargetRegistry.seed(incoming)
+        : previous.reconcile(incoming);
+    if (nextRegistry == previous ||
+        (previous == null && nextRegistry.targets.isEmpty)) {
+      return;
+    }
+    await _saveAndPublish(
+      current.copyWith(
+        updatedAt: _now(),
+        targetRegistries: {...current.targetRegistries, photoId: nextRegistry},
+      ),
+    );
+  }
+
+  Future<void> rebindEditTarget({
+    required String photoId,
+    required String targetId,
+    required DetectedEditTarget detection,
+  }) async {
+    final current = _requirePhoto(photoId);
+    if (current.flowState != PhotoProjectFlowState.editing) {
+      throw StateError('Targets can only be rebound while editing');
+    }
+    final before = current.targetRegistries[photoId];
+    if (before == null) {
+      throw StateError('A target registry is required before rebinding');
+    }
+    final rebound = before.rebind(targetId, detection);
+    final after = rebound.withoutRebindRecord();
+    if (after == before) return;
+    final operation = ProjectEditOperation(
+      kind: ProjectEditOperationKind.targetRebind,
+      source: EditSource.targetRebind,
+      scope: ProjectEditingScope.currentPhoto,
+      photoId: photoId,
+      beforeRecipe: EditRecipe.neutral,
+      afterRecipe: EditRecipe.neutral,
+      beforeSharedIntensity: current.sharedStyle.intensity,
+      afterSharedIntensity: current.sharedStyle.intensity,
+      beforeTargetRegistry: before,
+      afterTargetRegistry: after,
+    );
+    final rawNext = _applyOperation(
+      current,
+      operation,
+      operation.afterRecipe,
+      sharedIntensity: operation.afterSharedIntensity,
+      targetRegistry: after,
+      undoHistory: current.undoHistory,
+      redoHistory: const [],
+    );
+    final next = _finalizeNewOperation(current, rawNext, operation);
     await _saveAndPublish(next);
   }
 
@@ -678,10 +1408,30 @@ class PhotoProjectSession extends ChangeNotifier {
     EditRecipe recipe, {
     required double sharedIntensity,
     EditRecipe? syncedPhotoOverride,
+    EditTargetRegistry? targetRegistry,
     required List<ProjectEditOperation> undoHistory,
     required List<ProjectEditOperation> redoHistory,
   }) {
     final exportStates = Map.of(current.exportStates);
+    if (operation.kind == ProjectEditOperationKind.targetRebind) {
+      final photoId = operation.photoId!;
+      final registries = Map.of(current.targetRegistries);
+      if (targetRegistry == null) {
+        registries.remove(photoId);
+      } else {
+        registries[photoId] = targetRegistry;
+      }
+      exportStates[photoId] = PhotoExportState.notQueued;
+      return current.copyWith(
+        updatedAt: _now(),
+        editingScope: ProjectEditingScope.currentPhoto,
+        focusPhotoId: photoId,
+        targetRegistries: registries,
+        exportStates: exportStates,
+        undoHistory: undoHistory,
+        redoHistory: redoHistory,
+      );
+    }
     if (operation.kind == ProjectEditOperationKind.syncCurrentPhotoToGroup) {
       final photoId = operation.photoId!;
       final overrides = Map.of(current.photoOverrides);
@@ -750,7 +1500,7 @@ class PhotoProjectSession extends ChangeNotifier {
       }
       return current.copyWith(
         updatedAt: _now(),
-        editingScope: ProjectEditingScope.group,
+        editingScope: current.editingScope,
         sharedStyle: SharedStyle(
           recipe: recipe,
           family: current.sharedStyle.family,
@@ -782,9 +1532,135 @@ class PhotoProjectSession extends ChangeNotifier {
   }
 
   Future<void> _saveAndPublish(PhotoProject next) async {
-    await _store.save(next);
-    _project = next;
+    if ((_project?.requiresUpdate ?? false) || next.requiresUpdate) {
+      throw StateError(
+        'A project with unknown meta operations is read-only until update',
+      );
+    }
+    final synchronized = _synchronizeEditingResources(next);
+    await _store.save(synchronized);
+    _project = synchronized;
     notifyListeners();
+  }
+
+  PhotoProject _synchronizeEditingResources(PhotoProject project) {
+    Iterable<String> recipeResources(EditRecipe recipe) sync* {
+      final semantic = recipe.semanticEditingRecipe;
+      for (final id in [
+        semantic.backgroundImageResourceId,
+        semantic.subjectMaskResourceId,
+        semantic.localMaskResourceId,
+        semantic.eraseMaskResourceId,
+      ]) {
+        if (id != null) yield id;
+      }
+    }
+
+    Iterable<String> operationResources(ProjectEditOperation operation) sync* {
+      yield* recipeResources(operation.beforeRecipe);
+      yield* recipeResources(operation.afterRecipe);
+      if (operation.beforePhotoOverrideRecipe case final recipe?) {
+        yield* recipeResources(recipe);
+      }
+      if (operation.afterPhotoOverrideRecipe case final recipe?) {
+        yield* recipeResources(recipe);
+      }
+    }
+
+    Iterable<String> snapshotResources(ProjectEditSnapshot snapshot) sync* {
+      yield* recipeResources(snapshot.sharedStyle.recipe);
+      for (final layer in snapshot.photoOverrides.values) {
+        yield* recipeResources(layer.recipe);
+      }
+    }
+
+    var registry = project.editingResources
+        .replaceReferences(EditingResourceOwner.currentState, [
+          ...recipeResources(project.sharedStyle.recipe),
+          for (final layer in project.adaptiveCompensations.values)
+            ...recipeResources(layer.recipe),
+          for (final layer in project.photoOverrides.values)
+            ...recipeResources(layer.recipe),
+        ])
+        .replaceReferences(
+          EditingResourceOwner.undoHistory,
+          project.undoHistory.expand(operationResources),
+        )
+        .replaceReferences(
+          EditingResourceOwner.redoHistory,
+          project.redoHistory.expand(operationResources),
+        )
+        .replaceReferences(EditingResourceOwner.checkpoint, [
+          if (project.historyBaseSnapshot case final snapshot?)
+            ...snapshotResources(snapshot),
+          for (final checkpoint in project.editCheckpoints)
+            ...snapshotResources(checkpoint.snapshot),
+        ]);
+    registry = registry.removeReclaimable();
+    return registry == project.editingResources
+        ? project
+        : project.copyWith(editingResources: registry);
+  }
+
+  PhotoProject _finalizeNewOperation(
+    PhotoProject current,
+    PhotoProject next,
+    ProjectEditOperation operation,
+  ) {
+    if (next.editState == current.editState) {
+      final derived = PhotoProject.deriveEditState(
+        sharedStyle: next.sharedStyle,
+        photoOverrides: next.photoOverrides,
+        targetRegistries: next.targetRegistries,
+      );
+      next = next.copyWith(
+        editState: EditState(
+          version: current.editState.version + 1,
+          values: derived.values,
+        ),
+      );
+    }
+    final before = ProjectEditSnapshot.fromProject(current);
+    final after = ProjectEditSnapshot.fromProject(next);
+    final enriched = operation.withSnapshots(before: before, after: after);
+    var folded = current.foldedEditCount;
+    var base = current.historyBaseSnapshot;
+    var history = current.undoHistory;
+    var checkpoints = current.editCheckpoints
+        .where(
+          (checkpoint) =>
+              checkpoint.editCount <= folded + current.undoHistory.length,
+        )
+        .toList();
+    if (base == null) {
+      folded += history.length;
+      history = const [];
+      checkpoints = const [];
+      base = before;
+    }
+    history = [...history, enriched];
+    while (history.length > PhotoProject.maxEditHistoryCount) {
+      base = history.first.afterSnapshot!;
+      history = history.sublist(1);
+      folded += 1;
+    }
+    checkpoints = checkpoints
+        .where((checkpoint) => checkpoint.editCount > folded)
+        .toList();
+    final editCount = folded + history.length;
+    if (editCount % PhotoProject.checkpointInterval == 0) {
+      checkpoints = [
+        ...checkpoints.where((checkpoint) => checkpoint.editCount != editCount),
+        ProjectEditCheckpoint(editCount: editCount, snapshot: after),
+      ]..sort((left, right) => left.editCount.compareTo(right.editCount));
+    }
+    return next.copyWith(
+      undoHistory: history,
+      redoHistory: const [],
+      foldedEditCount: folded,
+      historyBaseSnapshot: base,
+      editCheckpoints: checkpoints,
+    );
   }
 
   EditRecipe _editablePhotoRecipe(PhotoProject project, String photoId) {

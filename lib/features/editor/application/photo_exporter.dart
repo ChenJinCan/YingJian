@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/editing_core.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 
 abstract interface class PhotoExporter {
@@ -13,6 +14,17 @@ abstract interface class ConfigurablePhotoExporter implements PhotoExporter {
   Future<ExportedPhoto> exportWithOptions({
     required ProjectPhoto photo,
     required EditRecipe recipe,
+    required PhotoExportOptions options,
+  });
+}
+
+abstract interface class CanonicalPhotoExporter
+    implements ConfigurablePhotoExporter {
+  Future<ExportedPhoto> exportCanonical({
+    required ProjectPhoto photo,
+    required EditRecipe recipe,
+    required EditState editState,
+    required EditContext editContext,
     required PhotoExportOptions options,
   });
 }

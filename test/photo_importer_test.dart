@@ -1,6 +1,8 @@
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yingjian/features/editor/domain/editing_resource.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/project/infrastructure/app_owned_photo_importer.dart';
@@ -50,6 +52,45 @@ void main() {
   );
 
   test(
+    'imports an editing resource into content-addressed app storage',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'yingjian-editing-resource-import-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final sourceFile = File('${directory.path}/background.jpg');
+      final bytes = _jpeg(width: 1600, height: 1200);
+      await sourceFile.writeAsBytes(bytes);
+      final importer = AppOwnedPhotoImporter(
+        source: _FakePhotoSource([
+          SelectedPhoto(path: sourceFile.path, name: 'background.jpg'),
+        ]),
+        mediaDirectory: () async => Directory('${directory.path}/app/media'),
+        inspectPhoto: _inspectJpeg,
+        createId: () => 'resource-import',
+      );
+
+      final imported = await importer.importEditingResource(
+        EditingResourceKind.backgroundImage,
+      );
+
+      const sha =
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+      expect(imported, isNotNull);
+      expect(imported!.descriptor.id, 'resource-v1-$sha');
+      expect(imported.descriptor.relativePath, 'resources/aa/$sha.jpg');
+      expect(imported.descriptor.byteLength, bytes.length);
+      expect(imported.localPath, '${directory.path}/app/resources/aa/$sha.jpg');
+      expect(await File(imported.localPath).readAsBytes(), bytes);
+      expect(await sourceFile.readAsBytes(), bytes);
+      expect(
+        File('${directory.path}/app/media/resource-import.jpg').existsSync(),
+        isFalse,
+      );
+    },
+  );
+
+  test(
     'releases temporary picker files after creating app-owned copies',
     () async {
       final directory = await Directory.systemTemp.createTemp(
@@ -75,6 +116,36 @@ void main() {
       expect(source.released, [sourceFile.path]);
     },
   );
+
+  test('stores generated vector resources by their SHA-256 identity', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'yingjian-generated-resource-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final importer = AppOwnedPhotoImporter(
+      source: _FakePhotoSource(const []),
+      mediaDirectory: () async => Directory('${directory.path}/app/media'),
+      inspectPhoto: _inspectJpeg,
+    );
+    final bytes = utf8.encode('{"schemaVersion":1,"strokes":[]}');
+
+    final first = await importer.storeEditingResource(
+      kind: EditingResourceKind.subjectMask,
+      bytes: bytes,
+    );
+    final second = await importer.storeEditingResource(
+      kind: EditingResourceKind.subjectMask,
+      bytes: bytes,
+    );
+
+    expect(first.descriptor.id, second.descriptor.id);
+    expect(first.descriptor.relativePath, endsWith('.json'));
+    expect(await File(first.localPath).readAsBytes(), bytes);
+    expect(first.descriptor.byteLength, bytes.length);
+
+    await importer.discardEditingResource(first);
+    expect(await File(first.localPath).exists(), isFalse);
+  });
 
   test('removes app-owned copies when picker cleanup fails', () async {
     final directory = await Directory.systemTemp.createTemp(

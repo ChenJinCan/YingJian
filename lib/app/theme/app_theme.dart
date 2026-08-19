@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 
 abstract final class AppTheme {
-  static const _seed = Color(0xFFDAB34B);
-  static const _darkBackground = Color(0xFF0D0F10);
-  static const _darkSurface = Color(0xFF17191C);
-  static const _darkSurfaceRaised = Color(0xFF202226);
-  static const _darkInk = Color(0xFFF5F2EA);
-  static const _darkMuted = Color(0xFFAAA69E);
-  static const _darkAccent = Color(0xFFDAB34B);
+  // Frozen Stitch MVP palette. Keep these values exact so every production
+  // surface shares the same warm-black editorial language.
+  static const _seed = Color(0xFFE6BC45);
+  static const _darkBackground = Color(0xFF0B0D0E);
+  static const _darkSurface = Color(0xFF151719);
+  static const _darkSurfaceRaised = Color(0xFF202224);
+  static const _darkInk = Color(0xFFF6F2EA);
+  static const _darkMuted = Color(0xFFA7A39C);
+  static const _darkAccent = Color(0xFFE6BC45);
 
   static final light = _build(Brightness.light);
   static final dark = _build(Brightness.dark);
@@ -21,8 +23,8 @@ abstract final class AppTheme {
       colorScheme = colorScheme.copyWith(
         primary: _darkAccent,
         onPrimary: const Color(0xFF211A06),
-        primaryContainer: const Color(0xFF41340E),
-        onPrimaryContainer: const Color(0xFFFFE59A),
+        primaryContainer: const Color(0xFF3A3015),
+        onPrimaryContainer: const Color(0xFFF8D875),
         surface: _darkBackground,
         surfaceContainerLowest: const Color(0xFF08090A),
         surfaceContainerLow: _darkSurface,
@@ -31,8 +33,8 @@ abstract final class AppTheme {
         surfaceContainerHighest: const Color(0xFF2B2D31),
         onSurface: _darkInk,
         onSurfaceVariant: _darkMuted,
-        outline: const Color(0xFF46484D),
-        outlineVariant: const Color(0xFF303237),
+        outline: const Color(0xFF444648),
+        outlineVariant: const Color(0xFF2B2D2F),
       );
     }
 
@@ -52,7 +54,7 @@ abstract final class AppTheme {
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(22),
+          borderRadius: BorderRadius.circular(20),
           side: BorderSide(color: colorScheme.outlineVariant),
         ),
       ),
@@ -76,7 +78,7 @@ abstract final class AppTheme {
         style: FilledButton.styleFrom(
           minimumSize: const Size(160, 52),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(14),
           ),
         ),
       ),

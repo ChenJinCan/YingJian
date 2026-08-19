@@ -10,7 +10,10 @@ import 'package:yingjian/app/settings/app_settings.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_sharer.dart';
 import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
+import 'package:yingjian/features/editor/domain/editing_core.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/meta_op.dart';
+import 'package:yingjian/features/editor/domain/platform_meta_op_capabilities.dart';
 import 'package:yingjian/features/editor/domain/semantic_editing_recipe.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
@@ -26,8 +29,8 @@ void main() {
     await tester.pumpWidget(buildTestApp(settings));
 
     expect(find.text('映见'), findsOneWidget);
-    expect(find.text('选张照片，说说想怎么改'), findsOneWidget);
-    expect(find.text('选择照片'), findsOneWidget);
+    expect(find.text('让变美更容易'), findsOneWidget);
+    expect(find.text('选择照片开始'), findsOneWidget);
     expect(
       find.byKey(const ValueKey('home-full-screen-background')),
       findsOneWidget,
@@ -55,7 +58,7 @@ void main() {
     await tester.pumpWidget(buildTestApp(settings));
 
     expect(find.text('Yingjian'), findsOneWidget);
-    expect(find.text('Choose photos'), findsOneWidget);
+    expect(find.text('Choose photos to start'), findsOneWidget);
   });
 
   testWidgets('English unfinished-project count uses singular grammar', (
@@ -111,10 +114,230 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('未完成项目'), findsOneWidget);
-    expect(find.text('选择照片'), findsOneWidget);
+    expect(find.text('选择照片开始'), findsOneWidget);
     expect(find.byKey(const ValueKey('home-resume-project')), findsOneWidget);
     expect(find.textContaining('1 张照片'), findsOneWidget);
     expect(find.textContaining('14:30'), findsOneWidget);
+  });
+
+  testWidgets('future meta ops open visibly read-only until update', (
+    tester,
+  ) async {
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final project = PhotoProject(
+      id: 'future-project',
+      createdAt: DateTime.utc(2026, 8, 20),
+      updatedAt: DateTime.utc(2026, 8, 20),
+      photos: [
+        ProjectPhoto(
+          id: 'photo-1',
+          localPath: photoFile.path,
+          originalName: 'future.jpg',
+        ),
+      ],
+      flowState: PhotoProjectFlowState.editing,
+      selectedRecommendationId: 'clean-natural-01',
+      unknownMetaOps: const [
+        {
+          'id': 'future.generative_relight',
+          'version': 7,
+          'payload': {'mode': 'cinematic'},
+        },
+      ],
+    );
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoProjectStore: MemoryPhotoProjectStore(project),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('home-resume-project')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('project-requires-update')),
+      findsOneWidget,
+    );
+    expect(find.text('需要更新后继续编辑'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const ValueKey('editor-batch-export')),
+          )
+          .onPressed,
+      isNull,
+    );
+  });
+
+  testWidgets('AI asks for one face then commits one undoable transaction', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final store = MemoryPhotoProjectStore(
+      PhotoProject(
+        id: 'project-ai-target',
+        createdAt: DateTime.utc(2026, 8, 20),
+        updatedAt: DateTime.utc(2026, 8, 20),
+        photos: [
+          ProjectPhoto(
+            id: 'photo-1',
+            localPath: photoFile.path,
+            originalName: '多人合照.png',
+          ),
+        ],
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'clean-natural-01',
+        focusPhotoId: 'photo-1',
+      ),
+    );
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoProjectStore: store,
+        metaOpCapabilities: iosMetaOpCapabilities,
+        photoAnalyzer: _CountingPhotoAnalyzer(
+          portrait: PortraitApplicability.applicable,
+          faceSlimTargetCount: 2,
+          faceTargetRegions: const [
+            NormalizedTargetRegion(
+              left: 0.05,
+              top: 0.1,
+              right: 0.4,
+              bottom: 0.65,
+            ),
+            NormalizedTargetRegion(
+              left: 0.58,
+              top: 0.12,
+              right: 0.94,
+              bottom: 0.68,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    await _openEditorFromHome(tester);
+    final targetIds = store.project!.targetRegistries['photo-1']!.targets.keys
+        .toList(growable: false);
+    await tester.tap(find.byKey(const ValueKey('voice-edit-entry')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('voice-edit-text-field')),
+      '皮肤自然一点',
+    );
+    await tester.tap(find.byKey(const ValueKey('voice-edit-submit')));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.byKey(ValueKey('ai-target-${targetIds[0]}')), findsOneWidget);
+    expect(find.byKey(ValueKey('ai-target-${targetIds[1]}')), findsOneWidget);
+    expect(store.project!.undoHistory, isEmpty);
+
+    await tester.tap(find.byKey(ValueKey('ai-target-${targetIds[1]}')));
+    await tester.pumpAndSettle();
+
+    expect(store.project!.undoHistory, hasLength(1));
+    expect(store.project!.undoHistory.single.source, EditSource.ai);
+    expect(store.project!.undoHistory.single.changedAddresses, hasLength(3));
+    expect(
+      store.project!.undoHistory.single.changedAddresses
+          .map((address) => address.targetId)
+          .toSet(),
+      {targetIds[1]},
+    );
+    expect(find.byKey(const ValueKey('editor-feedback-pill')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
+    await tester.pumpAndSettle();
+    final tabs = find.descendant(
+      of: find.byKey(const ValueKey('editor-adjustment-tabs')),
+      matching: find.byWidgetPredicate((widget) {
+        final key = widget.key;
+        return key is ValueKey<String> &&
+            key.value.startsWith('editor-adjustment-tab-');
+      }),
+    );
+    expect(
+      (tabs.evaluate().first.widget.key! as ValueKey<String>).value,
+      'editor-adjustment-tab-textureSmoothing',
+    );
+    final smoothing = find.byKey(
+      const ValueKey('editor-adjustment-textureSmoothing'),
+    );
+    expect(
+      tester
+          .widget<Slider>(
+            find.descendant(of: smoothing, matching: find.byType(Slider)),
+          )
+          .value,
+      closeTo(0.5, 0.001),
+    );
+  });
+
+  testWidgets('AI keeps the safe state when its proposed render fails', (
+    tester,
+  ) async {
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final store = MemoryPhotoProjectStore(
+      PhotoProject(
+        id: 'project-ai-render-failure',
+        createdAt: DateTime.utc(2026, 8, 20),
+        updatedAt: DateTime.utc(2026, 8, 20),
+        photos: [
+          ProjectPhoto(
+            id: 'photo-1',
+            localPath: photoFile.path,
+            originalName: 'AI 渲染失败.png',
+          ),
+        ],
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'clean-natural-01',
+        focusPhotoId: 'photo-1',
+      ),
+    );
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoProjectStore: store,
+        metaOpCapabilities: iosMetaOpCapabilities,
+        photoPreviewRenderer: FakePhotoPreviewRenderer.unsupported(),
+      ),
+    );
+
+    await _tapEditorEntryFromHome(tester);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('voice-edit-entry')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('voice-edit-text-field')),
+      '照片亮一点',
+    );
+    await tester.tap(find.byKey(const ValueKey('voice-edit-submit')));
+    await tester.pumpAndSettle();
+
+    expect(store.project!.undoHistory, isEmpty);
+    expect(store.project!.sharedStyle.recipe.exposure, 0);
+    expect(find.byKey(const ValueKey('voice-edit-text-field')), findsOneWidget);
   });
 
   testWidgets('starting over requires confirmation before deleting copies', (
@@ -174,8 +397,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
+    await _openEditorFromHome(tester);
 
     expect(find.byKey(const ValueKey('photo-preview-photo-1')), findsOneWidget);
     expect(find.byKey(const ValueKey('editor-preview-stage')), findsOneWidget);
@@ -216,8 +438,7 @@ void main() {
         ),
       );
 
-      await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-      await tester.pumpAndSettle();
+      await _openEditorFromHome(tester);
       expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
       expect(
         find.byKey(const ValueKey('editor-bottom-command-bar')),
@@ -296,8 +517,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
+    await _openEditorFromHome(tester);
 
     expect(find.text('可用照片.png'), findsOneWidget);
     expect(find.textContaining('动态照片.png'), findsOneWidget);
@@ -319,8 +539,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
+    await _openEditorFromHome(tester);
 
     expect(find.textContaining('损坏照片.jpg'), findsOneWidget);
     expect(find.textContaining('无法读取'), findsOneWidget);
@@ -337,8 +556,7 @@ void main() {
       buildTestApp(settings, photoImporter: FakePhotoImporter()),
     );
 
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
+    await _openEditorFromHome(tester);
 
     expect(find.text('未添加任何照片'), findsOneWidget);
     expect(find.text('选择照片'), findsOneWidget);
@@ -352,13 +570,13 @@ void main() {
     final settings = await AppSettings.load();
     await tester.pumpWidget(buildTestApp(settings, photoImporter: importer));
 
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+    await _tapEditorEntryFromHome(tester);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
     final progress = find.semantics.byPredicate(
       (node) =>
-          node.label.contains('正在本地导入照片') && node.flagsCollection.isLiveRegion,
+          node.label.contains('正在导入照片') && node.flagsCollection.isLiveRegion,
     );
     expect(progress, findsOne);
     expect(progress.evaluate().single.flagsCollection.isLiveRegion, isTrue);
@@ -393,8 +611,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
+    await _openEditorFromHome(tester);
     expect(previewRenderer.maxEdges, contains(2048));
     expect(store.project?.flowState, PhotoProjectFlowState.editing);
     expect(store.project?.selectedRecommendationId, contains('clean-balanced'));
@@ -441,22 +658,20 @@ void main() {
     );
 
     await tester.pumpWidget(app());
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
+    await _openEditorFromHome(tester);
     expect(analyzer.calls, 1);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
     await tester.pumpWidget(app());
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
+    await _openEditorFromHome(tester);
 
     expect(analyzer.calls, 1);
     expect(store.project?.flowState, PhotoProjectFlowState.editing);
     expect(find.byKey(const ValueKey('voice-edit-entry')), findsOneWidget);
   });
 
-  testWidgets('an unavailable edited preview is explicit and retryable', (
+  testWidgets('a failed recommendation preview stays safe and can retry', (
     tester,
   ) async {
     final photoFile = File(
@@ -480,20 +695,22 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
+    await _openEditorFromHome(tester);
 
     expect(find.textContaining('预览'), findsWidgets);
-    expect(find.textContaining('原图不受影响'), findsOneWidget);
-    expect(find.byKey(const ValueKey('photo-preview-retry')), findsOneWidget);
+    expect(find.textContaining('当前效果预览暂不可用'), findsOneWidget);
+    final confirm = find.byKey(const ValueKey('recommendation-confirm'));
+    expect(confirm, findsOneWidget);
     final createCountBeforeRetry = renderer.creates.length;
 
-    await tester.tap(find.byKey(const ValueKey('photo-preview-retry')));
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(confirm);
+    await tester.tap(confirm);
     await tester.pumpAndSettle();
 
     expect(renderer.creates.length, createCountBeforeRetry + 1);
-    expect(find.textContaining('预览'), findsWidgets);
-    expect(find.byKey(const ValueKey('voice-edit-entry')), findsOneWidget);
+    expect(confirm, findsOneWidget);
   });
 
   testWidgets('backgrounding analysis discards a late native result', (
@@ -534,7 +751,7 @@ void main() {
         photoAnalysisCache: cache,
       ),
     );
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+    await _tapEditorEntryFromHome(tester);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     await analyzer.started.future;
@@ -560,8 +777,14 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
 
-    expect(store.project?.flowState, PhotoProjectFlowState.editing);
-    expect(find.byKey(const ValueKey('voice-edit-entry')), findsOneWidget);
+    expect(
+      store.project?.flowState,
+      PhotoProjectFlowState.choosingRecommendation,
+    );
+    expect(
+      find.byKey(const ValueKey('recommendation-confirm')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('rapid resume waits for the serialized lifecycle fallback', (
@@ -600,7 +823,7 @@ void main() {
         photoAnalyzer: analyzer,
       ),
     );
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+    await _tapEditorEntryFromHome(tester);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     await analyzer.started.future;
@@ -615,7 +838,10 @@ void main() {
     store.completeFallbackSave();
     await tester.pumpAndSettle();
 
-    expect(store.project?.flowState, PhotoProjectFlowState.editing);
+    expect(
+      store.project?.flowState,
+      PhotoProjectFlowState.choosingRecommendation,
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -648,7 +874,7 @@ void main() {
         photoAnalyzer: analyzer,
       ),
     );
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+    await _tapEditorEntryFromHome(tester);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     await analyzer.started.future;
@@ -693,7 +919,7 @@ void main() {
         photoAnalysisCache: cache,
       ),
     );
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+    await _tapEditorEntryFromHome(tester);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     await analyzer.started.future;
@@ -748,7 +974,7 @@ void main() {
         photoAnalyzer: _CountingPhotoAnalyzer(),
       ),
     );
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+    await _tapEditorEntryFromHome(tester);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     await store.analysisSaveStarted.future;
@@ -799,7 +1025,7 @@ void main() {
         photoAnalyzer: analyzer,
       ),
     );
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+    await _tapEditorEntryFromHome(tester);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     await analyzer.started.future;
@@ -813,9 +1039,15 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(store.project?.photos.map((photo) => photo.id), ['photo-2']);
-    expect(store.project?.flowState, PhotoProjectFlowState.editing);
+    expect(
+      store.project?.flowState,
+      PhotoProjectFlowState.choosingRecommendation,
+    );
     expect(analyzer.calls, greaterThanOrEqualTo(2));
-    expect(find.byKey(const ValueKey('voice-edit-entry')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('recommendation-confirm')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('photo removal drains a claimed analysis state save', (
@@ -856,7 +1088,7 @@ void main() {
         photoAnalyzer: _CountingPhotoAnalyzer(),
       ),
     );
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+    await _tapEditorEntryFromHome(tester);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     await store.analysisSaveStarted.future;
@@ -872,7 +1104,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(store.project?.photos.map((photo) => photo.id), ['photo-2']);
-    expect(store.project?.flowState, PhotoProjectFlowState.editing);
+    expect(
+      store.project?.flowState,
+      PhotoProjectFlowState.choosingRecommendation,
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -913,22 +1148,30 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
+    await _openEditorFromHome(tester);
 
     expect(find.text('周末人像.png'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
+    await tester.pumpAndSettle();
     final exposureAdjustment = find.byKey(
       const ValueKey('editor-adjustment-exposure'),
     );
-    await tester.dragUntilVisible(
-      exposureAdjustment,
-      find.byKey(const Key('photo-workspace-scroll')),
-      const Offset(0, -200),
-    );
+    await tester.ensureVisible(exposureAdjustment);
     await tester.pumpAndSettle();
     expect(find.text('高光'), findsOneWidget);
     expect(find.text('阴影'), findsOneWidget);
-    expect(find.text('构图'), findsOneWidget);
+    expect(find.byKey(const ValueKey('editor-all-tools')), findsOneWidget);
+    expect(find.byKey(const ValueKey('editor-tool-categories')), findsNothing);
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget.key is ValueKey<String> &&
+            (widget.key! as ValueKey<String>).value.startsWith(
+              'editor-adjustment-tab-',
+            ),
+      ),
+      findsNWidgets(5),
+    );
     await tester.drag(
       find.descendant(of: exposureAdjustment, matching: find.byType(Slider)),
       const Offset(120, 0),
@@ -936,13 +1179,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(exporter.exportedRecipe, isNull);
     expect(store.project?.undoHistory, hasLength(1));
-
-    await tester.dragUntilVisible(
-      find.text('重做'),
-      find.byKey(const Key('photo-workspace-scroll')),
-      const Offset(0, -200),
-    );
-    expect(find.text('重做'), findsOneWidget);
 
     final saveButton = find.byKey(const ValueKey('editor-batch-export'));
     await tester.ensureVisible(saveButton);
@@ -953,6 +1189,7 @@ void main() {
     expect(find.byKey(const ValueKey('save-all')), findsOneWidget);
     expect(find.byKey(const ValueKey('save-current')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('save-all')));
+    await tester.tap(find.byKey(const ValueKey('save-confirm')));
     await tester.pumpAndSettle();
 
     expect(exporter.exportedPhoto, photo);
@@ -1098,51 +1335,26 @@ void main() {
       );
       SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
       final settings = await AppSettings.load();
+      final store = MemoryPhotoProjectStore(project);
       await tester.pumpWidget(
         buildTestApp(
           settings,
-          photoProjectStore: MemoryPhotoProjectStore(project),
+          photoProjectStore: store,
           photoPreviewRenderer: FakePhotoPreviewRenderer.unsupported(),
         ),
       );
-      await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+      await _tapEditorEntryFromHome(tester);
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
-      expect(find.byKey(const Key('photo-workspace-scroll')), findsOneWidget);
-      for (
-        var attempt = 0;
-        attempt < 8 && find.text('构图').evaluate().isEmpty;
-        attempt += 1
-      ) {
-        await tester.drag(
-          find.byKey(const Key('photo-workspace-scroll')),
-          const Offset(0, -260),
-        );
-        await tester.pumpAndSettle();
-      }
-      final compositionCategory = find.byKey(
-        const ValueKey('editor-tool-category-composition'),
-      );
-      expect(compositionCategory, findsOneWidget);
-      await Scrollable.ensureVisible(tester.element(compositionCategory));
-      await tester.pumpAndSettle();
-      await tester.tap(compositionCategory);
-      await tester.pumpAndSettle();
+      await _openManualMetaOp(tester, MetaOpIds.compositionGeometry);
       await tester.ensureVisible(find.byTooltip('向左旋转'));
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('向左旋转'));
       await tester.pumpAndSettle();
-      for (var attempt = 0; attempt < 6; attempt += 1) {
-        await tester.drag(
-          find.byKey(const Key('photo-workspace-scroll')),
-          const Offset(0, 320),
-        );
-        await tester.pumpAndSettle();
-      }
 
-      expect(find.textContaining('构图预览暂不可用'), findsOneWidget);
-      expect(find.textContaining('原图不受影响'), findsOneWidget);
+      expect(find.textContaining('当前效果预览暂不可用'), findsOneWidget);
       expect(find.text('构图预览.png'), findsOneWidget);
+      expect(store.project!.effectiveRecipeFor('photo-1').crop.quarterTurns, 0);
       debugDefaultTargetPlatformOverride = null;
     },
   );
@@ -1183,24 +1395,42 @@ void main() {
           },
         ),
       );
+      final previewRenderer = FakePhotoPreviewRenderer.supported();
       SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
       final settings = await AppSettings.load();
-      await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
-      await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoProjectStore: store,
+          photoPreviewRenderer: previewRenderer,
+          metaOpCapabilities: iosMetaOpCapabilities,
+        ),
+      );
+      await _tapEditorEntryFromHome(tester);
       await tester.pumpAndSettle();
 
-      final compositionCategory = find.byKey(
-        const ValueKey('editor-tool-category-composition'),
-      );
-      await tester.ensureVisible(compositionCategory);
-      await tester.tap(compositionCategory);
-      await tester.pumpAndSettle();
+      await _openManualMetaOp(tester, MetaOpIds.compositionGeometry);
       final reset = find.widgetWithText(TextButton, '恢复原始构图');
       await tester.ensureVisible(reset);
       expect(tester.widget<TextButton>(reset).onPressed, isNotNull);
       await tester.tap(reset);
       await tester.pumpAndSettle();
 
+      for (
+        var attempt = 0;
+        attempt < 10 &&
+            store
+                .project!
+                .photoOverrides['photo-1']!
+                .recipe
+                .basicEditingRecipe
+                .flipHorizontal;
+        attempt += 1
+      ) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+
+      expect(previewRenderer.creates.length, greaterThan(1));
       final recipe = store.project!.photoOverrides['photo-1']!.recipe;
       expect(recipe.crop, CropGeometry.original);
       expect(recipe.basicEditingRecipe.flipHorizontal, isFalse);
@@ -1265,30 +1495,747 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
+    await _openEditorFromHome(tester);
 
     expect(find.textContaining('当前效果预览暂不可用'), findsOneWidget);
-    expect(find.textContaining('原图不受影响'), findsOneWidget);
     expect(find.textContaining('构图预览暂不可用'), findsNothing);
     debugDefaultTargetPlatformOverride = null;
   });
 
+  testWidgets('applicable portrait exposes one undoable natural retouch control', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final semantics = tester.ensureSemantics();
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final photo = ProjectPhoto(
+      id: 'portrait-photo',
+      localPath: photoFile.path,
+      originalName: '已有照片人像.png',
+      contentSha256:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      pixelWidth: 1024,
+      pixelHeight: 1024,
+      colorSpace: PhotoColorSpace.srgb,
+      inputFormat: PhotoInputFormat.png,
+      supportState: PhotoSupportState.supported,
+    );
+    final store = MemoryPhotoProjectStore(
+      PhotoProject(
+        id: 'portrait-project',
+        createdAt: DateTime.utc(2026, 8, 5),
+        updatedAt: DateTime.utc(2026, 8, 5),
+        photos: [photo],
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'clean-natural-01',
+        editingScope: ProjectEditingScope.currentPhoto,
+        focusPhotoId: photo.id,
+      ),
+    );
+    final cache = MemoryPhotoAnalysisCache();
+    final cachedWrite = await cache.stage(
+      projectId: 'portrait-project',
+      photoId: photo.id,
+      analysis: LocalPhotoAnalysis(
+        analysisVersion: 'widget-analysis-v1',
+        capabilityVersion: 'widget-capability-v1',
+        contentSha256: photo.contentSha256,
+        orientation: photo.orientation,
+        pixelWidth: photo.pixelWidth,
+        pixelHeight: photo.pixelHeight,
+        colorSpace: photo.colorSpace,
+        disposition: PhotoAnalysisDisposition.ready,
+        fallbackReason: AnalysisFallbackReason.none,
+        portrait: PortraitApplicability.applicable,
+        faceSlimTargetCount: 2,
+        faceTargetRegions: const [
+          NormalizedTargetRegion(
+            left: 0.12,
+            top: 0.18,
+            right: 0.38,
+            bottom: 0.5,
+          ),
+          NormalizedTargetRegion(
+            left: 0.62,
+            top: 0.18,
+            right: 0.88,
+            bottom: 0.5,
+          ),
+        ],
+        body: PortraitApplicability.applicable,
+        bodyTargetCount: 2,
+        bodyTargetRegions: const [
+          NormalizedTargetRegion(
+            left: 0.05,
+            top: 0.34,
+            right: 0.44,
+            bottom: 0.92,
+          ),
+          NormalizedTargetRegion(
+            left: 0.56,
+            top: 0.34,
+            right: 0.95,
+            bottom: 0.92,
+          ),
+        ],
+      ),
+    );
+    await cache.commit(cachedWrite, canCommit: () => true);
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    final backgroundImporter = FakePhotoImporter([
+      ProjectPhoto(
+        id: 'background-photo',
+        localPath: photoFile.path,
+        originalName: '背景.png',
+        contentSha256:
+            'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      ),
+    ]);
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoImporter: backgroundImporter,
+        photoProjectStore: store,
+        photoAnalyzer: _CountingPhotoAnalyzer(
+          portrait: PortraitApplicability.applicable,
+          faceSlimTargetCount: 2,
+          body: PortraitApplicability.applicable,
+          bodyTargetCount: 2,
+        ),
+        metaOpCapabilities: iosMetaOpCapabilities,
+        photoAnalysisCache: cache,
+        photoPreviewRenderer: FakePhotoPreviewRenderer.supported(),
+      ),
+    );
+
+    await _openEditorFromHome(tester);
+    await _openManualMetaOp(tester, MetaOpIds.skinSmooth);
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('editor-adjustment-tab-naturalBeautification')),
+    );
+    await tester.pumpAndSettle();
+    final portraitTab = find.byKey(
+      const ValueKey('editor-adjustment-tab-naturalBeautification'),
+    );
+    expect(portraitTab.hitTestable(), findsOneWidget);
+    for (final category in [
+      'composition',
+      'color',
+      'filters',
+      'quality',
+      'retouch',
+      'semantic',
+    ]) {
+      expect(
+        find.byKey(ValueKey('editor-tool-category-$category')),
+        findsNothing,
+      );
+    }
+    final exposureTab = find.byKey(
+      const ValueKey('editor-adjustment-tab-exposure'),
+    );
+    expect(exposureTab, findsNothing);
+    await tester.tap(portraitTab);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('editor-apply-one-tap-natural-beautification')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('editor-adjustment-section')),
+      findsOneWidget,
+    );
+    expect(find.text('人像'), findsWidgets);
+    final faceSlimTab = find.byKey(
+      const ValueKey('editor-adjustment-tab-faceSlim'),
+    );
+    expect(faceSlimTab.hitTestable(), findsOneWidget);
+    await _openManualMetaOp(tester, MetaOpIds.exposure);
+    expect(exposureTab, findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('editor-adjustment-tab-faceSlim')),
+      findsNothing,
+    );
+    await _openManualMetaOp(tester, MetaOpIds.noiseReduction);
+    await tester.tap(
+      find.byKey(const ValueKey('editor-adjustment-tab-qualityImprovement')),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('editor-apply-quality-improvement')),
+      findsOneWidget,
+    );
+    await _openManualMetaOp(tester, MetaOpIds.skinSmooth);
+    await tester.tap(portraitTab);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('editor-adjustment-tab-textureSmoothing')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('editor-adjustment-tab-skinToneLighting')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('editor-adjustment-tab-blemishReduction')),
+      findsOneWidget,
+    );
+    expect(store.project!.targetRegistries[photo.id]!.targets, hasLength(4));
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('editor-apply-one-tap-natural-beautification')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('editor-apply-one-tap-natural-beautification')),
+    );
+    await tester.pumpAndSettle();
+    var targetedPortraitRecipe = store.project!
+        .effectiveRecipeFor(photo.id)
+        .targetedPortraitRecipe;
+    expect(targetedPortraitRecipe.adjustments, hasLength(2));
+    for (final adjustment in targetedPortraitRecipe.adjustments.values) {
+      expect(adjustment.textureSmoothing, 50);
+      expect(adjustment.skinToneLighting, 50);
+      expect(adjustment.blemishReduction, 20);
+    }
+
+    final textureSmoothingTab = find.byKey(
+      const ValueKey('editor-adjustment-tab-textureSmoothing'),
+    );
+    await tester.tap(textureSmoothingTab);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('editor-stable-face-target-selector')),
+      findsOneWidget,
+    );
+    final secondStableFaceOverlay = find.byKey(
+      const ValueKey('portrait-target-overlay-1'),
+    );
+    tester
+        .widget<GestureDetector>(
+          find.descendant(
+            of: secondStableFaceOverlay,
+            matching: find.byType(GestureDetector),
+          ),
+        )
+        .onTap!();
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('editor-stable-face-target-selector')),
+      findsNothing,
+    );
+    final textureSmoothingControl = find.descendant(
+      of: find.byKey(const ValueKey('editor-adjustment-textureSmoothing')),
+      matching: find.byType(Slider),
+    );
+    expect(textureSmoothingControl, findsOneWidget);
+    final textureSmoothingSlider = tester.widget<Slider>(
+      textureSmoothingControl,
+    );
+    textureSmoothingSlider.onChangeStart!(textureSmoothingSlider.value);
+    textureSmoothingSlider.onChanged!(0.8);
+    textureSmoothingSlider.onChangeEnd!(0.8);
+    await tester.pumpAndSettle();
+    expect(find.text('无法保存本次调整，请重试'), findsNothing);
+    expect(
+      tester.widget<Slider>(textureSmoothingControl).value,
+      greaterThan(0.5),
+    );
+    targetedPortraitRecipe = store.project!
+        .effectiveRecipeFor(photo.id)
+        .targetedPortraitRecipe;
+    expect(
+      targetedPortraitRecipe.adjustments.values.where(
+        (adjustment) => adjustment.textureSmoothing > 50,
+      ),
+      hasLength(1),
+    );
+
+    await tester.ensureVisible(faceSlimTab);
+    await tester.pumpAndSettle();
+    await tester.tap(faceSlimTab);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('editor-face-slim-target-0')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('editor-face-slim-target-1')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('editor-face-target-selector')),
+      findsOneWidget,
+    );
+    final secondFaceOverlay = find.byKey(
+      const ValueKey('portrait-target-overlay-1'),
+    );
+    expect(secondFaceOverlay, findsOneWidget);
+    expect(tester.getSize(secondFaceOverlay).width, greaterThanOrEqualTo(44));
+    expect(tester.getSize(secondFaceOverlay).height, greaterThanOrEqualTo(44));
+    final faceSlimSlider = find.semantics.byPredicate(
+      (node) => node.label.startsWith('瘦脸') && node.flagsCollection.isSlider,
+    );
+    expect(faceSlimSlider, findsOne);
+    expect(
+      find.byKey(const ValueKey('editor-adjustment-faceSlim')),
+      findsOneWidget,
+    );
+    final faceSlimControl = find.descendant(
+      of: find.byKey(const ValueKey('editor-adjustment-faceSlim')),
+      matching: find.byType(Slider),
+    );
+    await tester.ensureVisible(faceSlimControl);
+    await tester.pumpAndSettle();
+    expect(tester.widget<Slider>(faceSlimControl).max, 0.5);
+    var faceSlimWidget = tester.widget<Slider>(faceSlimControl);
+    faceSlimWidget.onChangeStart!(faceSlimWidget.value);
+    faceSlimWidget.onChanged!(0.2);
+    faceSlimWidget.onChangeEnd!(0.2);
+    await tester.pumpAndSettle();
+    final firstFaceStrength = (await store.loadLatest())!
+        .effectiveRecipeFor(photo.id)
+        .faceSlimRecipe
+        .targetStrengths[0];
+    expect(firstFaceStrength, greaterThan(0));
+    await tester.ensureVisible(secondFaceOverlay);
+    await tester.pumpAndSettle();
+    tester
+        .widget<GestureDetector>(
+          find.descendant(
+            of: secondFaceOverlay,
+            matching: find.byType(GestureDetector),
+          ),
+        )
+        .onTap!();
+    await tester.pumpAndSettle();
+    expect(tester.widget<Slider>(faceSlimControl).value, 0);
+    faceSlimWidget = tester.widget<Slider>(faceSlimControl);
+    faceSlimWidget.onChangeStart!(faceSlimWidget.value);
+    faceSlimWidget.onChanged!(0.15);
+    faceSlimWidget.onChangeEnd!(0.15);
+    await tester.pumpAndSettle();
+    final multiFaceRecipe = (await store.loadLatest())!
+        .effectiveRecipeFor(photo.id)
+        .faceSlimRecipe;
+    expect(multiFaceRecipe.targetStrengths[0], firstFaceStrength);
+    expect(multiFaceRecipe.targetStrengths[1], greaterThan(0));
+    expect(
+      (await store.loadLatest())?.effectiveRecipeFor(photo.id).faceSlimStrength,
+      greaterThan(0),
+    );
+    final headSizeTab = find.byKey(
+      const ValueKey('editor-adjustment-tab-headSize'),
+    );
+    await tester.ensureVisible(headSizeTab);
+    await tester.pumpAndSettle();
+    expect(headSizeTab.hitTestable(), findsOneWidget);
+    await tester.tap(headSizeTab);
+    await tester.pumpAndSettle();
+    final headSizeControl = find.descendant(
+      of: find.byKey(const ValueKey('editor-adjustment-headSize')),
+      matching: find.byType(Slider),
+    );
+    final headSizeWidget = tester.widget<Slider>(headSizeControl);
+    headSizeWidget.onChangeStart!(headSizeWidget.value);
+    headSizeWidget.onChanged!(0.2);
+    headSizeWidget.onChangeEnd!(0.2);
+    await tester.pumpAndSettle();
+    expect(
+      (await store.loadLatest())!
+          .effectiveRecipeFor(photo.id)
+          .portraitGeometryRecipe
+          .faceTargets[1]
+          .headSize,
+      greaterThan(0),
+    );
+    final bodySlimTab = find.byKey(
+      const ValueKey('editor-adjustment-tab-bodySlim'),
+    );
+    await tester.ensureVisible(bodySlimTab);
+    await tester.pumpAndSettle();
+    expect(bodySlimTab.hitTestable(), findsOneWidget);
+    await tester.tap(bodySlimTab);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('editor-body-target-0')), findsOneWidget);
+    expect(find.byKey(const ValueKey('editor-body-target-1')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('editor-body-target-selector')),
+      findsOneWidget,
+    );
+    final secondBodyOverlay = find.byKey(
+      const ValueKey('portrait-target-overlay-1'),
+    );
+    await tester.ensureVisible(secondBodyOverlay);
+    await tester.pumpAndSettle();
+    tester
+        .widget<GestureDetector>(
+          find.descendant(
+            of: secondBodyOverlay,
+            matching: find.byType(GestureDetector),
+          ),
+        )
+        .onTap!();
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<ChoiceChip>(
+            find.byKey(const ValueKey('editor-body-target-1')),
+          )
+          .selected,
+      isTrue,
+    );
+    final bodySlimControl = find.descendant(
+      of: find.byKey(const ValueKey('editor-adjustment-bodySlim')),
+      matching: find.byType(Slider),
+    );
+    await tester.ensureVisible(bodySlimControl);
+    await tester.pumpAndSettle();
+    expect(bodySlimControl, findsOneWidget);
+    expect(tester.widget<Slider>(bodySlimControl).max, 0.35);
+    final bodySlimWidget = tester.widget<Slider>(bodySlimControl);
+    bodySlimWidget.onChangeStart!(bodySlimWidget.value);
+    bodySlimWidget.onChanged!(0.2);
+    bodySlimWidget.onChangeEnd!(0.2);
+    await tester.pumpAndSettle();
+    expect(
+      store.project!
+          .effectiveRecipeFor(photo.id)
+          .portraitGeometryRecipe
+          .selectedBodyIndex,
+      1,
+    );
+    expect(
+      (await store.loadLatest())?.effectiveRecipeFor(photo.id).bodySlimStrength,
+      greaterThan(0),
+    );
+    final recipe = store.project!.effectiveRecipeFor('portrait-photo');
+    expect(recipe.portraitStrength, 0);
+    expect(recipe.targetedPortraitRecipe.adjustments, hasLength(2));
+    expect(find.text('选择人像'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('editor-undo')));
+    await tester.pumpAndSettle();
+    expect(store.project!.effectiveRecipeFor(photo.id).bodySlimStrength, 0);
+    await tester.tap(find.byKey(const ValueKey('editor-undo')));
+    await tester.pumpAndSettle();
+    expect(
+      store.project!
+          .effectiveRecipeFor(photo.id)
+          .portraitGeometryRecipe
+          .faceTargets[1]
+          .headSize,
+      0,
+    );
+    expect(
+      store.project!
+          .effectiveRecipeFor(photo.id)
+          .faceSlimRecipe
+          .targetStrengths[1],
+      greaterThan(0),
+    );
+    await tester.tap(find.byKey(const ValueKey('editor-undo')));
+    await tester.pumpAndSettle();
+    expect(
+      store.project!.effectiveRecipeFor(photo.id).faceSlimStrength,
+      firstFaceStrength,
+    );
+    expect(
+      store.project!
+          .effectiveRecipeFor(photo.id)
+          .faceSlimRecipe
+          .targetStrengths[0],
+      firstFaceStrength,
+    );
+    expect(
+      store.project!
+          .effectiveRecipeFor(photo.id)
+          .faceSlimRecipe
+          .targetStrengths[1],
+      0,
+    );
+    await tester.tap(find.byKey(const ValueKey('editor-undo')));
+    await tester.pumpAndSettle();
+    expect(store.project!.effectiveRecipeFor(photo.id).faceSlimStrength, 0);
+    expect(
+      store.project!
+          .effectiveRecipeFor(photo.id)
+          .targetedPortraitRecipe
+          .adjustments
+          .values
+          .where((adjustment) => adjustment.textureSmoothing > 50),
+      hasLength(1),
+    );
+    await tester.tap(find.byKey(const ValueKey('editor-undo')));
+    await tester.pumpAndSettle();
+    targetedPortraitRecipe = store.project!
+        .effectiveRecipeFor(photo.id)
+        .targetedPortraitRecipe;
+    expect(targetedPortraitRecipe.adjustments, hasLength(2));
+    expect(
+      targetedPortraitRecipe.adjustments.values.every(
+        (adjustment) => adjustment.textureSmoothing == 50,
+      ),
+      isTrue,
+    );
+    await tester.tap(find.byKey(const ValueKey('editor-undo')));
+    await tester.pumpAndSettle();
+    targetedPortraitRecipe = store.project!
+        .effectiveRecipeFor(photo.id)
+        .targetedPortraitRecipe;
+    expect(targetedPortraitRecipe.isNeutral, isTrue);
+
+    await _openManualMetaOp(tester, MetaOpIds.semanticAdjustments);
+    expect(find.byKey(const ValueKey('editor-semantic-tools')), findsOneWidget);
+    final whiteBackground = find.byKey(
+      const ValueKey('editor-background-white'),
+    );
+    await tester.ensureVisible(whiteBackground);
+    await tester.pumpAndSettle();
+    expect(whiteBackground.hitTestable(), findsOneWidget);
+    await tester.tap(whiteBackground);
+    await tester.pumpAndSettle();
+    expect(
+      store.project!
+          .effectiveRecipeFor(photo.id)
+          .semanticEditingRecipe
+          .background,
+      BackgroundTreatment.white,
+    );
+    final imageBackground = find.byKey(
+      const ValueKey('editor-background-image'),
+    );
+    await Scrollable.ensureVisible(tester.element(imageBackground));
+    await tester.pumpAndSettle();
+    await tester.tap(imageBackground);
+    await tester.pumpAndSettle();
+    expect(backgroundImporter.editingResourceImportCount, 1);
+    expect(backgroundImporter.lastImportedEditingResource, isNotNull);
+    expect(find.text('无法保存本次调整，请重试'), findsNothing);
+    expect(
+      store.project!.editingResources.resources.keys,
+      contains(
+        'resource-v1-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      ),
+    );
+    expect(
+      store.project!
+          .effectiveRecipeFor(photo.id)
+          .semanticEditingRecipe
+          .background,
+      BackgroundTreatment.image,
+    );
+    expect(
+      store.project!
+          .effectiveRecipeFor(photo.id)
+          .semanticEditingRecipe
+          .backgroundImagePath,
+      photoFile.path,
+    );
+    expect(
+      store.project!
+          .effectiveRecipeFor(photo.id)
+          .semanticEditingRecipe
+          .backgroundImageResourceId,
+      'resource-v1-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    );
+    final subjectMaskButton = find.byKey(
+      const ValueKey('editor-open-subject-mask-brush'),
+    );
+    await tester.dragUntilVisible(
+      subjectMaskButton,
+      find.byKey(const Key('photo-workspace-scroll')),
+      const Offset(0, -260),
+    );
+    await tester.tap(subjectMaskButton);
+    await tester.pumpAndSettle();
+    final subjectMaskCanvas = find.semantics.byPredicate(
+      (node) =>
+          node.label == '主体蒙版' &&
+          node.getSemanticsData().hasAction(SemanticsAction.tap),
+    );
+    final subjectMaskSemantics = subjectMaskCanvas
+        .evaluate()
+        .single
+        .getSemanticsData();
+    expect(subjectMaskSemantics.label, '主体蒙版');
+    expect(subjectMaskSemantics.hasAction(SemanticsAction.tap), isTrue);
+    tester.semantics.tap(subjectMaskCanvas);
+    await tester.pumpAndSettle();
+    expect(
+      store.project!
+          .effectiveRecipeFor(photo.id)
+          .semanticEditingRecipe
+          .subjectMaskStrokes,
+      isNotEmpty,
+    );
+    expect(find.byKey(const ValueKey('subject-mask-apply')), findsNothing);
+    final subjectUndo = find.byKey(const ValueKey('subject-mask-undo'));
+    final subjectRedo = find.byKey(const ValueKey('subject-mask-redo'));
+    await tester.ensureVisible(subjectUndo);
+    await tester.pump();
+    expect(tester.widget<IconButton>(subjectUndo).onPressed, isNotNull);
+    await tester.tap(subjectUndo);
+    await tester.pumpAndSettle();
+    expect(
+      store.project!
+          .effectiveRecipeFor(photo.id)
+          .semanticEditingRecipe
+          .subjectMaskStrokes,
+      isEmpty,
+    );
+    await tester.ensureVisible(subjectRedo);
+    await tester.pump();
+    expect(tester.widget<IconButton>(subjectRedo).onPressed, isNotNull);
+    await tester.tap(subjectRedo);
+    await tester.pumpAndSettle();
+    expect(
+      store.project!
+          .effectiveRecipeFor(photo.id)
+          .semanticEditingRecipe
+          .subjectMaskStrokes,
+      isNotEmpty,
+    );
+    await tester.tap(find.byKey(const ValueKey('subject-mask-close')));
+    await tester.pumpAndSettle();
+    final localExposure = find.descendant(
+      of: find.byKey(const ValueKey('editor-local-exposure')),
+      matching: find.byType(Slider),
+    );
+    await tester.dragUntilVisible(
+      localExposure,
+      find.byKey(const Key('photo-workspace-scroll')),
+      const Offset(0, -260),
+    );
+    await tester.drag(localExposure, const Offset(60, 0));
+    await tester.pumpAndSettle();
+    final localBrushButton = find.byKey(
+      const ValueKey('editor-open-local-adjustment-brush'),
+    );
+    await tester.dragUntilVisible(
+      localBrushButton,
+      find.byKey(const Key('photo-workspace-scroll')),
+      const Offset(0, -260),
+    );
+    await tester.tap(localBrushButton);
+    await tester.pumpAndSettle();
+    final localMaskCanvas = find.semantics.byPredicate(
+      (node) =>
+          node.label == '局部光色' &&
+          node.getSemanticsData().hasAction(SemanticsAction.tap),
+    );
+    final localMaskSemantics = localMaskCanvas
+        .evaluate()
+        .single
+        .getSemanticsData();
+    expect(localMaskSemantics.label, '局部光色');
+    expect(localMaskSemantics.hasAction(SemanticsAction.tap), isTrue);
+    tester.semantics.tap(localMaskCanvas);
+    await tester.pumpAndSettle();
+    expect(
+      store.project!
+          .effectiveRecipeFor(photo.id)
+          .semanticEditingRecipe
+          .localAdjustmentStrokes,
+      isNotEmpty,
+    );
+    expect(find.byKey(const ValueKey('local-mask-apply')), findsNothing);
+    final localUndo = find.byKey(const ValueKey('local-mask-undo'));
+    final localRedo = find.byKey(const ValueKey('local-mask-redo'));
+    await tester.ensureVisible(localUndo);
+    await tester.pump();
+    expect(tester.widget<IconButton>(localUndo).onPressed, isNotNull);
+    await tester.tap(localUndo);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(localRedo);
+    await tester.pump();
+    expect(tester.widget<IconButton>(localRedo).onPressed, isNotNull);
+    await tester.tap(localRedo);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('local-mask-close')));
+    await tester.pumpAndSettle();
+    final semantic = store.project!
+        .effectiveRecipeFor(photo.id)
+        .semanticEditingRecipe;
+    expect(semantic.localExposure, greaterThan(0));
+    expect(semantic.localAdjustmentStrokes, isNotEmpty);
+    final eraseButton = find.byKey(const ValueKey('editor-open-erase-brush'));
+    await tester.dragUntilVisible(
+      eraseButton,
+      find.byKey(const Key('photo-workspace-scroll')),
+      const Offset(0, -260),
+    );
+    await Scrollable.ensureVisible(tester.element(eraseButton), alignment: 0.5);
+    await tester.pumpAndSettle();
+    await tester.tap(eraseButton);
+    await tester.pumpAndSettle();
+    final eraseCanvas = find.semantics.byPredicate(
+      (node) =>
+          node.label == '消除笔' &&
+          node.getSemanticsData().hasAction(SemanticsAction.tap),
+    );
+    final eraseCanvasSemantics = eraseCanvas
+        .evaluate()
+        .single
+        .getSemanticsData();
+    expect(eraseCanvasSemantics.label, '消除笔');
+    expect(eraseCanvasSemantics.hasAction(SemanticsAction.tap), isTrue);
+    tester.semantics.tap(eraseCanvas);
+    await tester.pumpAndSettle();
+    expect(
+      store.project!
+          .effectiveRecipeFor(photo.id)
+          .semanticEditingRecipe
+          .eraseStrokes,
+      isNotEmpty,
+    );
+    expect(find.byKey(const ValueKey('erase-brush-apply')), findsNothing);
+    final eraseUndo = find.byKey(const ValueKey('erase-brush-undo'));
+    final eraseRedo = find.byKey(const ValueKey('erase-brush-redo'));
+    await tester.ensureVisible(eraseUndo);
+    await tester.pump();
+    expect(tester.widget<IconButton>(eraseUndo).onPressed, isNotNull);
+    await tester.tap(eraseUndo);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(eraseRedo);
+    await tester.pump();
+    expect(tester.widget<IconButton>(eraseRedo).onPressed, isNotNull);
+    await tester.tap(eraseRedo);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('erase-brush-close')));
+    await tester.pumpAndSettle();
+    expect(
+      store.project!
+          .effectiveRecipeFor(photo.id)
+          .semanticEditingRecipe
+          .eraseStrokes,
+      isNotEmpty,
+    );
+    semantics.dispose();
+    debugDefaultTargetPlatformOverride = null;
+  });
+
   testWidgets(
-    'applicable portrait exposes one undoable natural retouch control',
+    'failed mask save discards its draft resource and keeps the safe state',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(390, 844));
       addTearDown(() => tester.binding.setSurfaceSize(null));
-      final semantics = tester.ensureSemantics();
       debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final photoFile = File(
         'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
         'Icon-App-1024x1024@1x.png',
       );
       final photo = ProjectPhoto(
-        id: 'portrait-photo',
+        id: 'failed-mask-photo',
         localPath: photoFile.path,
-        originalName: '已有照片人像.png',
+        originalName: '蒙版保存失败.png',
         contentSha256:
             'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         pixelWidth: 1024,
@@ -1297,21 +2244,22 @@ void main() {
         inputFormat: PhotoInputFormat.png,
         supportState: PhotoSupportState.supported,
       );
-      final store = MemoryPhotoProjectStore(
-        PhotoProject(
-          id: 'portrait-project',
-          createdAt: DateTime.utc(2026, 8, 5),
-          updatedAt: DateTime.utc(2026, 8, 5),
-          photos: [photo],
-          flowState: PhotoProjectFlowState.editing,
-          selectedRecommendationId: 'clean-natural-01',
-          editingScope: ProjectEditingScope.currentPhoto,
-          focusPhotoId: photo.id,
-        ),
+      final project = PhotoProject(
+        id: 'failed-mask-project',
+        createdAt: DateTime.utc(2026, 8, 20),
+        updatedAt: DateTime.utc(2026, 8, 20),
+        photos: [photo],
+        flowState: PhotoProjectFlowState.editing,
+        selectedRecommendationId: 'clean-natural-01',
+        editingScope: ProjectEditingScope.currentPhoto,
+        focusPhotoId: photo.id,
       );
       final cache = MemoryPhotoAnalysisCache();
+      final analyzer = _CountingPhotoAnalyzer(
+        portrait: PortraitApplicability.applicable,
+      );
       final cachedWrite = await cache.stage(
-        projectId: 'portrait-project',
+        projectId: project.id,
         photoId: photo.id,
         analysis: LocalPhotoAnalysis(
           analysisVersion: 'widget-analysis-v1',
@@ -1324,427 +2272,30 @@ void main() {
           disposition: PhotoAnalysisDisposition.ready,
           fallbackReason: AnalysisFallbackReason.none,
           portrait: PortraitApplicability.applicable,
-          faceSlimTargetCount: 2,
-          faceTargetRegions: const [
-            NormalizedTargetRegion(
-              left: 0.12,
-              top: 0.18,
-              right: 0.38,
-              bottom: 0.5,
-            ),
-            NormalizedTargetRegion(
-              left: 0.62,
-              top: 0.18,
-              right: 0.88,
-              bottom: 0.5,
-            ),
-          ],
-          body: PortraitApplicability.applicable,
-          bodyTargetCount: 2,
-          bodyTargetRegions: const [
-            NormalizedTargetRegion(
-              left: 0.05,
-              top: 0.34,
-              right: 0.44,
-              bottom: 0.92,
-            ),
-            NormalizedTargetRegion(
-              left: 0.56,
-              top: 0.34,
-              right: 0.95,
-              bottom: 0.92,
-            ),
-          ],
         ),
       );
       await cache.commit(cachedWrite, canCommit: () => true);
+      final importer = FakePhotoImporter();
+      final store = _ArmableFailProjectStore(project);
       SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
       final settings = await AppSettings.load();
       await tester.pumpWidget(
         buildTestApp(
           settings,
-          photoImporter: FakePhotoImporter([
-            ProjectPhoto(
-              id: 'background-photo',
-              localPath: photoFile.path,
-              originalName: '背景.png',
-            ),
-          ]),
+          photoImporter: importer,
           photoProjectStore: store,
-          photoAnalyzer: _CountingPhotoAnalyzer(
-            portrait: PortraitApplicability.applicable,
-            faceSlimTargetCount: 2,
-            body: PortraitApplicability.applicable,
-            bodyTargetCount: 2,
-          ),
+          photoAnalyzer: analyzer,
           photoAnalysisCache: cache,
+          metaOpCapabilities: iosMetaOpCapabilities,
           photoPreviewRenderer: FakePhotoPreviewRenderer.supported(),
         ),
       );
-
-      await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(
-        find.byKey(
-          const ValueKey('editor-adjustment-tab-naturalBeautification'),
-        ),
-      );
-      await tester.pumpAndSettle();
-      final portraitTab = find.byKey(
-        const ValueKey('editor-adjustment-tab-naturalBeautification'),
-      );
-      expect(portraitTab.hitTestable(), findsOneWidget);
-      for (final category in [
-        'composition',
-        'color',
-        'filters',
-        'quality',
-        'retouch',
-        'semantic',
-      ]) {
-        expect(
-          find.byKey(ValueKey('editor-tool-category-$category')),
-          findsOneWidget,
-        );
-      }
-      final exposureTab = find.byKey(
-        const ValueKey('editor-adjustment-tab-exposure'),
-      );
-      expect(exposureTab, findsNothing);
-      expect(
-        find.byKey(
-          const ValueKey('editor-apply-one-tap-natural-beautification'),
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const ValueKey('editor-adjustment-section')),
-        findsOneWidget,
-      );
-      expect(find.text('人像'), findsOneWidget);
-      expect(find.text('人像工具已就绪 · 本地处理'), findsOneWidget);
-      final faceSlimTab = find.byKey(
-        const ValueKey('editor-adjustment-tab-faceSlim'),
-      );
-      expect(faceSlimTab.hitTestable(), findsOneWidget);
-      final colorCategory = find.byKey(
-        const ValueKey('editor-tool-category-color'),
-      );
-      await Scrollable.ensureVisible(tester.element(colorCategory));
-      await tester.pumpAndSettle();
-      await tester.tap(colorCategory);
-      await tester.pumpAndSettle();
-      expect(exposureTab, findsOneWidget);
-      expect(
-        find.byKey(const ValueKey('editor-adjustment-tab-faceSlim')),
-        findsNothing,
-      );
-      final qualityCategory = find.byKey(
-        const ValueKey('editor-tool-category-quality'),
-      );
-      await Scrollable.ensureVisible(tester.element(qualityCategory));
-      await tester.pumpAndSettle();
-      await tester.tap(qualityCategory);
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const ValueKey('editor-apply-quality-improvement')),
-        findsOneWidget,
-      );
-      final retouchCategory = find.byKey(
-        const ValueKey('editor-tool-category-retouch'),
-      );
-      await Scrollable.ensureVisible(tester.element(retouchCategory));
-      await tester.pumpAndSettle();
-      await tester.tap(retouchCategory);
-      await tester.pumpAndSettle();
-      await tester.tap(portraitTab);
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const ValueKey('editor-adjustment-tab-textureSmoothing')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const ValueKey('editor-adjustment-tab-skinToneLighting')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const ValueKey('editor-adjustment-tab-blemishReduction')),
-        findsOneWidget,
-      );
-      await tester.tap(
-        find.byKey(
-          const ValueKey('editor-apply-one-tap-natural-beautification'),
-        ),
-      );
-      await tester.pumpAndSettle();
-      var portraitRecipe = store.project!
-          .effectiveRecipeFor(photo.id)
-          .portraitRecipe;
-      expect(portraitRecipe.textureSmoothing, 50);
-      expect(portraitRecipe.skinToneLighting, 50);
-      expect(portraitRecipe.blemishReduction, 20);
-
-      await tester.tap(faceSlimTab);
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const ValueKey('editor-face-slim-target-0')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const ValueKey('editor-face-slim-target-1')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const ValueKey('editor-face-target-selector')),
-        findsOneWidget,
-      );
-      final secondFaceOverlay = find.byKey(
-        const ValueKey('portrait-target-overlay-1'),
-      );
-      expect(secondFaceOverlay, findsOneWidget);
-      expect(tester.getSize(secondFaceOverlay).width, greaterThanOrEqualTo(44));
-      expect(
-        tester.getSize(secondFaceOverlay).height,
-        greaterThanOrEqualTo(44),
-      );
-      final faceSlimSlider = find.semantics.byPredicate(
-        (node) => node.label.startsWith('瘦脸') && node.flagsCollection.isSlider,
-      );
-      expect(faceSlimSlider, findsOne);
-      expect(
-        find.byKey(const ValueKey('editor-adjustment-faceSlim')),
-        findsOneWidget,
-      );
-      final faceSlimControl = find.descendant(
-        of: find.byKey(const ValueKey('editor-adjustment-faceSlim')),
-        matching: find.byType(Slider),
-      );
-      await tester.ensureVisible(faceSlimControl);
-      await tester.pumpAndSettle();
-      expect(tester.widget<Slider>(faceSlimControl).max, 0.5);
-      await tester.drag(faceSlimControl, const Offset(80, 0));
-      await tester.pumpAndSettle();
-      final firstFaceStrength = (await store.loadLatest())!
-          .effectiveRecipeFor(photo.id)
-          .faceSlimRecipe
-          .targetStrengths[0];
-      expect(firstFaceStrength, greaterThan(0));
-      await tester.ensureVisible(secondFaceOverlay);
-      await tester.pumpAndSettle();
-      await tester.tap(secondFaceOverlay);
-      await tester.pumpAndSettle();
-      expect(tester.widget<Slider>(faceSlimControl).value, 0);
-      await tester.drag(faceSlimControl, const Offset(48, 0));
-      await tester.pumpAndSettle();
-      final multiFaceRecipe = (await store.loadLatest())!
-          .effectiveRecipeFor(photo.id)
-          .faceSlimRecipe;
-      expect(multiFaceRecipe.targetStrengths[0], firstFaceStrength);
-      expect(multiFaceRecipe.targetStrengths[1], greaterThan(0));
-      expect(
-        (await store.loadLatest())
-            ?.effectiveRecipeFor(photo.id)
-            .faceSlimStrength,
-        greaterThan(0),
-      );
-      final headSizeTab = find.byKey(
-        const ValueKey('editor-adjustment-tab-headSize'),
-      );
-      await tester.ensureVisible(headSizeTab);
-      await tester.pumpAndSettle();
-      expect(headSizeTab.hitTestable(), findsOneWidget);
-      await tester.tap(headSizeTab);
-      await tester.pumpAndSettle();
-      final headSizeControl = find.descendant(
-        of: find.byKey(const ValueKey('editor-adjustment-headSize')),
-        matching: find.byType(Slider),
-      );
-      await tester.drag(headSizeControl, const Offset(60, 0));
-      await tester.pumpAndSettle();
-      expect(
-        (await store.loadLatest())!
-            .effectiveRecipeFor(photo.id)
-            .portraitGeometryRecipe
-            .faceTargets[1]
-            .headSize,
-        greaterThan(0),
-      );
-      final bodySlimTab = find.byKey(
-        const ValueKey('editor-adjustment-tab-bodySlim'),
-      );
-      await tester.ensureVisible(bodySlimTab);
-      await tester.pumpAndSettle();
-      expect(bodySlimTab.hitTestable(), findsOneWidget);
-      await tester.tap(bodySlimTab);
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const ValueKey('editor-body-target-0')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const ValueKey('editor-body-target-1')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const ValueKey('editor-body-target-selector')),
-        findsOneWidget,
-      );
-      final secondBodyOverlay = find.byKey(
-        const ValueKey('portrait-target-overlay-1'),
-      );
-      await tester.ensureVisible(secondBodyOverlay);
-      await tester.pumpAndSettle();
-      await tester.tap(secondBodyOverlay);
-      await tester.pumpAndSettle();
-      expect(
-        tester
-            .widget<ChoiceChip>(
-              find.byKey(const ValueKey('editor-body-target-1')),
-            )
-            .selected,
-        isTrue,
-      );
-      final bodySlimControl = find.descendant(
-        of: find.byKey(const ValueKey('editor-adjustment-bodySlim')),
-        matching: find.byType(Slider),
-      );
-      await tester.ensureVisible(bodySlimControl);
-      await tester.pumpAndSettle();
-      expect(bodySlimControl, findsOneWidget);
-      expect(tester.widget<Slider>(bodySlimControl).max, 0.35);
-      await tester.drag(bodySlimControl, const Offset(70, 0));
-      await tester.pumpAndSettle();
-      expect(
-        store.project!
-            .effectiveRecipeFor(photo.id)
-            .portraitGeometryRecipe
-            .selectedBodyIndex,
-        1,
-      );
-      expect(
-        (await store.loadLatest())
-            ?.effectiveRecipeFor(photo.id)
-            .bodySlimStrength,
-        greaterThan(0),
-      );
-      final recipe = store.project!.effectiveRecipeFor('portrait-photo');
-      expect(recipe.portraitStrength, 0);
-      expect(recipe.portraitRecipe.textureSmoothing, 50);
-      expect(find.text('选择人像'), findsNothing);
-
-      await tester.tap(find.text('撤销'));
-      await tester.pumpAndSettle();
-      expect(store.project!.effectiveRecipeFor(photo.id).bodySlimStrength, 0);
-      await tester.tap(find.text('撤销'));
-      await tester.pumpAndSettle();
-      expect(
-        store.project!
-            .effectiveRecipeFor(photo.id)
-            .portraitGeometryRecipe
-            .faceTargets[1]
-            .headSize,
-        0,
-      );
-      expect(
-        store.project!
-            .effectiveRecipeFor(photo.id)
-            .faceSlimRecipe
-            .targetStrengths[1],
-        greaterThan(0),
-      );
-      await tester.tap(find.text('撤销'));
-      await tester.pumpAndSettle();
-      expect(
-        store.project!.effectiveRecipeFor(photo.id).faceSlimStrength,
-        firstFaceStrength,
-      );
-      expect(
-        store.project!
-            .effectiveRecipeFor(photo.id)
-            .faceSlimRecipe
-            .targetStrengths[0],
-        firstFaceStrength,
-      );
-      expect(
-        store.project!
-            .effectiveRecipeFor(photo.id)
-            .faceSlimRecipe
-            .targetStrengths[1],
-        0,
-      );
-      await tester.tap(find.text('撤销'));
-      await tester.pumpAndSettle();
-      expect(store.project!.effectiveRecipeFor(photo.id).faceSlimStrength, 0);
-      expect(
-        store.project!
-            .effectiveRecipeFor(photo.id)
-            .portraitRecipe
-            .textureSmoothing,
-        50,
-      );
-      await tester.tap(find.text('撤销'));
-      await tester.pumpAndSettle();
-      portraitRecipe = store.project!
-          .effectiveRecipeFor(photo.id)
-          .portraitRecipe;
-      expect(portraitRecipe, isNot(equals(recipe.portraitRecipe)));
-      expect(portraitRecipe.textureSmoothing, 0);
-      expect(portraitRecipe.skinToneLighting, 0);
-      expect(portraitRecipe.blemishReduction, 0);
-
-      final semanticCategory = find.byKey(
-        const ValueKey('editor-tool-category-semantic'),
-      );
-      await tester.dragUntilVisible(
-        semanticCategory,
-        find.byKey(const Key('photo-workspace-scroll')),
-        const Offset(0, -260),
-      );
-      await Scrollable.ensureVisible(
-        tester.element(semanticCategory),
-        alignment: 0.5,
-      );
-      await tester.pumpAndSettle();
-      expect(semanticCategory.hitTestable(), findsOneWidget);
-      await tester.tap(semanticCategory);
-      await tester.pumpAndSettle();
+      await _openEditorFromHome(tester);
+      await _openManualMetaOp(tester, MetaOpIds.semanticAdjustments);
+      store.failSaves = true;
       expect(
         find.byKey(const ValueKey('editor-semantic-tools')),
         findsOneWidget,
-      );
-      final whiteBackground = find.byKey(
-        const ValueKey('editor-background-white'),
-      );
-      expect(whiteBackground.hitTestable(), findsOneWidget);
-      await tester.tap(whiteBackground);
-      await tester.pumpAndSettle();
-      expect(
-        store.project!
-            .effectiveRecipeFor(photo.id)
-            .semanticEditingRecipe
-            .background,
-        BackgroundTreatment.white,
-      );
-      final imageBackground = find.byKey(
-        const ValueKey('editor-background-image'),
-      );
-      await Scrollable.ensureVisible(tester.element(imageBackground));
-      await tester.pumpAndSettle();
-      await tester.tap(imageBackground);
-      await tester.pumpAndSettle();
-      expect(
-        store.project!
-            .effectiveRecipeFor(photo.id)
-            .semanticEditingRecipe
-            .background,
-        BackgroundTreatment.image,
-      );
-      expect(
-        store.project!
-            .effectiveRecipeFor(photo.id)
-            .semanticEditingRecipe
-            .backgroundImagePath,
-        photoFile.path,
       );
       final subjectMaskButton = find.byKey(
         const ValueKey('editor-open-subject-mask-brush'),
@@ -1756,141 +2307,28 @@ void main() {
       );
       await tester.tap(subjectMaskButton);
       await tester.pumpAndSettle();
-      final subjectMaskCanvas = find.semantics.byPredicate(
-        (node) =>
-            node.label == '主体蒙版' &&
-            node.getSemanticsData().hasAction(SemanticsAction.tap),
+      tester.semantics.tap(
+        find.semantics.byPredicate(
+          (node) =>
+              node.label == '主体蒙版' &&
+              node.getSemanticsData().hasAction(SemanticsAction.tap),
+        ),
       );
-      final subjectMaskSemantics = subjectMaskCanvas
-          .evaluate()
-          .single
-          .getSemanticsData();
-      expect(subjectMaskSemantics.label, '主体蒙版');
-      expect(subjectMaskSemantics.hasAction(SemanticsAction.tap), isTrue);
-      tester.semantics.tap(subjectMaskCanvas);
-      await tester.pump();
-      final subjectUndo = find.byKey(const ValueKey('subject-mask-undo'));
-      final subjectRedo = find.byKey(const ValueKey('subject-mask-redo'));
-      await tester.ensureVisible(subjectUndo);
-      await tester.pump();
-      expect(tester.widget<IconButton>(subjectUndo).onPressed, isNotNull);
-      await tester.tap(subjectUndo);
-      await tester.pump();
-      await tester.ensureVisible(subjectRedo);
-      await tester.pump();
-      expect(tester.widget<IconButton>(subjectRedo).onPressed, isNotNull);
-      await tester.tap(subjectRedo);
-      await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('subject-mask-apply')));
       await tester.pumpAndSettle();
+
+      expect(find.text('无法保存本次调整，请重试'), findsOneWidget);
+      expect(importer.lastImportedEditingResource, isNotNull);
+      expect(importer.discardedEditingResourceIds, [
+        importer.lastImportedEditingResource!.descriptor.id,
+      ]);
       expect(
-        store.project!
+        store.project
             .effectiveRecipeFor(photo.id)
             .semanticEditingRecipe
             .subjectMaskStrokes,
-        isNotEmpty,
+        isEmpty,
       );
-      final localExposure = find.descendant(
-        of: find.byKey(const ValueKey('editor-local-exposure')),
-        matching: find.byType(Slider),
-      );
-      await tester.dragUntilVisible(
-        localExposure,
-        find.byKey(const Key('photo-workspace-scroll')),
-        const Offset(0, -260),
-      );
-      await tester.drag(localExposure, const Offset(60, 0));
-      await tester.pumpAndSettle();
-      final localBrushButton = find.byKey(
-        const ValueKey('editor-open-local-adjustment-brush'),
-      );
-      await tester.dragUntilVisible(
-        localBrushButton,
-        find.byKey(const Key('photo-workspace-scroll')),
-        const Offset(0, -260),
-      );
-      await tester.tap(localBrushButton);
-      await tester.pumpAndSettle();
-      final localMaskCanvas = find.semantics.byPredicate(
-        (node) =>
-            node.label == '局部光色' &&
-            node.getSemanticsData().hasAction(SemanticsAction.tap),
-      );
-      final localMaskSemantics = localMaskCanvas
-          .evaluate()
-          .single
-          .getSemanticsData();
-      expect(localMaskSemantics.label, '局部光色');
-      expect(localMaskSemantics.hasAction(SemanticsAction.tap), isTrue);
-      tester.semantics.tap(localMaskCanvas);
-      await tester.pump();
-      final localUndo = find.byKey(const ValueKey('local-mask-undo'));
-      final localRedo = find.byKey(const ValueKey('local-mask-redo'));
-      await tester.ensureVisible(localUndo);
-      await tester.pump();
-      expect(tester.widget<IconButton>(localUndo).onPressed, isNotNull);
-      await tester.tap(localUndo);
-      await tester.pump();
-      await tester.ensureVisible(localRedo);
-      await tester.pump();
-      expect(tester.widget<IconButton>(localRedo).onPressed, isNotNull);
-      await tester.tap(localRedo);
-      await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('local-mask-apply')));
-      await tester.pumpAndSettle();
-      final semantic = store.project!
-          .effectiveRecipeFor(photo.id)
-          .semanticEditingRecipe;
-      expect(semantic.localExposure, greaterThan(0));
-      expect(semantic.localAdjustmentStrokes, isNotEmpty);
-      final eraseButton = find.byKey(const ValueKey('editor-open-erase-brush'));
-      await tester.dragUntilVisible(
-        eraseButton,
-        find.byKey(const Key('photo-workspace-scroll')),
-        const Offset(0, -260),
-      );
-      await Scrollable.ensureVisible(
-        tester.element(eraseButton),
-        alignment: 0.5,
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(eraseButton);
-      await tester.pumpAndSettle();
-      final eraseCanvas = find.semantics.byPredicate(
-        (node) =>
-            node.label == '消除笔' &&
-            node.getSemanticsData().hasAction(SemanticsAction.tap),
-      );
-      final eraseCanvasSemantics = eraseCanvas
-          .evaluate()
-          .single
-          .getSemanticsData();
-      expect(eraseCanvasSemantics.label, '消除笔');
-      expect(eraseCanvasSemantics.hasAction(SemanticsAction.tap), isTrue);
-      tester.semantics.tap(eraseCanvas);
-      await tester.pump();
-      final eraseUndo = find.byKey(const ValueKey('erase-brush-undo'));
-      final eraseRedo = find.byKey(const ValueKey('erase-brush-redo'));
-      await tester.ensureVisible(eraseUndo);
-      await tester.pump();
-      expect(tester.widget<IconButton>(eraseUndo).onPressed, isNotNull);
-      await tester.tap(eraseUndo);
-      await tester.pump();
-      await tester.ensureVisible(eraseRedo);
-      await tester.pump();
-      expect(tester.widget<IconButton>(eraseRedo).onPressed, isNotNull);
-      await tester.tap(eraseRedo);
-      await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('erase-brush-apply')));
-      await tester.pumpAndSettle();
-      expect(
-        store.project!
-            .effectiveRecipeFor(photo.id)
-            .semanticEditingRecipe
-            .eraseStrokes,
-        isNotEmpty,
-      );
-      semantics.dispose();
+      expect(store.project.editingResources.resources, isEmpty);
       debugDefaultTargetPlatformOverride = null;
     },
   );
@@ -1964,15 +2402,17 @@ void main() {
           photoProjectStore: store,
           photoAnalyzer: analyzer,
           photoAnalysisCache: cache,
+          metaOpCapabilities: iosMetaOpCapabilities,
           photoPreviewRenderer: FakePhotoPreviewRenderer.supported(),
         ),
       );
-      await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+      await _tapEditorEntryFromHome(tester);
       await tester.pumpAndSettle();
 
       expect(analyzer.calls, 1);
       expect(store.project?.flowState, PhotoProjectFlowState.editing);
       expect(find.byKey(const ValueKey('recommendation-use')), findsNothing);
+      await _openManualMetaOp(tester, MetaOpIds.skinSmooth);
       await tester.dragUntilVisible(
         find.byKey(
           const ValueKey('editor-adjustment-tab-naturalBeautification'),
@@ -2016,7 +2456,7 @@ void main() {
   );
 
   testWidgets(
-    'multi-photo editing makes group and current-photo scope explicit',
+    'multi-photo editing routes operations without exposing a scope choice',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
       final photoFile = File(
@@ -2061,57 +2501,18 @@ void main() {
       final settings = await AppSettings.load();
       await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
 
-      await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+      await _tapEditorEntryFromHome(tester);
       await tester.pumpAndSettle();
 
-      expect(find.text('第 1 / 2 张 · 编辑整组'), findsOneWidget);
-      expect(find.text('编辑整组'), findsOneWidget);
-      expect(find.text('仅当前照片'), findsOneWidget);
-      expect(find.text('自动补偿'), findsNWidgets(2));
-      final groupIntensity = find.byKey(
-        const ValueKey('editor-group-style-intensity'),
-      );
-      expect(find.textContaining('保留每张照片的独立补偿'), findsOneWidget);
-      await tester.dragUntilVisible(
-        groupIntensity,
-        find.byKey(const Key('photo-workspace-scroll')),
-        const Offset(0, -180),
-      );
-      await tester.pumpAndSettle();
-      expect(groupIntensity, findsOneWidget);
-      final groupIntensitySlider = find.descendant(
-        of: groupIntensity,
-        matching: find.byType(Slider),
-      );
-      await tester.drag(groupIntensitySlider, const Offset(-90, 0));
-      await tester.pumpAndSettle();
-      final adjustedGroupIntensity = store.project!.sharedStyle.intensity;
-      expect(adjustedGroupIntensity, lessThan(1));
-      expect(store.project!.undoHistory, hasLength(1));
+      expect(find.byKey(const ValueKey('editor-scope-switch')), findsNothing);
+      expect(find.byKey(const ValueKey('editor-scope-group')), findsNothing);
       expect(
-        store.project!.effectiveRecipeFor('photo-1').exposure,
-        lessThan(0.1),
+        find.byKey(const ValueKey('editor-scope-currentPhoto')),
+        findsNothing,
       );
-
-      await tester.dragUntilVisible(
-        find.text('仅当前照片'),
-        find.byKey(const Key('photo-workspace-scroll')),
-        const Offset(0, 180),
-      );
-      await tester.tap(find.text('仅当前照片'));
+      expect(find.text('自动补偿'), findsNWidgets(2));
+      await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
       await tester.pumpAndSettle();
-      expect(store.project?.editingScope, ProjectEditingScope.currentPhoto);
-      await tester.dragUntilVisible(
-        find.text('第 1 / 2 张 · 仅当前照片'),
-        find.byKey(const Key('photo-workspace-scroll')),
-        const Offset(0, 180),
-      );
-      expect(find.text('第 1 / 2 张 · 仅当前照片'), findsOneWidget);
-      await tester.dragUntilVisible(
-        find.byKey(const ValueKey('editor-tool-category-composition')),
-        find.byKey(const Key('photo-workspace-scroll')),
-        const Offset(0, -180),
-      );
       for (final category in <String>[
         'composition',
         'color',
@@ -2121,58 +2522,75 @@ void main() {
       ]) {
         expect(
           find.byKey(ValueKey('editor-tool-category-$category')),
-          findsOneWidget,
+          findsNothing,
         );
       }
+      expect(find.byKey(const ValueKey('editor-all-tools')), findsOneWidget);
 
       final exposureAdjustment = find.byKey(
         const ValueKey('editor-adjustment-exposure'),
       );
-      await tester.dragUntilVisible(
-        exposureAdjustment,
-        find.byKey(const Key('photo-workspace-scroll')),
-        const Offset(0, -240),
-      );
-      await tester.drag(
-        find.byKey(const Key('photo-workspace-scroll')),
-        const Offset(0, -80),
-      );
-      await tester.pumpAndSettle();
+      await tester.ensureVisible(exposureAdjustment);
       await tester.drag(
         find.descendant(of: exposureAdjustment, matching: find.byType(Slider)),
         const Offset(90, 0),
       );
       await tester.pumpAndSettle();
 
-      expect(store.project?.photoOverrides.containsKey('photo-1'), isTrue);
-      expect(store.project?.photoOverrides.containsKey('photo-2'), isFalse);
+      final sharedExposure = store.project!.sharedStyle.recipe.exposure;
+      expect(sharedExposure, isNot(0.1));
       expect(
-        store.project?.effectiveRecipeFor('photo-2').exposure,
-        closeTo(0.1 * adjustedGroupIntensity, 1e-12),
+        store.project!.effectiveRecipeFor('photo-1').exposure,
+        sharedExposure,
       );
-      expect(find.text('单张精修'), findsOneWidget);
+      expect(
+        store.project!.effectiveRecipeFor('photo-2').exposure,
+        sharedExposure,
+      );
+      expect(store.project!.photoOverrides, isEmpty);
+      expect(
+        find.byKey(const ValueKey('editor-feedback-pill')),
+        findsOneWidget,
+      );
+      expect(find.text('已同步整组'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('editor-feedback-undo')),
+        findsOneWidget,
+      );
 
+      await _openManualMetaOp(tester, MetaOpIds.compositionGeometry);
+      final flipHorizontal = find.byKey(
+        const ValueKey('editor-flip-horizontal'),
+      );
       await tester.dragUntilVisible(
-        find.text('重置'),
+        flipHorizontal,
         find.byKey(const Key('photo-workspace-scroll')),
-        const Offset(0, -180),
+        const Offset(0, -160),
       );
-      await tester.tap(find.text('重置'));
+      await tester.tap(flipHorizontal.hitTestable());
       await tester.pumpAndSettle();
-      expect(store.project?.photoOverrides.containsKey('photo-1'), isFalse);
-      expect(store.project?.sharedStyle.recipe.exposure, 0.1);
+
       expect(
-        store.project
-            ?.effectiveRecipeFor('photo-1')
-            .portraitRecipe
-            .textureSmoothing,
-        35,
+        store.project!
+            .effectiveRecipeFor('photo-1')
+            .basicEditingRecipe
+            .flipHorizontal,
+        isTrue,
       );
+      expect(
+        store.project!
+            .effectiveRecipeFor('photo-2')
+            .basicEditingRecipe
+            .flipHorizontal,
+        isFalse,
+      );
+      expect(store.project!.photoOverrides.keys, ['photo-1']);
+      expect(store.project!.undoHistory, hasLength(2));
       debugDefaultTargetPlatformOverride = null;
     },
   );
 
-  testWidgets('syncing a photo adjustment to the group requires confirmation', (
+  testWidgets('multi-photo editing has no manual sync confirmation path', (
     tester,
   ) async {
     final photoFile = File(
@@ -2211,51 +2629,17 @@ void main() {
     final settings = await AppSettings.load();
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
 
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
-    await tester.dragUntilVisible(
-      find.text('同步当前调整到整组'),
-      find.byKey(const Key('photo-workspace-scroll')),
-      const Offset(0, -200),
-    );
-    expect(find.text('同步当前调整到整组'), findsOneWidget);
-    await tester.tap(find.text('同步当前调整到整组'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('将当前光色调整同步到整组？'), findsOneWidget);
-    expect(find.textContaining('构图仍只保留在当前照片'), findsOneWidget);
-    expect(store.project?.sharedStyle.recipe, EditRecipe(exposure: 0.1));
-    await tester.tap(find.text('取消'));
-    await tester.pumpAndSettle();
-    expect(store.project?.photoOverrides, isNotEmpty);
-
-    await tester.tap(find.text('同步当前调整到整组'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('同步整组'));
-    await tester.pumpAndSettle();
-
-    expect(
-      store.project?.sharedStyle.recipe,
-      EditRecipe(exposure: 0.1, contrast: 0.2),
-    );
-    expect(store.project?.photoOverrides, isEmpty);
-    expect(store.project?.undoHistory, hasLength(1));
-
-    await tester.tap(find.text('撤销'));
-    await tester.pumpAndSettle();
+    await _openEditorFromHome(tester);
+    expect(find.text('同步当前调整到整组'), findsNothing);
+    expect(find.text('将当前光色调整同步到整组？'), findsNothing);
+    expect(find.text('同步整组'), findsNothing);
+    expect(find.byKey(const ValueKey('editor-scope-switch')), findsNothing);
     expect(store.project?.sharedStyle.recipe, EditRecipe(exposure: 0.1));
     expect(
       store.project?.photoOverrides['photo-1']?.recipe,
       EditRecipe(contrast: 0.2),
     );
-
-    await tester.tap(find.text('重做'));
-    await tester.pumpAndSettle();
-    expect(
-      store.project?.sharedStyle.recipe,
-      EditRecipe(exposure: 0.1, contrast: 0.2),
-    );
-    expect(store.project?.photoOverrides, isEmpty);
+    expect(store.project?.undoHistory, isEmpty);
   });
 
   testWidgets('restores the saved group photo-strip position', (tester) async {
@@ -2291,12 +2675,10 @@ void main() {
     final settings = await AppSettings.load();
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
 
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
+    await _openEditorFromHome(tester);
 
-    expect(find.text('第 4 / 6 张 · 仅当前照片'), findsOneWidget);
-    await tester.tap(find.text('编辑整组'));
-    await tester.pumpAndSettle();
+    expect(find.text('4/6'), findsOneWidget);
+    expect(find.byKey(const ValueKey('editor-scope-switch')), findsNothing);
 
     await tester.drag(
       find.byKey(const Key('photo-strip-scroll')),
@@ -2308,10 +2690,9 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
+    await _openEditorFromHome(tester);
 
-    expect(find.text('第 4 / 6 张 · 编辑整组'), findsOneWidget);
+    expect(find.text('4/6'), findsOneWidget);
     expect(
       find.bySemanticsLabel(RegExp(r'^photo-6\.png, 待导出')).hitTestable(),
       findsOneWidget,
@@ -2346,8 +2727,7 @@ void main() {
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
     final settings = await AppSettings.load();
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
+    await _openEditorFromHome(tester);
 
     await tester.drag(
       find.byKey(const Key('photo-strip-scroll')),
@@ -2368,8 +2748,7 @@ void main() {
       buildTestApp(settings, photoProjectStore: _FailingProjectStore()),
     );
 
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
+    await _openEditorFromHome(tester);
 
     expect(find.text('无法恢复上次项目'), findsOneWidget);
     expect(find.text('重试'), findsOneWidget);
@@ -2418,23 +2797,19 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
+    await _openEditorFromHome(tester);
     final saveButton = find.byKey(const ValueKey('editor-batch-export'));
     await tester.tap(saveButton);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('save-all')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('save-confirm')));
     await tester.pumpAndSettle();
 
     expect(find.text('已保存 1 张 · 失败 1 张 · 取消 0 张'), findsWidgets);
     expect(store.project?.exportStates['photo-1'], PhotoExportState.saved);
     expect(store.project?.exportStates['photo-2'], PhotoExportState.failed);
-    expect(find.bySemanticsLabel(RegExp(r'^first\.png, 已导出')), findsOneWidget);
-    expect(
-      find.bySemanticsLabel(RegExp(r'^second\.png, 导出失败')),
-      findsOneWidget,
-    );
-    await tester.tap(find.text('只重试失败与取消项'));
+    await tester.tap(find.byKey(const ValueKey('export-retry-failed')));
     await tester.pumpAndSettle();
 
     expect(
@@ -2479,17 +2854,17 @@ void main() {
         photoExporter: _AlwaysFailPhotoExporter(),
       ),
     );
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
+    await _openEditorFromHome(tester);
     final saveButton = find.byKey(const ValueKey('editor-batch-export'));
     await tester.ensureVisible(saveButton);
     await tester.tap(saveButton);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('save-all')));
+    await tester.tap(find.byKey(const ValueKey('save-confirm')));
     await tester.pumpAndSettle();
 
     expect(find.text('已保存 0 张 · 失败 1 张 · 取消 0 张'), findsWidgets);
-    expect(find.text('只重试失败与取消项'), findsOneWidget);
+    expect(find.byKey(const ValueKey('export-retry-failed')), findsOneWidget);
     expect(find.semantics.byFlag(SemanticsFlag.isLiveRegion), findsWidgets);
   });
 
@@ -2529,12 +2904,14 @@ void main() {
     await tester.pumpWidget(
       buildTestApp(settings, photoProjectStore: store, photoExporter: exporter),
     );
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
+    await _openEditorFromHome(tester);
     final saveButton = find.byKey(const ValueKey('editor-batch-export'));
     await tester.tap(saveButton);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('save-all')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('save-confirm')));
+    await tester.pump();
     for (
       var attempt = 0;
       attempt < 6 &&
@@ -2544,20 +2921,36 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
     }
     expect(find.byKey(const ValueKey('save-all')), findsNothing);
+    for (
+      var attempt = 0;
+      attempt < 10 &&
+          find
+              .byKey(const ValueKey('editor-saving-progress'))
+              .evaluate()
+              .isEmpty;
+      attempt += 1
+    ) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
 
-    await tester.ensureVisible(find.text('正在逐张导出…'));
-    await tester.pump();
+    expect(store.project?.flowState, PhotoProjectFlowState.exporting);
+    expect(
+      find.byKey(const ValueKey('editor-saving-progress')),
+      findsOneWidget,
+    );
     final exportProgress = find.semantics.byPredicate(
       (node) =>
-          node.label.contains('正在逐张导出') && node.flagsCollection.isLiveRegion,
+          node.label.contains('正在保存 1/2') && node.flagsCollection.isLiveRegion,
     );
     expect(exportProgress, findsOne);
     expect(
       exportProgress.evaluate().single.flagsCollection.isLiveRegion,
       isTrue,
     );
-    expect(find.bySemanticsLabel(RegExp(r'^first\.png, 导出中')), findsOneWidget);
-    expect(find.bySemanticsLabel(RegExp(r'^second\.png, 待导出')), findsOneWidget);
+    expect(find.text('第 1 张'), findsOneWidget);
+    expect(find.text('导出中'), findsOneWidget);
+    expect(find.text('第 2 张'), findsOneWidget);
+    expect(find.text('待导出'), findsOneWidget);
 
     expect(
       tester
@@ -2567,30 +2960,14 @@ void main() {
           .onPressed,
       isNull,
     );
+    expect(find.widgetWithIcon(IconButton, Icons.arrow_forward), findsNothing);
     expect(
-      tester
-          .widget<IconButton>(
-            find.widgetWithIcon(IconButton, Icons.arrow_forward),
-          )
-          .onPressed,
-      isNull,
+      find.widgetWithIcon(IconButton, Icons.remove_circle_outline),
+      findsNothing,
     );
-    expect(
-      tester
-          .widget<IconButton>(
-            find.widgetWithIcon(IconButton, Icons.remove_circle_outline),
-          )
-          .onPressed,
-      isNull,
-    );
-    expect(
-      tester
-          .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '继续添加照片'))
-          .onPressed,
-      isNull,
-    );
+    expect(find.widgetWithText(OutlinedButton, '继续添加照片'), findsNothing);
 
-    await tester.tap(find.text('取消未开始项'));
+    await tester.tap(find.byKey(const ValueKey('export-cancel-remaining')));
     exporter.complete();
     await tester.pumpAndSettle();
 
@@ -2598,11 +2975,8 @@ void main() {
     expect(find.semantics.byFlag(SemanticsFlag.isLiveRegion), findsWidgets);
     expect(store.project?.exportStates['photo-1'], PhotoExportState.saved);
     expect(store.project?.exportStates['photo-2'], PhotoExportState.cancelled);
-    expect(find.bySemanticsLabel(RegExp(r'^first\.png, 已导出')), findsOneWidget);
-    expect(
-      find.bySemanticsLabel(RegExp(r'^second\.png, 已取消导出')),
-      findsOneWidget,
-    );
+    expect(find.text('first.png'), findsNothing);
+    expect(find.text('second.png'), findsOneWidget);
     semantics.dispose();
   });
 
@@ -2638,13 +3012,13 @@ void main() {
         photoSharer: sharer,
       ),
     );
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
+    await _openEditorFromHome(tester);
     final saveButton = find.byKey(const ValueKey('editor-batch-export'));
     await tester.ensureVisible(saveButton);
     await tester.tap(saveButton);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('save-all')));
+    await tester.tap(find.byKey(const ValueKey('save-confirm')));
     await tester.pump(const Duration(milliseconds: 300));
 
     await tester.tap(find.byType(BackButton));
@@ -2689,8 +3063,7 @@ void main() {
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
     final settings = await AppSettings.load();
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
+    await _openEditorFromHome(tester);
 
     await tester.tap(find.byTooltip('删除项目'));
     await tester.pumpAndSettle();
@@ -2757,27 +3130,29 @@ void main() {
     final settings = await AppSettings.load();
 
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
+    await _openEditorFromHome(tester);
 
     expect(
       find.byKey(const ValueKey('editor-bottom-command-bar')),
       findsOneWidget,
     );
-    await tester.tap(find.byKey(const ValueKey('editor-manual-adjustments')));
+    await _openManualMetaOp(tester, MetaOpIds.compositionGeometry);
+    final freeCrop = find.byKey(const ValueKey('editor-free-crop'));
+    expect(freeCrop, findsOneWidget);
+    await tester.ensureVisible(freeCrop);
     await tester.pumpAndSettle();
-    final composition = find.byKey(
-      const ValueKey('editor-tool-category-composition'),
-    );
-    await tester.dragUntilVisible(
-      composition,
-      find.byKey(const Key('photo-workspace-scroll')),
-      const Offset(0, -220),
-    );
-    expect(composition.hitTestable(), findsOneWidget);
-    await tester.tap(composition);
+    await tester.tap(freeCrop);
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('editor-free-crop')), findsOneWidget);
+    final cropCanvas = find.byKey(const ValueKey('free-crop-canvas'));
+    await tester.drag(cropCanvas, const Offset(36, 28));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('free-crop-apply')), findsNothing);
+    expect(
+      store.project!.effectiveRecipeFor('dynamic-text-photo').crop.isOriginal,
+      isFalse,
+    );
+    await tester.tap(find.byKey(const ValueKey('free-crop-close')));
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
 
@@ -2800,6 +3175,45 @@ void main() {
 
     expect(find.text('映见隐私政策'), findsOneWidget);
   });
+}
+
+Future<void> _tapEditorEntryFromHome(WidgetTester tester) async {
+  final resume = find.byKey(const ValueKey('home-resume-project'));
+  if (resume.evaluate().isNotEmpty) {
+    await tester.tap(resume);
+  } else {
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+  }
+}
+
+Future<void> _openEditorFromHome(WidgetTester tester) async {
+  await _tapEditorEntryFromHome(tester);
+  await tester.pumpAndSettle();
+  final recommendation = find.byKey(const ValueKey('recommendation-confirm'));
+  if (recommendation.evaluate().isNotEmpty) {
+    await tester.tap(recommendation);
+    await tester.pumpAndSettle();
+  }
+}
+
+Future<void> _openManualMetaOp(WidgetTester tester, String metaOpId) async {
+  if (find.byKey(const ValueKey('editor-tools-dock')).evaluate().isEmpty) {
+    await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
+    await tester.pumpAndSettle();
+  }
+  await tester.tap(find.byKey(const ValueKey('editor-all-tools')));
+  await tester.pumpAndSettle();
+  await tester.enterText(
+    find.byKey(const ValueKey('editor-meta-op-search')),
+    metaOpId,
+  );
+  await tester.pumpAndSettle();
+  final result = find.byKey(ValueKey('editor-meta-op-result-$metaOpId'));
+  expect(result, findsOneWidget);
+  tester.widget<ListTile>(result).onTap!();
+  tester.testTextInput.hide();
+  FocusManager.instance.primaryFocus?.unfocus();
+  await tester.pumpAndSettle();
 }
 
 Future<MemoryPhotoProjectStore> _pumpSinglePhotoExport(
@@ -2835,13 +3249,14 @@ Future<MemoryPhotoProjectStore> _pumpSinglePhotoExport(
       photoSharer: sharer,
     ),
   );
-  await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+  await _tapEditorEntryFromHome(tester);
   await tester.pumpAndSettle();
   final saveButton = find.byKey(const ValueKey('editor-batch-export'));
   await tester.ensureVisible(saveButton);
   await tester.tap(saveButton);
   await tester.pumpAndSettle();
   await tester.tap(find.byKey(const ValueKey('save-all')));
+  await tester.tap(find.byKey(const ValueKey('save-confirm')));
   await tester.pumpAndSettle();
   return store;
 }
@@ -2938,6 +3353,7 @@ final class _CountingPhotoAnalyzer implements PhotoAnalyzer {
     this.faceSlimTargetCount,
     this.body = PortraitApplicability.unavailable,
     this.bodyTargetCount,
+    this.faceTargetRegions = const [],
     this.capabilityVersion = 'widget-capability-v1',
   }) : faceSlim = faceSlim ?? portrait;
 
@@ -2947,6 +3363,8 @@ final class _CountingPhotoAnalyzer implements PhotoAnalyzer {
   final int? faceSlimTargetCount;
   final PortraitApplicability body;
   final int? bodyTargetCount;
+  final List<NormalizedTargetRegion> faceTargetRegions;
+  final List<NormalizedTargetRegion> bodyTargetRegions = const [];
   final String capabilityVersion;
   int calls = 0;
 
@@ -2978,8 +3396,10 @@ final class _CountingPhotoAnalyzer implements PhotoAnalyzer {
       faceSlim: faceSlim,
       faceSlimReason: faceSlimReason,
       faceSlimTargetCount: faceSlimTargetCount,
+      faceTargetRegions: faceTargetRegions,
       body: body,
       bodyTargetCount: bodyTargetCount,
+      bodyTargetRegions: bodyTargetRegions,
     );
   }
 }
@@ -3061,6 +3481,22 @@ final class _FailingSaveProjectStore implements PhotoProjectStore {
   @override
   Future<void> save(PhotoProject project) async {
     throw StateError('fixture save failure');
+  }
+}
+
+final class _ArmableFailProjectStore implements PhotoProjectStore {
+  _ArmableFailProjectStore(this.project);
+
+  PhotoProject project;
+  bool failSaves = false;
+
+  @override
+  Future<PhotoProject?> loadLatest() async => project;
+
+  @override
+  Future<void> save(PhotoProject project) async {
+    if (failSaves) throw StateError('fixture save failure');
+    this.project = project;
   }
 }
 

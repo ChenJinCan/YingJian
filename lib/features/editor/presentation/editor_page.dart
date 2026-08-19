@@ -2,22 +2,28 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:yingjian/features/editor/application/ai_edit_planner.dart';
 import 'package:yingjian/features/editor/application/batch_photo_exporter.dart';
 import 'package:yingjian/features/editor/application/editor_session.dart';
-import 'package:yingjian/features/editor/application/natural_language_edit_interpreter.dart';
+import 'package:yingjian/features/editor/application/edit_target_detection_adapter.dart';
+import 'package:yingjian/features/editor/application/meta_op_capabilities_provider.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
 import 'package:yingjian/features/editor/application/photo_sharer.dart';
 import 'package:yingjian/features/editor/application/speech_transcriber.dart';
 import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/edit_target.dart';
+import 'package:yingjian/features/editor/domain/editing_core.dart';
+import 'package:yingjian/features/editor/domain/editing_resource.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_for_platform.dart';
-import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
+import 'package:yingjian/features/editor/domain/legacy_edit_recipe_adapter.dart';
+import 'package:yingjian/features/editor/domain/meta_op.dart';
 import 'package:yingjian/features/editor/domain/quality_enhancement_recipe.dart';
 import 'package:yingjian/features/editor/domain/semantic_editing_recipe.dart';
+import 'package:yingjian/features/editor/domain/targeted_portrait_recipe.dart';
 import 'package:yingjian/features/editor/infrastructure/method_channel_speech_transcriber.dart';
 import 'package:yingjian/features/editor/presentation/native_photo_preview.dart';
 import 'package:yingjian/features/editor/presentation/voice_edit_sheet.dart';
@@ -32,11 +38,13 @@ import 'package:yingjian/l10n/l10n.dart';
 class EditorPage extends StatefulWidget {
   const EditorPage({
     this.speechTranscriber = const MethodChannelSpeechTranscriber(),
+    this.aiEditPlanner = const LocalAiEditPlanner(),
     this.startWithImport = false,
     super.key,
   });
 
   final SpeechTranscriber speechTranscriber;
+  final AiEditPlanner aiEditPlanner;
   final bool startWithImport;
 
   @override
@@ -46,6 +54,7 @@ class EditorPage extends StatefulWidget {
 class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   PhotoProjectSession? _session;
   PhotoSharer? _photoSharer;
+  PhotoImporter? _photoImporter;
   final EditorSession _editorSession = EditorSession();
   ScrollController? _photoStripController;
   int _selectedIndex = 0;
@@ -76,16 +85,20 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   final Map<String, List<NormalizedTargetRegion>> _bodyTargetRegionsByPhotoId =
       {};
   int _previewRecommendationIndex = -1;
-  double? _previewSharedIntensity;
   double? _pendingPhotoStripOffset;
   bool _savingPhotoStripPosition = false;
   PhotoAnalysisCancellationToken? _analysisCancellation;
   Future<void>? _analysisCompletion;
   Future<void> _lifecycleAnalysisUpdates = Future.value();
   _EditFeedback? _editFeedback;
+  Timer? _editFeedbackTimer;
+  _PendingManualRender? _pendingManualRender;
+  final Map<String, EditRecipe> _lastRenderedRecipeByPhotoId = {};
+  Future<void> _recipePersistence = Future.value();
   bool _handledStartWithImport = false;
   bool _manualToolsVisible = false;
   bool _immersivePreview = false;
+  MetaOpCapabilitiesProvider? _metaOpCapabilitiesProvider;
 
   @override
   void initState() {
@@ -156,6 +169,12 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _photoSharer ??= context.read<PhotoSharer>();
+    _photoImporter ??= context.read<PhotoImporter>();
+    final capabilitiesProvider = context.read<MetaOpCapabilitiesProvider>();
+    if (!identical(_metaOpCapabilitiesProvider, capabilitiesProvider)) {
+      _metaOpCapabilitiesProvider = capabilitiesProvider;
+      unawaited(_loadMetaOpCapabilities(capabilitiesProvider));
+    }
     if (_session != null) {
       return;
     }
@@ -165,6 +184,20 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     );
     _session = session;
     unawaited(_initializeSession(session));
+  }
+
+  Future<void> _loadMetaOpCapabilities(
+    MetaOpCapabilitiesProvider provider,
+  ) async {
+    try {
+      final capabilities = await provider.load();
+      if (!mounted || !identical(_metaOpCapabilitiesProvider, provider)) {
+        return;
+      }
+      _editorSession.setPlatformCapabilities(capabilities);
+    } on Object {
+      // The bundled declaration remains the conservative offline fallback.
+    }
   }
 
   Future<void> _initializeSession(PhotoProjectSession session) async {
@@ -195,7 +228,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     if (mounted && recoveredSummary != null) {
       setState(() => _exportSummary = recoveredSummary);
     }
-    _editorSession.load(session.editableRecipe);
+    _loadEditableRecipe();
     final focusPhotoId = project?.focusPhotoId;
     if (focusPhotoId != null) {
       final focusIndex = project!.photos.indexWhere(
@@ -221,6 +254,24 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         exposeRecommendations: false,
       );
     }
+  }
+
+  void _loadEditableRecipe() {
+    final session = _session;
+    final project = session?.project;
+    final prioritized = <String>[];
+    final seen = <String>{};
+    if (project != null) {
+      for (final operation in project.undoHistory.reversed) {
+        for (final address in operation.changedAddresses) {
+          if (seen.add(address.metaOpId)) prioritized.add(address.metaOpId);
+        }
+      }
+    }
+    _editorSession.load(
+      session?.editableRecipe ?? EditRecipe.neutral,
+      prioritizedMetaOpIds: prioritized,
+    );
   }
 
   Future<bool> _restoreCachedPortraitApplicability(
@@ -255,6 +306,10 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           restoredBody[photo.id] = analysis.body;
           restoredBodyTargetCount[photo.id] = analysis.bodyTargetCount;
           restoredBodyTargetRegions[photo.id] = analysis.bodyTargetRegions;
+          await session.reconcileEditTargets(
+            photo.id,
+            detectedEditTargetsFor(photo: photo, analysis: analysis),
+          );
         } else {
           refreshRequired = true;
         }
@@ -312,6 +367,12 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           await LocalRecommendationCoordinator(
             analyzer: context.read<PhotoAnalyzer>(),
             cache: context.read<PhotoAnalysisCache>(),
+            recommendationEngine: LocalRecommendationEngine(
+              availableMetaOpIds: _editorSession
+                  .metaOpAvailability()
+                  .recommendationIds
+                  .toSet(),
+            ),
           ).prepare(
             projectId: projectId,
             photos: photos,
@@ -330,6 +391,15 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                   }
                 : null,
           );
+      if (_isCurrentAnalysisRun(cancellation, projectId)) {
+        for (final entry in preparation.analyses.entries) {
+          final photo = photos.singleWhere((photo) => photo.id == entry.key);
+          await session.reconcileEditTargets(
+            photo.id,
+            detectedEditTargetsFor(photo: photo, analysis: entry.value),
+          );
+        }
+      }
       if (_isCurrentAnalysisRun(cancellation, projectId) &&
           persistAnalysisStates &&
           session.project?.flowState == PhotoProjectFlowState.analyzing) {
@@ -381,13 +451,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           }
         });
       }
-      if (_isCurrentAnalysisRun(cancellation, projectId) &&
-          exposeRecommendations &&
-          preparation.recommendations.isNotEmpty &&
-          session.project?.flowState ==
-              PhotoProjectFlowState.choosingRecommendation) {
-        await _selectRecommendation(preparation.recommendations.first);
-      }
     } finally {
       completion.complete();
       if (identical(_analysisCompletion, completion.future)) {
@@ -431,12 +494,42 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   Future<void> _selectRecommendation(LocalRecommendation recommendation) async {
     if (_exportSummary != null || _exporting || _sharing) return;
     try {
+      final session = _session!;
+      final project = session.project!;
+      final photoId = project.focusPhotoId ?? project.photos.first.id;
+      final activeTargets =
+          project.targetRegistries[photoId]?.targets.values
+              .where((target) => target.status == EditTargetStatus.active)
+              .map((target) => target.id)
+              .toSet() ??
+          const <String>{};
+      final prepared = session.prepareRecommendationForPreview(
+        sharedStyle: recommendation.sharedStyle,
+        adaptiveCompensations: recommendation.adaptiveCompensations,
+        context: _editorSession.editContext(
+          photoIds: project.photos.map((photo) => photo.id).toSet(),
+          targetIds: activeTargets,
+          applicability: {'photo', if (activeTargets.isNotEmpty) 'face'},
+        ),
+      );
+      if (prepared == null ||
+          !await _renderBeforeAiCommit(
+            photo: project.photos.firstWhere((photo) => photo.id == photoId),
+            preview: prepared,
+          )) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(context.l10n.effectPreviewUnavailable)),
+          );
+        }
+        return;
+      }
       await _session!.selectRecommendation(
         recommendationId: recommendation.id,
         sharedStyle: recommendation.sharedStyle,
         adaptiveCompensations: recommendation.adaptiveCompensations,
       );
-      _editorSession.load(_session!.editableRecipe);
+      _loadEditableRecipe();
       if (mounted) setState(() => _recommendationPreparation = null);
     } on Object {
       if (mounted) {
@@ -447,10 +540,120 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _persistRecipe() async {
+  Future<void> _skipRecommendation() async {
     if (_exportSummary != null || _exporting || _sharing) return;
     try {
-      await _session?.commitEdit(_editorSession.recipe);
+      await _session!.selectRecommendation(
+        recommendationId: 'skipped',
+        sharedStyle: SharedStyle(recipe: EditRecipe.neutral),
+      );
+      _loadEditableRecipe();
+      if (mounted) setState(() => _recommendationPreparation = null);
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
+      }
+    }
+  }
+
+  void _requestRecipePersistence() {
+    final session = _session;
+    final project = session?.project;
+    if (session == null || project == null || project.photos.isEmpty) return;
+    final photoId = project.focusPhotoId ?? project.photos.first.id;
+    final editableRecipe = _editorSession.recipe;
+    final renderedRecipe = session.previewRecipeFor(photoId, editableRecipe);
+    final request = _PendingManualRender(
+      photoId: photoId,
+      editableRecipe: editableRecipe,
+      renderedRecipe: renderedRecipe,
+    );
+    _pendingManualRender = request;
+    if (_lastRenderedRecipeByPhotoId[photoId] == renderedRecipe) {
+      _acceptRenderedRecipe(request);
+    }
+  }
+
+  void _handleRecipeRendered(String photoId, EditRecipe recipe) {
+    _lastRenderedRecipeByPhotoId[photoId] = recipe;
+    final request = _pendingManualRender;
+    if (request != null &&
+        request.photoId == photoId &&
+        request.renderedRecipe == recipe) {
+      _acceptRenderedRecipe(request);
+    }
+  }
+
+  void _acceptRenderedRecipe(_PendingManualRender request) {
+    if (!identical(_pendingManualRender, request)) return;
+    _pendingManualRender = null;
+    _recipePersistence = _recipePersistence.then(
+      (_) => _persistRecipe(request.editableRecipe),
+    );
+  }
+
+  void _handleRecipeRenderFailed(String photoId, EditRecipe recipe) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _handleRecipeRenderFailedAfterFrame(photoId, recipe);
+      }
+    });
+  }
+
+  void _handleRecipeRenderFailedAfterFrame(String photoId, EditRecipe recipe) {
+    final request = _pendingManualRender;
+    if (request == null ||
+        request.photoId != photoId ||
+        request.renderedRecipe != recipe) {
+      return;
+    }
+    _pendingManualRender = null;
+    if (_editorSession.recipe == request.editableRecipe) {
+      _loadEditableRecipe();
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.effectPreviewUnavailable)),
+      );
+    }
+  }
+
+  Future<void> _persistRecipe(EditRecipe desiredRecipe) async {
+    if (_exportSummary != null || _exporting || _sharing) return;
+    var committedGroupEdit = false;
+    try {
+      final session = _session;
+      final project = session?.project;
+      if (session == null || project == null) return;
+      final photoId = project.focusPhotoId ?? project.photos.first.id;
+      final importer = _photoImporter!;
+      final activeTargetValues =
+          project.targetRegistries[photoId]?.targets.values
+              .where((target) => target.status == EditTargetStatus.active)
+              .toList(growable: false) ??
+          const <StableEditTarget>[];
+      final commit = await session.commitManualRecipe(
+        desiredRecipe: desiredRecipe,
+        context: _editorSession.editContext(
+          photoIds: project.photos.map((photo) => photo.id).toSet(),
+          targetIds: activeTargetValues.map((target) => target.id).toSet(),
+          applicability: {
+            'photo',
+            if (activeTargetValues.any(
+              (target) => target.kind == EditTargetKind.face,
+            ))
+              'face',
+            if (activeTargetValues.any(
+              (target) => target.kind == EditTargetKind.body,
+            ))
+              'body',
+          },
+        ),
+        resourceImporter: importer is EditingResourceImporter ? importer : null,
+      );
+      committedGroupEdit = commit.appliedToGroup;
     } on Object {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -458,12 +661,27 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
       }
     } finally {
-      _editorSession.load(_session?.editableRecipe ?? EditRecipe.neutral);
+      if (_editorSession.recipe == desiredRecipe) {
+        _loadEditableRecipe();
+      }
+      if (committedGroupEdit && mounted) {
+        _showEditFeedback(context.l10n.editAppliedToGroup);
+      }
     }
+  }
+
+  void _showEditFeedback(String message) {
+    _editFeedbackTimer?.cancel();
+    if (!mounted) return;
+    setState(() => _editFeedback = _EditFeedback(message: message));
+    _editFeedbackTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _editFeedback = null);
+    });
   }
 
   Future<void> _undoEdit() async {
     if (_exportSummary != null || _exporting || _sharing) return;
+    _editFeedbackTimer?.cancel();
     try {
       await _session?.undoEdit();
     } on Object {
@@ -473,7 +691,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
       }
     } finally {
-      _editorSession.load(_session?.editableRecipe ?? EditRecipe.neutral);
+      _loadEditableRecipe();
       if (mounted) setState(() => _editFeedback = null);
     }
   }
@@ -489,14 +707,39 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
       }
     } finally {
-      _editorSession.load(_session?.editableRecipe ?? EditRecipe.neutral);
+      _loadEditableRecipe();
     }
   }
 
   Future<void> _resetEdit() async {
     if (_exportSummary != null || _exporting || _sharing) return;
     try {
-      await _session?.resetScopedEdit();
+      final session = _session;
+      final project = session?.project;
+      if (session == null || project == null) return;
+      final photoId = project.focusPhotoId ?? project.photos.first.id;
+      final activeTargets =
+          project.targetRegistries[photoId]?.targets.values
+              .where((target) => target.status == EditTargetStatus.active)
+              .toList(growable: false) ??
+          const <StableEditTarget>[];
+      await session.resetScopedEdit(
+        context: _editorSession.editContext(
+          photoIds: project.photos.map((photo) => photo.id).toSet(),
+          targetIds: activeTargets.map((target) => target.id).toSet(),
+          applicability: {
+            'photo',
+            if (activeTargets.any(
+              (target) => target.kind == EditTargetKind.face,
+            ))
+              'face',
+            if (activeTargets.any(
+              (target) => target.kind == EditTargetKind.body,
+            ))
+              'body',
+          },
+        ),
+      );
     } on Object {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -504,7 +747,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
       }
     } finally {
-      _editorSession.load(_session?.editableRecipe ?? EditRecipe.neutral);
+      _loadEditableRecipe();
     }
   }
 
@@ -515,12 +758,17 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       isScrollControlled: true,
       showDragHandle: false,
       builder: (sheetContext) => VoiceEditSheet(
-        currentRecipe: _editorSession.recipe,
-        interpreter: const LocalNaturalLanguageEditInterpreter(),
         transcriber: widget.speechTranscriber,
-        onApplied: (result) async {
-          await _commitNaturalLanguageResult(result);
-          if (sheetContext.mounted) Navigator.pop(sheetContext);
+        onSubmit: (intent) async {
+          final applied = await _planAndCommitAiIntent(intent);
+          if (applied && sheetContext.mounted) {
+            final route = ModalRoute.of(sheetContext);
+            final navigator = route?.navigator;
+            if (route != null && navigator != null) {
+              navigator.removeRoute(route);
+            }
+          }
+          return applied;
         },
       ),
     );
@@ -528,65 +776,161 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
 
   Future<void> _applyQuickInstruction(String instruction) async {
     if (_exportSummary != null || _exporting || _sharing) return;
-    final result = const LocalNaturalLanguageEditInterpreter().interpret(
-      instruction,
-      current: _editorSession.recipe,
-    );
-    if (!result.isApplicable) return;
-    await _commitNaturalLanguageResult(result);
+    await _planAndCommitAiIntent(instruction);
   }
 
-  Future<void> _commitNaturalLanguageResult(
-    NaturalLanguageEditResult result,
-  ) async {
-    _editorSession.apply(result.recipe);
-    await _persistRecipe();
-    if (!mounted) return;
-    setState(
-      () => _editFeedback = _EditFeedback(
-        message:
-            result.changes.any(
-              (change) => change.parameter == EditableParameter.exposure,
-            )
-            ? context.l10n.editResultBrighter
-            : context.l10n.editResultApplied,
+  Future<bool> _planAndCommitAiIntent(String intent) async {
+    final session = _session;
+    final project = session?.project;
+    if (session == null || project == null || !session.canEdit) return false;
+    final photoId = project.focusPhotoId ?? project.photos.first.id;
+    final activeTargets =
+        project.targetRegistries[photoId]?.targets.values
+            .where((target) => target.status == EditTargetStatus.active)
+            .map((target) => target.id)
+            .toSet() ??
+        const <String>{};
+    final applicability = {'photo', if (activeTargets.isNotEmpty) 'face'};
+    final availability = _editorSession.metaOpAvailability(
+      applicability: applicability,
+    );
+    final productionIds = availability.aiProductionIds.toSet();
+    final capabilities = availability
+        .aiCapabilities(MetaOpCatalog.standard)
+        .where((value) => productionIds.contains(value.definition.id));
+    final analysis = _recommendationPreparation?.analyses[photoId];
+    final outcome = await widget.aiEditPlanner.plan(
+      AiEditPlanningRequest(
+        intent: intent,
+        baseStateVersion: project.editStateVersion,
+        currentState: project.editState,
+        capabilities: capabilities,
+        photoAnalysis: AiPhotoAnalysis(
+          scene: analysis?.scene.name ?? SceneKind.unknown.name,
+          targetIds: activeTargets.toList(growable: false),
+        ),
+        photoId: photoId,
       ),
     );
+    final AiEditProposal proposal;
+    if (outcome is AiEditProposal) {
+      proposal = outcome;
+    } else if (outcome is AiTargetClarification) {
+      final candidates =
+          project.targetRegistries[photoId]?.targets.values
+              .where(
+                (target) =>
+                    target.status == EditTargetStatus.active &&
+                    ((outcome.targetType == MetaOpTargetType.face &&
+                            target.kind == EditTargetKind.face) ||
+                        (outcome.targetType == MetaOpTargetType.body &&
+                            target.kind == EditTargetKind.body)),
+              )
+              .toList() ??
+          const <StableEditTarget>[];
+      final selectedTargetId = await _chooseAiTarget(candidates);
+      if (selectedTargetId == null) return false;
+      proposal = outcome.resolve(selectedTargetId);
+    } else {
+      return false;
+    }
+    final editContext = _editorSession.editContext(
+      photoIds: project.photos.map((photo) => photo.id).toSet(),
+      targetIds: activeTargets,
+      applicability: applicability,
+    );
+    final preparedPreview = session.prepareMetaOpsForPreview(
+      changes: proposal.changes,
+      source: EditSource.ai,
+      context: editContext,
+    );
+    if (preparedPreview == null ||
+        !await _renderBeforeAiCommit(
+          photo: project.photos.firstWhere((photo) => photo.id == photoId),
+          preview: preparedPreview,
+        )) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.effectPreviewUnavailable)),
+        );
+      }
+      return false;
+    }
+    final result = await session.commitAiProposal(
+      proposal,
+      context: editContext,
+    );
+    if (result is! AcceptedEdit) return false;
+    _loadEditableRecipe();
+    if (!mounted) return true;
+    _showEditFeedback(
+      proposal.changes.any(
+            (change) => change.address.metaOpId == MetaOpIds.exposure,
+          )
+          ? context.l10n.editResultBrighter
+          : context.l10n.editResultApplied,
+    );
+    return true;
   }
 
-  Future<void> _syncCurrentPhotoAdjustmentsToGroup() async {
-    if (_exportSummary != null || _exporting || _sharing) return;
-    final confirmed =
-        await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Text(context.l10n.syncGroupConfirmationTitle),
-            content: Text(context.l10n.syncGroupConfirmationMessage),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: Text(context.l10n.cancel),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: Text(context.l10n.syncGroupAction),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-    if (!confirmed || !mounted) return;
+  Future<bool> _renderBeforeAiCommit({
+    required ProjectPhoto photo,
+    required PreparedMetaOpPreview preview,
+  }) async {
+    final renderer = context.read<PhotoPreviewRenderer>();
+    PhotoPreviewHandle? handle;
     try {
-      await _session!.syncCurrentPhotoAdjustmentsToGroup();
+      handle = await renderer.create(
+        sourcePath: photo.localPath,
+        pipeline: imagePipelineForCurrentPlatform(
+          preview.recipe,
+          sourceId: preview.sourceId,
+          editState: preview.state,
+          context: preview.context,
+        ),
+        maxEdge: 1024,
+      );
+      return true;
     } on Object {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
-      }
+      return false;
     } finally {
-      _editorSession.load(_session?.editableRecipe ?? EditRecipe.neutral);
+      if (handle != null) {
+        try {
+          await renderer.dispose(handle);
+        } on Object {
+          // The validation render succeeded; cleanup is best effort.
+        }
+      }
     }
+  }
+
+  Future<String?> _chooseAiTarget(List<StableEditTarget> candidates) async {
+    if (candidates.isEmpty) return null;
+    if (candidates.length == 1) return candidates.single.id;
+    FocusManager.instance.primaryFocus?.unfocus();
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    if (!mounted) return null;
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(context.l10n.choosePersonTitle),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(context.l10n.choosePersonHint),
+            const SizedBox(height: 12),
+            for (var index = 0; index < candidates.length; index++)
+              ListTile(
+                key: ValueKey('ai-target-${candidates[index].id}'),
+                leading: CircleAvatar(child: Text('${index + 1}')),
+                title: Text('${context.l10n.choosePersonTitle} ${index + 1}'),
+                onTap: () => Navigator.pop(context, candidates[index].id),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _selectPhoto(int index) async {
@@ -594,7 +938,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     try {
       await _session!.setFocusPhoto(photo.id);
       if (mounted) setState(() => _selectedIndex = index);
-      _editorSession.load(_session!.editableRecipe);
+      _loadEditableRecipe();
     } on Object {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -630,59 +974,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       }
     }
     _savingPhotoStripPosition = false;
-  }
-
-  Future<void> _setEditingScope(ProjectEditingScope scope) async {
-    if (_exportSummary != null || _exporting || _sharing) return;
-    final session = _session!;
-    final photo = session.photos[_selectedIndex];
-    _previewSharedIntensity = null;
-    try {
-      await session.setEditingScope(
-        scope,
-        photoId: scope == ProjectEditingScope.currentPhoto ? photo.id : null,
-      );
-      _editorSession.load(session.editableRecipe);
-    } on Object {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
-      }
-    }
-  }
-
-  void _beginSharedIntensityAdjustment() {
-    final project = _session?.project;
-    if (project == null ||
-        project.editingScope != ProjectEditingScope.group ||
-        _previewSharedIntensity != null) {
-      return;
-    }
-    setState(() => _previewSharedIntensity = project.sharedStyle.intensity);
-  }
-
-  void _previewSharedIntensityAdjustment(double intensity) {
-    if (_previewSharedIntensity == null) return;
-    setState(() => _previewSharedIntensity = intensity);
-  }
-
-  Future<void> _commitSharedIntensityAdjustment() async {
-    final intensity = _previewSharedIntensity;
-    if (intensity == null || _exportSummary != null || _exporting || _sharing) {
-      return;
-    }
-    try {
-      await _session?.commitSharedIntensity(intensity);
-    } on Object {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
-      }
-    } finally {
-      if (mounted) setState(() => _previewSharedIntensity = null);
-    }
   }
 
   Future<bool> _confirm({
@@ -738,7 +1029,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       } else {
         _selectedIndex = 0;
       }
-      _editorSession.load(_session!.editableRecipe);
+      _loadEditableRecipe();
       unawaited(_restartRecommendationsIfNeeded());
     } on Object {
       if (mounted) {
@@ -772,7 +1063,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       _bodyTargetCountByPhotoId.clear();
       await _discardShareFiles();
       _selectedIndex = 0;
-      _editorSession.load(EditRecipe.neutral);
+      _loadEditableRecipe();
     } on Object {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -799,6 +1090,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _editFeedbackTimer?.cancel();
     _analysisCancellation?.cancel();
     _batchExporter?.cancel();
     final batchCompletion = _batchCompletion;
@@ -811,6 +1103,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       final pending = <Future<void>>[
         ?analysisCompletion,
         lifecycleAnalysisUpdates,
+        _recipePersistence,
         ?batchDrain,
       ];
       if (pending.isEmpty) {
@@ -1291,7 +1584,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         );
       }
       if (result == PhotoImportResult.imported) {
-        _editorSession.load(_session!.editableRecipe);
+        _loadEditableRecipe();
         await _prepareRecommendations(persistAnalysisStates: true);
       }
     } on Object {
@@ -1305,6 +1598,28 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         setState(() => _busy = false);
       }
     }
+  }
+
+  EditContext _renderContextFor(PhotoProject project, String photoId) {
+    final targets =
+        project.targetRegistries[photoId]?.targets.values
+            .where((target) => target.status == EditTargetStatus.active)
+            .toList(growable: false) ??
+        const <StableEditTarget>[];
+    return _editorSession.editContext(
+      photoIds: project.photos.map((photo) => photo.id).toSet(),
+      targetIds: targets.map((target) => target.id).toSet(),
+      applicability: {
+        'photo',
+        if (targets.any((target) => target.kind == EditTargetKind.face)) 'face',
+        if (targets.any((target) => target.kind == EditTargetKind.body)) 'body',
+      },
+      resourceIds: project.editingResources.resources.keys.toSet(),
+      resourceByteLengths: {
+        for (final resource in project.editingResources.resources.values)
+          resource.id: resource.byteLength,
+      },
+    );
   }
 
   @override
@@ -1327,31 +1642,10 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         final previewRecipe = photos.isEmpty
             ? EditRecipe.neutral
             : previewRecommendation == null
-            ? _previewSharedIntensity == null
-                  ? session.previewRecipeFor(
-                      photos[_selectedIndex].id,
-                      _editorSession.recipe,
-                    )
-                  : session.project!
-                        .copyWith(
-                          sharedStyle: SharedStyle(
-                            family: session.project!.sharedStyle.family,
-                            intensity: _previewSharedIntensity!,
-                            recipe:
-                                session.project!.editingScope ==
-                                    ProjectEditingScope.group
-                                ? _editorSession.recipe
-                                : session.project!.sharedStyle.recipe,
-                          ),
-                        )
-                        .effectiveRecipeFor(
-                          photos[_selectedIndex].id,
-                          photoOverride:
-                              session.project!.editingScope ==
-                                  ProjectEditingScope.currentPhoto
-                              ? _editorSession.recipe
-                              : null,
-                        )
+            ? session.previewRecipeFor(
+                photos[_selectedIndex].id,
+                _editorSession.recipe,
+              )
             : session.project!
                   .copyWith(
                     sharedStyle: previewRecommendation.sharedStyle,
@@ -1400,16 +1694,18 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         final bodyTargetRegions = selectedPhoto == null
             ? const <NormalizedTargetRegion>[]
             : _bodyTargetRegionsByPhotoId[selectedPhoto.id] ?? const [];
-        final photoToolsVisible =
-            photos.length == 1 ||
-            session.project?.editingScope == ProjectEditingScope.currentPhoto;
+        const photoToolsVisible = true;
         return Scaffold(
           key: const ValueKey('editor-page'),
           backgroundColor: _immersivePreview ? const Color(0xFF0B0D0E) : null,
           appBar: _immersivePreview
               ? null
               : AppBar(
-                  title: MediaQuery.sizeOf(context).width < 700
+                  title:
+                      session.flowState ==
+                          PhotoProjectFlowState.choosingRecommendation
+                      ? Text(context.l10n.chooseOverallFeeling)
+                      : MediaQuery.sizeOf(context).width < 700
                       ? photos.isEmpty
                             ? null
                             : Text(
@@ -1426,7 +1722,51 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                         ),
                   actions: photos.isEmpty
                       ? null
+                      : session.flowState ==
+                            PhotoProjectFlowState.choosingRecommendation
+                      ? [
+                          IconButton(
+                            tooltip: context.l10n.removePhoto,
+                            onPressed: selectedPhoto == null
+                                ? null
+                                : () => unawaited(_removePhoto(selectedPhoto)),
+                            icon: const Icon(Icons.remove_circle_outline),
+                          ),
+                          IconButton(
+                            tooltip: context.l10n.deleteProject,
+                            onPressed: () => unawaited(_deleteProject()),
+                            icon: const Icon(Icons.delete_outline),
+                          ),
+                          TextButton(
+                            key: const ValueKey('recommendation-skip'),
+                            onPressed: () => unawaited(_skipRecommendation()),
+                            child: Text(context.l10n.skip),
+                          ),
+                        ]
+                      : session.flowState == PhotoProjectFlowState.analyzing
+                      ? [
+                          IconButton(
+                            tooltip: context.l10n.removePhoto,
+                            onPressed: selectedPhoto == null
+                                ? null
+                                : () => unawaited(_removePhoto(selectedPhoto)),
+                            icon: const Icon(Icons.remove_circle_outline),
+                          ),
+                          IconButton(
+                            tooltip: context.l10n.deleteProject,
+                            onPressed: () => unawaited(_deleteProject()),
+                            icon: const Icon(Icons.delete_outline),
+                          ),
+                        ]
                       : [
+                          IconButton(
+                            key: const ValueKey('editor-undo'),
+                            tooltip: context.l10n.undo,
+                            onPressed: editingEnabled && session.canUndo
+                                ? () => unawaited(_undoEdit())
+                                : null,
+                            icon: const Icon(Icons.undo_rounded),
+                          ),
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 4),
                             child: FilledButton(
@@ -1472,6 +1812,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                               PopupMenuItem(
                                 value: 'addPhoto',
                                 enabled:
+                                    !session.project!.isReadOnly &&
                                     !_exporting &&
                                     !_sharing &&
                                     photos.length < PhotoProject.maxPhotoCount,
@@ -1480,6 +1821,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                               PopupMenuItem(
                                 value: 'removePhoto',
                                 enabled:
+                                    !session.project!.isReadOnly &&
                                     !_exporting &&
                                     !_sharing &&
                                     selectedPhoto != null,
@@ -1521,7 +1863,11 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                             ),
                         ],
                 ),
-          bottomNavigationBar: _immersivePreview || _manualToolsVisible
+          bottomNavigationBar:
+              _immersivePreview ||
+                  _manualToolsVisible ||
+                  recommendationFlow ||
+                  _exporting
               ? null
               : (_exportSummary?.failedCount == 0 &&
                     _exportSummary?.cancelledCount == 0)
@@ -1559,16 +1905,28 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
               ? _FullscreenPhotoPreview(
                   photo: selectedPhoto,
                   recipe: previewRecipe,
+                  editState: session.project!.renderStateFor(
+                    selectedPhoto.id,
+                    recipe: previewRecipe,
+                  ),
+                  editContext: _renderContextFor(
+                    session.project!,
+                    selectedPhoto.id,
+                  ),
                   renderer: context.read<PhotoPreviewRenderer>(),
                   position: _selectedIndex + 1,
                   count: photos.length,
                   onClose: () => setState(() => _immersivePreview = false),
                 )
               : SafeArea(
-                  child:
-                      _exportSummary != null &&
-                          _exportSummary!.failedCount == 0 &&
-                          _exportSummary!.cancelledCount == 0
+                  child: _exporting
+                      ? _SavingProgressView(
+                          project: session.project!,
+                          onCancel: _cancelBatchExport,
+                        )
+                      : _exportSummary != null &&
+                            _exportSummary!.failedCount == 0 &&
+                            _exportSummary!.cancelledCount == 0
                       ? _SaveSuccessView(
                           count: _exportSummary!.savedCount,
                           onFinish: _finishSaving,
@@ -1576,6 +1934,17 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                               ? () => unawaited(_shareExportedPhotos())
                               : null,
                           sharing: _sharing,
+                        )
+                      : _exportSummary != null
+                      ? _PartialSaveView(
+                          summary: _exportSummary!,
+                          project: session.project!,
+                          exporting: _exporting,
+                          sharing: _sharing,
+                          onRetry: () =>
+                              unawaited(_exportBatch(retryFailuresOnly: true)),
+                          onViewSaved: () => unawaited(_shareExportedPhotos()),
+                          onBackToEditing: () => unawaited(_continueEditing()),
                         )
                       : session.isRestoring
                       ? Semantics(
@@ -1592,6 +1961,25 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                           busy: _busy,
                           failures: session.importFailures,
                           onImport: _importPhotos,
+                        )
+                      : session.flowState == PhotoProjectFlowState.analyzing
+                      ? _AnalysisStage(
+                          photos: photos,
+                          project: session.project!,
+                          failures: session.importFailures,
+                        )
+                      : session.flowState ==
+                            PhotoProjectFlowState.choosingRecommendation
+                      ? _RecommendationStage(
+                          photos: photos,
+                          recommendations: recommendations ?? const [],
+                          selectedIndex: _previewRecommendationIndex,
+                          previewRenderer: context.read<PhotoPreviewRenderer>(),
+                          onSelected: (index) => setState(
+                            () => _previewRecommendationIndex = index,
+                          ),
+                          onConfirm: (recommendation) =>
+                              unawaited(_selectRecommendation(recommendation)),
                         )
                       : _PhotoWorkspace(
                           photos: photos,
@@ -1618,8 +2006,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                           bodyTargetRegions: bodyTargetRegions,
                           photoToolsVisible: photoToolsVisible,
                           manualToolsVisible: _manualToolsVisible,
-                          canSyncCurrentPhoto:
-                              session.canSyncCurrentPhotoAdjustmentsToGroup,
+                          feedback: _editFeedback,
                           photoStripController: _photoStripController ??=
                               ScrollController(
                                 initialScrollOffset:
@@ -1636,9 +2023,17 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                           sharing: _sharing,
                           onShareExport: () =>
                               unawaited(_shareExportedPhotos()),
-                          onRecipeCommitted: () => unawaited(_persistRecipe()),
-                          onSyncCurrentPhotoToGroup: () =>
-                              unawaited(_syncCurrentPhotoAdjustmentsToGroup()),
+                          onRecipeCommitted: _requestRecipePersistence,
+                          onRecipeRendered: (recipe) => _handleRecipeRendered(
+                            photos[_selectedIndex].id,
+                            recipe,
+                          ),
+                          onRecipeRenderFailed: (recipe) =>
+                              _handleRecipeRenderFailed(
+                                photos[_selectedIndex].id,
+                                recipe,
+                              ),
+                          onUndo: () => unawaited(_undoEdit()),
                           onOpenTools: () =>
                               setState(() => _manualToolsVisible = true),
                           onCloseTools: () =>
@@ -1649,15 +2044,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                           onRecommendationPreviewed: (index) => setState(
                             () => _previewRecommendationIndex = index,
                           ),
-                          previewSharedIntensity: _previewSharedIntensity,
-                          onSharedIntensityStart:
-                              _beginSharedIntensityAdjustment,
-                          onSharedIntensityChanged:
-                              _previewSharedIntensityAdjustment,
-                          onSharedIntensityEnd: () =>
-                              unawaited(_commitSharedIntensityAdjustment()),
-                          onEditingScopeChanged: (scope) =>
-                              unawaited(_setEditingScope(scope)),
                         ),
                 ),
         );
@@ -1735,13 +2121,7 @@ class _EmptyProject extends StatelessWidget {
               style: Theme.of(context).textTheme.headlineSmall,
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 12),
-            Text(
-              context.l10n.photoImportPrivacy,
-              style: Theme.of(context).textTheme.bodyMedium,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 28),
+            const SizedBox(height: 24),
             Semantics(
               liveRegion: busy,
               label: busy ? context.l10n.importingPhotos : null,
@@ -1794,7 +2174,7 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.bodyTargetRegions,
     required this.photoToolsVisible,
     required this.manualToolsVisible,
-    required this.canSyncCurrentPhoto,
+    required this.feedback,
     required this.photoStripController,
     required this.onSelected,
     required this.onMove,
@@ -1804,17 +2184,14 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.sharing,
     required this.onShareExport,
     required this.onRecipeCommitted,
-    required this.onSyncCurrentPhotoToGroup,
+    required this.onRecipeRendered,
+    required this.onRecipeRenderFailed,
+    required this.onUndo,
     required this.onOpenTools,
     required this.onCloseTools,
     required this.onOpenFullscreen,
     required this.onPhotoStripScrollEnd,
     required this.onRecommendationPreviewed,
-    required this.previewSharedIntensity,
-    required this.onSharedIntensityStart,
-    required this.onSharedIntensityChanged,
-    required this.onSharedIntensityEnd,
-    required this.onEditingScopeChanged,
   });
 
   final List<ProjectPhoto> photos;
@@ -1841,7 +2218,7 @@ class _PhotoWorkspace extends StatelessWidget {
   final List<NormalizedTargetRegion> bodyTargetRegions;
   final bool photoToolsVisible;
   final bool manualToolsVisible;
-  final bool canSyncCurrentPhoto;
+  final _EditFeedback? feedback;
   final ScrollController photoStripController;
   final ValueChanged<int> onSelected;
   final void Function(ProjectPhoto photo, int destination) onMove;
@@ -1851,24 +2228,40 @@ class _PhotoWorkspace extends StatelessWidget {
   final bool sharing;
   final VoidCallback onShareExport;
   final VoidCallback onRecipeCommitted;
-  final VoidCallback onSyncCurrentPhotoToGroup;
+  final ValueChanged<EditRecipe> onRecipeRendered;
+  final ValueChanged<EditRecipe> onRecipeRenderFailed;
+  final VoidCallback onUndo;
   final VoidCallback onOpenTools;
   final VoidCallback onCloseTools;
   final VoidCallback onOpenFullscreen;
   final VoidCallback onPhotoStripScrollEnd;
   final ValueChanged<int> onRecommendationPreviewed;
-  final double? previewSharedIntensity;
-  final VoidCallback onSharedIntensityStart;
-  final ValueChanged<double> onSharedIntensityChanged;
-  final VoidCallback onSharedIntensityEnd;
-  final ValueChanged<ProjectEditingScope> onEditingScopeChanged;
 
   @override
   Widget build(BuildContext context) {
     final selected = photos[selectedIndex];
+    final activeTargets =
+        (project.targetRegistries[selected.id]?.targets.values ?? const [])
+            .where((target) => target.status == EditTargetStatus.active)
+            .toList(growable: false);
+    final stableFaceTargets =
+        activeTargets
+            .where(
+              (target) =>
+                  target.kind == EditTargetKind.face &&
+                  target.status == EditTargetStatus.active,
+            )
+            .toList()
+          ..sort((left, right) {
+            final horizontal = left.region.left.compareTo(right.region.left);
+            return horizontal != 0
+                ? horizontal
+                : left.region.top.compareTo(right.region.top);
+          });
     final recipe = editorSession.recipe;
     final previewRenderer = context.read<PhotoPreviewRenderer>();
-    final interactionsBlocked = exporting || sharing || exportSummary != null;
+    final interactionsBlocked =
+        project.isReadOnly || exporting || sharing || exportSummary != null;
     final recommendationFlow =
         flowState == PhotoProjectFlowState.analyzing ||
         flowState == PhotoProjectFlowState.choosingRecommendation;
@@ -1882,14 +2275,72 @@ class _PhotoWorkspace extends StatelessWidget {
           key: ValueKey('photo-preview-${selected.id}'),
           sourcePath: selected.localPath,
           recipe: previewRecipe,
+          sourceId: selected.id,
+          editState: project.renderStateFor(selected.id, recipe: previewRecipe),
+          editContext: editorSession.editContext(
+            photoIds: project.photos.map((photo) => photo.id).toSet(),
+            targetIds: activeTargets.map((target) => target.id).toSet(),
+            applicability: {
+              'photo',
+              if (activeTargets.any(
+                (target) => target.kind == EditTargetKind.face,
+              ))
+                'face',
+              if (activeTargets.any(
+                (target) => target.kind == EditTargetKind.body,
+              ))
+                'body',
+            },
+            resourceIds: project.editingResources.resources.keys.toSet(),
+            resourceByteLengths: {
+              for (final resource in project.editingResources.resources.values)
+                resource.id: resource.byteLength,
+            },
+          ),
           renderer: previewRenderer,
           recommendationMode:
               flowState == PhotoProjectFlowState.choosingRecommendation,
+          onRendered: onRecipeRendered,
+          onRenderFailed: onRecipeRenderFailed,
         ),
       ),
     );
     return Column(
       children: [
+        if (project.requiresUpdate)
+          Semantics(
+            key: const ValueKey('project-requires-update'),
+            liveRegion: true,
+            child: Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.secondaryContainer,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.system_update_alt_rounded),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          context.l10n.projectRequiresUpdateTitle,
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(context.l10n.projectRequiresUpdateMessage),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         Expanded(
           flex: exportSummary == null
               ? recommendationFlow || compactHeight
@@ -1938,10 +2389,12 @@ class _PhotoWorkspace extends StatelessWidget {
             ),
           ),
         ),
-        if (simplifiedMobile &&
-            manualToolsVisible &&
-            !recommendationFlow &&
-            exportSummary == null)
+        if (manualToolsVisible && feedback != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: _ResultFeedbackPill(feedback: feedback!, onUndo: onUndo),
+          ),
+        if (manualToolsVisible && !recommendationFlow && exportSummary == null)
           _EditorToolsDock(
             photos: photos,
             project: project,
@@ -1954,15 +2407,13 @@ class _PhotoWorkspace extends StatelessWidget {
             faceSlimReason: faceSlimReason,
             faceSlimTargetCount: faceSlimTargetCount,
             faceTargetRegions: faceTargetRegions,
+            stableFaceTargets: stableFaceTargets,
             bodyApplicable: bodyApplicable,
             bodyTargetCount: bodyTargetCount,
             bodyTargetRegions: bodyTargetRegions,
             photoToolsVisible: photoToolsVisible,
-            canSyncCurrentPhoto: canSyncCurrentPhoto,
             editorSession: editorSession,
             onRecipeCommitted: onRecipeCommitted,
-            onSyncCurrentPhotoToGroup: onSyncCurrentPhotoToGroup,
-            onEditingScopeChanged: onEditingScopeChanged,
             onClose: onCloseTools,
           ),
         if (!simplifiedMobile)
@@ -2103,7 +2554,9 @@ class _PhotoWorkspace extends StatelessWidget {
               ),
             ),
           ),
-        if (!simplifiedMobile || recommendationFlow || exportSummary != null)
+        if ((!simplifiedMobile && !manualToolsVisible) ||
+            recommendationFlow ||
+            exportSummary != null)
           Expanded(
             flex: exportSummary == null
                 ? recommendationFlow || compactHeight
@@ -2121,153 +2574,16 @@ class _PhotoWorkspace extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 112),
                 children: [
                   Text(
-                    context.l10n.photoPositionAndScope(
-                      selectedIndex + 1,
-                      photos.length,
-                      project.editingScope == ProjectEditingScope.group
-                          ? context.l10n.editWholeGroup
-                          : context.l10n.editCurrentPhoto,
-                    ),
+                    '${selectedIndex + 1}/${photos.length}',
                     style: Theme.of(context).textTheme.labelLarge,
                   ),
                   if (importFailures.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     _ImportFailures(failures: importFailures),
                   ],
-                  if (photos.length > 1 &&
-                      editingEnabled &&
-                      exportSummary == null) ...[
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      child: SegmentedButton<ProjectEditingScope>(
-                        segments: [
-                          ButtonSegment(
-                            value: ProjectEditingScope.group,
-                            icon: const Icon(Icons.collections_outlined),
-                            label: Text(
-                              context.l10n.editWholeGroup,
-                              key: const ValueKey('editor-scope-group'),
-                            ),
-                          ),
-                          ButtonSegment(
-                            value: ProjectEditingScope.currentPhoto,
-                            icon: const Icon(Icons.photo_outlined),
-                            label: Text(
-                              context.l10n.editCurrentPhoto,
-                              key: const ValueKey('editor-scope-currentPhoto'),
-                            ),
-                          ),
-                        ],
-                        selected: {project.editingScope},
-                        onSelectionChanged: (selection) =>
-                            onEditingScopeChanged(selection.single),
-                      ),
-                    ),
-                  ],
-                  if (editingEnabled &&
-                      exportSummary == null &&
-                      !recommendationFlow &&
-                      project.editingScope == ProjectEditingScope.group) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      context.l10n.groupStyleIntensityHint,
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    _AdjustmentSlider(
-                      key: const ValueKey('editor-group-style-intensity'),
-                      enabled: !interactionsBlocked,
-                      label: context.l10n.groupStyleIntensity,
-                      semanticLabel: context.l10n.groupStyleIntensity,
-                      value:
-                          previewSharedIntensity ??
-                          project.sharedStyle.intensity,
-                      minimum: 0,
-                      maximum: 1,
-                      onStart: onSharedIntensityStart,
-                      onChanged: onSharedIntensityChanged,
-                      onEnd: onSharedIntensityEnd,
-                    ),
-                  ],
                   if (exportSummary == null && recommendationFlow) ...[
                     const SizedBox(height: 12),
                     const _PreparationStatusCard(),
-                  ] else if (exportSummary == null) ...[
-                    const SizedBox(height: 8),
-                    if (MediaQuery.sizeOf(context).width >= 700 &&
-                        MediaQuery.textScalerOf(context).scale(1) <= 1.3)
-                      _MobileToolWorkspace(
-                        enabled: editingEnabled,
-                        photoToolsVisible: photoToolsVisible,
-                        portraitAvailable: portraitApplicable,
-                        faceSlimAvailable: faceSlimApplicable,
-                        faceSlimReason: faceSlimReason,
-                        faceSlimTargetCount: faceSlimTargetCount,
-                        faceTargetRegions: faceTargetRegions,
-                        bodyAvailable: bodyApplicable,
-                        bodyTargetCount: bodyTargetCount,
-                        bodyTargetRegions: bodyTargetRegions,
-                        subjectAvailable: portraitApplicable || bodyApplicable,
-                        allowDetailedTools: photoToolsVisible,
-                        photo: selected,
-                        recipe: recipe,
-                        editorSession: editorSession,
-                        onRecipeCommitted: onRecipeCommitted,
-                      )
-                    else
-                      Card(
-                        child: ExpansionTile(
-                          key: const ValueKey('editor-manual-adjustments'),
-                          maintainState: true,
-                          tilePadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 4,
-                          ),
-                          childrenPadding: const EdgeInsets.fromLTRB(
-                            16,
-                            0,
-                            16,
-                            16,
-                          ),
-                          leading: const Icon(Icons.tune),
-                          title: Text(
-                            context.l10n.manualAdjustments,
-                            style: Theme.of(context).textTheme.titleSmall
-                                ?.copyWith(fontWeight: FontWeight.w700),
-                          ),
-                          subtitle: Text(context.l10n.manualAdjustmentsHint),
-                          children: [
-                            _MobileToolWorkspace(
-                              enabled: editingEnabled,
-                              photoToolsVisible: photoToolsVisible,
-                              portraitAvailable: portraitApplicable,
-                              faceSlimAvailable: faceSlimApplicable,
-                              faceSlimReason: faceSlimReason,
-                              faceSlimTargetCount: faceSlimTargetCount,
-                              faceTargetRegions: faceTargetRegions,
-                              bodyAvailable: bodyApplicable,
-                              bodyTargetCount: bodyTargetCount,
-                              bodyTargetRegions: bodyTargetRegions,
-                              subjectAvailable:
-                                  portraitApplicable || bodyApplicable,
-                              allowDetailedTools: photoToolsVisible,
-                              photo: selected,
-                              recipe: recipe,
-                              editorSession: editorSession,
-                              onRecipeCommitted: onRecipeCommitted,
-                            ),
-                          ],
-                        ),
-                      ),
-                    if (canSyncCurrentPhoto) ...[
-                      OutlinedButton.icon(
-                        onPressed: editingEnabled
-                            ? onSyncCurrentPhotoToGroup
-                            : null,
-                        icon: const Icon(Icons.sync_alt),
-                        label: Text(context.l10n.syncCurrentAdjustments),
-                      ),
-                    ],
                   ],
                   if (exportSummary != null) ...[
                     const SizedBox(height: 12),
@@ -2299,7 +2615,7 @@ class _PhotoWorkspace extends StatelessWidget {
   }
 }
 
-class _EditorToolsDock extends StatelessWidget {
+class _EditorToolsDock extends StatefulWidget {
   const _EditorToolsDock({
     required this.photos,
     required this.project,
@@ -2312,15 +2628,13 @@ class _EditorToolsDock extends StatelessWidget {
     required this.faceSlimReason,
     required this.faceSlimTargetCount,
     required this.faceTargetRegions,
+    required this.stableFaceTargets,
     required this.bodyApplicable,
     required this.bodyTargetCount,
     required this.bodyTargetRegions,
     required this.photoToolsVisible,
-    required this.canSyncCurrentPhoto,
     required this.editorSession,
     required this.onRecipeCommitted,
-    required this.onSyncCurrentPhotoToGroup,
-    required this.onEditingScopeChanged,
     required this.onClose,
   });
 
@@ -2335,130 +2649,96 @@ class _EditorToolsDock extends StatelessWidget {
   final PortraitDegradationReason faceSlimReason;
   final int faceSlimTargetCount;
   final List<NormalizedTargetRegion> faceTargetRegions;
+  final List<StableEditTarget> stableFaceTargets;
   final bool bodyApplicable;
   final int bodyTargetCount;
   final List<NormalizedTargetRegion> bodyTargetRegions;
   final bool photoToolsVisible;
-  final bool canSyncCurrentPhoto;
   final EditorSession editorSession;
   final VoidCallback onRecipeCommitted;
-  final VoidCallback onSyncCurrentPhotoToGroup;
-  final ValueChanged<ProjectEditingScope> onEditingScopeChanged;
   final VoidCallback onClose;
+
+  @override
+  State<_EditorToolsDock> createState() => _EditorToolsDockState();
+}
+
+class _EditorToolsDockState extends State<_EditorToolsDock> {
+  String? _selectedMetaOpId;
+  late List<String> _frozenManualMetaOpIds;
+
+  @override
+  void initState() {
+    super.initState();
+    _freezeManualOrder();
+  }
+
+  @override
+  void didUpdateWidget(covariant _EditorToolsDock oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selected.id != widget.selected.id) {
+      _selectedMetaOpId = null;
+      _freezeManualOrder();
+    }
+  }
+
+  void _freezeManualOrder() {
+    _frozenManualMetaOpIds = widget.editorSession.orderedManualMetaOpIds(
+      applicability: {
+        'photo',
+        if (widget.photoToolsVisible && widget.portraitApplicable) 'face',
+        if (widget.photoToolsVisible && widget.bodyApplicable) 'body',
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.3;
-    final scopeLabel = project.editingScope == ProjectEditingScope.group
-        ? context.l10n.editWholeGroup
-        : context.l10n.editCurrentPhoto;
     return SizedBox(
       key: const ValueKey('editor-tools-dock'),
-      height: largeText
+      height: _usesDedicatedEditor(_selectedMetaOpId)
+          ? min(320, MediaQuery.sizeOf(context).height * 0.36)
+          : largeText
           ? min(350, MediaQuery.sizeOf(context).height * 0.42)
-          : min(270, MediaQuery.sizeOf(context).height * 0.32),
+          : min(190, MediaQuery.sizeOf(context).height * 0.23),
       child: Material(
         color: colors.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        clipBehavior: Clip.antiAlias,
         child: Column(
           children: [
+            Divider(height: 1, color: colors.outlineVariant),
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 2),
               child: Row(
                 children: [
-                  Text(
-                    context.l10n.adjustPhoto,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  if (photos.length > 1)
-                    PopupMenuButton<ProjectEditingScope>(
-                      key: const ValueKey('editor-scope-menu'),
-                      enabled: editingEnabled,
-                      onSelected: onEditingScopeChanged,
-                      itemBuilder: (context) => [
-                        PopupMenuItem(
-                          value: ProjectEditingScope.currentPhoto,
-                          child: Text(
-                            context.l10n.editCurrentPhoto,
-                            key: const ValueKey('editor-scope-currentPhoto'),
-                          ),
-                        ),
-                        PopupMenuItem(
-                          value: ProjectEditingScope.group,
-                          child: Text(
-                            context.l10n.editWholeGroup,
-                            key: const ValueKey('editor-scope-group'),
-                          ),
-                        ),
-                      ],
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: colors.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(99),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 7,
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(scopeLabel),
-                              const SizedBox(width: 2),
-                              const Icon(Icons.arrow_drop_down, size: 18),
-                            ],
-                          ),
-                        ),
-                      ),
+                  if (largeText)
+                    IconButton(
+                      key: const ValueKey('editor-tools-done'),
+                      tooltip: context.l10n.backToEditing,
+                      onPressed: widget.onClose,
+                      icon: const Icon(Icons.arrow_back_rounded),
+                    )
+                  else
+                    TextButton.icon(
+                      key: const ValueKey('editor-tools-done'),
+                      onPressed: widget.onClose,
+                      icon: const Icon(Icons.arrow_back_rounded, size: 18),
+                      label: Text(context.l10n.backToEditing),
                     ),
                   const Spacer(),
-                  if (canSyncCurrentPhoto)
-                    IconButton(
-                      key: const ValueKey('editor-sync-current-inline'),
-                      tooltip: context.l10n.syncCurrentAdjustments,
-                      onPressed: editingEnabled
-                          ? onSyncCurrentPhotoToGroup
-                          : null,
-                      icon: const Icon(Icons.sync_alt, size: 20),
-                    ),
                   TextButton(
-                    key: const ValueKey('editor-tools-done'),
-                    onPressed: onClose,
-                    child: Text(context.l10n.finish),
+                    key: const ValueKey('editor-all-tools'),
+                    onPressed: widget.editingEnabled ? _showMetaOpSearch : null,
+                    child: Text(context.l10n.allTools),
                   ),
                 ],
               ),
             ),
-            Divider(height: 1, color: colors.outlineVariant),
             Expanded(
               child: SingleChildScrollView(
-                key: const Key('photo-workspace-scroll'),
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 18),
-                child: _MobileToolWorkspace(
-                  compact: true,
-                  enabled: editingEnabled && !interactionsBlocked,
-                  photoToolsVisible: photoToolsVisible,
-                  portraitAvailable: portraitApplicable,
-                  faceSlimAvailable: faceSlimApplicable,
-                  faceSlimReason: faceSlimReason,
-                  faceSlimTargetCount: faceSlimTargetCount,
-                  faceTargetRegions: faceTargetRegions,
-                  bodyAvailable: bodyApplicable,
-                  bodyTargetCount: bodyTargetCount,
-                  bodyTargetRegions: bodyTargetRegions,
-                  subjectAvailable: portraitApplicable || bodyApplicable,
-                  allowDetailedTools: photoToolsVisible,
-                  photo: selected,
-                  recipe: recipe,
-                  editorSession: editorSession,
-                  onRecipeCommitted: onRecipeCommitted,
-                ),
+                key: const ValueKey('editor-tools-scroll'),
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: _buildSelectedTool(),
               ),
             ),
           ],
@@ -2466,7 +2746,268 @@ class _EditorToolsDock extends StatelessWidget {
       ),
     );
   }
+
+  bool _usesDedicatedEditor(String? id) =>
+      id == MetaOpIds.compositionGeometry ||
+      id == MetaOpIds.filter ||
+      id == MetaOpIds.semanticAdjustments ||
+      id == MetaOpIds.faceGeometry ||
+      id == MetaOpIds.bodyGeometry ||
+      id == MetaOpIds.skinSmooth ||
+      id == MetaOpIds.skinToneLighting ||
+      id == MetaOpIds.blemishReduction ||
+      id == MetaOpIds.noiseReduction ||
+      id == MetaOpIds.lowLightRecovery ||
+      id == MetaOpIds.hazeRemoval ||
+      id == MetaOpIds.detailSharpening ||
+      MetaOpIds.hslChannels.contains(id);
+
+  Widget _buildSelectedTool() {
+    final enabled = widget.editingEnabled && !widget.interactionsBlocked;
+    final selectedId = _selectedMetaOpId;
+    if (selectedId == MetaOpIds.compositionGeometry) {
+      return _CompositionTools(
+        enabled: enabled,
+        photo: widget.selected,
+        recipe: widget.recipe,
+        editorSession: widget.editorSession,
+        onRecipeCommitted: widget.onRecipeCommitted,
+      );
+    }
+    if (selectedId == MetaOpIds.filter) {
+      return _FilterHslTools(
+        enabled: enabled,
+        recipe: widget.recipe,
+        editorSession: widget.editorSession,
+        onRecipeCommitted: widget.onRecipeCommitted,
+        mode: _FilterHslMode.filter,
+      );
+    }
+    if (selectedId == MetaOpIds.semanticAdjustments) {
+      return _SemanticTools(
+        enabled: enabled,
+        subjectAvailable: widget.portraitApplicable || widget.bodyApplicable,
+        photo: widget.selected,
+        recipe: widget.recipe,
+        editorSession: widget.editorSession,
+        onRecipeCommitted: widget.onRecipeCommitted,
+      );
+    }
+    if (selectedId == MetaOpIds.noiseReduction ||
+        selectedId == MetaOpIds.lowLightRecovery ||
+        selectedId == MetaOpIds.hazeRemoval ||
+        selectedId == MetaOpIds.detailSharpening) {
+      return _AdjustmentToolStrip(
+        scope: _AdjustmentToolScope.quality,
+        initialMetaOpId: selectedId,
+        enabled: enabled,
+        extended: true,
+        photoToolsVisible: widget.photoToolsVisible,
+        portraitAvailable: widget.portraitApplicable,
+        faceSlimAvailable: widget.faceSlimApplicable,
+        faceSlimReason: widget.faceSlimReason,
+        faceSlimTargetCount: widget.faceSlimTargetCount,
+        faceTargetRegions: widget.faceTargetRegions,
+        stableFaceTargets: widget.stableFaceTargets,
+        bodyAvailable: widget.bodyApplicable,
+        bodyTargetCount: widget.bodyTargetCount,
+        bodyTargetRegions: widget.bodyTargetRegions,
+        photo: widget.selected,
+        recipe: widget.recipe,
+        editorSession: widget.editorSession,
+        onRecipeCommitted: widget.onRecipeCommitted,
+      );
+    }
+    if (selectedId == MetaOpIds.skinSmooth ||
+        selectedId == MetaOpIds.skinToneLighting ||
+        selectedId == MetaOpIds.blemishReduction ||
+        selectedId == MetaOpIds.faceGeometry ||
+        selectedId == MetaOpIds.bodyGeometry) {
+      return _AdjustmentToolStrip(
+        scope: _AdjustmentToolScope.portrait,
+        initialMetaOpId: selectedId,
+        enabled: enabled,
+        extended: true,
+        photoToolsVisible: widget.photoToolsVisible,
+        portraitAvailable: widget.portraitApplicable,
+        faceSlimAvailable: widget.faceSlimApplicable,
+        faceSlimReason: widget.faceSlimReason,
+        faceSlimTargetCount: widget.faceSlimTargetCount,
+        faceTargetRegions: widget.faceTargetRegions,
+        stableFaceTargets: widget.stableFaceTargets,
+        bodyAvailable: widget.bodyApplicable,
+        bodyTargetCount: widget.bodyTargetCount,
+        bodyTargetRegions: widget.bodyTargetRegions,
+        photo: widget.selected,
+        recipe: widget.recipe,
+        editorSession: widget.editorSession,
+        onRecipeCommitted: widget.onRecipeCommitted,
+      );
+    }
+    final hslIndex = MetaOpIds.hslChannels.indexOf(selectedId ?? '');
+    if (hslIndex >= 0) {
+      return _FilterHslTools(
+        enabled: enabled,
+        recipe: widget.recipe,
+        editorSession: widget.editorSession,
+        onRecipeCommitted: widget.onRecipeCommitted,
+        mode: _FilterHslMode.hsl,
+        initialChannel: HslChannel.values[hslIndex],
+      );
+    }
+    return _AdjustmentToolStrip(
+      compact: true,
+      scope: _AdjustmentToolScope.common,
+      initialMetaOpId: selectedId,
+      manualMetaOpIds: _frozenManualMetaOpIds,
+      enabled: enabled,
+      extended: false,
+      photoToolsVisible: widget.photoToolsVisible,
+      portraitAvailable: widget.portraitApplicable,
+      faceSlimAvailable: widget.faceSlimApplicable,
+      faceSlimReason: widget.faceSlimReason,
+      faceSlimTargetCount: widget.faceSlimTargetCount,
+      faceTargetRegions: widget.faceTargetRegions,
+      stableFaceTargets: widget.stableFaceTargets,
+      bodyAvailable: widget.bodyApplicable,
+      bodyTargetCount: widget.bodyTargetCount,
+      bodyTargetRegions: widget.bodyTargetRegions,
+      photo: widget.selected,
+      recipe: widget.recipe,
+      editorSession: widget.editorSession,
+      onRecipeCommitted: widget.onRecipeCommitted,
+    );
+  }
+
+  Future<void> _showMetaOpSearch() async {
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => _MetaOpSearchSheet(
+        editorSession: widget.editorSession,
+        applicability: {
+          'photo',
+          if (widget.photoToolsVisible && widget.portraitApplicable) 'face',
+          if (widget.photoToolsVisible && widget.bodyApplicable) 'body',
+        },
+      ),
+    );
+    if (selected != null && mounted) {
+      setState(() => _selectedMetaOpId = selected);
+    }
+  }
 }
+
+class _MetaOpSearchSheet extends StatefulWidget {
+  const _MetaOpSearchSheet({
+    required this.editorSession,
+    required this.applicability,
+  });
+
+  final EditorSession editorSession;
+  final Set<String> applicability;
+
+  @override
+  State<_MetaOpSearchSheet> createState() => _MetaOpSearchSheetState();
+}
+
+class _MetaOpSearchSheetState extends State<_MetaOpSearchSheet> {
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final availability = widget.editorSession.metaOpAvailability(
+      applicability: widget.applicability,
+    );
+    final ids = _query.trim().isEmpty
+        ? availability.searchIds
+        : availability.search(MetaOpCatalog.standard, _query);
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          0,
+          16,
+          16 + MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              key: const ValueKey('editor-meta-op-search'),
+              autofocus: true,
+              textInputAction: TextInputAction.search,
+              decoration: InputDecoration(
+                hintText: context.l10n.metaOpSearchHint,
+                prefixIcon: const Icon(Icons.search),
+              ),
+              onChanged: (value) => setState(() => _query = value),
+            ),
+            const SizedBox(height: 8),
+            if (ids.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 28),
+                child: Text(
+                  context.l10n.metaOpSearchNoResults,
+                  key: const ValueKey('editor-meta-op-search-empty'),
+                ),
+              )
+            else
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: ids.length,
+                  itemBuilder: (context, index) {
+                    final id = ids[index];
+                    return ListTile(
+                      key: ValueKey('editor-meta-op-result-$id'),
+                      leading: const Icon(Icons.tune),
+                      title: Text(_metaOpLabel(context, id)),
+                      onTap: () => Navigator.pop(context, id),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _metaOpLabel(BuildContext context, String id) => switch (id) {
+  MetaOpIds.compositionGeometry => context.l10n.composition,
+  MetaOpIds.exposure => context.l10n.exposure,
+  MetaOpIds.highlights => context.l10n.highlights,
+  MetaOpIds.shadows => context.l10n.shadows,
+  MetaOpIds.contrast => context.l10n.contrast,
+  MetaOpIds.warmth => context.l10n.warmth,
+  MetaOpIds.tint => context.l10n.tint,
+  MetaOpIds.saturation => context.l10n.saturation,
+  MetaOpIds.clarity => context.l10n.clarity,
+  MetaOpIds.noiseReduction => context.l10n.noiseReduction,
+  MetaOpIds.lowLightRecovery => context.l10n.lowLightRecovery,
+  MetaOpIds.hazeRemoval => context.l10n.hazeRemoval,
+  MetaOpIds.detailSharpening => context.l10n.detailSharpening,
+  MetaOpIds.filter => context.l10n.filterAndHsl,
+  MetaOpIds.hslRed => context.l10n.hslRed,
+  MetaOpIds.hslOrange => context.l10n.hslOrange,
+  MetaOpIds.hslYellow => context.l10n.hslYellow,
+  MetaOpIds.hslGreen => context.l10n.hslGreen,
+  MetaOpIds.hslCyan => context.l10n.hslCyan,
+  MetaOpIds.hslBlue => context.l10n.hslBlue,
+  MetaOpIds.hslPurple => context.l10n.hslPurple,
+  MetaOpIds.hslMagenta => context.l10n.hslMagenta,
+  MetaOpIds.skinSmooth => context.l10n.textureSmoothing,
+  MetaOpIds.skinToneLighting => context.l10n.skinToneLighting,
+  MetaOpIds.blemishReduction => context.l10n.blemishReduction,
+  MetaOpIds.faceGeometry => context.l10n.faceSlim,
+  MetaOpIds.bodyGeometry => context.l10n.bodySlim,
+  MetaOpIds.semanticAdjustments => context.l10n.semanticTools,
+  _ => id,
+};
 
 enum _SaveScope { all, current }
 
@@ -2474,6 +3015,18 @@ class _EditFeedback {
   const _EditFeedback({required this.message});
 
   final String message;
+}
+
+class _PendingManualRender {
+  const _PendingManualRender({
+    required this.photoId,
+    required this.editableRecipe,
+    required this.renderedRecipe,
+  });
+
+  final String photoId;
+  final EditRecipe editableRecipe;
+  final EditRecipe renderedRecipe;
 }
 
 class _ResultFeedbackPill extends StatelessWidget {
@@ -2514,43 +3067,105 @@ class _ResultFeedbackPill extends StatelessWidget {
   }
 }
 
-class _SaveOptionsSheet extends StatelessWidget {
+class _SaveOptionsSheet extends StatefulWidget {
   const _SaveOptionsSheet({required this.photoCount});
 
   final int photoCount;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    key: const ValueKey('editor-save-options'),
-    padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          context.l10n.saveOptionsTitle,
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        const SizedBox(height: 6),
-        Text(
-          context.l10n.saveOptionsSubtitle,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
+  State<_SaveOptionsSheet> createState() => _SaveOptionsSheetState();
+}
+
+class _SaveOptionsSheetState extends State<_SaveOptionsSheet> {
+  _SaveScope _selection = _SaveScope.all;
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+    top: false,
+    child: SingleChildScrollView(
+      key: const ValueKey('editor-save-options'),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            context.l10n.savePhotos,
+            style: Theme.of(context).textTheme.titleLarge,
           ),
+          const SizedBox(height: 18),
+          _SaveScopeChoice(
+            key: const ValueKey('save-all'),
+            selected: _selection == _SaveScope.all,
+            label: context.l10n.saveAllPhotos(widget.photoCount),
+            onTap: () => setState(() => _selection = _SaveScope.all),
+          ),
+          const SizedBox(height: 10),
+          _SaveScopeChoice(
+            key: const ValueKey('save-current'),
+            selected: _selection == _SaveScope.current,
+            label: context.l10n.saveCurrentPhoto,
+            onTap: () => setState(() => _selection = _SaveScope.current),
+          ),
+          const SizedBox(height: 18),
+          FilledButton(
+            key: const ValueKey('save-confirm'),
+            onPressed: () => Navigator.pop(context, _selection),
+            child: Text(context.l10n.saveToAlbum),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _SaveScopeChoice extends StatelessWidget {
+  const _SaveScopeChoice({
+    required this.selected,
+    required this.label,
+    required this.onTap,
+    super.key,
+  });
+
+  final bool selected;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(16),
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 140),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 17),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: selected
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context).colorScheme.outlineVariant,
+          width: selected ? 2 : 1,
         ),
-        const SizedBox(height: 18),
-        FilledButton(
-          key: const ValueKey('save-all'),
-          onPressed: () => Navigator.pop(context, _SaveScope.all),
-          child: Text(context.l10n.saveAllPhotos(photoCount)),
-        ),
-        const SizedBox(height: 10),
-        OutlinedButton(
-          key: const ValueKey('save-current'),
-          onPressed: () => Navigator.pop(context, _SaveScope.current),
-          child: Text(context.l10n.saveCurrentPhoto),
-        ),
-      ],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+          ),
+          Icon(
+            selected ? Icons.radio_button_checked : Icons.radio_button_off,
+            color: selected
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ],
+      ),
     ),
   );
 }
@@ -2675,137 +3290,156 @@ class _EditorCommandBar extends StatelessWidget {
         key: const ValueKey('editor-bottom-command-bar'),
         top: false,
         minimum: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            border: Border(top: BorderSide(color: colors.outlineVariant)),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: recommendationFlow || interactionsBlocked
-                ? SizedBox(
-                    width: double.infinity,
-                    child: _statusAction(context),
-                  )
-                : Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (feedback != null) ...[
-                        _ResultFeedbackPill(
-                          feedback: feedback!,
-                          onUndo: onUndo,
-                        ),
-                        const SizedBox(height: 10),
-                      ],
-                      if (MediaQuery.sizeOf(context).width >= 700 &&
-                          MediaQuery.textScalerOf(context).scale(1) <= 1.3)
-                        Row(
-                          children: [
-                            TextButton(
-                              onPressed: editingEnabled && canUndo
-                                  ? onUndo
-                                  : null,
-                              child: Text(context.l10n.undo),
-                            ),
-                            TextButton(
-                              onPressed: editingEnabled && canRedo
-                                  ? onRedo
-                                  : null,
-                              child: Text(context.l10n.redo),
-                            ),
-                            TextButton(
-                              onPressed: editingEnabled && isEdited
-                                  ? onReset
-                                  : null,
-                              child: Text(context.l10n.reset),
-                            ),
-                            const Spacer(),
-                            OutlinedButton.icon(
-                              key: const ValueKey('voice-edit-entry'),
-                              onPressed: editingEnabled ? onVoiceEdit : null,
-                              icon: const Icon(Icons.mic_none_outlined),
-                              label: Text(context.l10n.voiceEditEntry),
-                            ),
-                          ],
-                        )
-                      else ...[
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton.icon(
+        child: LayoutBuilder(
+          builder: (context, constraints) => DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border(top: BorderSide(color: colors.outlineVariant)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: recommendationFlow || interactionsBlocked
+                  ? SizedBox(
+                      width: double.infinity,
+                      child: _statusAction(context),
+                    )
+                  : Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (feedback != null) ...[
+                          _ResultFeedbackPill(
+                            feedback: feedback!,
+                            onUndo: onUndo,
+                          ),
+                          const SizedBox(height: 10),
+                        ],
+                        if (constraints.maxWidth >= 700 &&
+                            MediaQuery.textScalerOf(context).scale(1) <= 1.3)
+                          Row(
+                            children: [
+                              TextButton(
+                                onPressed: editingEnabled && canUndo
+                                    ? onUndo
+                                    : null,
+                                child: Text(context.l10n.undo),
+                              ),
+                              TextButton(
+                                onPressed: editingEnabled && canRedo
+                                    ? onRedo
+                                    : null,
+                                child: Text(context.l10n.redo),
+                              ),
+                              TextButton(
+                                onPressed: editingEnabled && isEdited
+                                    ? onReset
+                                    : null,
+                                child: Text(context.l10n.reset),
+                              ),
+                              const Spacer(),
+                              OutlinedButton.icon(
                                 key: const ValueKey('voice-edit-entry'),
                                 onPressed: editingEnabled ? onVoiceEdit : null,
-                                style: OutlinedButton.styleFrom(
-                                  alignment: Alignment.centerLeft,
-                                  foregroundColor: colors.onSurfaceVariant,
-                                  minimumSize: const Size.fromHeight(54),
+                                icon: const Icon(Icons.mic_none_outlined),
+                                label: Text(context.l10n.voiceEditEntry),
+                              ),
+                              const SizedBox(width: 8),
+                              Semantics(
+                                key: const ValueKey('editor-open-tools'),
+                                button: true,
+                                child: TextButton.icon(
+                                  key: const ValueKey('editor-manual-entry'),
+                                  onPressed: editingEnabled
+                                      ? onManualEdit
+                                      : null,
+                                  icon: const Icon(Icons.tune, size: 18),
+                                  label: Text(context.l10n.adjustPhoto),
                                 ),
-                                icon: const Icon(Icons.auto_awesome_outlined),
-                                label: Text(context.l10n.voiceEditPrompt),
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            IconButton.filled(
-                              key: const ValueKey('voice-edit-microphone'),
-                              tooltip: context.l10n.voiceEditEntry,
-                              onPressed: editingEnabled ? onVoiceEdit : null,
-                              constraints: const BoxConstraints.tightFor(
-                                width: 54,
-                                height: 54,
-                              ),
-                              icon: const Icon(Icons.mic_none_outlined),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
+                            ],
+                          )
+                        else ...[
+                          Row(
                             children: [
-                              _QuickEditChip(
-                                key: const ValueKey('editor-quick-brighter'),
-                                label: context.l10n.quickEditBrighter,
-                                onPressed: editingEnabled
-                                    ? () => onQuickEdit('照片亮一点')
-                                    : null,
-                              ),
-                              const SizedBox(width: 8),
-                              _QuickEditChip(
-                                key: const ValueKey(
-                                  'editor-quick-natural-skin',
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  key: const ValueKey('voice-edit-entry'),
+                                  onPressed: editingEnabled
+                                      ? onVoiceEdit
+                                      : null,
+                                  style: OutlinedButton.styleFrom(
+                                    alignment: Alignment.centerLeft,
+                                    foregroundColor: colors.onSurfaceVariant,
+                                    minimumSize: const Size.fromHeight(54),
+                                  ),
+                                  icon: const Icon(Icons.auto_awesome_outlined),
+                                  label: Text(context.l10n.voiceEditPrompt),
                                 ),
-                                label: context.l10n.quickEditNaturalSkin,
-                                onPressed: editingEnabled
-                                    ? () => onQuickEdit('皮肤自然一点')
-                                    : null,
                               ),
                               const SizedBox(width: 8),
-                              _QuickEditChip(
-                                key: const ValueKey('editor-quick-atmosphere'),
-                                label: context.l10n.quickEditAtmosphere,
-                                onPressed: editingEnabled
-                                    ? () => onQuickEdit('整体更有氛围')
-                                    : null,
+                              IconButton.filled(
+                                key: const ValueKey('voice-edit-microphone'),
+                                tooltip: context.l10n.voiceEditEntry,
+                                onPressed: editingEnabled ? onVoiceEdit : null,
+                                constraints: const BoxConstraints.tightFor(
+                                  width: 54,
+                                  height: 54,
+                                ),
+                                icon: const Icon(Icons.mic_none_outlined),
                               ),
                             ],
                           ),
-                        ),
-                        Semantics(
-                          key: const ValueKey('editor-open-tools'),
-                          button: true,
-                          child: Align(
-                            alignment: Alignment.center,
-                            child: TextButton.icon(
-                              key: const ValueKey('editor-manual-entry'),
-                              onPressed: editingEnabled ? onManualEdit : null,
-                              icon: const Icon(Icons.tune, size: 18),
-                              label: Text(context.l10n.adjustPhoto),
+                          const SizedBox(height: 8),
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              children: [
+                                _QuickEditChip(
+                                  key: const ValueKey('editor-quick-brighter'),
+                                  label: context.l10n.quickEditBrighter,
+                                  onPressed: editingEnabled
+                                      ? () => onQuickEdit('照片亮一点')
+                                      : null,
+                                ),
+                                const SizedBox(width: 8),
+                                _QuickEditChip(
+                                  key: const ValueKey(
+                                    'editor-quick-natural-skin',
+                                  ),
+                                  label: context.l10n.quickEditNaturalSkin,
+                                  onPressed: editingEnabled
+                                      ? () => onQuickEdit('皮肤自然一点')
+                                      : null,
+                                ),
+                                const SizedBox(width: 8),
+                                _QuickEditChip(
+                                  key: const ValueKey(
+                                    'editor-quick-atmosphere',
+                                  ),
+                                  label: context.l10n.quickEditSoftBackground,
+                                  onPressed: editingEnabled
+                                      ? () => onQuickEdit('背景柔和一点')
+                                      : null,
+                                ),
+                              ],
                             ),
                           ),
-                        ),
+                          Semantics(
+                            key: const ValueKey('editor-open-tools'),
+                            button: true,
+                            child: Align(
+                              alignment: Alignment.center,
+                              child: TextButton.icon(
+                                key: const ValueKey('editor-manual-entry'),
+                                onPressed: editingEnabled ? onManualEdit : null,
+                                icon: const Icon(Icons.tune, size: 18),
+                                label: Text(context.l10n.adjustPhoto),
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
-                    ],
-                  ),
+                    ),
+            ),
           ),
         ),
       ),
@@ -2984,6 +3618,453 @@ class _ExportSummaryCard extends StatelessWidget {
     return (Icons.auto_fix_high, context.l10n.photoStatusAutoCompensated);
   }
   return (Icons.hourglass_empty, context.l10n.photoStatusUnprocessed);
+}
+
+class _AnalysisStage extends StatelessWidget {
+  const _AnalysisStage({
+    required this.photos,
+    required this.project,
+    required this.failures,
+  });
+
+  final List<ProjectPhoto> photos;
+  final PhotoProject project;
+  final List<PhotoImportFailure> failures;
+
+  @override
+  Widget build(BuildContext context) {
+    final completed = project.analysisStates.values
+        .where(
+          (state) =>
+              state != PhotoAnalysisState.pending &&
+              state != PhotoAnalysisState.running,
+        )
+        .length;
+    final current = min(photos.length, max(1, completed + 1));
+    return Padding(
+      key: const ValueKey('editor-analysis-stage'),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            height: 86,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: photos.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 10),
+              itemBuilder: (context, index) => ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: SizedBox(
+                  width: 70,
+                  child: Image.file(
+                    File(photos[index].localPath),
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => const ColoredBox(
+                      color: Color(0xFF151719),
+                      child: Icon(Icons.photo_outlined),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const Spacer(),
+          const Center(child: CircularProgressIndicator(strokeWidth: 2.5)),
+          const SizedBox(height: 24),
+          Text(
+            context.l10n.preparingPhotos(current, photos.length),
+            textAlign: TextAlign.center,
+            style: Theme.of(
+              context,
+            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 12),
+          LinearProgressIndicator(
+            value: photos.isEmpty ? 0 : completed / photos.length,
+            minHeight: 4,
+            borderRadius: BorderRadius.circular(99),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            context.l10n.analysisNextStep,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          if (failures.isNotEmpty) ...[
+            const SizedBox(height: 18),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text(context.l10n.analysisNonBlockingFailure),
+              ),
+            ),
+          ],
+          const Spacer(),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecommendationStage extends StatelessWidget {
+  const _RecommendationStage({
+    required this.photos,
+    required this.recommendations,
+    required this.selectedIndex,
+    required this.previewRenderer,
+    required this.onSelected,
+    required this.onConfirm,
+  });
+
+  final List<ProjectPhoto> photos;
+  final List<LocalRecommendation> recommendations;
+  final int selectedIndex;
+  final PhotoPreviewRenderer previewRenderer;
+  final ValueChanged<int> onSelected;
+  final ValueChanged<LocalRecommendation> onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    if (recommendations.isEmpty || photos.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final safeIndex = selectedIndex
+        .clamp(0, recommendations.length - 1)
+        .toInt();
+    final selected = recommendations[safeIndex];
+    final sourcePath = photos.first.localPath;
+    return Padding(
+      key: const ValueKey('editor-recommendation-stage'),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(22),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  NativePhotoPreview(
+                    sourcePath: sourcePath,
+                    recipe: selected.sharedStyle.recipe,
+                    renderer: previewRenderer,
+                    maxEdge: 1024,
+                    errorBuilder: (context) => ColoredBox(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerHighest,
+                      child: Icon(
+                        Icons.photo_outlined,
+                        size: 44,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Colors.transparent, Color(0xB30B0D0E)],
+                        stops: [0.58, 1],
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 18,
+                    bottom: 16,
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.check_circle,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _RecommendationPanel._recommendationLabel(
+                            context,
+                            selected.family,
+                          ),
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 94,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: recommendations.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 10),
+              itemBuilder: (context, index) {
+                final recommendation = recommendations[index];
+                final active = index == safeIndex;
+                return InkWell(
+                  key: ValueKey('recommendation-${recommendation.family.name}'),
+                  onTap: () => onSelected(index),
+                  borderRadius: BorderRadius.circular(14),
+                  child: Container(
+                    width: 120,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceContainerLow,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: active
+                            ? Theme.of(context).colorScheme.primary
+                            : Theme.of(context).colorScheme.outlineVariant,
+                        width: active ? 2 : 1,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          _RecommendationPanel._recommendationIcon(
+                            recommendation.family,
+                          ),
+                          size: 20,
+                          color: active
+                              ? Theme.of(context).colorScheme.primary
+                              : Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          _RecommendationPanel._recommendationLabel(
+                            context,
+                            recommendation.family,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            context.l10n.recommendationAppliesToAll,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 12),
+          FilledButton(
+            key: const ValueKey('recommendation-confirm'),
+            onPressed: () => onConfirm(selected),
+            child: Text(context.l10n.useThisLook),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SavingProgressView extends StatelessWidget {
+  const _SavingProgressView({required this.project, required this.onCancel});
+
+  final PhotoProject project;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final completed = project.exportStates.values
+        .where((state) => state == PhotoExportState.saved)
+        .length;
+    final total = project.exportStates.values
+        .where((state) => state != PhotoExportState.notQueued)
+        .length;
+    return Semantics(
+      key: const ValueKey('editor-saving-progress'),
+      container: true,
+      liveRegion: true,
+      label: context.l10n.savingProgress(max(1, completed + 1), total),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 48, 24, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              context.l10n.savingProgress(max(1, completed + 1), total),
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 20),
+            LinearProgressIndicator(
+              value: total == 0 ? 0 : completed / total,
+              minHeight: 5,
+              borderRadius: BorderRadius.circular(99),
+            ),
+            const SizedBox(height: 30),
+            Expanded(
+              child: ListView.separated(
+                itemCount: project.photos.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 10),
+                itemBuilder: (context, index) {
+                  final photo = project.photos[index];
+                  final status = _photoStatus(context, project, photo.id);
+                  return ListTile(
+                    tileColor: Theme.of(
+                      context,
+                    ).colorScheme.surfaceContainerLow,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    leading: ClipRRect(
+                      borderRadius: BorderRadius.circular(9),
+                      child: Image.file(
+                        File(photo.localPath),
+                        width: 48,
+                        height: 48,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                    title: Text(context.l10n.photoNumber(index + 1)),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(status.$1, size: 18),
+                        const SizedBox(width: 6),
+                        Text(status.$2),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+            OutlinedButton(
+              key: const ValueKey('export-cancel-remaining'),
+              onPressed: onCancel,
+              child: Text(context.l10n.cancelRemainingPhotos),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              context.l10n.savedPhotosAreKept,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PartialSaveView extends StatelessWidget {
+  const _PartialSaveView({
+    required this.summary,
+    required this.project,
+    required this.exporting,
+    required this.sharing,
+    required this.onRetry,
+    required this.onViewSaved,
+    required this.onBackToEditing,
+  });
+
+  final BatchExportSummary summary;
+  final PhotoProject project;
+  final bool exporting;
+  final bool sharing;
+  final VoidCallback onRetry;
+  final VoidCallback onViewSaved;
+  final VoidCallback onBackToEditing;
+
+  @override
+  Widget build(BuildContext context) {
+    final failed = project.photos
+        .where(
+          (photo) =>
+              project.exportStates[photo.id] == PhotoExportState.failed ||
+              project.exportStates[photo.id] == PhotoExportState.cancelled,
+        )
+        .toList(growable: false);
+    return Padding(
+      key: const ValueKey('editor-partial-save'),
+      padding: const EdgeInsets.fromLTRB(24, 42, 24, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Icon(
+            Icons.error_outline_rounded,
+            color: Theme.of(context).colorScheme.primary,
+            size: 52,
+          ),
+          const SizedBox(height: 18),
+          Text(
+            context.l10n.partialSaveTitle(
+              summary.savedCount,
+              summary.failedCount + summary.cancelledCount,
+            ),
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
+          const SizedBox(height: 26),
+          Expanded(
+            child: ListView.separated(
+              itemCount: failed.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 10),
+              itemBuilder: (context, index) => ListTile(
+                tileColor: Theme.of(context).colorScheme.surfaceContainerLow,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                leading: ClipRRect(
+                  borderRadius: BorderRadius.circular(9),
+                  child: Image.file(
+                    File(failed[index].localPath),
+                    width: 52,
+                    height: 52,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                title: Text(failed[index].originalName),
+                subtitle: Text(context.l10n.photoLibraryTemporarilyUnavailable),
+              ),
+            ),
+          ),
+          FilledButton(
+            key: const ValueKey('export-retry-failed'),
+            onPressed: exporting || sharing ? null : onRetry,
+            child: Text(
+              context.l10n.retryPhotoCount(
+                summary.failedCount + summary.cancelledCount,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: summary.canShare && !sharing ? onViewSaved : null,
+            child: Text(context.l10n.viewSavedPhotos),
+          ),
+          TextButton(
+            key: const ValueKey('export-continue-editing'),
+            onPressed: exporting ? null : onBackToEditing,
+            child: Text(context.l10n.backToEditing),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _PreparationStatusCard extends StatelessWidget {
@@ -3354,6 +4435,8 @@ class _FullscreenPhotoPreview extends StatelessWidget {
   const _FullscreenPhotoPreview({
     required this.photo,
     required this.recipe,
+    required this.editState,
+    required this.editContext,
     required this.renderer,
     required this.position,
     required this.count,
@@ -3362,6 +4445,8 @@ class _FullscreenPhotoPreview extends StatelessWidget {
 
   final ProjectPhoto photo;
   final EditRecipe recipe;
+  final EditState editState;
+  final EditContext editContext;
   final PhotoPreviewRenderer renderer;
   final int position;
   final int count;
@@ -3379,6 +4464,9 @@ class _FullscreenPhotoPreview extends StatelessWidget {
             key: ValueKey('fullscreen-photo-preview-${photo.id}'),
             sourcePath: photo.localPath,
             recipe: recipe,
+            sourceId: photo.id,
+            editState: editState,
+            editContext: editContext,
             renderer: renderer,
             recommendationMode: false,
             immersive: true,
@@ -3456,8 +4544,13 @@ class _BeforeAfterPreview extends StatefulWidget {
     required this.recipe,
     required this.renderer,
     required this.recommendationMode,
+    this.sourceId,
+    this.editState,
+    this.editContext = EditContext.ios,
     this.immersive = false,
     this.onExitImmersive,
+    this.onRendered,
+    this.onRenderFailed,
     super.key,
   });
 
@@ -3465,8 +4558,13 @@ class _BeforeAfterPreview extends StatefulWidget {
   final EditRecipe recipe;
   final PhotoPreviewRenderer renderer;
   final bool recommendationMode;
+  final String? sourceId;
+  final EditState? editState;
+  final EditContext editContext;
   final bool immersive;
   final VoidCallback? onExitImmersive;
+  final ValueChanged<EditRecipe>? onRendered;
+  final ValueChanged<EditRecipe>? onRenderFailed;
 
   @override
   State<_BeforeAfterPreview> createState() => _BeforeAfterPreviewState();
@@ -3481,26 +4579,35 @@ class _BeforeAfterPreviewState extends State<_BeforeAfterPreview> {
     final recipe = _showOriginal
         ? EditRecipe(crop: widget.recipe.crop)
         : widget.recipe;
+    final editState = _showOriginal && widget.editState != null
+        ? EditState(
+            version: widget.editState!.version,
+            values: const LegacyEditRecipeAdapter()
+                .read(recipe, photoId: widget.sourceId)
+                .values,
+          )
+        : widget.editState;
     return GestureDetector(
       key: widget.immersive
           ? const ValueKey('editor-fullscreen-preview-surface')
-          : null,
+          : const ValueKey('editor-preview-surface'),
       behavior: HitTestBehavior.opaque,
       onTap: widget.immersive ? widget.onExitImmersive : null,
-      onLongPressStart: widget.immersive
-          ? (_) => setState(() => _showOriginal = true)
-          : null,
-      onLongPressEnd: widget.immersive
-          ? (_) => setState(() => _showOriginal = false)
-          : null,
+      onLongPressStart: (_) => setState(() => _showOriginal = true),
+      onLongPressEnd: (_) => setState(() => _showOriginal = false),
       child: Stack(
         fit: StackFit.expand,
         children: [
           NativePhotoPreview(
             sourcePath: widget.sourcePath,
             recipe: recipe,
+            sourceId: widget.sourceId,
+            editState: editState,
+            editContext: widget.editContext,
             renderer: widget.renderer,
             retryToken: _retryToken,
+            onRendered: widget.onRendered,
+            onRenderFailed: widget.onRenderFailed,
             errorBuilder: (context) => Semantics(
               liveRegion: true,
               child: Center(
@@ -3574,306 +4681,7 @@ class _BeforeAfterPreviewState extends State<_BeforeAfterPreview> {
   }
 }
 
-enum _MobileToolCategory {
-  composition,
-  color,
-  filters,
-  quality,
-  retouch,
-  semantic,
-}
-
-enum _AdjustmentToolScope { color, quality, portrait }
-
-class _MobileToolWorkspace extends StatefulWidget {
-  const _MobileToolWorkspace({
-    this.compact = false,
-    required this.enabled,
-    required this.photoToolsVisible,
-    required this.portraitAvailable,
-    required this.faceSlimAvailable,
-    required this.faceSlimReason,
-    required this.faceSlimTargetCount,
-    required this.faceTargetRegions,
-    required this.bodyAvailable,
-    required this.bodyTargetCount,
-    required this.bodyTargetRegions,
-    required this.subjectAvailable,
-    required this.allowDetailedTools,
-    required this.photo,
-    required this.recipe,
-    required this.editorSession,
-    required this.onRecipeCommitted,
-  });
-
-  final bool compact;
-  final bool enabled;
-  final bool photoToolsVisible;
-  final bool portraitAvailable;
-  final bool faceSlimAvailable;
-  final PortraitDegradationReason faceSlimReason;
-  final int faceSlimTargetCount;
-  final List<NormalizedTargetRegion> faceTargetRegions;
-  final bool bodyAvailable;
-  final int bodyTargetCount;
-  final List<NormalizedTargetRegion> bodyTargetRegions;
-  final bool subjectAvailable;
-  final bool allowDetailedTools;
-  final ProjectPhoto photo;
-  final EditRecipe recipe;
-  final EditorSession editorSession;
-  final VoidCallback onRecipeCommitted;
-
-  @override
-  State<_MobileToolWorkspace> createState() => _MobileToolWorkspaceState();
-}
-
-class _MobileToolWorkspaceState extends State<_MobileToolWorkspace> {
-  late _MobileToolCategory _selected;
-
-  @override
-  void initState() {
-    super.initState();
-    _selected =
-        widget.photoToolsVisible &&
-            (widget.portraitAvailable || widget.bodyAvailable)
-        ? _MobileToolCategory.retouch
-        : _MobileToolCategory.color;
-  }
-
-  @override
-  void didUpdateWidget(covariant _MobileToolWorkspace oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final portraitBecameAvailable =
-        (!oldWidget.portraitAvailable && widget.portraitAvailable) ||
-        (!oldWidget.bodyAvailable && widget.bodyAvailable);
-    if (_selected == _MobileToolCategory.color &&
-        widget.photoToolsVisible &&
-        portraitBecameAvailable) {
-      _selected = _MobileToolCategory.retouch;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final categories = <_MobileToolCategory>[
-      if (widget.allowDetailedTools && supportsImagePipelineV2)
-        _MobileToolCategory.composition,
-      _MobileToolCategory.color,
-      if (defaultTargetPlatform == TargetPlatform.iOS)
-        _MobileToolCategory.filters,
-      if (widget.allowDetailedTools &&
-          defaultTargetPlatform == TargetPlatform.iOS) ...[
-        _MobileToolCategory.quality,
-        if (widget.photoToolsVisible &&
-            (widget.portraitAvailable || widget.bodyAvailable))
-          _MobileToolCategory.retouch,
-        _MobileToolCategory.semantic,
-      ],
-    ];
-    final selected = categories.contains(_selected)
-        ? _selected
-        : _MobileToolCategory.color;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (!widget.compact)
-          SizedBox(
-            height: 48,
-            child: SingleChildScrollView(
-              key: const ValueKey('editor-tool-categories'),
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  for (var index = 0; index < categories.length; index++) ...[
-                    if (index > 0) const SizedBox(width: 8),
-                    ChoiceChip(
-                      key: ValueKey(
-                        'editor-tool-category-${categories[index].name}',
-                      ),
-                      avatar: Icon(_icon(categories[index]), size: 18),
-                      label: Text(_label(context, categories[index])),
-                      selected: categories[index] == selected,
-                      onSelected: (_) =>
-                          setState(() => _selected = categories[index]),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          )
-        else
-          SizedBox(
-            height: 48,
-            child: SingleChildScrollView(
-              key: const ValueKey('editor-tool-categories'),
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  for (var index = 0; index < categories.length; index++) ...[
-                    if (index > 0) const SizedBox(width: 4),
-                    Builder(
-                      builder: (context) {
-                        final category = categories[index];
-                        final isSelected = category == selected;
-                        final label = _label(context, category);
-                        return Semantics(
-                          button: true,
-                          selected: isSelected,
-                          label: label,
-                          excludeSemantics: true,
-                          child: TextButton(
-                            key: ValueKey(
-                              'editor-tool-category-${category.name}',
-                            ),
-                            onPressed: () =>
-                                setState(() => _selected = category),
-                            style: TextButton.styleFrom(
-                              foregroundColor: isSelected
-                                  ? Theme.of(context).colorScheme.primary
-                                  : Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
-                              minimumSize: const Size(64, 48),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                              ),
-                              shape: const RoundedRectangleBorder(),
-                            ),
-                            child: Text(
-                              label,
-                              style: TextStyle(
-                                fontWeight: isSelected
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
-                                decoration: isSelected
-                                    ? TextDecoration.underline
-                                    : TextDecoration.none,
-                                decorationColor: Theme.of(
-                                  context,
-                                ).colorScheme.primary,
-                                decorationThickness: 2,
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        const SizedBox(height: 8),
-        AnimatedSwitcher(
-          duration: const Duration(milliseconds: 180),
-          child: KeyedSubtree(
-            key: ValueKey('editor-tool-panel-${selected.name}'),
-            child: switch (selected) {
-              _MobileToolCategory.color => _AdjustmentToolStrip(
-                compact: widget.compact,
-                scope: _AdjustmentToolScope.color,
-                enabled: widget.enabled,
-                extended: supportsImagePipelineV2,
-                photoToolsVisible: widget.photoToolsVisible,
-                portraitAvailable: widget.portraitAvailable,
-                faceSlimAvailable: widget.faceSlimAvailable,
-                faceSlimReason: widget.faceSlimReason,
-                faceSlimTargetCount: widget.faceSlimTargetCount,
-                faceTargetRegions: widget.faceTargetRegions,
-                bodyAvailable: widget.bodyAvailable,
-                bodyTargetCount: widget.bodyTargetCount,
-                bodyTargetRegions: widget.bodyTargetRegions,
-                photo: widget.photo,
-                recipe: widget.recipe,
-                editorSession: widget.editorSession,
-                onRecipeCommitted: widget.onRecipeCommitted,
-              ),
-              _MobileToolCategory.quality => _AdjustmentToolStrip(
-                compact: widget.compact,
-                scope: _AdjustmentToolScope.quality,
-                enabled: widget.enabled,
-                extended: supportsImagePipelineV2,
-                photoToolsVisible: widget.photoToolsVisible,
-                portraitAvailable: widget.portraitAvailable,
-                faceSlimAvailable: widget.faceSlimAvailable,
-                faceSlimReason: widget.faceSlimReason,
-                faceSlimTargetCount: widget.faceSlimTargetCount,
-                faceTargetRegions: widget.faceTargetRegions,
-                bodyAvailable: widget.bodyAvailable,
-                bodyTargetCount: widget.bodyTargetCount,
-                bodyTargetRegions: widget.bodyTargetRegions,
-                photo: widget.photo,
-                recipe: widget.recipe,
-                editorSession: widget.editorSession,
-                onRecipeCommitted: widget.onRecipeCommitted,
-              ),
-              _MobileToolCategory.retouch => _AdjustmentToolStrip(
-                compact: widget.compact,
-                scope: _AdjustmentToolScope.portrait,
-                enabled: widget.enabled,
-                extended: supportsImagePipelineV2,
-                photoToolsVisible: widget.photoToolsVisible,
-                portraitAvailable: widget.portraitAvailable,
-                faceSlimAvailable: widget.faceSlimAvailable,
-                faceSlimReason: widget.faceSlimReason,
-                faceSlimTargetCount: widget.faceSlimTargetCount,
-                faceTargetRegions: widget.faceTargetRegions,
-                bodyAvailable: widget.bodyAvailable,
-                bodyTargetCount: widget.bodyTargetCount,
-                bodyTargetRegions: widget.bodyTargetRegions,
-                photo: widget.photo,
-                recipe: widget.recipe,
-                editorSession: widget.editorSession,
-                onRecipeCommitted: widget.onRecipeCommitted,
-              ),
-              _MobileToolCategory.composition => _CompositionTools(
-                enabled: widget.enabled,
-                photo: widget.photo,
-                recipe: widget.recipe,
-                editorSession: widget.editorSession,
-                onRecipeCommitted: widget.onRecipeCommitted,
-              ),
-              _MobileToolCategory.filters => _FilterHslTools(
-                enabled: widget.enabled,
-                recipe: widget.recipe,
-                editorSession: widget.editorSession,
-                onRecipeCommitted: widget.onRecipeCommitted,
-              ),
-              _MobileToolCategory.semantic => _SemanticTools(
-                enabled: widget.enabled,
-                subjectAvailable: widget.subjectAvailable,
-                photo: widget.photo,
-                recipe: widget.recipe,
-                editorSession: widget.editorSession,
-                onRecipeCommitted: widget.onRecipeCommitted,
-              ),
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  IconData _icon(_MobileToolCategory category) => switch (category) {
-    _MobileToolCategory.composition => Icons.crop_rotate,
-    _MobileToolCategory.color => Icons.tune,
-    _MobileToolCategory.filters => Icons.filter_vintage_outlined,
-    _MobileToolCategory.quality => Icons.auto_fix_high_outlined,
-    _MobileToolCategory.retouch => Icons.face_retouching_natural,
-    _MobileToolCategory.semantic => Icons.layers_outlined,
-  };
-
-  String _label(BuildContext context, _MobileToolCategory category) =>
-      switch (category) {
-        _MobileToolCategory.composition => context.l10n.composition,
-        _MobileToolCategory.color => context.l10n.lightAndColorTools,
-        _MobileToolCategory.filters => context.l10n.filterAndHsl,
-        _MobileToolCategory.quality => context.l10n.qualityTools,
-        _MobileToolCategory.retouch => context.l10n.mobileToolRetouch,
-        _MobileToolCategory.semantic => context.l10n.semanticTools,
-      };
-}
+enum _AdjustmentToolScope { common, color, quality, portrait }
 
 enum _AdjustmentParameter {
   exposure,
@@ -3910,6 +4718,8 @@ enum _AdjustmentParameter {
 class _AdjustmentToolStrip extends StatefulWidget {
   const _AdjustmentToolStrip({
     this.compact = false,
+    this.initialMetaOpId,
+    this.manualMetaOpIds,
     required this.scope,
     required this.enabled,
     required this.extended,
@@ -3919,6 +4729,7 @@ class _AdjustmentToolStrip extends StatefulWidget {
     required this.faceSlimReason,
     required this.faceSlimTargetCount,
     required this.faceTargetRegions,
+    required this.stableFaceTargets,
     required this.bodyAvailable,
     required this.bodyTargetCount,
     required this.bodyTargetRegions,
@@ -3929,6 +4740,8 @@ class _AdjustmentToolStrip extends StatefulWidget {
   });
 
   final bool compact;
+  final String? initialMetaOpId;
+  final List<String>? manualMetaOpIds;
   final _AdjustmentToolScope scope;
   final bool enabled;
   final bool extended;
@@ -3938,6 +4751,7 @@ class _AdjustmentToolStrip extends StatefulWidget {
   final PortraitDegradationReason faceSlimReason;
   final int faceSlimTargetCount;
   final List<NormalizedTargetRegion> faceTargetRegions;
+  final List<StableEditTarget> stableFaceTargets;
   final bool bodyAvailable;
   final int bodyTargetCount;
   final List<NormalizedTargetRegion> bodyTargetRegions;
@@ -3952,18 +4766,28 @@ class _AdjustmentToolStrip extends StatefulWidget {
 
 class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
   late _AdjustmentParameter _selected;
+  String? _selectedStableFaceTargetId;
 
   @override
   void initState() {
     super.initState();
     _selected = _initialSelection();
+    _selectedStableFaceTargetId = _preferredStableFaceTargetId();
   }
 
   @override
   void didUpdateWidget(covariant _AdjustmentToolStrip oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.scope != widget.scope) {
+    if (oldWidget.photo.id != widget.photo.id ||
+        !widget.stableFaceTargets.any(
+          (target) => target.id == _selectedStableFaceTargetId,
+        )) {
+      _selectedStableFaceTargetId = null;
+    }
+    if (oldWidget.scope != widget.scope ||
+        oldWidget.initialMetaOpId != widget.initialMetaOpId) {
       _selected = _initialSelection();
+      _selectedStableFaceTargetId = _preferredStableFaceTargetId();
       return;
     }
     if ((!oldWidget.portraitAvailable || !oldWidget.photoToolsVisible) &&
@@ -4025,7 +4849,7 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
             .withBodyTargetCount(widget.bodyTargetCount),
       );
     }
-    final selectedLabel = _label(context, selected);
+    final selectedLabel = _visibleLabel(context, selected);
     final selectedValue = _value(effectiveRecipe, selected);
     final selectedIsPortrait = _isPortrait(selected);
     final selectedIsQuality = _isQuality(selected);
@@ -4279,10 +5103,7 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
                   onPressed: widget.enabled
                       ? () {
                           widget.editorSession.apply(
-                            widget.recipe.copyWith(
-                              portraitRecipe: PortraitRetouchRecipe
-                                  .naturalBeautificationRecommended,
-                            ),
+                            _applyNaturalBeautification(widget.recipe),
                           );
                           widget.onRecipeCommitted();
                         }
@@ -4297,6 +5118,11 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (_isNaturalDetail(selected) &&
+                  _currentStableFaceTarget() == null) ...[
+                _buildStableFaceTargetSelector(),
+                const SizedBox(height: 8),
+              ],
               if (_isFaceGeometry(selected) &&
                   widget.faceTargetRegions.length ==
                       widget.faceSlimTargetCount &&
@@ -4429,43 +5255,44 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
                 ),
                 const SizedBox(height: 8),
               ],
-              Row(
-                children: [
-                  Expanded(
-                    child: _AdjustmentSlider(
-                      key: ValueKey('editor-adjustment-${selected.name}'),
-                      enabled: widget.enabled,
-                      label: selectedLabel,
-                      semanticLabel: selectedLabel,
-                      value: selectedValue,
-                      minimum: _minimum(selected),
-                      maximum: _maximum(selected),
-                      onStart: widget.editorSession.beginAdjustment,
-                      onChanged: (value) => widget.editorSession.preview(
-                        _copyWith(effectiveRecipe, selected, value),
+              if (!_isNaturalDetail(selected) ||
+                  _currentStableFaceTarget() != null)
+                Row(
+                  children: [
+                    Expanded(
+                      child: _AdjustmentSlider(
+                        key: ValueKey('editor-adjustment-${selected.name}'),
+                        enabled: widget.enabled,
+                        label: selectedLabel,
+                        semanticLabel: selectedLabel,
+                        value: selectedValue,
+                        minimum: _minimum(selected),
+                        maximum: _maximum(selected),
+                        onStart: widget.editorSession.beginAdjustment,
+                        onChanged: (value) =>
+                            _previewValue(effectiveRecipe, selected, value),
+                        onEnd: () {
+                          widget.editorSession.commitAdjustment();
+                          widget.onRecipeCommitted();
+                        },
                       ),
-                      onEnd: () {
-                        widget.editorSession.commitAdjustment();
-                        widget.onRecipeCommitted();
-                      },
                     ),
-                  ),
-                  const SizedBox(width: 4),
-                  IconButton.filledTonal(
-                    key: const ValueKey('editor-reset-current-adjustment'),
-                    tooltip: context.l10n.resetCurrentAdjustment,
-                    onPressed: widget.enabled && selectedValue != 0
-                        ? () {
-                            widget.editorSession.apply(
-                              _copyWith(effectiveRecipe, selected, 0),
-                            );
-                            widget.onRecipeCommitted();
-                          }
-                        : null,
-                    icon: const Icon(Icons.restart_alt),
-                  ),
-                ],
-              ),
+                    if (selectedValue != 0) ...[
+                      const SizedBox(width: 4),
+                      IconButton.filledTonal(
+                        key: const ValueKey('editor-reset-current-adjustment'),
+                        tooltip: context.l10n.resetCurrentAdjustment,
+                        onPressed: widget.enabled
+                            ? () {
+                                _resetValue(effectiveRecipe, selected);
+                                widget.onRecipeCommitted();
+                              }
+                            : null,
+                        icon: const Icon(Icons.restart_alt),
+                      ),
+                    ],
+                  ],
+                ),
             ],
           ),
       ],
@@ -4481,6 +5308,13 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
     required double selectedValue,
   }) {
     final colors = Theme.of(context).colorScheme;
+    if (_isNaturalDetail(selected) && _currentStableFaceTarget() == null) {
+      return Column(
+        key: const ValueKey('editor-adjustment-section'),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [_buildStableFaceTargetSelector()],
+      );
+    }
     final showsFaceTarget =
         _isFaceGeometry(selected) && widget.faceSlimTargetCount > 1;
     final showsBodyTarget =
@@ -4507,20 +5341,53 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
                 context,
               ).textTheme.labelLarge?.copyWith(color: colors.primary),
             ),
-            const SizedBox(width: 8),
-            TextButton(
-              key: const ValueKey('editor-reset-current-adjustment'),
-              onPressed: widget.enabled && selectedValue != 0
-                  ? () {
-                      widget.editorSession.apply(
-                        _copyWith(effectiveRecipe, selected, 0),
-                      );
-                      widget.onRecipeCommitted();
-                    }
-                  : null,
-              child: Text(context.l10n.resetCurrentAdjustment),
-            ),
-            if (showsFaceTarget || showsBodyTarget)
+            if (selectedValue != 0) ...[
+              const SizedBox(width: 8),
+              Semantics(
+                button: true,
+                label: context.l10n.resetCurrentAdjustment,
+                excludeSemantics: true,
+                child: TextButton(
+                  key: const ValueKey('editor-reset-current-adjustment'),
+                  style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                  onPressed: widget.enabled
+                      ? () {
+                          _resetValue(effectiveRecipe, selected);
+                          widget.onRecipeCommitted();
+                        }
+                      : null,
+                  child: Text(context.l10n.resetCurrentAdjustment),
+                ),
+              ),
+            ],
+            if (_isNaturalDetail(selected) &&
+                widget.stableFaceTargets.length > 1)
+              PopupMenuButton<String>(
+                key: const ValueKey('editor-stable-face-target-menu'),
+                tooltip: context.l10n.faceSlimTargetHint,
+                onSelected: (targetId) =>
+                    setState(() => _selectedStableFaceTargetId = targetId),
+                itemBuilder: (context) => [
+                  for (
+                    var index = 0;
+                    index < widget.stableFaceTargets.length;
+                    index++
+                  )
+                    PopupMenuItem(
+                      value: widget.stableFaceTargets[index].id,
+                      child: Text(context.l10n.faceSlimTarget(index + 1)),
+                    ),
+                ],
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Icon(
+                    Icons.people_alt_outlined,
+                    color: colors.primary,
+                    size: 20,
+                  ),
+                ),
+              )
+            else if (showsFaceTarget || showsBodyTarget)
               PopupMenuButton<int>(
                 key: ValueKey(
                   showsFaceTarget
@@ -4584,9 +5451,7 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
           minimum: _minimum(selected),
           maximum: _maximum(selected),
           onStart: widget.editorSession.beginAdjustment,
-          onChanged: (value) => widget.editorSession.preview(
-            _copyWith(effectiveRecipe, selected, value),
-          ),
+          onChanged: (value) => _previewValue(effectiveRecipe, selected, value),
           onEnd: () {
             widget.editorSession.commitAdjustment();
             widget.onRecipeCommitted();
@@ -4638,9 +5503,8 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
                                           QualityEnhancementRecipe
                                               .safeAutomatic,
                                     )
-                                  : effectiveRecipe.copyWith(
-                                      portraitRecipe: PortraitRetouchRecipe
-                                          .naturalBeautificationRecommended,
+                                  : _applyNaturalBeautification(
+                                      widget.editorSession.recipe,
                                     ),
                             );
                             widget.onRecipeCommitted();
@@ -4660,7 +5524,7 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
                 key: ValueKey('editor-adjustment-tab-${parameter.name}'),
                 enabled: widget.enabled,
                 selected: parameter == selected,
-                label: _label(context, parameter),
+                label: _visibleLabel(context, parameter),
                 icon: _icon(parameter),
                 largeText: false,
                 onTap: widget.enabled
@@ -4679,21 +5543,125 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
     return scaled > 0 ? '+$scaled' : '$scaled';
   }
 
-  _AdjustmentParameter _initialSelection() => switch (widget.scope) {
-    _AdjustmentToolScope.color => _AdjustmentParameter.exposure,
-    _AdjustmentToolScope.quality =>
-      widget.compact
-          ? _AdjustmentParameter.noiseReduction
-          : _AdjustmentParameter.qualityImprovement,
-    _AdjustmentToolScope.portrait =>
-      widget.photoToolsVisible && widget.portraitAvailable
-          ? widget.compact
-                ? _AdjustmentParameter.textureSmoothing
-                : _AdjustmentParameter.naturalBeautification
-          : _AdjustmentParameter.bodySlim,
-  };
+  void _previewValue(
+    EditRecipe recipe,
+    _AdjustmentParameter parameter,
+    double value,
+  ) {
+    final metaOpId = _globalMetaOpId(parameter);
+    if (metaOpId != null) {
+      widget.editorSession.previewMetaOp(_globalMetaOpAddress(metaOpId), value);
+      return;
+    }
+    final qualityMetaOpId = _qualityMetaOpId(parameter);
+    if (qualityMetaOpId != null) {
+      widget.editorSession.previewMetaOp(
+        _qualityMetaOpAddress(qualityMetaOpId),
+        (value * 100).round(),
+      );
+      return;
+    }
+    if (_portraitMetaOpId(parameter) != null) {
+      widget.editorSession.preview(
+        _copyWith(widget.editorSession.recipe, parameter, value),
+      );
+      return;
+    }
+    widget.editorSession.preview(_copyWith(recipe, parameter, value));
+  }
+
+  void _resetValue(EditRecipe recipe, _AdjustmentParameter parameter) {
+    final metaOpId = _globalMetaOpId(parameter);
+    if (metaOpId != null) {
+      widget.editorSession.applyMetaOp(_globalMetaOpAddress(metaOpId), 0.0);
+      return;
+    }
+    final qualityMetaOpId = _qualityMetaOpId(parameter);
+    if (qualityMetaOpId != null) {
+      widget.editorSession.applyMetaOp(
+        _qualityMetaOpAddress(qualityMetaOpId),
+        0,
+      );
+      return;
+    }
+    if (_portraitMetaOpId(parameter) != null) {
+      widget.editorSession.apply(
+        _copyWith(widget.editorSession.recipe, parameter, 0),
+      );
+      return;
+    }
+    widget.editorSession.apply(_copyWith(recipe, parameter, 0));
+  }
+
+  String? _globalMetaOpId(_AdjustmentParameter parameter) =>
+      switch (parameter) {
+        _AdjustmentParameter.exposure => MetaOpIds.exposure,
+        _AdjustmentParameter.highlights => MetaOpIds.highlights,
+        _AdjustmentParameter.shadows => MetaOpIds.shadows,
+        _AdjustmentParameter.contrast => MetaOpIds.contrast,
+        _AdjustmentParameter.warmth => MetaOpIds.warmth,
+        _AdjustmentParameter.tint => MetaOpIds.tint,
+        _AdjustmentParameter.saturation => MetaOpIds.saturation,
+        _AdjustmentParameter.clarity => MetaOpIds.clarity,
+        _ => null,
+      };
+
+  String? _qualityMetaOpId(_AdjustmentParameter parameter) =>
+      switch (parameter) {
+        _AdjustmentParameter.noiseReduction => MetaOpIds.noiseReduction,
+        _AdjustmentParameter.lowLightRecovery => MetaOpIds.lowLightRecovery,
+        _AdjustmentParameter.hazeRemoval => MetaOpIds.hazeRemoval,
+        _AdjustmentParameter.detailSharpening => MetaOpIds.detailSharpening,
+        _ => null,
+      };
+
+  String? _portraitMetaOpId(_AdjustmentParameter parameter) =>
+      switch (parameter) {
+        _AdjustmentParameter.textureSmoothing => MetaOpIds.skinSmooth,
+        _AdjustmentParameter.skinToneLighting => MetaOpIds.skinToneLighting,
+        _AdjustmentParameter.blemishReduction => MetaOpIds.blemishReduction,
+        _ => null,
+      };
+
+  OpAddress _globalMetaOpAddress(String id) => OpAddress(
+    metaOpId: id,
+    metaOpVersion: 1,
+    parameterId: 'value',
+    scope: EditScope.group,
+  );
+
+  OpAddress _qualityMetaOpAddress(String id) => OpAddress(
+    metaOpId: id,
+    metaOpVersion: 1,
+    parameterId: 'value',
+    scope: EditScope.currentPhoto,
+    photoId: widget.photo.id,
+  );
+
+  _AdjustmentParameter _initialSelection() {
+    final requested = _parameterForMetaOp(widget.initialMetaOpId);
+    if (requested != null) return requested;
+    if (widget.scope == _AdjustmentToolScope.common) {
+      return _commonParameters().firstOrNull ?? _AdjustmentParameter.exposure;
+    }
+    return switch (widget.scope) {
+      _AdjustmentToolScope.common => _AdjustmentParameter.exposure,
+      _AdjustmentToolScope.color => _AdjustmentParameter.exposure,
+      _AdjustmentToolScope.quality =>
+        widget.compact
+            ? _AdjustmentParameter.noiseReduction
+            : _AdjustmentParameter.qualityImprovement,
+      _AdjustmentToolScope.portrait =>
+        widget.photoToolsVisible && widget.portraitAvailable
+            ? widget.compact
+                  ? _AdjustmentParameter.textureSmoothing
+                  : _AdjustmentParameter.naturalBeautification
+            : _AdjustmentParameter.bodySlim,
+    };
+  }
 
   List<_AdjustmentParameter> _parameters() => switch (widget.scope) {
+    _AdjustmentToolScope.common => _commonParameters(),
     _AdjustmentToolScope.color =>
       widget.extended
           ? const [
@@ -4731,6 +5699,52 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
     ],
   };
 
+  List<_AdjustmentParameter> _commonParameters() {
+    final applicability = <String>{
+      'photo',
+      if (widget.photoToolsVisible && widget.portraitAvailable) 'face',
+    };
+    final available =
+        widget.manualMetaOpIds ??
+        widget.editorSession.orderedManualMetaOpIds(
+          applicability: applicability,
+        );
+    final requested = _parameterForMetaOp(widget.initialMetaOpId);
+    if (requested != null &&
+        widget.initialMetaOpId != null &&
+        available.contains(widget.initialMetaOpId)) {
+      return [requested];
+    }
+    final parameters = <_AdjustmentParameter>[];
+    for (final id in available) {
+      final parameter = _parameterForMetaOp(id);
+      if (parameter != null) parameters.add(parameter);
+      if (parameters.length == 5) break;
+    }
+    return parameters;
+  }
+
+  _AdjustmentParameter? _parameterForMetaOp(String? id) => switch (id) {
+    MetaOpIds.exposure => _AdjustmentParameter.exposure,
+    MetaOpIds.highlights => _AdjustmentParameter.highlights,
+    MetaOpIds.shadows => _AdjustmentParameter.shadows,
+    MetaOpIds.contrast => _AdjustmentParameter.contrast,
+    MetaOpIds.warmth => _AdjustmentParameter.warmth,
+    MetaOpIds.tint => _AdjustmentParameter.tint,
+    MetaOpIds.saturation => _AdjustmentParameter.saturation,
+    MetaOpIds.clarity => _AdjustmentParameter.clarity,
+    MetaOpIds.noiseReduction => _AdjustmentParameter.noiseReduction,
+    MetaOpIds.lowLightRecovery => _AdjustmentParameter.lowLightRecovery,
+    MetaOpIds.hazeRemoval => _AdjustmentParameter.hazeRemoval,
+    MetaOpIds.detailSharpening => _AdjustmentParameter.detailSharpening,
+    MetaOpIds.skinSmooth => _AdjustmentParameter.textureSmoothing,
+    MetaOpIds.skinToneLighting => _AdjustmentParameter.skinToneLighting,
+    MetaOpIds.blemishReduction => _AdjustmentParameter.blemishReduction,
+    MetaOpIds.faceGeometry => _AdjustmentParameter.faceSlim,
+    MetaOpIds.bodyGeometry => _AdjustmentParameter.bodySlim,
+    _ => null,
+  };
+
   bool _isPortrait(_AdjustmentParameter parameter) =>
       parameter == _AdjustmentParameter.naturalBeautification ||
       parameter == _AdjustmentParameter.textureSmoothing ||
@@ -4738,6 +5752,20 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
       parameter == _AdjustmentParameter.blemishReduction ||
       _isFaceGeometry(parameter) ||
       _isBodyGeometry(parameter);
+
+  String _visibleLabel(BuildContext context, _AdjustmentParameter parameter) {
+    if (widget.scope != _AdjustmentToolScope.common) {
+      return _label(context, parameter);
+    }
+    return switch (parameter) {
+      _AdjustmentParameter.exposure => context.l10n.manualBrighter,
+      _AdjustmentParameter.warmth => context.l10n.manualWarmer,
+      _AdjustmentParameter.saturation => context.l10n.manualMoreVivid,
+      _AdjustmentParameter.textureSmoothing => context.l10n.manualSmootherSkin,
+      _AdjustmentParameter.faceSlim => context.l10n.manualSmallerFace,
+      _ => _label(context, parameter),
+    };
+  }
 
   bool _isFaceGeometry(_AdjustmentParameter parameter) => const {
     _AdjustmentParameter.faceSlim,
@@ -4933,11 +5961,11 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
               ].reduce((left, right) => left > right ? left : right) /
               100,
         _AdjustmentParameter.textureSmoothing =>
-          recipe.portraitRecipe.textureSmoothing / 100,
+          (_currentTargetedAdjustment(recipe)?.textureSmoothing ?? 0) / 100,
         _AdjustmentParameter.skinToneLighting =>
-          recipe.portraitRecipe.skinToneLighting / 100,
+          (_currentTargetedAdjustment(recipe)?.skinToneLighting ?? 0) / 100,
         _AdjustmentParameter.blemishReduction =>
-          recipe.portraitRecipe.blemishReduction / 100,
+          (_currentTargetedAdjustment(recipe)?.blemishReduction ?? 0) / 100,
         _AdjustmentParameter.faceSlim ||
         _AdjustmentParameter.headSize ||
         _AdjustmentParameter.jaw ||
@@ -5015,20 +6043,12 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
       ),
     ),
     _AdjustmentParameter.naturalBeautification => recipe,
-    _AdjustmentParameter.textureSmoothing => recipe.copyWith(
-      portraitRecipe: recipe.portraitRecipe.copyWith(
-        textureSmoothing: (value * 100).round(),
-      ),
-    ),
-    _AdjustmentParameter.skinToneLighting => recipe.copyWith(
-      portraitRecipe: recipe.portraitRecipe.copyWith(
-        skinToneLighting: (value * 100).round(),
-      ),
-    ),
-    _AdjustmentParameter.blemishReduction => recipe.copyWith(
-      portraitRecipe: recipe.portraitRecipe.copyWith(
-        blemishReduction: (value * 100).round(),
-      ),
+    _AdjustmentParameter.textureSmoothing ||
+    _AdjustmentParameter.skinToneLighting ||
+    _AdjustmentParameter.blemishReduction => _copyTargetedPortrait(
+      recipe,
+      parameter,
+      value,
     ),
     _AdjustmentParameter.faceSlim ||
     _AdjustmentParameter.headSize ||
@@ -5081,6 +6101,107 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
       },
     ),
   );
+
+  StableEditTarget? _currentStableFaceTarget() {
+    if (widget.stableFaceTargets.length == 1) {
+      return widget.stableFaceTargets.single;
+    }
+    for (final target in widget.stableFaceTargets) {
+      if (target.id == _selectedStableFaceTargetId) return target;
+    }
+    return null;
+  }
+
+  String? _preferredStableFaceTargetId() {
+    if (widget.stableFaceTargets.length == 1) {
+      return widget.stableFaceTargets.single.id;
+    }
+    final adjustedIds = widget.stableFaceTargets
+        .where(
+          (target) => widget.recipe.targetedPortraitRecipe.adjustments
+              .containsKey(target.id),
+        )
+        .map((target) => target.id)
+        .toList(growable: false);
+    return adjustedIds.length == 1 ? adjustedIds.single : null;
+  }
+
+  TargetedPortraitAdjustment? _currentTargetedAdjustment(EditRecipe recipe) {
+    final target = _currentStableFaceTarget();
+    return target == null
+        ? null
+        : recipe.targetedPortraitRecipe.adjustments[target.id];
+  }
+
+  EditRecipe _copyTargetedPortrait(
+    EditRecipe recipe,
+    _AdjustmentParameter parameter,
+    double value,
+  ) {
+    final target = _currentStableFaceTarget();
+    if (target == null) return recipe;
+    final targetedParameter = switch (parameter) {
+      _AdjustmentParameter.textureSmoothing =>
+        TargetedPortraitParameter.textureSmoothing,
+      _AdjustmentParameter.skinToneLighting =>
+        TargetedPortraitParameter.skinToneLighting,
+      _AdjustmentParameter.blemishReduction =>
+        TargetedPortraitParameter.blemishReduction,
+      _ => throw ArgumentError.value(parameter, 'parameter'),
+    };
+    return recipe.copyWith(
+      targetedPortraitRecipe: recipe.targetedPortraitRecipe.update(
+        targetId: target.id,
+        region: target.region,
+        parameter: targetedParameter,
+        value: (value * 100).round(),
+      ),
+    );
+  }
+
+  EditRecipe _applyNaturalBeautification(EditRecipe recipe) {
+    var targeted = recipe.targetedPortraitRecipe;
+    for (final target in widget.stableFaceTargets) {
+      for (final entry in const {
+        TargetedPortraitParameter.textureSmoothing: 50,
+        TargetedPortraitParameter.skinToneLighting: 50,
+        TargetedPortraitParameter.blemishReduction: 20,
+      }.entries) {
+        targeted = targeted.update(
+          targetId: target.id,
+          region: target.region,
+          parameter: entry.key,
+          value: entry.value,
+        );
+      }
+    }
+    return recipe.copyWith(targetedPortraitRecipe: targeted);
+  }
+
+  Widget _buildStableFaceTargetSelector() {
+    final regions = widget.stableFaceTargets
+        .map(
+          (target) => NormalizedTargetRegion(
+            left: target.region.left,
+            top: target.region.top,
+            right: target.region.right,
+            bottom: target.region.bottom,
+          ),
+        )
+        .toList(growable: false);
+    return _PortraitTargetSelector(
+      key: const ValueKey('editor-stable-face-target-selector'),
+      photo: widget.photo,
+      regions: regions,
+      selectedIndex: null,
+      targetLabel: context.l10n.faceSlimTarget,
+      hint: context.l10n.faceSlimTargetHint,
+      enabled: widget.enabled,
+      onSelected: (index) => setState(
+        () => _selectedStableFaceTargetId = widget.stableFaceTargets[index].id,
+      ),
+    );
+  }
 }
 
 class _PortraitTargetSelector extends StatelessWidget {
@@ -5097,7 +6218,7 @@ class _PortraitTargetSelector extends StatelessWidget {
 
   final ProjectPhoto photo;
   final List<NormalizedTargetRegion> regions;
-  final int selectedIndex;
+  final int? selectedIndex;
   final String Function(int number) targetLabel;
   final String hint;
   final bool enabled;
@@ -5601,16 +6722,16 @@ class _CompositionTools extends StatelessWidget {
     final swapsAxes = photo.orientation >= 5;
     final width = swapsAxes ? photo.pixelHeight : photo.pixelWidth;
     final height = swapsAxes ? photo.pixelWidth : photo.pixelHeight;
-    final result = await showDialog<CropGeometry>(
+    await showDialog<void>(
       context: context,
       builder: (context) => _FreeCropDialog(
         sourcePath: photo.localPath,
         sourceAspectRatio: width > 0 && height > 0 ? width / height : 4 / 3,
         initial: recipe.crop,
         previewRecipe: recipe.copyWith(crop: CropGeometry.original),
+        onChanged: (crop) => _commit(editorSession.recipe.copyWith(crop: crop)),
       ),
     );
-    if (result != null) _commit(recipe.copyWith(crop: result));
   }
 
   void _rotate(int delta) {
@@ -5630,12 +6751,14 @@ class _FreeCropDialog extends StatefulWidget {
     required this.sourceAspectRatio,
     required this.initial,
     required this.previewRecipe,
+    required this.onChanged,
   });
 
   final String sourcePath;
   final double sourceAspectRatio;
   final CropGeometry initial;
   final EditRecipe previewRecipe;
+  final ValueChanged<CropGeometry> onChanged;
 
   @override
   State<_FreeCropDialog> createState() => _FreeCropDialogState();
@@ -5676,6 +6799,7 @@ class _FreeCropDialogState extends State<_FreeCropDialog> {
                       _selectCorner(details.localPosition, canvasSize),
                   onPanUpdate: (details) =>
                       _moveCorner(details.delta, canvasSize),
+                  onPanEnd: (_) => widget.onChanged(_crop),
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
@@ -5705,21 +6829,9 @@ class _FreeCropDialogState extends State<_FreeCropDialog> {
       ),
       actions: [
         TextButton(
+          key: const ValueKey('free-crop-close'),
           onPressed: () => Navigator.pop(context),
-          child: Text(context.l10n.cancel),
-        ),
-        FilledButton(
-          key: const ValueKey('free-crop-apply'),
-          onPressed: () => Navigator.pop(
-            context,
-            widget.initial.copyWith(
-              left: _left,
-              top: _top,
-              right: _right,
-              bottom: _bottom,
-            ),
-          ),
-          child: Text(context.l10n.applyCrop),
+          child: Text(context.l10n.close),
         ),
       ],
     );
@@ -5763,6 +6875,13 @@ class _FreeCropDialogState extends State<_FreeCropDialog> {
       }
     });
   }
+
+  CropGeometry get _crop => widget.initial.copyWith(
+    left: _left,
+    top: _top,
+    right: _right,
+    bottom: _bottom,
+  );
 }
 
 class _CropOverlayPainter extends CustomPainter {
@@ -5806,25 +6925,39 @@ class _CropOverlayPainter extends CustomPainter {
       oldDelegate.crop != crop;
 }
 
+enum _FilterHslMode { all, filter, hsl }
+
 class _FilterHslTools extends StatefulWidget {
   const _FilterHslTools({
     required this.enabled,
     required this.recipe,
     required this.editorSession,
     required this.onRecipeCommitted,
+    this.mode = _FilterHslMode.all,
+    this.initialChannel = HslChannel.red,
   });
 
   final bool enabled;
   final EditRecipe recipe;
   final EditorSession editorSession;
   final VoidCallback onRecipeCommitted;
+  final _FilterHslMode mode;
+  final HslChannel initialChannel;
 
   @override
   State<_FilterHslTools> createState() => _FilterHslToolsState();
 }
 
 class _FilterHslToolsState extends State<_FilterHslTools> {
-  HslChannel _selectedChannel = HslChannel.red;
+  late HslChannel _selectedChannel = widget.initialChannel;
+
+  @override
+  void didUpdateWidget(covariant _FilterHslTools oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialChannel != widget.initialChannel) {
+      _selectedChannel = widget.initialChannel;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -5839,111 +6972,115 @@ class _FilterHslToolsState extends State<_FilterHslTools> {
       leading: const Icon(Icons.filter_vintage_outlined),
       title: Text(context.l10n.filterAndHsl),
       children: [
-        SizedBox(
-          height: 48,
-          child: ListView.separated(
-            key: const ValueKey('editor-filter-list'),
-            scrollDirection: Axis.horizontal,
-            itemCount: PhotoFilter.values.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 8),
-            itemBuilder: (context, index) {
-              final filter = PhotoFilter.values[index];
-              return ChoiceChip(
-                key: ValueKey('editor-filter-${filter.name}'),
-                label: Text(_filterLabel(context, filter)),
-                selected: basic.filter == filter,
-                onSelected: widget.enabled
-                    ? (_) {
-                        widget.editorSession.apply(
-                          widget.editorSession.recipe.copyWith(
-                            basicEditingRecipe: basic.copyWith(
-                              filter: filter,
-                              filterStrength: filter == PhotoFilter.none
-                                  ? 0
-                                  : basic.filterStrength == 0
-                                  ? 70
-                                  : basic.filterStrength,
+        if (widget.mode != _FilterHslMode.hsl) ...[
+          SizedBox(
+            height: 48,
+            child: ListView.separated(
+              key: const ValueKey('editor-filter-list'),
+              scrollDirection: Axis.horizontal,
+              itemCount: PhotoFilter.values.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                final filter = PhotoFilter.values[index];
+                return ChoiceChip(
+                  key: ValueKey('editor-filter-${filter.name}'),
+                  label: Text(_filterLabel(context, filter)),
+                  selected: basic.filter == filter,
+                  onSelected: widget.enabled
+                      ? (_) {
+                          widget.editorSession.apply(
+                            widget.editorSession.recipe.copyWith(
+                              basicEditingRecipe: basic.copyWith(
+                                filter: filter,
+                                filterStrength: filter == PhotoFilter.none
+                                    ? 0
+                                    : basic.filterStrength == 0
+                                    ? 70
+                                    : basic.filterStrength,
+                              ),
                             ),
-                          ),
-                        );
-                        widget.onRecipeCommitted();
-                      }
-                    : null,
-              );
-            },
-          ),
-        ),
-        const SizedBox(height: 8),
-        _AdjustmentSlider(
-          key: const ValueKey('editor-filter-strength'),
-          enabled: widget.enabled && basic.filter != PhotoFilter.none,
-          label: context.l10n.filterStrength,
-          semanticLabel: context.l10n.filterStrength,
-          value: basic.filterStrength / 100,
-          minimum: 0,
-          onStart: widget.editorSession.beginAdjustment,
-          onChanged: (value) => widget.editorSession.preview(
-            widget.editorSession.recipe.copyWith(
-              basicEditingRecipe: basic.copyWith(filterStrength: value * 100),
+                          );
+                          widget.onRecipeCommitted();
+                        }
+                      : null,
+                );
+              },
             ),
           ),
-          onEnd: _commitAdjustment,
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          height: 42,
-          child: ListView.separated(
-            key: const ValueKey('editor-hsl-channels'),
-            scrollDirection: Axis.horizontal,
-            itemCount: HslChannel.values.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 8),
-            itemBuilder: (context, index) {
-              final channel = HslChannel.values[index];
-              return ChoiceChip(
-                key: ValueKey('editor-hsl-${channel.name}'),
-                label: Text(_channelLabel(context, channel)),
-                selected: channel == _selectedChannel,
-                onSelected: (_) => setState(() => _selectedChannel = channel),
-              );
-            },
+          const SizedBox(height: 8),
+          _AdjustmentSlider(
+            key: const ValueKey('editor-filter-strength'),
+            enabled: widget.enabled && basic.filter != PhotoFilter.none,
+            label: context.l10n.filterStrength,
+            semanticLabel: context.l10n.filterStrength,
+            value: basic.filterStrength / 100,
+            minimum: 0,
+            onStart: widget.editorSession.beginAdjustment,
+            onChanged: (value) => widget.editorSession.preview(
+              widget.editorSession.recipe.copyWith(
+                basicEditingRecipe: basic.copyWith(filterStrength: value * 100),
+              ),
+            ),
+            onEnd: _commitAdjustment,
           ),
-        ),
-        const SizedBox(height: 8),
-        _hslSlider(
-          context,
-          'hue',
-          context.l10n.hslHue,
-          hsl.hue,
-          (value) => HslAdjustment(
-            hue: value,
-            saturation: hsl.saturation,
-            lightness: hsl.lightness,
+        ],
+        if (widget.mode == _FilterHslMode.all) const SizedBox(height: 12),
+        if (widget.mode != _FilterHslMode.filter) ...[
+          SizedBox(
+            height: 42,
+            child: ListView.separated(
+              key: const ValueKey('editor-hsl-channels'),
+              scrollDirection: Axis.horizontal,
+              itemCount: HslChannel.values.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                final channel = HslChannel.values[index];
+                return ChoiceChip(
+                  key: ValueKey('editor-hsl-${channel.name}'),
+                  label: Text(_channelLabel(context, channel)),
+                  selected: channel == _selectedChannel,
+                  onSelected: (_) => setState(() => _selectedChannel = channel),
+                );
+              },
+            ),
           ),
-        ),
-        const SizedBox(height: 6),
-        _hslSlider(
-          context,
-          'saturation',
-          context.l10n.hslSaturation,
-          hsl.saturation,
-          (value) => HslAdjustment(
-            hue: hsl.hue,
-            saturation: value,
-            lightness: hsl.lightness,
+          const SizedBox(height: 8),
+          _hslSlider(
+            context,
+            'hue',
+            context.l10n.hslHue,
+            hsl.hue,
+            (value) => HslAdjustment(
+              hue: value,
+              saturation: hsl.saturation,
+              lightness: hsl.lightness,
+            ),
           ),
-        ),
-        const SizedBox(height: 6),
-        _hslSlider(
-          context,
-          'lightness',
-          context.l10n.hslLightness,
-          hsl.lightness,
-          (value) => HslAdjustment(
-            hue: hsl.hue,
-            saturation: hsl.saturation,
-            lightness: value,
+          const SizedBox(height: 6),
+          _hslSlider(
+            context,
+            'saturation',
+            context.l10n.hslSaturation,
+            hsl.saturation,
+            (value) => HslAdjustment(
+              hue: hsl.hue,
+              saturation: value,
+              lightness: hsl.lightness,
+            ),
           ),
-        ),
+          const SizedBox(height: 6),
+          _hslSlider(
+            context,
+            'lightness',
+            context.l10n.hslLightness,
+            hsl.lightness,
+            (value) => HslAdjustment(
+              hue: hsl.hue,
+              saturation: hsl.saturation,
+              lightness: value,
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -6306,7 +7443,7 @@ class _SemanticTools extends StatelessWidget {
   );
 
   Future<void> _openEraseBrush(BuildContext context) async {
-    final result = await showDialog<List<EraseStroke>>(
+    await showDialog<void>(
       context: context,
       builder: (context) => _EraseBrushDialog(
         sourcePath: photo.localPath,
@@ -6315,15 +7452,13 @@ class _SemanticTools extends StatelessWidget {
             : 4 / 3,
         initial: editorSession.recipe.semanticEditingRecipe.eraseStrokes,
         previewRecipe: editorSession.recipe,
+        onChanged: (strokes) => _commit(
+          editorSession.recipe.semanticEditingRecipe.copyWith(
+            eraseStrokes: strokes,
+          ),
+        ),
       ),
     );
-    if (result != null) {
-      _commit(
-        editorSession.recipe.semanticEditingRecipe.copyWith(
-          eraseStrokes: result,
-        ),
-      );
-    }
   }
 
   Future<void> _openMaskBrush(
@@ -6331,7 +7466,7 @@ class _SemanticTools extends StatelessWidget {
     required bool localAdjustment,
   }) async {
     final semantic = editorSession.recipe.semanticEditingRecipe;
-    final result = await showDialog<List<MaskStroke>>(
+    await showDialog<void>(
       context: context,
       builder: (context) => _MaskBrushDialog(
         sourcePath: photo.localPath,
@@ -6343,31 +7478,35 @@ class _SemanticTools extends StatelessWidget {
             : semantic.subjectMaskStrokes,
         previewRecipe: editorSession.recipe,
         localAdjustment: localAdjustment,
+        onChanged: (strokes) {
+          final current = editorSession.recipe.semanticEditingRecipe;
+          _commit(
+            localAdjustment
+                ? current.copyWith(localAdjustmentStrokes: strokes)
+                : current.copyWith(subjectMaskStrokes: strokes),
+          );
+        },
       ),
-    );
-    if (result == null) return;
-    _commit(
-      localAdjustment
-          ? semantic.copyWith(localAdjustmentStrokes: result)
-          : semantic.copyWith(subjectMaskStrokes: result),
     );
   }
 
   Future<void> _pickBackgroundImage(BuildContext context) async {
-    final batch = await context.read<PhotoImporter>().importPhotos(limit: 1);
-    if (!context.mounted) return;
-    if (batch.photos.isEmpty) {
-      if (batch.failures.isNotEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.l10n.backgroundImageImportFailed)),
-        );
-      }
+    final importer = context.read<PhotoImporter>();
+    if (importer is! EditingResourceImporter) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.backgroundImageImportFailed)),
+      );
       return;
     }
+    final imported = await importer.importEditingResource(
+      EditingResourceKind.backgroundImage,
+    );
+    if (imported == null) return;
     _commit(
       editorSession.recipe.semanticEditingRecipe.copyWith(
         background: BackgroundTreatment.image,
-        backgroundImagePath: batch.photos.single.localPath,
+        backgroundImagePath: imported.localPath,
+        backgroundImageResourceId: imported.descriptor.id,
       ),
     );
   }
@@ -6400,6 +7539,7 @@ class _MaskBrushDialog extends StatefulWidget {
     required this.initial,
     required this.previewRecipe,
     required this.localAdjustment,
+    required this.onChanged,
   });
 
   final String sourcePath;
@@ -6407,6 +7547,7 @@ class _MaskBrushDialog extends StatefulWidget {
   final List<MaskStroke> initial;
   final EditRecipe previewRecipe;
   final bool localAdjustment;
+  final ValueChanged<List<MaskStroke>> onChanged;
 
   @override
   State<_MaskBrushDialog> createState() => _MaskBrushDialogState();
@@ -6572,13 +7713,9 @@ class _MaskBrushDialogState extends State<_MaskBrushDialog> {
           child: Text(context.l10n.clear),
         ),
         TextButton(
+          key: ValueKey('$keyPrefix-close'),
           onPressed: () => Navigator.pop(context),
-          child: Text(context.l10n.cancel),
-        ),
-        FilledButton(
-          key: ValueKey('$keyPrefix-apply'),
-          onPressed: () => Navigator.pop(context, _strokes),
-          child: Text(context.l10n.apply),
+          child: Text(context.l10n.close),
         ),
       ],
     );
@@ -6621,6 +7758,7 @@ class _MaskBrushDialogState extends State<_MaskBrushDialog> {
       _strokes = List.of(next);
       _activePoints = null;
     });
+    widget.onChanged(List.unmodifiable(_strokes));
   }
 
   void _undoStrokeChange() {
@@ -6630,6 +7768,7 @@ class _MaskBrushDialogState extends State<_MaskBrushDialog> {
       _strokes = List.of(_undoHistory.removeLast());
       _activePoints = null;
     });
+    widget.onChanged(List.unmodifiable(_strokes));
   }
 
   void _redoStrokeChange() {
@@ -6639,6 +7778,7 @@ class _MaskBrushDialogState extends State<_MaskBrushDialog> {
       _strokes = List.of(_redoHistory.removeLast());
       _activePoints = null;
     });
+    widget.onChanged(List.unmodifiable(_strokes));
   }
 
   NormalizedPoint _normalized(Offset position, Size size) =>
@@ -6728,12 +7868,14 @@ class _EraseBrushDialog extends StatefulWidget {
     required this.sourceAspectRatio,
     required this.initial,
     required this.previewRecipe,
+    required this.onChanged,
   });
 
   final String sourcePath;
   final double sourceAspectRatio;
   final List<EraseStroke> initial;
   final EditRecipe previewRecipe;
+  final ValueChanged<List<EraseStroke>> onChanged;
 
   @override
   State<_EraseBrushDialog> createState() => _EraseBrushDialogState();
@@ -6855,13 +7997,9 @@ class _EraseBrushDialogState extends State<_EraseBrushDialog> {
           child: Text(context.l10n.clear),
         ),
         TextButton(
+          key: const ValueKey('erase-brush-close'),
           onPressed: () => Navigator.pop(context),
-          child: Text(context.l10n.cancel),
-        ),
-        FilledButton(
-          key: const ValueKey('erase-brush-apply'),
-          onPressed: () => Navigator.pop(context, _strokes),
-          child: Text(context.l10n.apply),
+          child: Text(context.l10n.close),
         ),
       ],
     );
@@ -6906,6 +8044,7 @@ class _EraseBrushDialogState extends State<_EraseBrushDialog> {
       _strokes = List.of(next);
       _activePoints = null;
     });
+    widget.onChanged(List.unmodifiable(_strokes));
   }
 
   void _undoStrokeChange() {
@@ -6915,6 +8054,7 @@ class _EraseBrushDialogState extends State<_EraseBrushDialog> {
       _strokes = List.of(_undoHistory.removeLast());
       _activePoints = null;
     });
+    widget.onChanged(List.unmodifiable(_strokes));
   }
 
   void _redoStrokeChange() {
@@ -6924,6 +8064,7 @@ class _EraseBrushDialogState extends State<_EraseBrushDialog> {
       _strokes = List.of(_redoHistory.removeLast());
       _activePoints = null;
     });
+    widget.onChanged(List.unmodifiable(_strokes));
   }
 
   NormalizedPoint _normalized(Offset position, Size size) =>

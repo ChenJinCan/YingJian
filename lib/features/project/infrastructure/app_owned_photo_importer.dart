@@ -3,6 +3,8 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:yingjian/features/editor/domain/content_sha256.dart';
+import 'package:yingjian/features/editor/domain/editing_resource.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 
@@ -46,7 +48,7 @@ abstract interface class ReleasablePhotoSource implements PhotoSource {
   Future<void> releasePhotos(List<SelectedPhoto> photos);
 }
 
-final class AppOwnedPhotoImporter implements PhotoImporter {
+final class AppOwnedPhotoImporter implements EditingResourceImporter {
   static const maxFileBytes = 100 * 1024 * 1024;
   static const maxPixelCount = 48 * 1000 * 1000;
   static const maxEdge = 12000;
@@ -169,6 +171,98 @@ final class AppOwnedPhotoImporter implements PhotoImporter {
           rethrow;
         }
       }
+    }
+  }
+
+  @override
+  Future<ImportedEditingResource?> importEditingResource(
+    EditingResourceKind kind,
+  ) async {
+    final batch = await importPhotos(limit: 1);
+    if (batch.photos.isEmpty) return null;
+    final imported = batch.photos.single;
+    final temporary = File(imported.localPath);
+    try {
+      final media = await _mediaDirectory();
+      final sha = imported.contentSha256;
+      final extension = _extensionFor(imported.inputFormat);
+      final relativePath = 'resources/${sha.substring(0, 2)}/$sha$extension';
+      final destination = File('${media.parent.path}/$relativePath');
+      await destination.parent.create(recursive: true);
+      if (await destination.exists()) {
+        await _deleteIfExists(temporary);
+      } else {
+        await temporary.rename(destination.path);
+      }
+      final descriptor = EditingResourceDescriptor(
+        id: 'resource-v1-$sha',
+        kind: kind,
+        relativePath: relativePath,
+        contentSha256: sha,
+        byteLength: await destination.length(),
+      );
+      descriptor.validate();
+      return ImportedEditingResource(
+        descriptor: descriptor,
+        localPath: destination.path,
+      );
+    } on Object {
+      await _deleteIfExists(temporary);
+      rethrow;
+    }
+  }
+
+  @override
+  Future<ImportedEditingResource> storeEditingResource({
+    required EditingResourceKind kind,
+    required List<int> bytes,
+    String extension = '.json',
+    Object? payload,
+  }) async {
+    if (bytes.isEmpty || !RegExp(r'^\.[a-z0-9]{1,8}$').hasMatch(extension)) {
+      throw ArgumentError('Invalid editing resource payload');
+    }
+    final sha = ContentSha256.ofBytes(bytes);
+    final relativePath = 'resources/${sha.substring(0, 2)}/$sha$extension';
+    final media = await _mediaDirectory();
+    final destination = File('${media.parent.path}/$relativePath');
+    await destination.parent.create(recursive: true);
+    if (!await destination.exists()) {
+      final temporary = File('${destination.path}.tmp');
+      await temporary.writeAsBytes(bytes, flush: true);
+      try {
+        await temporary.rename(destination.path);
+      } on FileSystemException {
+        if (!await destination.exists()) rethrow;
+        await _deleteIfExists(temporary);
+      }
+    }
+    final descriptor = EditingResourceDescriptor(
+      id: 'resource-v1-$sha',
+      kind: kind,
+      relativePath: relativePath,
+      contentSha256: sha,
+      byteLength: bytes.length,
+    );
+    descriptor.validate();
+    return ImportedEditingResource(
+      descriptor: descriptor,
+      localPath: destination.path,
+      payload: payload,
+    );
+  }
+
+  @override
+  Future<void> discardEditingResource(ImportedEditingResource resource) async {
+    resource.descriptor.validate();
+    final media = await _mediaDirectory();
+    final root = Directory('${media.parent.path}/resources');
+    final file = File(resource.localPath);
+    if (!await root.exists() || !await file.exists()) return;
+    final safeRoot = await root.resolveSymbolicLinks();
+    final safePath = await file.resolveSymbolicLinks();
+    if (safePath.startsWith('$safeRoot${Platform.pathSeparator}')) {
+      await file.delete();
     }
   }
 

@@ -7,10 +7,12 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:yingjian/app/app.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
+import 'package:yingjian/features/editor/application/meta_op_capabilities_provider.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
 import 'package:yingjian/features/editor/application/photo_sharer.dart';
 import 'package:yingjian/features/editor/infrastructure/method_channel_photo_exporter.dart';
+import 'package:yingjian/features/editor/infrastructure/method_channel_meta_op_capabilities.dart';
 import 'package:yingjian/features/editor/infrastructure/method_channel_photo_preview_renderer.dart';
 import 'package:yingjian/features/editor/infrastructure/method_channel_photo_sharer.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
@@ -39,6 +41,7 @@ Future<void> _startApplication() async {
   late PhotoImporter photoImporter;
   late PhotoProjectStore photoProjectStore;
   late PhotoExporter photoExporter;
+  late MetaOpCapabilitiesProvider metaOpCapabilitiesProvider;
   late PhotoPreviewRenderer photoPreviewRenderer;
   late PhotoSharer photoSharer;
   late PhotoAnalyzer photoAnalyzer;
@@ -71,6 +74,7 @@ Future<void> _startApplication() async {
         directory: getApplicationSupportDirectory,
       );
       photoExporter = MethodChannelPhotoExporter();
+      metaOpCapabilitiesProvider = MethodChannelMetaOpCapabilities();
       photoPreviewRenderer = MethodChannelPhotoPreviewRenderer();
       photoSharer = const MethodChannelPhotoSharer();
       photoAnalyzer = const MethodChannelPhotoAnalyzer();
@@ -90,6 +94,9 @@ Future<void> _startApplication() async {
             Provider<PhotoImporter>.value(value: photoImporter),
             Provider<PhotoProjectStore>.value(value: photoProjectStore),
             Provider<PhotoExporter>.value(value: photoExporter),
+            Provider<MetaOpCapabilitiesProvider>.value(
+              value: metaOpCapabilitiesProvider,
+            ),
             Provider<PhotoPreviewRenderer>.value(value: photoPreviewRenderer),
             Provider<PhotoSharer>.value(value: photoSharer),
             Provider<PhotoAnalyzer>.value(value: photoAnalyzer),

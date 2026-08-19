@@ -51,8 +51,20 @@ void main() {
     final arguments = receivedCall?.arguments! as Map<Object?, Object?>;
     expect(arguments['sourcePath'], photo.localPath);
     expect(arguments.containsKey('imageBytes'), isFalse);
-    final pipeline = arguments['pipeline']! as Map<Object?, Object?>;
-    expect(pipeline['schemaVersion'], 10);
+    final envelope = arguments['pipeline']! as Map<Object?, Object?>;
+    final plan = envelope['renderPlanV1']! as Map<Object?, Object?>;
+    final pipeline = plan['backendPayload']! as Map<Object?, Object?>;
+    expect(plan['sourceId'], photo.id);
+    expect(plan['stateRevision'], 0);
+    expect(plan['outputRequirements'], {
+      'purpose': 'export',
+      'colorSpace': 'srgb',
+      'format': 'heif',
+      'quality': 'standard',
+      'maxEdge': 2048,
+    });
+    expect(pipeline['schemaVersion'], 11);
+    expect(pipeline['targetedPortraitRecipeV1'], isA<Map>());
     expect(arguments['options'], {
       'format': 'heif',
       'size': 'longEdge',

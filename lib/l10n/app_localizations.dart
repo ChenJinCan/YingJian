@@ -131,7 +131,7 @@ abstract class AppLocalizations {
   /// No description provided for @homePrimaryAction.
   ///
   /// In zh, this message translates to:
-  /// **'选择照片'**
+  /// **'选择照片开始'**
   String get homePrimaryAction;
 
   /// No description provided for @onboardingPromise.
@@ -248,12 +248,6 @@ abstract class AppLocalizations {
   /// **'继续添加照片'**
   String get addPhotos;
 
-  /// No description provided for @photoImportPrivacy.
-  ///
-  /// In zh, this message translates to:
-  /// **'照片仅复制到映见的本地项目中，不会因选择照片而上传云端。'**
-  String get photoImportPrivacy;
-
   /// No description provided for @photoCount.
   ///
   /// In zh, this message translates to:
@@ -269,19 +263,19 @@ abstract class AppLocalizations {
   /// No description provided for @compositionPreviewUnavailable.
   ///
   /// In zh, this message translates to:
-  /// **'构图预览暂不可用。可恢复原始构图或稍后重试；原图不受影响。'**
+  /// **'构图预览暂不可用，可恢复原始构图或稍后重试。'**
   String get compositionPreviewUnavailable;
 
   /// No description provided for @effectPreviewUnavailable.
   ///
   /// In zh, this message translates to:
-  /// **'当前效果预览暂不可用。可重置本次调整或稍后重试；原图不受影响。'**
+  /// **'当前效果预览暂不可用，可重置本次调整或稍后重试。'**
   String get effectPreviewUnavailable;
 
   /// No description provided for @recommendationPreviewUnavailable.
   ///
   /// In zh, this message translates to:
-  /// **'这套推荐预览暂不可用。可重试或查看其他方向；原图不受影响。'**
+  /// **'这套推荐预览暂不可用，可重试或查看其他方向。'**
   String get recommendationPreviewUnavailable;
 
   /// No description provided for @photoImportCanceled.
@@ -293,13 +287,13 @@ abstract class AppLocalizations {
   /// No description provided for @importingPhotos.
   ///
   /// In zh, this message translates to:
-  /// **'正在本地导入照片…'**
+  /// **'正在导入照片…'**
   String get importingPhotos;
 
   /// No description provided for @restoringProject.
   ///
   /// In zh, this message translates to:
-  /// **'正在恢复本地项目…'**
+  /// **'正在恢复项目…'**
   String get restoringProject;
 
   /// No description provided for @photoImportFailed.
@@ -527,7 +521,7 @@ abstract class AppLocalizations {
   /// No description provided for @applyNaturalBeautification.
   ///
   /// In zh, this message translates to:
-  /// **'应用自然美化'**
+  /// **'自然美化'**
   String get applyNaturalBeautification;
 
   /// No description provided for @textureSmoothing.
@@ -665,19 +659,19 @@ abstract class AppLocalizations {
   /// No description provided for @semanticTools.
   ///
   /// In zh, this message translates to:
-  /// **'主体与局部'**
+  /// **'背景'**
   String get semanticTools;
 
   /// No description provided for @mobileToolRetouch.
   ///
   /// In zh, this message translates to:
-  /// **'精修'**
+  /// **'人像'**
   String get mobileToolRetouch;
 
   /// No description provided for @semanticToolsLocalReady.
   ///
   /// In zh, this message translates to:
-  /// **'主体分割已就绪 · 本地处理'**
+  /// **'可以调整背景'**
   String get semanticToolsLocalReady;
 
   /// No description provided for @refineSubjectMask.
@@ -863,7 +857,7 @@ abstract class AppLocalizations {
   /// No description provided for @lightAndColorTools.
   ///
   /// In zh, this message translates to:
-  /// **'光色'**
+  /// **'光线'**
   String get lightAndColorTools;
 
   /// No description provided for @groupStyleIntensity.
@@ -893,7 +887,7 @@ abstract class AppLocalizations {
   /// No description provided for @localPortraitReady.
   ///
   /// In zh, this message translates to:
-  /// **'人像工具已就绪 · 本地处理'**
+  /// **'可以调整人像'**
   String get localPortraitReady;
 
   /// No description provided for @portraitToolsUnavailable.
@@ -1142,6 +1136,42 @@ abstract class AppLocalizations {
   /// **'正在准备适合这组照片的效果'**
   String get analysisPreparingSubtitle;
 
+  /// No description provided for @preparingPhotos.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在准备照片 {current}/{total}'**
+  String preparingPhotos(int current, int total);
+
+  /// No description provided for @analysisNextStep.
+  ///
+  /// In zh, this message translates to:
+  /// **'接下来会分析光线和人物'**
+  String get analysisNextStep;
+
+  /// No description provided for @analysisNonBlockingFailure.
+  ///
+  /// In zh, this message translates to:
+  /// **'这张暂时无法处理，其他照片会继续'**
+  String get analysisNonBlockingFailure;
+
+  /// No description provided for @chooseOverallFeeling.
+  ///
+  /// In zh, this message translates to:
+  /// **'先选一种感觉'**
+  String get chooseOverallFeeling;
+
+  /// No description provided for @skip.
+  ///
+  /// In zh, this message translates to:
+  /// **'跳过'**
+  String get skip;
+
+  /// No description provided for @recommendationAppliesToAll.
+  ///
+  /// In zh, this message translates to:
+  /// **'会应用到全部照片，每张仍会单独适配'**
+  String get recommendationAppliesToAll;
+
   /// No description provided for @recommendationsTitle.
   ///
   /// In zh, this message translates to:
@@ -1151,7 +1181,7 @@ abstract class AppLocalizations {
   /// No description provided for @recommendationsSubtitle.
   ///
   /// In zh, this message translates to:
-  /// **'三套效果都在本机生成，不上传照片。先看结果，之后随时都能继续修改。'**
+  /// **'先看效果，之后随时可以继续调整。'**
   String get recommendationsSubtitle;
 
   /// No description provided for @safeFallbackNotice.
@@ -1163,7 +1193,7 @@ abstract class AppLocalizations {
   /// No description provided for @localAnalysisNotice.
   ///
   /// In zh, this message translates to:
-  /// **'本机像素分析已为每张照片准备有边界的自适应调整。'**
+  /// **'已根据照片内容完成调整。'**
   String get localAnalysisNotice;
 
   /// No description provided for @localEffect.
@@ -1523,7 +1553,7 @@ abstract class AppLocalizations {
   /// No description provided for @filterAndHsl.
   ///
   /// In zh, this message translates to:
-  /// **'滤镜与 HSL'**
+  /// **'颜色'**
   String get filterAndHsl;
 
   /// No description provided for @filterStrength.
@@ -1706,6 +1736,24 @@ abstract class AppLocalizations {
   /// **'整体更有氛围'**
   String get quickEditAtmosphere;
 
+  /// No description provided for @quickEditSoftBackground.
+  ///
+  /// In zh, this message translates to:
+  /// **'背景柔和一点'**
+  String get quickEditSoftBackground;
+
+  /// No description provided for @onlyEditThisPhoto.
+  ///
+  /// In zh, this message translates to:
+  /// **'只改这张'**
+  String get onlyEditThisPhoto;
+
+  /// No description provided for @syncToAllPhotos.
+  ///
+  /// In zh, this message translates to:
+  /// **'同步到全部'**
+  String get syncToAllPhotos;
+
   /// No description provided for @manualAdjustments.
   ///
   /// In zh, this message translates to:
@@ -1733,8 +1781,20 @@ abstract class AppLocalizations {
   /// No description provided for @allTools.
   ///
   /// In zh, this message translates to:
-  /// **'全部工具'**
+  /// **'更多'**
   String get allTools;
+
+  /// No description provided for @metaOpSearchHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'搜索调整能力'**
+  String get metaOpSearchHint;
+
+  /// No description provided for @metaOpSearchNoResults.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有找到可用能力'**
+  String get metaOpSearchNoResults;
 
   /// No description provided for @savePhotos.
   ///
@@ -1754,6 +1814,66 @@ abstract class AppLocalizations {
   /// **'选择要保存的照片'**
   String get saveOptionsSubtitle;
 
+  /// No description provided for @saveToAlbum.
+  ///
+  /// In zh, this message translates to:
+  /// **'保存到相册'**
+  String get saveToAlbum;
+
+  /// No description provided for @savingProgress.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在保存 {current}/{total}'**
+  String savingProgress(int current, int total);
+
+  /// No description provided for @photoNumber.
+  ///
+  /// In zh, this message translates to:
+  /// **'第 {number} 张'**
+  String photoNumber(int number);
+
+  /// No description provided for @cancelRemainingPhotos.
+  ///
+  /// In zh, this message translates to:
+  /// **'取消剩余照片'**
+  String get cancelRemainingPhotos;
+
+  /// No description provided for @savedPhotosAreKept.
+  ///
+  /// In zh, this message translates to:
+  /// **'已经保存的照片会保留'**
+  String get savedPhotosAreKept;
+
+  /// No description provided for @partialSaveTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'已保存 {saved} 张，{failed} 张暂未保存'**
+  String partialSaveTitle(int saved, int failed);
+
+  /// No description provided for @photoLibraryTemporarilyUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'相册暂时无法写入'**
+  String get photoLibraryTemporarilyUnavailable;
+
+  /// No description provided for @retryPhotoCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'重试这 {count} 张'**
+  String retryPhotoCount(int count);
+
+  /// No description provided for @viewSavedPhotos.
+  ///
+  /// In zh, this message translates to:
+  /// **'查看已保存'**
+  String get viewSavedPhotos;
+
+  /// No description provided for @backToEditing.
+  ///
+  /// In zh, this message translates to:
+  /// **'回到编辑'**
+  String get backToEditing;
+
   /// No description provided for @voiceEditTitle.
   ///
   /// In zh, this message translates to:
@@ -1765,12 +1885,6 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'例如：照片亮一点，皮肤自然一点'**
   String get voiceEditHint;
-
-  /// No description provided for @voiceEditPrivacy.
-  ///
-  /// In zh, this message translates to:
-  /// **'语音只用于转写指令；修图结果仍由可见参数在本地生成。'**
-  String get voiceEditPrivacy;
 
   /// No description provided for @voiceEditRecord.
   ///
@@ -1832,6 +1946,12 @@ abstract class AppLocalizations {
   /// **'已完成这次修改'**
   String get editResultApplied;
 
+  /// No description provided for @editAppliedToGroup.
+  ///
+  /// In zh, this message translates to:
+  /// **'已同步整组'**
+  String get editAppliedToGroup;
+
   /// No description provided for @syncAllPhotos.
   ///
   /// In zh, this message translates to:
@@ -1855,6 +1975,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'暖一点'**
   String get manualWarmer;
+
+  /// No description provided for @manualMoreVivid.
+  ///
+  /// In zh, this message translates to:
+  /// **'鲜艳一点'**
+  String get manualMoreVivid;
 
   /// No description provided for @manualNaturalSkin.
   ///
@@ -1916,6 +2042,12 @@ abstract class AppLocalizations {
   /// **'完成'**
   String get finish;
 
+  /// No description provided for @close.
+  ///
+  /// In zh, this message translates to:
+  /// **'关闭'**
+  String get close;
+
   /// No description provided for @fullscreenPreview.
   ///
   /// In zh, this message translates to:
@@ -1933,6 +2065,18 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'轻点返回调整 · 按住看原图'**
   String get fullscreenPreviewHint;
+
+  /// No description provided for @projectRequiresUpdateTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'需要更新后继续编辑'**
+  String get projectRequiresUpdateTitle;
+
+  /// No description provided for @projectRequiresUpdateMessage.
+  ///
+  /// In zh, this message translates to:
+  /// **'这组照片包含当前版本尚不支持的效果。已完整保留，只能查看，更新应用后可继续编辑和保存。'**
+  String get projectRequiresUpdateMessage;
 }
 
 class _AppLocalizationsDelegate

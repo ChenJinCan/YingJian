@@ -57,7 +57,7 @@ final class _OnboardingPageState extends State<OnboardingPage> {
           ),
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(28, 32, 28, 20),
+              padding: const EdgeInsets.fromLTRB(28, 28, 28, 16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -69,13 +69,25 @@ final class _OnboardingPageState extends State<OnboardingPage> {
                       letterSpacing: 6,
                     ),
                   ),
-                  const Spacer(),
-                  Icon(
-                    Icons.auto_awesome_rounded,
-                    size: 54,
-                    color: colors.primary,
+                  const Spacer(flex: 2),
+                  Center(
+                    child: Container(
+                      width: 58,
+                      height: 58,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: colors.primary.withValues(alpha: 0.45),
+                        ),
+                      ),
+                      child: Icon(
+                        Icons.auto_awesome_rounded,
+                        size: 24,
+                        color: colors.primary,
+                      ),
+                    ),
                   ),
-                  const SizedBox(height: 30),
+                  const SizedBox(height: 26),
                   Text(
                     context.l10n.homeHeroTitle,
                     textAlign: TextAlign.center,
@@ -83,16 +95,16 @@ final class _OnboardingPageState extends State<OnboardingPage> {
                       fontWeight: FontWeight.w800,
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   Text(
-                    context.l10n.onboardingPromise,
+                    context.l10n.homeTagline,
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       color: colors.onSurfaceVariant,
-                      height: 1.5,
+                      height: 1.4,
                     ),
                   ),
-                  const Spacer(),
+                  const Spacer(flex: 2),
                   FilledButton(
                     key: const ValueKey('onboarding-continue'),
                     onPressed: _saving ? null : _continue,

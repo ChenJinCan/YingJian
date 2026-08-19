@@ -1,10 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/compiled_image_pipeline.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_for_platform.dart';
-import 'package:yingjian/features/editor/domain/image_pipeline_v2.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_v3.dart';
-import 'package:yingjian/features/editor/domain/image_pipeline_v10.dart';
 
 void main() {
   tearDown(() => debugDefaultTargetPlatformOverride = null);
@@ -13,14 +12,34 @@ void main() {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     expect(
       imagePipelineForCurrentPlatform(EditRecipe.neutral),
-      isA<ImagePipelineV10>(),
+      isA<CompiledImagePipeline>(),
     );
 
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     expect(
       imagePipelineForCurrentPlatform(EditRecipe.neutral),
-      isA<ImagePipelineV2>(),
+      isA<CompiledImagePipeline>(),
     );
+  });
+
+  test('production pipeline always carries its accepted render plan', () {
+    final arguments = imagePipelineForCurrentPlatform(
+      EditRecipe.neutral.copyWith(exposure: 0.2),
+      sourceId: 'photo-1',
+    ).toPlatformArguments();
+
+    expect(arguments['renderPlanV1'], isA<Map<String, Object>>());
+    final plan = arguments['renderPlanV1']! as Map<String, Object>;
+    expect(plan['sourceId'], 'photo-1');
+    expect(plan['planId'], startsWith('rp1-'));
+    expect(arguments.keys, {'renderPlanV1'});
+    expect(plan['backendPayload'], isA<Map<String, Object>>());
+    expect(plan['outputRequirements'], {
+      'purpose': 'preview',
+      'colorSpace': 'srgb',
+      'format': 'display',
+      'quality': 'interactive',
+    });
   });
 
   test(

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:yingjian/features/editor/domain/editing_resource.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 
@@ -22,12 +23,18 @@ final class JsonPhotoProjectStore implements PhotoProjectLifecycleStore {
     if (!await file.exists()) {
       return null;
     }
-    final value = jsonDecode(await file.readAsString());
-    if (value is! Map<String, Object?>) {
+    final decoded = jsonDecode(await file.readAsString());
+    if (decoded is! Map<String, Object?>) {
       throw const FormatException('Photo project must be a JSON object');
     }
+    final value = Map<String, Object?>.from(decoded);
+    final storedVersion = (value['schemaVersion'] as num?)?.toInt() ?? 1;
+    await _rewriteBackgroundImagePaths(
+      value,
+      (path) => _resolvePath(root, path),
+    );
     final stored = PhotoProject.fromJson(value);
-    return stored.copyWith(
+    final resolved = stored.copyWith(
       photos: await Future.wait(
         stored.photos.map(
           (photo) async => ProjectPhoto(
@@ -45,12 +52,32 @@ final class JsonPhotoProjectStore implements PhotoProjectLifecycleStore {
         ),
       ),
     );
+    if (storedVersion < PhotoProject.schemaVersion) {
+      try {
+        await save(resolved);
+      } on Object {
+        // The old snapshot remains authoritative and migration retries on the
+        // next open; the already validated visible result is still usable.
+      }
+    }
+    return resolved;
   }
 
   @override
   Future<void> save(PhotoProject project) async {
+    if (project.requiresUpdate) {
+      throw StateError(
+        'A project with unknown meta operations is read-only until update',
+      );
+    }
+    if (!project.hasConsistentEditState) {
+      throw StateError(
+        'Photo project edit state does not match its render projection',
+      );
+    }
     final root = await _directory();
     final file = _projectFile(root);
+    final previousResources = await _readStoredResources(file);
     await file.parent.create(recursive: true);
     final temporary = File('${file.path}.tmp');
     final value = project.toJson();
@@ -62,8 +89,35 @@ final class JsonPhotoProjectStore implements PhotoProjectLifecycleStore {
           },
         )
         .toList();
-    await temporary.writeAsString(jsonEncode(value), flush: true);
-    await temporary.rename(file.path);
+    await _rewriteBackgroundImagePaths(
+      value,
+      (path) async => _storedPath(root, path),
+    );
+    try {
+      await temporary.writeAsString(jsonEncode(value), flush: true);
+      final verified = jsonDecode(await temporary.readAsString());
+      if (verified is! Map<String, Object?>) {
+        throw const FormatException('Saved project must be a JSON object');
+      }
+      PhotoProject.fromJson(verified);
+      await temporary.rename(file.path);
+    } on Object {
+      if (await temporary.exists()) await temporary.delete();
+      await _deleteResources(
+        root,
+        project.editingResources.resources.values.where(
+          (resource) => !previousResources.containsKey(resource.id),
+        ),
+      );
+      rethrow;
+    }
+    await _deleteResources(
+      root,
+      previousResources.values.where(
+        (resource) =>
+            !project.editingResources.resources.containsKey(resource.id),
+      ),
+    );
   }
 
   @override
@@ -91,7 +145,13 @@ final class JsonPhotoProjectStore implements PhotoProjectLifecycleStore {
     for (final photo in project.photos) {
       await deletePhotoCopy(photo);
     }
-    for (final name in const ['media', 'previews', 'analysis', 'debug']) {
+    for (final name in const [
+      'media',
+      'resources',
+      'previews',
+      'analysis',
+      'debug',
+    ]) {
       final directory = Directory('${root.path}/$name');
       if (await directory.exists()) {
         await directory.delete(recursive: true);
@@ -138,6 +198,62 @@ final class JsonPhotoProjectStore implements PhotoProjectLifecycleStore {
       final directory = Directory('${root.path}/$name/$photoId');
       if (await directory.exists()) {
         await directory.delete(recursive: true);
+      }
+    }
+  }
+
+  Future<void> _rewriteBackgroundImagePaths(
+    Object? value,
+    Future<String> Function(String path) rewrite,
+  ) async {
+    if (value is List) {
+      for (final item in value) {
+        await _rewriteBackgroundImagePaths(item, rewrite);
+      }
+      return;
+    }
+    if (value is! Map) return;
+    for (final entry in value.entries.toList()) {
+      if (entry.key == 'unknownMetaOps') continue;
+      if (entry.key == 'backgroundImagePath' &&
+          entry.value is String &&
+          (entry.value! as String).isNotEmpty) {
+        value[entry.key] = await rewrite(entry.value! as String);
+      } else {
+        await _rewriteBackgroundImagePaths(entry.value, rewrite);
+      }
+    }
+  }
+
+  Future<Map<String, EditingResourceDescriptor>> _readStoredResources(
+    File file,
+  ) async {
+    if (!await file.exists()) return const {};
+    try {
+      final value = jsonDecode(await file.readAsString());
+      if (value is! Map || value['editingResources'] is! Map) return const {};
+      return EditingResourceRegistry.fromJson(
+        Map<String, Object?>.from(value['editingResources']! as Map),
+      ).resources;
+    } on Object {
+      return const {};
+    }
+  }
+
+  Future<void> _deleteResources(
+    Directory root,
+    Iterable<EditingResourceDescriptor> resources,
+  ) async {
+    final resourceRoot = Directory('${root.path}/resources');
+    if (!await resourceRoot.exists()) return;
+    final safeRoot = await resourceRoot.resolveSymbolicLinks();
+    for (final resource in resources) {
+      resource.validate();
+      final file = File('${root.path}/${resource.relativePath}');
+      if (!await file.exists()) continue;
+      final safePath = await file.resolveSymbolicLinks();
+      if (safePath.startsWith('$safeRoot${Platform.pathSeparator}')) {
+        await file.delete();
       }
     }
   }

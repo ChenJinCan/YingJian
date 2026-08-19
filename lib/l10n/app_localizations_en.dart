@@ -25,7 +25,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'Choose a photo and tell us how you want it changed';
 
   @override
-  String get homePrimaryAction => 'Choose photos';
+  String get homePrimaryAction => 'Choose photos to start';
 
   @override
   String get onboardingPromise =>
@@ -97,10 +97,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get addPhotos => 'Add more photos';
 
   @override
-  String get photoImportPrivacy =>
-      'Photos are copied only into your local Yingjian project and are not uploaded just because you selected them.';
-
-  @override
   String photoCount(int count) {
     return '$count/6';
   }
@@ -110,24 +106,24 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get compositionPreviewUnavailable =>
-      'Composition preview is temporarily unavailable. Reset composition or try again; your original is safe.';
+      'Composition preview is temporarily unavailable. Reset composition or try again.';
 
   @override
   String get effectPreviewUnavailable =>
-      'This effect preview is temporarily unavailable. Reset the adjustment or try again; your original is safe.';
+      'This effect preview is temporarily unavailable. Reset the adjustment or try again.';
 
   @override
   String get recommendationPreviewUnavailable =>
-      'This recommendation preview is temporarily unavailable. Try again or view another direction; your original is safe.';
+      'This recommendation preview is temporarily unavailable. Try again or view another direction.';
 
   @override
   String get photoImportCanceled => 'No photos were added';
 
   @override
-  String get importingPhotos => 'Importing photos locally…';
+  String get importingPhotos => 'Importing photos…';
 
   @override
-  String get restoringProject => 'Restoring your local project…';
+  String get restoringProject => 'Restoring your project…';
 
   @override
   String get photoImportFailed => 'Photo import failed. Try again.';
@@ -257,7 +253,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get oneTapNaturalBeautification => 'One-tap natural beautification';
 
   @override
-  String get applyNaturalBeautification => 'Apply natural beautification';
+  String get applyNaturalBeautification => 'Natural beautification';
 
   @override
   String get textureSmoothing => 'Texture smoothing';
@@ -333,14 +329,13 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get semanticTools => 'Subject & local';
+  String get semanticTools => 'Background';
 
   @override
-  String get mobileToolRetouch => 'Retouch';
+  String get mobileToolRetouch => 'Portrait';
 
   @override
-  String get semanticToolsLocalReady =>
-      'Subject segmentation ready · On-device';
+  String get semanticToolsLocalReady => 'Background adjustments available';
 
   @override
   String get refineSubjectMask => 'Refine subject edges';
@@ -437,7 +432,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get portraitTools => 'Portrait';
 
   @override
-  String get lightAndColorTools => 'Light & color';
+  String get lightAndColorTools => 'Light';
 
   @override
   String get groupStyleIntensity => 'Group look';
@@ -453,7 +448,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get alternativeRecommendation => 'Alternative';
 
   @override
-  String get localPortraitReady => 'Portrait tools ready · On-device';
+  String get localPortraitReady => 'Portrait adjustments available';
 
   @override
   String get portraitToolsUnavailable =>
@@ -592,19 +587,40 @@ class AppLocalizationsEn extends AppLocalizations {
       'Preparing a look that suits this set';
 
   @override
+  String preparingPhotos(int current, int total) {
+    return 'Preparing photos $current/$total';
+  }
+
+  @override
+  String get analysisNextStep => 'Next, lighting and people will be analyzed';
+
+  @override
+  String get analysisNonBlockingFailure =>
+      'This photo cannot be processed yet. The others will continue.';
+
+  @override
+  String get chooseOverallFeeling => 'Choose a feeling first';
+
+  @override
+  String get skip => 'Skip';
+
+  @override
+  String get recommendationAppliesToAll =>
+      'This applies to every photo, with individual adaptation';
+
+  @override
   String get recommendationsTitle => 'Choose a direction you like';
 
   @override
   String get recommendationsSubtitle =>
-      'All three looks are created on device. Start with the result and change anything later.';
+      'Preview a look first, then keep adjusting whenever you like.';
 
   @override
   String get safeFallbackNotice =>
       'Using restrained safe recipes until pixel analysis passes its quality gate.';
 
   @override
-  String get localAnalysisNotice =>
-      'On-device pixel analysis prepared a bounded adjustment for each photo.';
+  String get localAnalysisNotice => 'Adjustments are ready for this photo.';
 
   @override
   String get localEffect => 'On-device effect';
@@ -805,7 +821,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get perspectiveVertical => 'Vertical perspective';
 
   @override
-  String get filterAndHsl => 'Filters & HSL';
+  String get filterAndHsl => 'Color';
 
   @override
   String get filterStrength => 'Filter strength';
@@ -898,6 +914,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get quickEditAtmosphere => 'Add more atmosphere';
 
   @override
+  String get quickEditSoftBackground => 'Soften the background';
+
+  @override
+  String get onlyEditThisPhoto => 'Only this photo';
+
+  @override
+  String get syncToAllPhotos => 'Sync to all';
+
+  @override
   String get manualAdjustments => 'Manual adjustments';
 
   @override
@@ -911,7 +936,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get quickAdjust => 'Quick adjustments';
 
   @override
-  String get allTools => 'All tools';
+  String get allTools => 'More';
+
+  @override
+  String get metaOpSearchHint => 'Search adjustments';
+
+  @override
+  String get metaOpSearchNoResults => 'No available adjustment found';
 
   @override
   String get savePhotos => 'Save';
@@ -923,14 +954,49 @@ class AppLocalizationsEn extends AppLocalizations {
   String get saveOptionsSubtitle => 'Choose which photos to save';
 
   @override
+  String get saveToAlbum => 'Save to Photos';
+
+  @override
+  String savingProgress(int current, int total) {
+    return 'Saving $current/$total';
+  }
+
+  @override
+  String photoNumber(int number) {
+    return 'Photo $number';
+  }
+
+  @override
+  String get cancelRemainingPhotos => 'Cancel remaining photos';
+
+  @override
+  String get savedPhotosAreKept => 'Photos already saved will be kept';
+
+  @override
+  String partialSaveTitle(int saved, int failed) {
+    return 'Saved $saved; $failed could not be saved yet';
+  }
+
+  @override
+  String get photoLibraryTemporarilyUnavailable =>
+      'The photo library is temporarily unavailable';
+
+  @override
+  String retryPhotoCount(int count) {
+    return 'Retry these $count';
+  }
+
+  @override
+  String get viewSavedPhotos => 'View saved photos';
+
+  @override
+  String get backToEditing => 'Back to editing';
+
+  @override
   String get voiceEditTitle => 'What would you like to change?';
 
   @override
   String get voiceEditHint => 'For example: make it brighter with natural skin';
-
-  @override
-  String get voiceEditPrivacy =>
-      'Voice is used only to transcribe your instruction. Visible parameters still render the edit locally.';
 
   @override
   String get voiceEditRecord => 'Start speaking';
@@ -967,6 +1033,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get editResultApplied => 'Change applied';
 
   @override
+  String get editAppliedToGroup => 'Synced to the group';
+
+  @override
   String get syncAllPhotos => 'Sync to all';
 
   @override
@@ -977,6 +1046,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get manualWarmer => 'Warmer';
+
+  @override
+  String get manualMoreVivid => 'More vivid';
 
   @override
   String get manualNaturalSkin => 'Natural skin';
@@ -1013,6 +1085,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get finish => 'Done';
 
   @override
+  String get close => 'Close';
+
+  @override
   String get fullscreenPreview => 'View full screen';
 
   @override
@@ -1020,4 +1095,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get fullscreenPreviewHint => 'Tap to return · Hold for original';
+
+  @override
+  String get projectRequiresUpdateTitle => 'Update to continue editing';
+
+  @override
+  String get projectRequiresUpdateMessage =>
+      'This project contains effects this version cannot handle. Everything is preserved and view-only until the app is updated.';
 }

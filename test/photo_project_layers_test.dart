@@ -1,6 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/edit_target.dart';
+import 'package:yingjian/features/editor/domain/editing_core.dart';
+import 'package:yingjian/features/editor/domain/targeted_portrait_recipe.dart';
+import 'package:yingjian/features/editor/domain/targeted_geometry_recipe.dart';
 import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
 import 'package:yingjian/features/editor/domain/portrait_geometry_recipe.dart';
 import 'package:yingjian/features/editor/domain/semantic_editing_recipe.dart';
@@ -548,6 +552,21 @@ void main() {
       photoOverrides: {
         first.id: PhotoOverride(recipe: EditRecipe(contrast: 0.2)),
       },
+      targetRegistries: {
+        first.id: EditTargetRegistry.seed(const [
+          DetectedEditTarget(
+            photoId: 'photo-1',
+            kind: EditTargetKind.face,
+            analysisVersion: 'vision-v1',
+            region: NormalizedEditRegion(
+              left: 0.1,
+              top: 0.2,
+              right: 0.4,
+              bottom: 0.7,
+            ),
+          ),
+        ]),
+      },
       analysisStates: {first.id: PhotoAnalysisState.ready},
       exportStates: {first.id: PhotoExportState.queued},
       editingScope: ProjectEditingScope.currentPhoto,
@@ -561,14 +580,109 @@ void main() {
       ],
     );
 
-    final restored = PhotoProject.fromJson(project.toJson());
+    final currentSnapshot = ProjectEditSnapshot.fromProject(project);
+    final baseSnapshot = ProjectEditSnapshot(
+      sharedStyle: project.sharedStyle,
+      photoOverrides: const {},
+      targetRegistries: project.targetRegistries,
+    );
+    final validProject = project.copyWith(
+      historyBaseSnapshot: baseSnapshot,
+      undoHistory: [
+        project.undoHistory.single.withSnapshots(
+          before: baseSnapshot,
+          after: currentSnapshot,
+        ),
+      ],
+    );
+    final restored = PhotoProject.fromJson(validProject.toJson());
 
-    expect(restored, project);
+    expect(restored, validProject);
     expect(restored.analysisStates[first.id], PhotoAnalysisState.ready);
     expect(restored.exportStates[first.id], PhotoExportState.queued);
     expect(restored.editingScope, ProjectEditingScope.currentPhoto);
-    expect(restored.undoHistory, project.undoHistory);
-    expect(project.toJson()['schemaVersion'], 9);
+    expect(restored.undoHistory, validProject.undoHistory);
+    expect(restored.targetRegistries[first.id]!.targets, hasLength(1));
+    expect(project.toJson()['schemaVersion'], PhotoProject.schemaVersion);
+  });
+
+  test('effective recipe pauses targeted effects for suspended targets', () {
+    const detection = DetectedEditTarget(
+      photoId: 'photo-1',
+      kind: EditTargetKind.face,
+      analysisVersion: 'vision-v1',
+      region: NormalizedEditRegion(
+        left: 0.1,
+        top: 0.2,
+        right: 0.4,
+        bottom: 0.7,
+      ),
+    );
+    final activeRegistry = EditTargetRegistry.seed(const [detection]);
+    final target = activeRegistry.targets.values.single;
+    final targeted = TargetedPortraitRecipe.neutral.update(
+      targetId: target.id,
+      region: target.region,
+      parameter: TargetedPortraitParameter.textureSmoothing,
+      value: 45,
+    );
+    final targetedGeometry = TargetedGeometryRecipe.neutral.updateFace(
+      target.id,
+      (geometry) => geometry.copyWith(faceSlim: 35),
+    );
+    final active = PhotoProject(
+      id: 'targeted-effects',
+      createdAt: DateTime.utc(2026, 8, 20),
+      updatedAt: DateTime.utc(2026, 8, 20),
+      photos: const [first],
+      targetRegistries: {first.id: activeRegistry},
+      photoOverrides: {
+        first.id: PhotoOverride(
+          recipe: EditRecipe(
+            targetedPortraitRecipe: targeted,
+            targetedGeometryRecipe: targetedGeometry,
+          ),
+        ),
+      },
+    );
+
+    expect(
+      active.effectiveRecipeFor(first.id).targetedPortraitRecipe,
+      targeted,
+    );
+    expect(
+      active
+          .effectiveRecipeFor(first.id)
+          .portraitGeometryRecipe
+          .faceTargets
+          .single
+          .faceSlim,
+      35,
+    );
+
+    final suspendedRegistry = activeRegistry.reconcile(const []);
+    final suspended = active.copyWith(
+      targetRegistries: {first.id: suspendedRegistry},
+    );
+
+    expect(
+      suspended.effectiveRecipeFor(first.id).targetedPortraitRecipe.isNeutral,
+      isTrue,
+    );
+    expect(
+      suspended.effectiveRecipeFor(first.id).portraitGeometryRecipe.isNeutral,
+      isTrue,
+    );
+    expect(
+      suspended.photoOverrides[first.id]!.recipe.targetedPortraitRecipe,
+      targeted,
+      reason: 'suspending a target must not destroy its stored adjustment',
+    );
+    expect(
+      suspended.photoOverrides[first.id]!.recipe.targetedGeometryRecipe,
+      targetedGeometry,
+      reason: 'suspending a target must preserve its stored geometry',
+    );
   });
 
   test(
@@ -618,7 +732,7 @@ void main() {
           .basicEditingRecipe;
       expect(effective.flipHorizontal, isTrue);
       expect(effective.filter, PhotoFilter.cinematic);
-      expect(restored.toJson()['schemaVersion'], 9);
+      expect(restored.toJson()['schemaVersion'], PhotoProject.schemaVersion);
     },
   );
 
@@ -650,6 +764,115 @@ void main() {
     expect(restored.redoHistory, isEmpty);
   });
 
+  test('version eleven migrates replayable group history idempotently', () {
+    final project = PhotoProject(
+      id: 'version-eleven-group-history',
+      createdAt: DateTime.utc(2026, 8, 20),
+      updatedAt: DateTime.utc(2026, 8, 20, 1),
+      photos: const [first],
+      sharedStyle: SharedStyle(recipe: EditRecipe(exposure: 0.2)),
+      undoHistory: [
+        ProjectEditOperation(
+          scope: ProjectEditingScope.group,
+          beforeRecipe: EditRecipe.neutral,
+          afterRecipe: EditRecipe(exposure: 0.2),
+        ),
+      ],
+    );
+    final legacyJson = project.toJson()..['schemaVersion'] = 11;
+    for (final operation in legacyJson['undoHistory']! as List) {
+      (operation as Map).remove('source');
+      operation.remove('changedAddresses');
+      operation.remove('beforeSnapshot');
+      operation.remove('afterSnapshot');
+    }
+
+    final migrated = PhotoProject.fromJson(legacyJson);
+    final reopened = PhotoProject.fromJson(migrated.toJson());
+
+    expect(migrated.sharedStyle, project.sharedStyle);
+    expect(migrated.historyBaseSnapshot, isNotNull);
+    expect(migrated.undoHistory, hasLength(1));
+    expect(migrated.undoHistory.single.source, EditSource.migration);
+    expect(migrated.undoHistory.single.beforeSnapshot, isNotNull);
+    expect(migrated.undoHistory.single.afterSnapshot, isNotNull);
+    expect(migrated.hasValidHistoryReplay, isTrue);
+    expect(reopened, migrated);
+  });
+
+  test('version eleven freezes ambiguous photo history at current result', () {
+    final project = PhotoProject(
+      id: 'version-eleven-photo-history',
+      createdAt: DateTime.utc(2026, 8, 20),
+      updatedAt: DateTime.utc(2026, 8, 20, 1),
+      photos: const [first],
+      photoOverrides: {
+        first.id: PhotoOverride(recipe: EditRecipe(contrast: 0.2)),
+      },
+      undoHistory: [
+        ProjectEditOperation(
+          scope: ProjectEditingScope.currentPhoto,
+          photoId: first.id,
+          beforeRecipe: EditRecipe.neutral,
+          afterRecipe: EditRecipe(contrast: 0.2),
+        ),
+      ],
+    );
+    final legacyJson = project.toJson()..['schemaVersion'] = 11;
+    for (final operation in legacyJson['undoHistory']! as List) {
+      (operation as Map).remove('source');
+      operation.remove('changedAddresses');
+      operation.remove('beforeSnapshot');
+      operation.remove('afterSnapshot');
+    }
+
+    final migrated = PhotoProject.fromJson(legacyJson);
+
+    expect(migrated.photoOverrides, project.photoOverrides);
+    expect(migrated.undoHistory, isEmpty);
+    expect(migrated.redoHistory, isEmpty);
+    expect(migrated.foldedEditCount, 1);
+    expect(
+      migrated.historyBaseSnapshot,
+      ProjectEditSnapshot.fromProject(project),
+    );
+    expect(migrated.hasValidHistoryReplay, isTrue);
+    expect(PhotoProject.fromJson(migrated.toJson()), migrated);
+  });
+
+  test(
+    'unknown future meta ops stay opaque and require a read-only update',
+    () {
+      final source = PhotoProject(
+        id: 'future-meta-op',
+        createdAt: DateTime.utc(2026, 8, 20),
+        updatedAt: DateTime.utc(2026, 8, 20),
+        photos: const [first],
+      ).toJson();
+      final unknown = <String, Object?>{
+        'id': 'future.generative_relight',
+        'version': 7,
+        'scope': 'currentPhoto',
+        'photoId': first.id,
+        'payload': {
+          'mode': 'cinematic',
+          'weights': [0.2, 0.8],
+        },
+      };
+      source['unknownMetaOps'] = [unknown];
+
+      final restored = PhotoProject.fromJson(source);
+      final persisted = restored.toJson();
+
+      expect(restored.requiresUpdate, isTrue);
+      expect(restored.isReadOnly, isTrue);
+      expect(restored.canMutateInputs, isFalse);
+      expect(restored.canExport, isFalse);
+      expect(persisted['unknownMetaOps'], [unknown]);
+      expect(PhotoProject.fromJson(persisted), restored);
+    },
+  );
+
   test(
     'version five project migrates portrait geometry as safely disabled',
     () {
@@ -666,7 +889,7 @@ void main() {
 
       expect(restored.effectiveRecipeFor(first.id).faceSlimStrength, 0);
       expect(restored.effectiveRecipeFor(first.id).bodySlimStrength, 0);
-      expect(restored.toJson()['schemaVersion'], 9);
+      expect(restored.toJson()['schemaVersion'], PhotoProject.schemaVersion);
     },
   );
 

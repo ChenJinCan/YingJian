@@ -8,6 +8,8 @@ void main() {
     final semantic = SemanticEditingRecipe(
       background: BackgroundTreatment.image,
       backgroundImagePath: '/app/media/background.jpg',
+      backgroundImageResourceId:
+          'resource-v1-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       localExposure: 20,
       subjectMaskStrokes: [
         MaskStroke(

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/meta_op.dart';
 import 'package:yingjian/features/editor/domain/portrait_retouch_recipe.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/recommendations/application/local_recommendation_coordinator.dart';
@@ -143,6 +144,46 @@ void main() {
       isTrue,
     );
   });
+
+  test(
+    'recommendations never contain a meta op unavailable on this device',
+    () async {
+      final analysis = await const MetadataSafePhotoAnalyzer().analyze(photo);
+      final recommendations = LocalRecommendationEngine(
+        availableMetaOpIds: const {
+          MetaOpIds.exposure,
+          MetaOpIds.highlights,
+          MetaOpIds.shadows,
+          MetaOpIds.contrast,
+          MetaOpIds.warmth,
+          MetaOpIds.saturation,
+          MetaOpIds.clarity,
+        },
+      ).recommend(photos: const [photo], analyses: {'photo-1': analysis});
+
+      expect(recommendations, hasLength(2));
+      expect(
+        recommendations.map((item) => item.family),
+        isNot(contains(SharedStyleFamily.atmosphericColor)),
+      );
+      expect(
+        recommendations.every(
+          (item) => item.requiredMetaOpIds.every(
+            const {
+              MetaOpIds.exposure,
+              MetaOpIds.highlights,
+              MetaOpIds.shadows,
+              MetaOpIds.contrast,
+              MetaOpIds.warmth,
+              MetaOpIds.saturation,
+              MetaOpIds.clarity,
+            }.contains,
+          ),
+        ),
+        isTrue,
+      );
+    },
+  );
 
   test(
     'ready analysis selects families deterministically and limits compensation',

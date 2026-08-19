@@ -4,8 +4,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/editing_core.dart';
+import 'package:yingjian/features/editor/domain/image_pipeline.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_for_platform.dart';
 import 'package:yingjian/features/editor/domain/photo_color_transform.dart';
+import 'package:yingjian/features/editor/domain/render_plan.dart';
 
 class NativePhotoPreview extends StatefulWidget {
   const NativePhotoPreview({
@@ -13,8 +16,13 @@ class NativePhotoPreview extends StatefulWidget {
     required this.recipe,
     required this.renderer,
     required this.errorBuilder,
+    this.onRendered,
+    this.onRenderFailed,
     this.retryToken = 0,
     this.maxEdge = 2048,
+    this.sourceId,
+    this.editState,
+    this.editContext = EditContext.ios,
     super.key,
   }) : assert(maxEdge > 0 && maxEdge <= 2048);
 
@@ -22,8 +30,13 @@ class NativePhotoPreview extends StatefulWidget {
   final EditRecipe recipe;
   final PhotoPreviewRenderer renderer;
   final WidgetBuilder errorBuilder;
+  final ValueChanged<EditRecipe>? onRendered;
+  final ValueChanged<EditRecipe>? onRenderFailed;
   final int retryToken;
   final int maxEdge;
+  final String? sourceId;
+  final EditState? editState;
+  final EditContext editContext;
 
   @override
   State<NativePhotoPreview> createState() => _NativePhotoPreviewState();
@@ -83,6 +96,8 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.retryToken != widget.retryToken ||
         oldWidget.sourcePath != widget.sourcePath ||
+        oldWidget.sourceId != widget.sourceId ||
+        oldWidget.editState != widget.editState ||
         oldWidget.maxEdge != widget.maxEdge ||
         !identical(oldWidget.renderer, widget.renderer)) {
       unawaited(_replacePreview());
@@ -124,7 +139,7 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
     try {
       final handle = await widget.renderer.create(
         sourcePath: widget.sourcePath,
-        pipeline: imagePipelineForCurrentPlatform(initialRecipe),
+        pipeline: _pipeline(initialRecipe),
         maxEdge: widget.maxEdge,
       );
       if (!mounted || generation != _generation) {
@@ -132,6 +147,7 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
         return;
       }
       setState(() => _handle = handle);
+      widget.onRendered?.call(initialRecipe);
       if (widget.recipe != initialRecipe) {
         _pendingRecipe = widget.recipe;
         unawaited(_drainUpdates());
@@ -139,6 +155,7 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
     } on Object {
       if (mounted && generation == _generation) {
         setState(() => _useFallback = true);
+        widget.onRenderFailed?.call(initialRecipe);
       }
     }
   }
@@ -152,21 +169,28 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
       return;
     }
     _updateInFlight = true;
+    EditRecipe? failedRecipe;
     try {
       while (mounted &&
           identical(_handle, handle) &&
           _pendingRecipe != null &&
           !_useFallback) {
         final recipe = _pendingRecipe!;
+        failedRecipe = recipe;
         _pendingRecipe = null;
         await widget.renderer.update(
           handle: handle,
-          pipeline: imagePipelineForCurrentPlatform(recipe),
+          pipeline: _pipeline(recipe),
         );
+        widget.onRendered?.call(recipe);
+        failedRecipe = null;
       }
     } on Object {
       if (mounted && identical(_handle, handle)) {
         setState(() => _useFallback = true);
+        if (failedRecipe case final recipe?) {
+          widget.onRenderFailed?.call(recipe);
+        }
       }
     } finally {
       _updateInFlight = false;
@@ -177,6 +201,44 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
         unawaited(_drainUpdates());
       }
     }
+  }
+
+  ImagePipeline _pipeline(EditRecipe recipe) => imagePipelineForCurrentPlatform(
+    recipe,
+    sourceId: widget.sourceId ?? widget.sourcePath,
+    editState: widget.editState,
+    context: _contextFor(recipe),
+    outputRequirements: RenderOutputRequirements.preview(
+      maxEdge: widget.maxEdge,
+    ),
+  );
+
+  EditContext _contextFor(EditRecipe recipe) {
+    final semantic = recipe.semanticEditingRecipe;
+    final resourceId = semantic.backgroundImageResourceId;
+    final resourcePath = semantic.backgroundImagePath;
+    if (resourceId == null ||
+        resourcePath == null ||
+        widget.editContext.resourceIds.contains(resourceId)) {
+      return widget.editContext;
+    }
+    final resourceFile = File(resourcePath);
+    if (!resourceFile.existsSync()) {
+      return widget.editContext;
+    }
+    return EditContext(
+      platform: widget.editContext.platform,
+      photoIds: widget.editContext.photoIds,
+      targetIds: widget.editContext.targetIds,
+      capabilities: widget.editContext.capabilities,
+      applicability: widget.editContext.applicability,
+      resourceIds: {...widget.editContext.resourceIds, resourceId},
+      resourceByteLengths: {
+        ...widget.editContext.resourceByteLengths,
+        resourceId: resourceFile.lengthSync(),
+      },
+      metaOpCapabilities: widget.editContext.metaOpCapabilities,
+    );
   }
 
   Future<void> _safeDispose(PhotoPreviewHandle handle) async {

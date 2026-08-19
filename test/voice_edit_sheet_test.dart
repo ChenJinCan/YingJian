@@ -2,22 +2,21 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:yingjian/features/editor/application/natural_language_edit_interpreter.dart';
 import 'package:yingjian/features/editor/application/speech_transcriber.dart';
-import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/presentation/voice_edit_sheet.dart';
 import 'package:yingjian/l10n/app_localizations.dart';
 
 void main() {
   testWidgets('typed request applies a visible recipe result', (tester) async {
-    NaturalLanguageEditResult? applied;
+    String? applied;
     await tester.pumpWidget(
       _TestHost(
         child: VoiceEditSheet(
-          currentRecipe: EditRecipe.neutral,
-          interpreter: const LocalNaturalLanguageEditInterpreter(),
           transcriber: _FakeSpeechTranscriber(),
-          onApplied: (result) => applied = result,
+          onSubmit: (intent) {
+            applied = intent;
+            return true;
+          },
         ),
       ),
     );
@@ -29,8 +28,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('voice-edit-submit')));
     await tester.pump();
 
-    expect(applied?.recipe.exposure, 0.12);
-    expect(applied?.changes.single.parameter, EditableParameter.exposure);
+    expect(applied, '照片亮一点');
   });
 
   testWidgets('voice result remains editable before the user applies it', (
@@ -39,12 +37,7 @@ void main() {
     final transcriber = _FakeSpeechTranscriber();
     await tester.pumpWidget(
       _TestHost(
-        child: VoiceEditSheet(
-          currentRecipe: EditRecipe.neutral,
-          interpreter: const LocalNaturalLanguageEditInterpreter(),
-          transcriber: transcriber,
-          onApplied: (_) {},
-        ),
+        child: VoiceEditSheet(transcriber: transcriber, onSubmit: (_) => true),
       ),
     );
 
@@ -67,10 +60,8 @@ void main() {
     await tester.pumpWidget(
       _TestHost(
         child: VoiceEditSheet(
-          currentRecipe: EditRecipe.neutral,
-          interpreter: const LocalNaturalLanguageEditInterpreter(),
           transcriber: _FakeSpeechTranscriber(),
-          onApplied: (_) {},
+          onSubmit: (_) => true,
         ),
       ),
     );
