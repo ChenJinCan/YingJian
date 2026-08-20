@@ -57,6 +57,44 @@ class RunnerTests: XCTestCase {
     XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
   }
 
+  func testPhotoPickerDeadlineCancelsPendingProviderAfterTimeout() {
+    let timedOut = expectation(description: "photo picker deadline")
+    let progress = Progress(totalUnitCount: 1)
+    let deadline = IOSPhotoPickerLoadDeadline(
+      timeout: 0.01,
+      queue: .main
+    ) {
+      timedOut.fulfill()
+    }
+
+    deadline.track(progress)
+    deadline.start()
+    wait(for: [timedOut], timeout: 1)
+
+    XCTAssertTrue(progress.isCancelled)
+    XCTAssertFalse(deadline.complete())
+  }
+
+  func testPhotoPickerDeadlineDoesNotFireAfterCompletion() {
+    let timedOut = expectation(description: "photo picker deadline")
+    timedOut.isInverted = true
+    let progress = Progress(totalUnitCount: 1)
+    let deadline = IOSPhotoPickerLoadDeadline(
+      timeout: 0.01,
+      queue: .main
+    ) {
+      timedOut.fulfill()
+    }
+
+    deadline.track(progress)
+    deadline.start()
+    XCTAssertTrue(deadline.complete())
+    wait(for: [timedOut], timeout: 0.05)
+
+    XCTAssertFalse(progress.isCancelled)
+    XCTAssertFalse(deadline.complete())
+  }
+
   func testImagePipelineV2NeutralIsOpaqueAndPixelStable() throws {
     let pipeline = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV2()))
     let extent = CGRect(x: 0, y: 0, width: 8, height: 4)

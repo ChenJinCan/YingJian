@@ -42,9 +42,89 @@ struct IOSPickedPhotoFileStore {
   }
 }
 
+final class IOSPhotoPickerLoadDeadline {
+  init(
+    timeout: TimeInterval,
+    queue: DispatchQueue,
+    onTimeout: @escaping () -> Void
+  ) {
+    self.timeout = timeout
+    self.queue = queue
+    self.onTimeout = onTimeout
+  }
+
+  private let timeout: TimeInterval
+  private let queue: DispatchQueue
+  private let onTimeout: () -> Void
+  private let lock = NSLock()
+  private var didFinish = false
+  private var workItem: DispatchWorkItem?
+  private var progresses: [Progress] = []
+
+  func track(_ progress: Progress) {
+    lock.lock()
+    if didFinish {
+      lock.unlock()
+      progress.cancel()
+      return
+    }
+    progresses.append(progress)
+    lock.unlock()
+  }
+
+  func start() {
+    let workItem = DispatchWorkItem { [weak self] in
+      self?.fire()
+    }
+    lock.lock()
+    guard !didFinish else {
+      lock.unlock()
+      return
+    }
+    self.workItem = workItem
+    lock.unlock()
+    queue.asyncAfter(deadline: .now() + timeout, execute: workItem)
+  }
+
+  @discardableResult
+  func complete() -> Bool {
+    lock.lock()
+    guard !didFinish else {
+      lock.unlock()
+      return false
+    }
+    didFinish = true
+    let workItem = workItem
+    self.workItem = nil
+    progresses.removeAll()
+    lock.unlock()
+    workItem?.cancel()
+    return true
+  }
+
+  private func fire() {
+    lock.lock()
+    guard !didFinish else {
+      lock.unlock()
+      return
+    }
+    didFinish = true
+    let progresses = progresses
+    self.progresses.removeAll()
+    workItem = nil
+    lock.unlock()
+    progresses.forEach { $0.cancel() }
+    onTimeout()
+  }
+}
+
 final class IOSPhotoPicker: NSObject, PHPickerViewControllerDelegate {
+  private static let loadTimeout: TimeInterval = 90
+
   private var completion: FlutterResult?
   private var requestDirectory: URL?
+  private var requestID: UUID?
+  private var loadDeadline: IOSPhotoPickerLoadDeadline?
 
   func pickPhotos(
     limit: Int,
@@ -66,6 +146,7 @@ final class IOSPhotoPicker: NSObject, PHPickerViewControllerDelegate {
     let picker = PHPickerViewController(configuration: configuration)
     picker.delegate = self
     self.completion = completion
+    requestID = UUID()
     requestDirectory = FileManager.default.temporaryDirectory
       .appendingPathComponent("yingjian-photo-picker", isDirectory: true)
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -108,14 +189,26 @@ final class IOSPhotoPicker: NSObject, PHPickerViewControllerDelegate {
     didFinishPicking results: [PHPickerResult]
   ) {
     picker.dismiss(animated: true)
+    guard let requestID else {
+      finishWithErrorWithoutActiveRequest()
+      return
+    }
     guard !results.isEmpty else {
-      finish([])
+      finish([], requestID: requestID)
       return
     }
     guard let requestDirectory else {
-      finishWithError()
+      finishWithError(requestID: requestID)
       return
     }
+    let deadline = IOSPhotoPickerLoadDeadline(
+      timeout: Self.loadTimeout,
+      queue: .main
+    ) { [weak self] in
+      self?.finishTimedOut(requestID: requestID)
+    }
+    loadDeadline = deadline
+    deadline.start()
     let group = DispatchGroup()
     let lock = NSLock()
     var selected = Array<[String: String]?>(repeating: nil, count: results.count)
@@ -130,7 +223,9 @@ final class IOSPhotoPicker: NSObject, PHPickerViewControllerDelegate {
         continue
       }
       group.enter()
-      result.itemProvider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) {
+      let progress = result.itemProvider.loadFileRepresentation(
+        forTypeIdentifier: typeIdentifier
+      ) {
         sourceURL,
         error in
         defer { group.leave() }
@@ -160,41 +255,77 @@ final class IOSPhotoPicker: NSObject, PHPickerViewControllerDelegate {
           lock.unlock()
         }
       }
+      deadline.track(progress)
     }
     group.notify(queue: .main) { [weak self] in
+      guard let self else { return }
+      guard self.requestID == requestID, deadline.complete() else {
+        try? FileManager.default.removeItem(at: requestDirectory)
+        return
+      }
+      self.loadDeadline = nil
       lock.lock()
       let didFail = failed || selected.contains(where: { $0 == nil })
       let completedSelection = selected.compactMap { $0 }
       lock.unlock()
       if didFail {
-        self?.finishWithError()
+        self.finishWithError(requestID: requestID)
       } else {
-        self?.finish(completedSelection)
+        self.finish(completedSelection, requestID: requestID)
       }
     }
   }
 
-  private func finish(_ value: [[String: String]]) {
+  private func finish(_ value: [[String: String]], requestID: UUID) {
+    guard self.requestID == requestID else { return }
     if value.isEmpty, let requestDirectory {
       try? FileManager.default.removeItem(at: requestDirectory)
     }
-    let completion = completion
-    self.completion = nil
-    requestDirectory = nil
-    completion?(value)
+    resolve(value)
   }
 
-  private func finishWithError() {
+  private func finishWithError(requestID: UUID) {
+    guard self.requestID == requestID else { return }
     if let requestDirectory {
       try? FileManager.default.removeItem(at: requestDirectory)
     }
-    let completion = completion
-    self.completion = nil
-    requestDirectory = nil
-    completion?(FlutterError(
+    resolve(FlutterError(
       code: "pickerFailed",
       message: "Selected photos could not be copied without transcoding",
       details: nil
     ))
+  }
+
+  private func finishTimedOut(requestID: UUID) {
+    guard self.requestID == requestID else { return }
+    if let requestDirectory {
+      try? FileManager.default.removeItem(at: requestDirectory)
+    }
+    resolve(FlutterError(
+      code: "pickerTimedOut",
+      message: "Selected photos took too long to become available",
+      details: nil
+    ))
+  }
+
+  private func finishWithErrorWithoutActiveRequest() {
+    if let requestDirectory {
+      try? FileManager.default.removeItem(at: requestDirectory)
+    }
+    resolve(FlutterError(
+      code: "pickerFailed",
+      message: "The photo picker request is unavailable",
+      details: nil
+    ))
+  }
+
+  private func resolve(_ value: Any) {
+    loadDeadline?.complete()
+    loadDeadline = nil
+    let completion = completion
+    self.completion = nil
+    requestID = nil
+    requestDirectory = nil
+    completion?(value)
   }
 }

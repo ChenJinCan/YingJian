@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/project/infrastructure/app_owned_photo_importer.dart';
@@ -58,5 +60,20 @@ void main() {
         '/private/tmp/yingjian-photo-picker/request/photo-1.jpg',
       ],
     });
+  });
+
+  test('bounds a photo picker call that never returns', () async {
+    final pending = Completer<Object?>();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (_) => pending.future);
+    const source = MethodChannelPhotoSource(
+      channel: channel,
+      selectionTimeout: Duration(milliseconds: 10),
+    );
+
+    await expectLater(
+      source.pickPhotos(limit: 6),
+      throwsA(isA<TimeoutException>()),
+    );
   });
 }

@@ -585,6 +585,29 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  testWidgets('photo picker timeout restores a retryable import button', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoImporter: _ThrowingPhotoImporter(
+          TimeoutException('photo picker did not respond'),
+        ),
+      ),
+    );
+
+    await _openEditorFromHome(tester);
+
+    expect(find.text('照片导入失败，请重试'), findsOneWidget);
+    final retry = find.byKey(const ValueKey('editor-select-photos'));
+    expect(retry, findsOneWidget);
+    expect(tester.widget<FilledButton>(retry).onPressed, isNotNull);
+    expect(find.text('正在导入照片…'), findsNothing);
+  });
+
   testWidgets('import applies the safest local look without another decision', (
     tester,
   ) async {
@@ -3544,6 +3567,17 @@ final class _DeferredPhotoImporter implements PhotoImporter {
       _completion.future;
 
   void cancel() => _completion.complete(const PhotoImportBatch());
+}
+
+final class _ThrowingPhotoImporter implements PhotoImporter {
+  _ThrowingPhotoImporter(this.error);
+
+  final Object error;
+
+  @override
+  Future<PhotoImportBatch> importPhotos({required int limit}) async {
+    throw error;
+  }
 }
 
 final class _DeferredPhotoSharer implements PhotoSharer {

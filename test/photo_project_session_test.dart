@@ -2235,6 +2235,24 @@ void main() {
       expect(store.savedProject, isNull);
     });
 
+    test('leaves the importing state when photo selection times out', () async {
+      final session = PhotoProjectSession(
+        importer: _ThrowingPhotoImporter(
+          TimeoutException('photo picker did not respond'),
+        ),
+        store: _MemoryPhotoProjectStore(),
+      );
+
+      await expectLater(
+        session.importPhotos(),
+        throwsA(isA<TimeoutException>()),
+      );
+
+      expect(session.isImporting, isFalse);
+      expect(session.flowState, PhotoProjectFlowState.empty);
+      expect(session.project, isNull);
+    });
+
     test(
       'does not open the picker after a project reaches six photos',
       () async {
@@ -2774,6 +2792,17 @@ final class _FakePhotoImporter implements PhotoImporter {
   Future<PhotoImportBatch> importPhotos({required int limit}) async {
     requestedLimits.add(limit);
     return PhotoImportBatch(photos: photos, failures: failures);
+  }
+}
+
+final class _ThrowingPhotoImporter implements PhotoImporter {
+  _ThrowingPhotoImporter(this.error);
+
+  final Object error;
+
+  @override
+  Future<PhotoImportBatch> importPhotos({required int limit}) async {
+    throw error;
   }
 }
 
