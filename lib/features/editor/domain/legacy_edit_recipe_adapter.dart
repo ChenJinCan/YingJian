@@ -101,6 +101,24 @@ final class LegacyEditRecipeAdapter {
         addTargeted(MetaOpIds.skinToneLighting, adjustment.skinToneLighting);
         addTargeted(MetaOpIds.blemishReduction, adjustment.blemishReduction);
       }
+      for (final adjustment
+          in recipe.directionalLightingRecipe.adjustments.values) {
+        void addLighting(String parameterId, Object value, Object neutral) {
+          if (value == neutral) return;
+          values[OpAddress(
+                metaOpId: MetaOpIds.directionalLighting,
+                metaOpVersion: 1,
+                parameterId: parameterId,
+                scope: EditScope.currentPhoto,
+                photoId: photoId,
+                targetId: adjustment.targetId,
+              )] =
+              value;
+        }
+
+        addLighting('azimuth', adjustment.azimuth, 0.0);
+        addLighting('intensity', adjustment.intensity, 0);
+      }
       void addGeometry(
         String id,
         String parameterId,
@@ -275,6 +293,13 @@ final class LegacyEditRecipeAdapter {
         recipe,
         address,
         (value as num).toDouble(),
+        targetRegistry,
+      ),
+      MetaOpIds.directionalLighting => _writeDirectionalLighting(
+        recipe,
+        address,
+        value,
+        state,
         targetRegistry,
       ),
       MetaOpIds.semanticAdjustments => _writeSemantic(
@@ -507,6 +532,34 @@ final class LegacyEditRecipeAdapter {
       );
     }
 
+    final lightingTargetIds = {
+      ...before.directionalLightingRecipe.adjustments.keys,
+      ...after.directionalLightingRecipe.adjustments.keys,
+    };
+    for (final targetId in lightingTargetIds) {
+      final previous = before.directionalLightingRecipe.adjustments[targetId];
+      final next = after.directionalLightingRecipe.adjustments[targetId];
+      void addLighting(String parameterId, Object oldValue, Object newValue) {
+        if (oldValue == newValue) return;
+        changes.add(
+          MetaOpChange(
+            address: OpAddress(
+              metaOpId: MetaOpIds.directionalLighting,
+              metaOpVersion: 1,
+              parameterId: parameterId,
+              scope: EditScope.currentPhoto,
+              photoId: photoId,
+              targetId: targetId,
+            ),
+            value: newValue,
+          ),
+        );
+      }
+
+      addLighting('azimuth', previous?.azimuth ?? 0.0, next?.azimuth ?? 0.0);
+      addLighting('intensity', previous?.intensity ?? 0, next?.intensity ?? 0);
+    }
+
     void addGeometry(
       String id,
       String parameterId,
@@ -688,6 +741,8 @@ final class LegacyEditRecipeAdapter {
           ? before.portraitGeometryRecipe
           : after.portraitGeometryRecipe,
       targetedPortraitRecipe: after.targetedPortraitRecipe,
+      targetedGeometryRecipe: after.targetedGeometryRecipe,
+      directionalLightingRecipe: after.directionalLightingRecipe,
       semanticEditingRecipe: beforeSemantic.copyWith(
         background: afterSemantic.background,
         backgroundImagePath: afterSemantic.backgroundImagePath,
@@ -1048,6 +1103,50 @@ final class LegacyEditRecipeAdapter {
     return recipe.copyWith(
       portraitGeometryRecipe: geometry,
       targetedGeometryRecipe: targeted,
+    );
+  }
+
+  EditRecipe _writeDirectionalLighting(
+    EditRecipe recipe,
+    OpAddress address,
+    Object value,
+    EditState state,
+    EditTargetRegistry? targetRegistry,
+  ) {
+    final targetId = address.targetId;
+    if (targetId == null) {
+      throw ArgumentError.value(address, 'address', 'Face target is required');
+    }
+    final existing = recipe.directionalLightingRecipe.adjustments[targetId];
+    final target = existing == null ? targetRegistry?.targets[targetId] : null;
+    if (existing == null && target == null) {
+      throw ArgumentError.value(targetId, 'targetId', 'Unknown face target');
+    }
+    Object read(String parameterId, Object fallback) =>
+        state.valueAt(
+          OpAddress(
+            metaOpId: MetaOpIds.directionalLighting,
+            metaOpVersion: 1,
+            parameterId: parameterId,
+            scope: address.scope,
+            photoId: address.photoId,
+            targetId: targetId,
+          ),
+        ) ??
+        fallback;
+    final azimuth = address.parameterId == 'azimuth'
+        ? (value as num).toDouble()
+        : (read('azimuth', existing?.azimuth ?? 0.0) as num).toDouble();
+    final intensity = address.parameterId == 'intensity'
+        ? value as int
+        : read('intensity', existing?.intensity ?? 0) as int;
+    return recipe.copyWith(
+      directionalLightingRecipe: recipe.directionalLightingRecipe.update(
+        targetId: targetId,
+        region: existing?.region ?? target!.region,
+        azimuth: azimuth,
+        intensity: intensity,
+      ),
     );
   }
 

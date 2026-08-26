@@ -1102,4 +1102,46 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get projectRequiresUpdateMessage =>
       'This project contains effects this version cannot handle. Everything is preserved and view-only until the app is updated.';
+
+  @override
+  String get visualTracksTitle => 'Visual Tracks';
+
+  @override
+  String get visualTracksEntry => 'Visual Tracks';
+
+  @override
+  String get visualTracksNotApplied => 'This change was not applied';
+
+  @override
+  String get eraAtmosphereTrack => 'Era atmosphere';
+
+  @override
+  String get lightingTrack => 'Lighting';
+
+  @override
+  String get vintageFilm => 'Vintage film';
+
+  @override
+  String get currentEffect => 'Current look';
+
+  @override
+  String get nearFuture => 'Near future';
+
+  @override
+  String get lightingNeedsPerson =>
+      'No person in this photo can be relit safely';
+
+  @override
+  String personNumber(int number) {
+    return 'Person $number';
+  }
+
+  @override
+  String get leftLight => 'Left light';
+
+  @override
+  String get frontLight => 'Front light';
+
+  @override
+  String get rightLight => 'Right light';
 }

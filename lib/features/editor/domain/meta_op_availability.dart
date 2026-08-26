@@ -110,6 +110,7 @@ final standardMetaOpProductPolicy = MetaOpProductPolicy(
     MetaOpIds.blemishReduction: MetaOpLifecycle.aiProduction,
     MetaOpIds.faceGeometry: MetaOpLifecycle.aiProposal,
     MetaOpIds.bodyGeometry: MetaOpLifecycle.aiProposal,
+    MetaOpIds.directionalLighting: MetaOpLifecycle.manualProduction,
     MetaOpIds.semanticAdjustments: MetaOpLifecycle.aiProduction,
   },
 );

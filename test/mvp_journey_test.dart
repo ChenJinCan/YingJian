@@ -136,6 +136,11 @@ void main() {
           await tester.pumpAndSettle();
           await tester.tap(find.byKey(const ValueKey('editor-all-tools')));
           await tester.pumpAndSettle();
+          expect(find.byType(BottomSheet), findsNothing);
+          expect(
+            find.byKey(const ValueKey('editor-tools-dock')),
+            findsOneWidget,
+          );
           expect(
             find.byKey(const ValueKey('editor-meta-op-search')),
             findsOneWidget,
@@ -331,7 +336,7 @@ void main() {
       findsOneWidget,
     );
     _expectCurrentTapSemanticsAtLeast(tester, 48);
-    await tester.tapAt(const Offset(12, 12));
+    await tester.tap(find.byKey(const ValueKey('editor-all-tools-back')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('editor-all-tools')));
     await tester.pumpAndSettle();

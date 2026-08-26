@@ -26,6 +26,7 @@ import 'package:yingjian/features/editor/domain/semantic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/targeted_portrait_recipe.dart';
 import 'package:yingjian/features/editor/infrastructure/method_channel_speech_transcriber.dart';
 import 'package:yingjian/features/editor/presentation/native_photo_preview.dart';
+import 'package:yingjian/features/editor/presentation/visual_tracks_page.dart';
 import 'package:yingjian/features/editor/presentation/voice_edit_sheet.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
@@ -257,6 +258,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   }
 
   void _loadEditableRecipe() {
+    if (!mounted) return;
     final session = _session;
     final project = session?.project;
     final prioritized = <String>[];
@@ -661,7 +663,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
       }
     } finally {
-      if (_editorSession.recipe == desiredRecipe) {
+      if (mounted && _editorSession.recipe == desiredRecipe) {
         _loadEditableRecipe();
       }
       if (committedGroupEdit && mounted) {
@@ -694,6 +696,88 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       _loadEditableRecipe();
       if (mounted) setState(() => _editFeedback = null);
     }
+  }
+
+  Future<EditRecipe?> _commitVisualTrackRecipe(EditRecipe desiredRecipe) async {
+    try {
+      final session = _session;
+      final project = session?.project;
+      if (session == null || project == null) return null;
+      final photoId = project.focusPhotoId ?? project.photos.first.id;
+      final activeTargets =
+          project.targetRegistries[photoId]?.targets.values
+              .where((target) => target.status == EditTargetStatus.active)
+              .toList(growable: false) ??
+          const <StableEditTarget>[];
+      await session.commitManualRecipe(
+        desiredRecipe: desiredRecipe,
+        context: _editorSession.editContext(
+          photoIds: project.photos.map((photo) => photo.id).toSet(),
+          targetIds: activeTargets.map((target) => target.id).toSet(),
+          applicability: {
+            'photo',
+            if (activeTargets.any(
+              (target) => target.kind == EditTargetKind.face,
+            ))
+              'face',
+          },
+        ),
+      );
+      _loadEditableRecipe();
+      return _editorSession.recipe;
+    } on Object {
+      return null;
+    }
+  }
+
+  Future<EditRecipe?> _undoVisualTrack() async {
+    await _undoEdit();
+    return _editorSession.recipe;
+  }
+
+  Future<void> _openVisualTracks() async {
+    final session = _session;
+    final project = session?.project;
+    if (session == null || project == null || project.photos.isEmpty) return;
+    final photo = project.photos[_selectedIndex];
+    final activeTargets =
+        (project.targetRegistries[photo.id]?.targets.values ?? const [])
+            .where(
+              (target) =>
+                  target.kind == EditTargetKind.face &&
+                  target.status == EditTargetStatus.active,
+            )
+            .toList(growable: false)
+          ..sort(
+            (left, right) => left.region.left.compareTo(right.region.left),
+          );
+    final editContext = _editorSession.editContext(
+      photoIds: project.photos.map((value) => value.id).toSet(),
+      targetIds: activeTargets.map((target) => target.id).toSet(),
+      applicability: {'photo', if (activeTargets.isNotEmpty) 'face'},
+      resourceIds: project.editingResources.resources.keys.toSet(),
+      resourceByteLengths: {
+        for (final resource in project.editingResources.resources.values)
+          resource.id: resource.byteLength,
+      },
+    );
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => VisualTracksPage(
+          photo: photo,
+          initialRecipe: _editorSession.recipe,
+          editorSession: _editorSession,
+          previewRenderer: context.read<PhotoPreviewRenderer>(),
+          faceTargets: activeTargets,
+          editStateFor: (recipe) =>
+              project.renderStateFor(photo.id, recipe: recipe),
+          editContext: editContext,
+          onCommit: _commitVisualTrackRecipe,
+          onUndo: _undoVisualTrack,
+        ),
+      ),
+    );
+    _loadEditableRecipe();
   }
 
   Future<void> _redoEdit() async {
@@ -1891,6 +1975,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                   onVoiceEdit: () => unawaited(_showVoiceEditSheet()),
                   onManualEdit: () =>
                       setState(() => _manualToolsVisible = true),
+                  onVisualTracks: () => unawaited(_openVisualTracks()),
                   onUndo: () => unawaited(_undoEdit()),
                   onRedo: () => unawaited(_redoEdit()),
                   onReset: () => unawaited(_resetEdit()),
@@ -2664,6 +2749,7 @@ class _EditorToolsDock extends StatefulWidget {
 
 class _EditorToolsDockState extends State<_EditorToolsDock> {
   String? _selectedMetaOpId;
+  bool _showAllTools = false;
   late List<String> _frozenManualMetaOpIds;
 
   @override
@@ -2677,6 +2763,7 @@ class _EditorToolsDockState extends State<_EditorToolsDock> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.selected.id != widget.selected.id) {
       _selectedMetaOpId = null;
+      _showAllTools = false;
       _freezeManualOrder();
     }
   }
@@ -2695,51 +2782,100 @@ class _EditorToolsDockState extends State<_EditorToolsDock> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.3;
+    final usesDedicatedEditor = _usesDedicatedEditor(_selectedMetaOpId);
     return SizedBox(
       key: const ValueKey('editor-tools-dock'),
-      height: _usesDedicatedEditor(_selectedMetaOpId)
+      height: _showAllTools
+          ? min(300, MediaQuery.sizeOf(context).height * 0.38)
+          : usesDedicatedEditor
           ? min(320, MediaQuery.sizeOf(context).height * 0.36)
           : largeText
-          ? min(350, MediaQuery.sizeOf(context).height * 0.42)
-          : min(190, MediaQuery.sizeOf(context).height * 0.23),
+          ? min(320, MediaQuery.sizeOf(context).height * 0.42)
+          : min(236, MediaQuery.sizeOf(context).height * 0.31),
       child: Material(
         color: colors.surface,
         child: Column(
           children: [
             Divider(height: 1, color: colors.outlineVariant),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 4, 8, 2),
-              child: Row(
-                children: [
-                  if (largeText)
+            SizedBox(
+              height: 52,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(
+                  children: [
                     IconButton(
-                      key: const ValueKey('editor-tools-done'),
-                      tooltip: context.l10n.backToEditing,
-                      onPressed: widget.onClose,
-                      icon: const Icon(Icons.arrow_back_rounded),
-                    )
-                  else
-                    TextButton.icon(
-                      key: const ValueKey('editor-tools-done'),
-                      onPressed: widget.onClose,
-                      icon: const Icon(Icons.arrow_back_rounded, size: 18),
-                      label: Text(context.l10n.backToEditing),
+                      key: ValueKey(
+                        _showAllTools
+                            ? 'editor-all-tools-back'
+                            : 'editor-tools-done',
+                      ),
+                      tooltip: _showAllTools
+                          ? MaterialLocalizations.of(context).backButtonTooltip
+                          : context.l10n.backToEditing,
+                      onPressed: _showAllTools
+                          ? () => setState(() => _showAllTools = false)
+                          : widget.onClose,
+                      icon: Icon(
+                        _showAllTools
+                            ? Icons.arrow_back_rounded
+                            : Icons.keyboard_arrow_down_rounded,
+                      ),
                     ),
-                  const Spacer(),
-                  TextButton(
-                    key: const ValueKey('editor-all-tools'),
-                    onPressed: widget.editingEnabled ? _showMetaOpSearch : null,
-                    child: Text(context.l10n.allTools),
-                  ),
-                ],
+                    Expanded(
+                      child: Text(
+                        _showAllTools
+                            ? context.l10n.allTools
+                            : context.l10n.adjustPhoto,
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    if (_showAllTools)
+                      IconButton(
+                        key: const ValueKey('editor-tools-done'),
+                        tooltip: context.l10n.backToEditing,
+                        onPressed: widget.onClose,
+                        icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                      )
+                    else
+                      IconButton(
+                        key: const ValueKey('editor-all-tools'),
+                        tooltip: context.l10n.allTools,
+                        onPressed: widget.editingEnabled
+                            ? () => setState(() => _showAllTools = true)
+                            : null,
+                        icon: const Icon(Icons.grid_view_rounded),
+                      ),
+                  ],
+                ),
               ),
             ),
             Expanded(
-              child: SingleChildScrollView(
-                key: const ValueKey('editor-tools-scroll'),
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: _buildSelectedTool(),
-              ),
+              child: _showAllTools
+                  ? _InlineMetaOpBrowser(
+                      editorSession: widget.editorSession,
+                      applicability: {
+                        'photo',
+                        if (widget.photoToolsVisible &&
+                            widget.portraitApplicable)
+                          'face',
+                        if (widget.photoToolsVisible && widget.bodyApplicable)
+                          'body',
+                      },
+                      onSelected: (selected) => setState(() {
+                        _selectedMetaOpId = selected;
+                        _showAllTools = false;
+                      }),
+                    )
+                  : SingleChildScrollView(
+                      key: const ValueKey('editor-tools-scroll'),
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      child: _buildSelectedTool(),
+                    ),
             ),
           ],
         ),
@@ -2878,41 +3014,24 @@ class _EditorToolsDockState extends State<_EditorToolsDock> {
       onRecipeCommitted: widget.onRecipeCommitted,
     );
   }
-
-  Future<void> _showMetaOpSearch() async {
-    final selected = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (context) => _MetaOpSearchSheet(
-        editorSession: widget.editorSession,
-        applicability: {
-          'photo',
-          if (widget.photoToolsVisible && widget.portraitApplicable) 'face',
-          if (widget.photoToolsVisible && widget.bodyApplicable) 'body',
-        },
-      ),
-    );
-    if (selected != null && mounted) {
-      setState(() => _selectedMetaOpId = selected);
-    }
-  }
 }
 
-class _MetaOpSearchSheet extends StatefulWidget {
-  const _MetaOpSearchSheet({
+class _InlineMetaOpBrowser extends StatefulWidget {
+  const _InlineMetaOpBrowser({
     required this.editorSession,
     required this.applicability,
+    required this.onSelected,
   });
 
   final EditorSession editorSession;
   final Set<String> applicability;
+  final ValueChanged<String> onSelected;
 
   @override
-  State<_MetaOpSearchSheet> createState() => _MetaOpSearchSheetState();
+  State<_InlineMetaOpBrowser> createState() => _InlineMetaOpBrowserState();
 }
 
-class _MetaOpSearchSheetState extends State<_MetaOpSearchSheet> {
+class _InlineMetaOpBrowserState extends State<_InlineMetaOpBrowser> {
   String _query = '';
 
   @override
@@ -2923,55 +3042,48 @@ class _MetaOpSearchSheetState extends State<_MetaOpSearchSheet> {
     final ids = _query.trim().isEmpty
         ? availability.searchIds
         : availability.search(MetaOpCatalog.standard, _query);
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(
-          16,
-          0,
-          16,
-          16 + MediaQuery.viewInsetsOf(context).bottom,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              key: const ValueKey('editor-meta-op-search'),
-              autofocus: true,
-              textInputAction: TextInputAction.search,
-              decoration: InputDecoration(
-                hintText: context.l10n.metaOpSearchHint,
-                prefixIcon: const Icon(Icons.search),
-              ),
-              onChanged: (value) => setState(() => _query = value),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Column(
+        children: [
+          TextField(
+            key: const ValueKey('editor-meta-op-search'),
+            autofocus: false,
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              hintText: context.l10n.metaOpSearchHint,
+              prefixIcon: const Icon(Icons.search),
             ),
-            const SizedBox(height: 8),
-            if (ids.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 28),
+            onChanged: (value) => setState(() => _query = value),
+          ),
+          const SizedBox(height: 8),
+          if (ids.isEmpty)
+            Expanded(
+              child: Center(
                 child: Text(
                   context.l10n.metaOpSearchNoResults,
                   key: const ValueKey('editor-meta-op-search-empty'),
                 ),
-              )
-            else
-              Flexible(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: ids.length,
-                  itemBuilder: (context, index) {
-                    final id = ids[index];
-                    return ListTile(
-                      key: ValueKey('editor-meta-op-result-$id'),
-                      leading: const Icon(Icons.tune),
-                      title: Text(_metaOpLabel(context, id)),
-                      onTap: () => Navigator.pop(context, id),
-                    );
-                  },
-                ),
               ),
-          ],
-        ),
+            )
+          else
+            Expanded(
+              child: ListView.builder(
+                padding: EdgeInsets.zero,
+                itemCount: ids.length,
+                itemBuilder: (context, index) {
+                  final id = ids[index];
+                  return ListTile(
+                    key: ValueKey('editor-meta-op-result-$id'),
+                    minTileHeight: 48,
+                    leading: const Icon(Icons.tune),
+                    title: Text(_metaOpLabel(context, id)),
+                    onTap: () => widget.onSelected(id),
+                  );
+                },
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -3249,6 +3361,7 @@ class _EditorCommandBar extends StatelessWidget {
     required this.feedback,
     required this.onVoiceEdit,
     required this.onManualEdit,
+    required this.onVisualTracks,
     required this.onUndo,
     required this.onRedo,
     required this.onReset,
@@ -3271,6 +3384,7 @@ class _EditorCommandBar extends StatelessWidget {
   final _EditFeedback? feedback;
   final VoidCallback onVoiceEdit;
   final VoidCallback onManualEdit;
+  final VoidCallback onVisualTracks;
   final VoidCallback onUndo;
   final VoidCallback onRedo;
   final VoidCallback onReset;
@@ -3393,6 +3507,14 @@ class _EditorCommandBar extends StatelessWidget {
                             scrollDirection: Axis.horizontal,
                             child: Row(
                               children: [
+                                _QuickEditChip(
+                                  key: const ValueKey('editor-visual-tracks'),
+                                  label: context.l10n.visualTracksEntry,
+                                  onPressed: editingEnabled
+                                      ? onVisualTracks
+                                      : null,
+                                ),
+                                const SizedBox(width: 8),
                                 _QuickEditChip(
                                   key: const ValueKey('editor-quick-brighter'),
                                   label: context.l10n.quickEditBrighter,
@@ -5342,22 +5464,17 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
               ).textTheme.labelLarge?.copyWith(color: colors.primary),
             ),
             if (selectedValue != 0) ...[
-              const SizedBox(width: 8),
-              Semantics(
-                button: true,
-                label: context.l10n.resetCurrentAdjustment,
-                excludeSemantics: true,
-                child: TextButton(
-                  key: const ValueKey('editor-reset-current-adjustment'),
-                  style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-                  onPressed: widget.enabled
-                      ? () {
-                          _resetValue(effectiveRecipe, selected);
-                          widget.onRecipeCommitted();
-                        }
-                      : null,
-                  child: Text(context.l10n.resetCurrentAdjustment),
-                ),
+              const SizedBox(width: 4),
+              IconButton(
+                key: const ValueKey('editor-reset-current-adjustment'),
+                tooltip: context.l10n.resetCurrentAdjustment,
+                onPressed: widget.enabled
+                    ? () {
+                        _resetValue(effectiveRecipe, selected);
+                        widget.onRecipeCommitted();
+                      }
+                    : null,
+                icon: const Icon(Icons.restart_alt_rounded),
               ),
             ],
             if (_isNaturalDetail(selected) &&
@@ -5445,9 +5562,10 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
         _AdjustmentSlider(
           key: ValueKey('editor-adjustment-${selected.name}'),
           enabled: widget.enabled,
-          label: selectedLabel,
+          label: '',
           semanticLabel: selectedLabel,
           value: selectedValue,
+          showValue: false,
           minimum: _minimum(selected),
           maximum: _maximum(selected),
           onStart: widget.editorSession.beginAdjustment,
@@ -8144,6 +8262,7 @@ class _AdjustmentSlider extends StatelessWidget {
     required this.onEnd,
     this.minimum = -1,
     this.maximum = 1,
+    this.showValue = true,
   });
 
   final bool enabled;
@@ -8155,6 +8274,7 @@ class _AdjustmentSlider extends StatelessWidget {
   final VoidCallback onEnd;
   final double minimum;
   final double maximum;
+  final bool showValue;
 
   @override
   Widget build(BuildContext context) {
@@ -8199,10 +8319,11 @@ class _AdjustmentSlider extends StatelessWidget {
             ),
           ),
         ),
-        SizedBox(
-          width: 40,
-          child: Text('${(value * 100).round()}', textAlign: TextAlign.end),
-        ),
+        if (showValue)
+          SizedBox(
+            width: 40,
+            child: Text('${(value * 100).round()}', textAlign: TextAlign.end),
+          ),
       ],
     );
   }

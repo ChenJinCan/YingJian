@@ -748,6 +748,44 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('editor-tools-done')));
     await tester.pumpAndSettle();
+    final visualTracksEntry = find.byKey(
+      const ValueKey('editor-visual-tracks'),
+    );
+    await tester.ensureVisible(visualTracksEntry);
+    await tester.tap(visualTracksEntry);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('visual-tracks-page')), findsOneWidget);
+    expect(find.byKey(const ValueKey('visual-tracks-preview')), findsOneWidget);
+    final eraBefore = (await store.loadLatest())!.effectiveRecipeFor(
+      importedPhoto.id,
+    );
+    await tester.drag(
+      find.byKey(const ValueKey('era-arc-track')),
+      const Offset(110, 0),
+    );
+    await tester.pumpAndSettle();
+    final eraAfter = (await store.loadLatest())!.effectiveRecipeFor(
+      importedPhoto.id,
+    );
+    expect(eraAfter, isNot(eraBefore));
+    await tester.tap(find.text('光照'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('lighting-arc-track')), findsOneWidget);
+    await tester.drag(
+      find.byKey(const ValueKey('lighting-arc-track')),
+      const Offset(-80, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      (await store.loadLatest())!
+          .effectiveRecipeFor(importedPhoto.id)
+          .directionalLightingRecipe
+          .adjustments,
+      isNotEmpty,
+    );
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
     final saveButton = find.byKey(const ValueKey('editor-batch-export'));
     await tester.ensureVisible(saveButton);
     await tester.tap(saveButton);

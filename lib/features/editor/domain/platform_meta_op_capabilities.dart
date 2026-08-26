@@ -18,6 +18,7 @@ final iosMetaOpCapabilities = PlatformMetaOpCapabilities(
     _support(MetaOpIds.blemishReduction, maxTargets: 6),
     _support(MetaOpIds.faceGeometry, maxTargets: 3),
     _support(MetaOpIds.bodyGeometry, maxTargets: 3),
+    _support(MetaOpIds.directionalLighting, maxTargets: 6),
     _support(MetaOpIds.semanticAdjustments, maxResourceBytes: 50 * 1024 * 1024),
   ],
 );

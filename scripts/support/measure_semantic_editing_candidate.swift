@@ -359,9 +359,12 @@ private enum SemanticEditingMeasurement {
     eraseStrokes: [[String: Any]] = []
   ) -> [String: Any] {
     [
-      "recipeVersion": 2,
+      "recipeVersion": 3,
       "background": background,
       "backgroundImagePath": backgroundImagePath,
+      "backgroundImageResourceId": background == "image"
+        ? "resource-v1-0000000000000000000000000000000000000000000000000000000000000000"
+        : "",
       "backgroundBlur": backgroundBlur,
       "subjectExposure": subjectExposure,
       "subjectSaturation": 0,

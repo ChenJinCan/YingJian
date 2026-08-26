@@ -5,7 +5,7 @@ import 'package:yingjian/features/editor/domain/editing_core.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_v1.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline_v2.dart';
-import 'package:yingjian/features/editor/domain/image_pipeline_v11.dart';
+import 'package:yingjian/features/editor/domain/image_pipeline_v12.dart';
 import 'package:yingjian/features/editor/domain/legacy_edit_recipe_adapter.dart';
 import 'package:yingjian/features/editor/domain/meta_op.dart';
 import 'package:yingjian/features/editor/domain/render_plan.dart';
@@ -62,7 +62,7 @@ ImagePipeline imagePipelineForCurrentPlatform(
     throw StateError('Render plan rejected: ${rejection.reason.name}');
   }
   final payload = defaultTargetPlatform == TargetPlatform.iOS
-      ? ImagePipelineV11.fromRecipe(recipe)
+      ? ImagePipelineV12.fromRecipe(recipe)
       : supportsImagePipelineV2
       ? ImagePipelineV2.fromRecipe(recipe)
       : ImagePipelineV1.fromRecipe(recipe);

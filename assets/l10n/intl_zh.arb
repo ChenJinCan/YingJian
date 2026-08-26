@@ -362,5 +362,19 @@
   "fullscreenAdjusted": "调整后",
   "fullscreenPreviewHint": "轻点返回调整 · 按住看原图",
   "projectRequiresUpdateTitle": "需要更新后继续编辑",
-  "projectRequiresUpdateMessage": "这组照片包含当前版本尚不支持的效果。已完整保留，只能查看，更新应用后可继续编辑和保存。"
+  "projectRequiresUpdateMessage": "这组照片包含当前版本尚不支持的效果。已完整保留，只能查看，更新应用后可继续编辑和保存。",
+  "visualTracksTitle": "视觉轨道",
+  "visualTracksEntry": "视觉轨道",
+  "visualTracksNotApplied": "没有应用这次变化",
+  "eraAtmosphereTrack": "时代氛围",
+  "lightingTrack": "光照",
+  "vintageFilm": "复古胶片",
+  "currentEffect": "当前效果",
+  "nearFuture": "近未来",
+  "lightingNeedsPerson": "这张照片没有可安全重布光的人物",
+  "personNumber": "人物 {number}",
+  "@personNumber": {"placeholders": {"number": {"type": "int"}}},
+  "leftLight": "左侧光",
+  "frontLight": "正面光",
+  "rightLight": "右侧光"
 }

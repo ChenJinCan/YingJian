@@ -1453,7 +1453,8 @@ void main() {
         await tester.pump(const Duration(milliseconds: 100));
       }
 
-      expect(previewRenderer.creates.length, greaterThan(1));
+      expect(previewRenderer.creates, hasLength(1));
+      expect(previewRenderer.updates, isNotEmpty);
       final recipe = store.project!.photoOverrides['photo-1']!.recipe;
       expect(recipe.crop, CropGeometry.original);
       expect(recipe.basicEditingRecipe.flipHorizontal, isFalse);

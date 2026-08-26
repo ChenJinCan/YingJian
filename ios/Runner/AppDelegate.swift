@@ -984,6 +984,7 @@ private final class IOSPhotoPreviewRenderer {
           metaOpCapability(id: "portrait.blemish_reduction", maxTargets: 6),
           metaOpCapability(id: "portrait.face_geometry", maxTargets: 3),
           metaOpCapability(id: "portrait.body_geometry", maxTargets: 3),
+          metaOpCapability(id: "portrait.directional_lighting", maxTargets: 6),
           metaOpCapability(
             id: "semantic.background_local",
             maxTargets: 0,

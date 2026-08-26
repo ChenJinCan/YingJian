@@ -1045,4 +1045,45 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String get projectRequiresUpdateMessage =>
       '这组照片包含当前版本尚不支持的效果。已完整保留，只能查看，更新应用后可继续编辑和保存。';
+
+  @override
+  String get visualTracksTitle => '视觉轨道';
+
+  @override
+  String get visualTracksEntry => '视觉轨道';
+
+  @override
+  String get visualTracksNotApplied => '没有应用这次变化';
+
+  @override
+  String get eraAtmosphereTrack => '时代氛围';
+
+  @override
+  String get lightingTrack => '光照';
+
+  @override
+  String get vintageFilm => '复古胶片';
+
+  @override
+  String get currentEffect => '当前效果';
+
+  @override
+  String get nearFuture => '近未来';
+
+  @override
+  String get lightingNeedsPerson => '这张照片没有可安全重布光的人物';
+
+  @override
+  String personNumber(int number) {
+    return '人物 $number';
+  }
+
+  @override
+  String get leftLight => '左侧光';
+
+  @override
+  String get frontLight => '正面光';
+
+  @override
+  String get rightLight => '右侧光';
 }

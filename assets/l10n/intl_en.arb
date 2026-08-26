@@ -360,5 +360,19 @@
   "fullscreenAdjusted": "Edited",
   "fullscreenPreviewHint": "Tap to return · Hold for original",
   "projectRequiresUpdateTitle": "Update to continue editing",
-  "projectRequiresUpdateMessage": "This project contains effects this version cannot handle. Everything is preserved and view-only until the app is updated."
+  "projectRequiresUpdateMessage": "This project contains effects this version cannot handle. Everything is preserved and view-only until the app is updated.",
+  "visualTracksTitle": "Visual Tracks",
+  "visualTracksEntry": "Visual Tracks",
+  "visualTracksNotApplied": "This change was not applied",
+  "eraAtmosphereTrack": "Era atmosphere",
+  "lightingTrack": "Lighting",
+  "vintageFilm": "Vintage film",
+  "currentEffect": "Current look",
+  "nearFuture": "Near future",
+  "lightingNeedsPerson": "No person in this photo can be relit safely",
+  "personNumber": "Person {number}",
+  "@personNumber": {"placeholders": {"number": {"type": "int"}}},
+  "leftLight": "Left light",
+  "frontLight": "Front light",
+  "rightLight": "Right light"
 }

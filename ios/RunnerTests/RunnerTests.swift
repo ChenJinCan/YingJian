@@ -1213,6 +1213,28 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(Array(bytes[rightPixel..<(rightPixel + 3)]), [51, 51, 51])
   }
 
+  func testImagePipelineV12ValidatesDirectionalLightingContract() throws {
+    let adjustment: [String: Any] = [
+      "targetId": "target-v1-1234abcd",
+      "region": ["left": 0.1, "top": 0.3, "right": 0.4, "bottom": 0.8],
+      "azimuth": -45.0,
+      "intensity": 35,
+    ]
+    let pipeline = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV12(
+      adjustments: [adjustment]
+    )))
+    XCTAssertEqual(pipeline.directionalLightingAdjustments.count, 1)
+    XCTAssertEqual(pipeline.directionalLightingAdjustments.first?.azimuth, -45)
+    XCTAssertEqual(pipeline.directionalLightingAdjustments.first?.intensity, 35)
+
+    var invalidAzimuth = adjustment
+    invalidAzimuth["azimuth"] = 91
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV12(adjustments: [invalidAzimuth])))
+    var fractionalIntensity = adjustment
+    fractionalIntensity["intensity"] = 20.5
+    XCTAssertNil(IOSImagePipeline(arguments: pipelineV12(adjustments: [fractionalIntensity])))
+  }
+
   func testPhotoExportOptionsValidateFormatSizeAndQuality() {
     let original = IOSPhotoExportOptions(arguments: [
       "format": "jpeg", "size": "original", "quality": "high", "colorSpace": "srgb",
@@ -3607,6 +3629,18 @@ class RunnerTests: XCTestCase {
     var pipeline = pipelineV10()
     pipeline["schemaVersion"] = 11
     pipeline["targetedPortraitRecipeV1"] = [
+      "schemaVersion": 1,
+      "adjustments": adjustments,
+    ]
+    return pipeline
+  }
+
+  private func pipelineV12(
+    adjustments: [[String: Any]] = []
+  ) -> [String: Any] {
+    var pipeline = pipelineV11()
+    pipeline["schemaVersion"] = 12
+    pipeline["directionalLightingRecipeV1"] = [
       "schemaVersion": 1,
       "adjustments": adjustments,
     ]

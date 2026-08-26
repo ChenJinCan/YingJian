@@ -69,18 +69,34 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
       case AppLifecycleState.resumed:
         if (!_suspended) return;
         _suspended = false;
-        if (_handle == null) unawaited(_create());
+        if (_handle == null) {
+          unawaited(_create());
+        } else {
+          _pendingRecipe = widget.recipe;
+          unawaited(_drainUpdates());
+        }
         return;
       case AppLifecycleState.inactive:
+        return;
       case AppLifecycleState.hidden:
       case AppLifecycleState.paused:
+        _pausePreview();
+        return;
       case AppLifecycleState.detached:
-        unawaited(_suspendPreview());
+        unawaited(_detachPreview());
     }
   }
 
-  Future<void> _suspendPreview() async {
+  void _pausePreview() {
     if (_suspended) return;
+    _suspended = true;
+    if (_handle == null) {
+      _generation += 1;
+    }
+  }
+
+  Future<void> _detachPreview() async {
+    if (_suspended && _handle == null) return;
     _suspended = true;
     _generation += 1;
     final previous = _handle;
@@ -97,7 +113,6 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
     if (oldWidget.retryToken != widget.retryToken ||
         oldWidget.sourcePath != widget.sourcePath ||
         oldWidget.sourceId != widget.sourceId ||
-        oldWidget.editState != widget.editState ||
         oldWidget.maxEdge != widget.maxEdge ||
         !identical(oldWidget.renderer, widget.renderer)) {
       unawaited(_replacePreview());
@@ -111,7 +126,8 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
       unawaited(_replacePreview());
       return;
     }
-    if (oldWidget.recipe != widget.recipe) {
+    if (oldWidget.recipe != widget.recipe ||
+        oldWidget.editState != widget.editState) {
       _pendingRecipe = widget.recipe;
       unawaited(_drainUpdates());
     }
@@ -161,7 +177,7 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
   }
 
   Future<void> _drainUpdates() async {
-    if (_updateInFlight) {
+    if (_updateInFlight || _suspended) {
       return;
     }
     final handle = _handle;
@@ -174,6 +190,7 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
       while (mounted &&
           identical(_handle, handle) &&
           _pendingRecipe != null &&
+          !_suspended &&
           !_useFallback) {
         final recipe = _pendingRecipe!;
         failedRecipe = recipe;
@@ -197,6 +214,7 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
       if (_pendingRecipe != null &&
           _handle != null &&
           mounted &&
+          !_suspended &&
           !_useFallback) {
         unawaited(_drainUpdates());
       }

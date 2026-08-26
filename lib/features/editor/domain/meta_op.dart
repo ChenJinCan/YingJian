@@ -39,6 +39,7 @@ abstract final class MetaOpIds {
   static const blemishReduction = 'portrait.blemish_reduction';
   static const faceGeometry = 'portrait.face_geometry';
   static const bodyGeometry = 'portrait.body_geometry';
+  static const directionalLighting = 'portrait.directional_lighting';
   static const semanticAdjustments = 'semantic.background_local';
 }
 
@@ -564,6 +565,36 @@ final class MetaOpCatalog {
       defaultOrder: 26,
     ),
     const MetaOpDefinition(
+      id: MetaOpIds.directionalLighting,
+      version: 1,
+      semantic:
+          'Relight one stable face target with a bounded horizontal key-light direction and intensity.',
+      exclusions: {},
+      parameters: [
+        MetaOpParameterDefinition.number(
+          id: 'azimuth',
+          neutralValue: 0,
+          minimum: -90,
+          maximum: 90,
+        ),
+        MetaOpParameterDefinition.integer(
+          id: 'intensity',
+          neutralValue: 0,
+          minimum: 0,
+          maximum: 100,
+        ),
+      ],
+      targetType: MetaOpTargetType.face,
+      stage: RenderStage.portraitBody,
+      sharing: MetaOpSharing.currentPhoto,
+      applicability: {'photo', 'face'},
+      searchTerms: {'光照', '左侧光', '右侧光', 'relight', 'directional light'},
+      defaultOrder: 27,
+      control: MetaOpControl.dedicatedEditor,
+      aiAvailability: AiAvailability.proposalOnly,
+      requiredCapability: 'portrait.directional_lighting.v1',
+    ),
+    const MetaOpDefinition(
       id: MetaOpIds.semanticAdjustments,
       version: 1,
       semantic:
@@ -644,7 +675,7 @@ final class MetaOpCatalog {
         'local',
         'mask',
       },
-      defaultOrder: 27,
+      defaultOrder: 28,
       control: MetaOpControl.dedicatedEditor,
       aiAvailability: AiAvailability.enabled,
       requiredCapability: 'semantic.background_local.v1',

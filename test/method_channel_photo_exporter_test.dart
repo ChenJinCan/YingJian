@@ -63,8 +63,9 @@ void main() {
       'quality': 'standard',
       'maxEdge': 2048,
     });
-    expect(pipeline['schemaVersion'], 11);
+    expect(pipeline['schemaVersion'], 12);
     expect(pipeline['targetedPortraitRecipeV1'], isA<Map>());
+    expect(pipeline['directionalLightingRecipeV1'], isA<Map>());
     expect(arguments['options'], {
       'format': 'heif',
       'size': 'longEdge',

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
+import 'package:yingjian/features/editor/domain/directional_lighting_recipe.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/edit_target.dart';
 import 'package:yingjian/features/editor/domain/editing_core.dart';
@@ -1491,6 +1492,10 @@ class PhotoProject {
           (override?.targetedPortraitRecipe ?? TargetedPortraitRecipe.neutral)
               .retainTargets(activeTargetIds),
       targetedGeometryRecipe: activeTargetedGeometry,
+      directionalLightingRecipe:
+          (override?.directionalLightingRecipe ??
+                  DirectionalLightingRecipe.neutral)
+              .retainTargets(activeTargetIds),
       crop: overridesCrop ? override!.crop : shared.crop,
     );
   }

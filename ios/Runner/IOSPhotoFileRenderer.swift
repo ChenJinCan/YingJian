@@ -542,6 +542,13 @@ struct IOSTargetedPortraitAdjustment: Equatable {
   let blemishReduction: Int
 }
 
+struct IOSDirectionalLightingAdjustment: Equatable {
+  let targetId: String
+  let region: CGRect
+  let azimuth: Double
+  let intensity: Int
+}
+
 struct IOSImagePipeline {
   let schemaVersion: Int
   let exposureEV: Double
@@ -580,6 +587,7 @@ struct IOSImagePipeline {
   let bodyGeometryTargets: [IOSBodyGeometryParameters]
   let semanticEditing: IOSSemanticEditingParameters
   let targetedPortraitAdjustments: [IOSTargetedPortraitAdjustment]
+  let directionalLightingAdjustments: [IOSDirectionalLightingAdjustment]
   let crop: CGRect
   let quarterTurns: Int
   let straightenDegrees: Double
@@ -599,7 +607,7 @@ struct IOSImagePipeline {
     }
     guard
       let schemaVersion = Self.exactInteger(pipeline["schemaVersion"]),
-      (1...11).contains(schemaVersion),
+      (1...12).contains(schemaVersion),
       pipeline["workingColorSpace"] as? String == "srgb",
       let adjustments = pipeline["adjustments"] as? [String: Any],
       let exposureEV = Self.finiteNumber(adjustments["exposureEv"]),
@@ -656,6 +664,7 @@ struct IOSImagePipeline {
       )]
       semanticEditing = .neutral
       targetedPortraitAdjustments = []
+      directionalLightingAdjustments = []
       crop = CGRect(x: 0, y: 0, width: 1, height: 1)
       quarterTurns = 0
       straightenDegrees = 0
@@ -1018,6 +1027,19 @@ struct IOSImagePipeline {
     } else {
       targetedPortraitAdjustments = []
     }
+    if schemaVersion >= 12 {
+      guard
+        let lighting = pipeline["directionalLightingRecipeV1"] as? [String: Any],
+        Set(lighting.keys) == Set(["schemaVersion", "adjustments"]),
+        Self.exactInteger(lighting["schemaVersion"]) == 1,
+        let rawAdjustments = lighting["adjustments"] as? [Any],
+        rawAdjustments.count <= 6,
+        let parsed = Self.parseDirectionalLightingAdjustments(rawAdjustments)
+      else { return nil }
+      directionalLightingAdjustments = parsed
+    } else {
+      directionalLightingAdjustments = []
+    }
     crop = CGRect(
       x: values[0],
       y: values[1],
@@ -1187,6 +1209,39 @@ struct IOSImagePipeline {
     return parsed
   }
 
+  private static func parseDirectionalLightingAdjustments(
+    _ rawAdjustments: [Any]
+  ) -> [IOSDirectionalLightingAdjustment]? {
+    var parsed: [IOSDirectionalLightingAdjustment] = []
+    var targetIds = Set<String>()
+    for raw in rawAdjustments {
+      guard
+        let adjustment = raw as? [String: Any],
+        Set(adjustment.keys) == Set(["targetId", "region", "azimuth", "intensity"]),
+        let targetId = adjustment["targetId"] as? String,
+        isStableTargetId(targetId), targetIds.insert(targetId).inserted,
+        let rawRegion = adjustment["region"] as? [String: Any],
+        Set(rawRegion.keys) == Set(["left", "top", "right", "bottom"]),
+        let left = finiteNumber(rawRegion["left"]),
+        let top = finiteNumber(rawRegion["top"]),
+        let right = finiteNumber(rawRegion["right"]),
+        let bottom = finiteNumber(rawRegion["bottom"]),
+        [left, top, right, bottom].allSatisfy({ (0.0...1.0).contains($0) }),
+        right > left, bottom > top,
+        let azimuth = finiteNumber(adjustment["azimuth"]),
+        (-90.0...90.0).contains(azimuth),
+        let intensity = percentage(adjustment["intensity"])
+      else { return nil }
+      parsed.append(IOSDirectionalLightingAdjustment(
+        targetId: targetId,
+        region: CGRect(x: left, y: top, width: right - left, height: bottom - top),
+        azimuth: azimuth,
+        intensity: intensity
+      ))
+    }
+    return parsed
+  }
+
   private static func isStableTargetId(_ value: String) -> Bool {
     guard value.hasPrefix("target-v1-"), value.count == 18 else { return false }
     return value.dropFirst(10).allSatisfy { $0.isHexDigit && !$0.isUppercase }
@@ -1293,6 +1348,34 @@ struct IOSImagePipeline {
     extent: CGRect,
     excluding usedIndices: Set<Int>
   ) -> Int? {
+    matchedFaceTargetIndex(
+      for: adjustment.region,
+      targets: targets,
+      extent: extent,
+      excluding: usedIndices
+    )
+  }
+
+  private func matchedFaceTargetIndex(
+    for adjustment: IOSDirectionalLightingAdjustment,
+    targets: [IOSFaceSlimTargetContext],
+    extent: CGRect,
+    excluding usedIndices: Set<Int>
+  ) -> Int? {
+    matchedFaceTargetIndex(
+      for: adjustment.region,
+      targets: targets,
+      extent: extent,
+      excluding: usedIndices
+    )
+  }
+
+  private func matchedFaceTargetIndex(
+    for adjustmentRegion: CGRect,
+    targets: [IOSFaceSlimTargetContext],
+    extent: CGRect,
+    excluding usedIndices: Set<Int>
+  ) -> Int? {
     guard extent.width > 0, extent.height > 0 else { return nil }
     func normalizedTopLeft(_ bounds: CGRect) -> CGRect {
       CGRect(
@@ -1314,10 +1397,10 @@ struct IOSImagePipeline {
     let candidates = targets.indices.compactMap { index -> (Int, CGFloat, CGFloat)? in
       guard !usedIndices.contains(index) else { return nil }
       let region = normalizedTopLeft(targets[index].features.faceBounds)
-      let iou = intersectionOverUnion(adjustment.region, region)
+      let iou = intersectionOverUnion(adjustmentRegion, region)
       let centerDistance = hypot(
-        adjustment.region.midX - region.midX,
-        adjustment.region.midY - region.midY
+        adjustmentRegion.midX - region.midX,
+        adjustmentRegion.midY - region.midY
       )
       return (index, iou, centerDistance)
     }.sorted { left, right in
@@ -1334,6 +1417,52 @@ struct IOSImagePipeline {
       }
     }
     return best.0
+  }
+
+  private func applyingDirectionalLighting(
+    to input: CIImage,
+    adjustment: IOSDirectionalLightingAdjustment,
+    target: IOSFaceSlimTargetContext,
+    extent: CGRect
+  ) -> CIImage {
+    let strength = Double(adjustment.intensity) / 100
+    guard strength > 0 else { return input }
+    let faceBounds = target.features.faceBounds.intersection(extent)
+    guard !faceBounds.isNull, faceBounds.width > 0 else { return input }
+    let direction = adjustment.azimuth / 90
+    let directionalAmount = abs(direction)
+    let startX = direction <= 0 ? faceBounds.minX : faceBounds.maxX
+    let endX = direction <= 0 ? faceBounds.maxX : faceBounds.minX
+    let gradient = CIFilter(
+      name: "CILinearGradient",
+      parameters: [
+        "inputPoint0": CIVector(x: startX, y: faceBounds.midY),
+        "inputPoint1": CIVector(x: endX, y: faceBounds.midY),
+        "inputColor0": CIColor.white,
+        "inputColor1": CIColor(
+          red: 1 - 0.65 * directionalAmount,
+          green: 1 - 0.65 * directionalAmount,
+          blue: 1 - 0.65 * directionalAmount,
+          alpha: 1
+        ),
+      ]
+    )?.outputImage?.cropped(to: extent)
+    guard let gradient else { return input }
+    let weightedMask = gradient.applyingFilter(
+      "CIMultiplyCompositing",
+      parameters: [kCIInputBackgroundImageKey: target.mask.cropped(to: extent)]
+    ).cropped(to: extent)
+    let lit = input.applyingFilter(
+      "CIExposureAdjust",
+      parameters: [kCIInputEVKey: 0.42 * strength]
+    ).cropped(to: extent)
+    return lit.applyingFilter(
+      "CIBlendWithMask",
+      parameters: [
+        kCIInputBackgroundImageKey: input,
+        kCIInputMaskImageKey: weightedMask,
+      ]
+    ).cropped(to: extent)
   }
 
   func applying(
@@ -1649,6 +1778,24 @@ struct IOSImagePipeline {
             extent: extent
           )
         }
+      }
+    }
+    if schemaVersion >= 12, let portraitContext {
+      var usedTargetIndices = Set<Int>()
+      for adjustment in directionalLightingAdjustments {
+        guard let targetIndex = matchedFaceTargetIndex(
+          for: adjustment,
+          targets: portraitContext.faceSlimTargets,
+          extent: extent,
+          excluding: usedTargetIndices
+        ) else { continue }
+        usedTargetIndices.insert(targetIndex)
+        output = applyingDirectionalLighting(
+          to: output,
+          adjustment: adjustment,
+          target: portraitContext.faceSlimTargets[targetIndex],
+          extent: extent
+        )
       }
     }
     if schemaVersion >= 9 && semanticEditing != .neutral {

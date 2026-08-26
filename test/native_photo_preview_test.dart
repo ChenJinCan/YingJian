@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/editing_core.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline.dart';
 import 'package:yingjian/features/editor/presentation/native_photo_preview.dart';
 
@@ -14,7 +15,7 @@ void main() {
     );
   });
 
-  testWidgets('releases and recreates its texture across app suspension', (
+  testWidgets('keeps its rendered texture across a brief app suspension', (
     tester,
   ) async {
     final renderer = _RecordingPreviewRenderer();
@@ -27,13 +28,53 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
     await tester.pumpAndSettle();
 
-    expect(renderer.disposedTextureIds, [1]);
+    expect(renderer.disposedTextureIds, isEmpty);
+    expect(find.byType(Texture), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
 
-    expect(renderer.createCount, 2);
+    expect(renderer.createCount, 1);
     expect(find.byType(Texture), findsOneWidget);
+  });
+
+  testWidgets('updates an existing texture when recipe edit state changes', (
+    tester,
+  ) async {
+    final renderer = _RecordingPreviewRenderer();
+    var recipe = EditRecipe.neutral;
+    var editState = EditState.empty;
+    late StateSetter rebuild;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setState) {
+            rebuild = setState;
+            return NativePhotoPreview(
+              sourcePath: '/tmp/Yingjian_preview_fixture.jpg',
+              recipe: recipe,
+              editState: editState,
+              renderer: renderer,
+              errorBuilder: (_) => const Text('preview unavailable'),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    rebuild(() {
+      recipe = EditRecipe(exposure: 0.12);
+      editState = const EditState(version: 1);
+    });
+    await tester.pumpAndSettle();
+
+    expect(renderer.createCount, 1);
+    expect(renderer.updateCount, 1);
+    expect(renderer.disposedTextureIds, isEmpty);
+    expect(find.byType(Texture), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
   });
 
   testWidgets('disposes a late texture created after app suspension', (
@@ -186,6 +227,7 @@ Widget _previewApp(PhotoPreviewRenderer renderer) => MaterialApp(
 
 class _RecordingPreviewRenderer implements PhotoPreviewRenderer {
   int createCount = 0;
+  int updateCount = 0;
   final List<int> disposedTextureIds = [];
   final List<int> maxEdges = [];
 
@@ -214,7 +256,9 @@ class _RecordingPreviewRenderer implements PhotoPreviewRenderer {
   Future<void> update({
     required PhotoPreviewHandle handle,
     required ImagePipeline pipeline,
-  }) async {}
+  }) async {
+    updateCount += 1;
+  }
 }
 
 final class _FailFirstCreatePreviewRenderer extends _RecordingPreviewRenderer {

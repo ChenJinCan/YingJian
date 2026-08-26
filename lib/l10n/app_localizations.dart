@@ -2077,6 +2077,84 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'这组照片包含当前版本尚不支持的效果。已完整保留，只能查看，更新应用后可继续编辑和保存。'**
   String get projectRequiresUpdateMessage;
+
+  /// No description provided for @visualTracksTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'视觉轨道'**
+  String get visualTracksTitle;
+
+  /// No description provided for @visualTracksEntry.
+  ///
+  /// In zh, this message translates to:
+  /// **'视觉轨道'**
+  String get visualTracksEntry;
+
+  /// No description provided for @visualTracksNotApplied.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有应用这次变化'**
+  String get visualTracksNotApplied;
+
+  /// No description provided for @eraAtmosphereTrack.
+  ///
+  /// In zh, this message translates to:
+  /// **'时代氛围'**
+  String get eraAtmosphereTrack;
+
+  /// No description provided for @lightingTrack.
+  ///
+  /// In zh, this message translates to:
+  /// **'光照'**
+  String get lightingTrack;
+
+  /// No description provided for @vintageFilm.
+  ///
+  /// In zh, this message translates to:
+  /// **'复古胶片'**
+  String get vintageFilm;
+
+  /// No description provided for @currentEffect.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前效果'**
+  String get currentEffect;
+
+  /// No description provided for @nearFuture.
+  ///
+  /// In zh, this message translates to:
+  /// **'近未来'**
+  String get nearFuture;
+
+  /// No description provided for @lightingNeedsPerson.
+  ///
+  /// In zh, this message translates to:
+  /// **'这张照片没有可安全重布光的人物'**
+  String get lightingNeedsPerson;
+
+  /// No description provided for @personNumber.
+  ///
+  /// In zh, this message translates to:
+  /// **'人物 {number}'**
+  String personNumber(int number);
+
+  /// No description provided for @leftLight.
+  ///
+  /// In zh, this message translates to:
+  /// **'左侧光'**
+  String get leftLight;
+
+  /// No description provided for @frontLight.
+  ///
+  /// In zh, this message translates to:
+  /// **'正面光'**
+  String get frontLight;
+
+  /// No description provided for @rightLight.
+  ///
+  /// In zh, this message translates to:
+  /// **'右侧光'**
+  String get rightLight;
 }
 
 class _AppLocalizationsDelegate

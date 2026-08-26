@@ -192,7 +192,8 @@ private enum BasicEditingMeasurement {
       ],
     ]
     recipe["semanticEditingRecipeV2"] = [
-      "recipeVersion": 2, "background": "original", "backgroundImagePath": "",
+      "recipeVersion": 3, "background": "original", "backgroundImagePath": "",
+      "backgroundImageResourceId": "",
       "backgroundBlur": 0, "subjectExposure": 0, "subjectSaturation": 0,
       "backgroundExposure": 0, "backgroundSaturation": 0,
       "localExposure": 0, "localSaturation": 0,
