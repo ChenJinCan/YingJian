@@ -229,6 +229,54 @@ final class LocalAiEditPlanner implements AiEditPlanner {
       );
     }
 
+    final portraitBrightness = _containsAny(intent, const [
+      '脸上亮',
+      '脸更亮',
+      '人物更亮',
+      '人像提亮',
+      '只调整人物',
+      'brighten face',
+      'brighter person',
+      'person only',
+    ]);
+    if (portraitBrightness) {
+      final definition = admitted[MetaOpIds.skinToneLighting];
+      final parameter = definition?.parameter('value');
+      if (definition != null && parameter != null) {
+        final pending = MetaOpChange(
+          address: OpAddress(
+            metaOpId: definition.id,
+            metaOpVersion: definition.version,
+            parameterId: parameter.id,
+            scope: EditScope.currentPhoto,
+            photoId: request.photoId,
+          ),
+          value: 0.12,
+        );
+        if (request.photoAnalysis.targetIds.length != 1) {
+          return AiTargetClarification(
+            targetType: MetaOpTargetType.face,
+            baseStateVersion: request.baseStateVersion,
+            pendingChanges: [pending],
+            summary: const [MetaOpIds.skinToneLighting],
+          );
+        }
+        changes.add(
+          MetaOpChange(
+            address: OpAddress(
+              metaOpId: pending.address.metaOpId,
+              metaOpVersion: pending.address.metaOpVersion,
+              parameterId: pending.address.parameterId,
+              scope: pending.address.scope,
+              photoId: pending.address.photoId,
+              targetId: request.photoAnalysis.targetIds.single,
+            ),
+            value: pending.value,
+          ),
+        );
+      }
+    }
+
     if (_containsAny(intent, const [
       '背景柔和',
       '虚化背景',
@@ -238,6 +286,14 @@ final class LocalAiEditPlanner implements AiEditPlanner {
     ])) {
       setParameter(MetaOpIds.semanticAdjustments, 'background', 'blur');
       setParameter(MetaOpIds.semanticAdjustments, 'backgroundBlur', 35);
+    }
+    if (_containsAny(intent, const [
+      '背景不要太艳',
+      '背景不太艳',
+      '背景饱和低一点',
+      'less saturated background',
+    ])) {
+      setParameter(MetaOpIds.semanticAdjustments, 'backgroundSaturation', -8);
     }
     if (_containsAny(intent, const ['电影感', 'cinematic'])) {
       setParameter(MetaOpIds.filter, 'filter', 'cinematic');
@@ -273,7 +329,8 @@ final class LocalAiEditPlanner implements AiEditPlanner {
       }
     }
 
-    if (_containsAny(intent, const ['亮一点', '更亮', '提亮', 'brighter'])) {
+    if (!portraitBrightness &&
+        _containsAny(intent, const ['亮一点', '更亮', '提亮', 'brighter'])) {
       changeBy(MetaOpIds.exposure, 0.12);
     } else if (_containsAny(intent, const ['暗一点', '更暗', '压暗', 'darker'])) {
       changeBy(MetaOpIds.exposure, -0.12);

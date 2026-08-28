@@ -11,6 +11,12 @@ abstract final class AppTheme {
   static const _darkMuted = Color(0xFFA7A39C);
   static const _darkAccent = Color(0xFFE6BC45);
 
+  static const canvas = Color(0xFF0B0D0E);
+  static const gold = Color(0xFFE6BC45);
+  static const softWhite = Color(0xFFF6F2EA);
+  static const muted = Color(0xFFA7A39C);
+  static const dock = Color(0xE6141617);
+
   static final light = _build(Brightness.light);
   static final dark = _build(Brightness.dark);
 
@@ -42,6 +48,9 @@ abstract final class AppTheme {
       useMaterial3: true,
       colorScheme: colorScheme,
       scaffoldBackgroundColor: colorScheme.surface,
+      visualDensity: VisualDensity.standard,
+      splashFactory: InkSparkle.splashFactory,
+      textTheme: _textTheme(colorScheme),
       appBarTheme: AppBarTheme(
         centerTitle: true,
         elevation: 0,
@@ -77,8 +86,10 @@ abstract final class AppTheme {
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           minimumSize: const Size(160, 52),
+          foregroundColor: const Color(0xFF211A06),
+          textStyle: const TextStyle(fontWeight: FontWeight.w700),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(999),
           ),
         ),
       ),
@@ -87,7 +98,7 @@ abstract final class AppTheme {
           minimumSize: const Size(48, 48),
           side: BorderSide(color: colorScheme.outline),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(999),
           ),
         ),
       ),
@@ -96,6 +107,63 @@ abstract final class AppTheme {
         side: BorderSide(color: colorScheme.outlineVariant),
       ),
       dividerTheme: DividerThemeData(color: colorScheme.outlineVariant),
+      navigationBarTheme: NavigationBarThemeData(
+        height: 72,
+        backgroundColor: const Color(0xFF181A1B),
+        indicatorColor: Colors.transparent,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          return IconThemeData(
+            color: states.contains(WidgetState.selected)
+                ? _darkAccent
+                : _darkMuted,
+            size: 25,
+          );
+        }),
+      ),
     );
   }
+
+  static TextTheme _textTheme(ColorScheme colors) => TextTheme(
+    displayLarge: TextStyle(
+      fontSize: 32,
+      height: 1.25,
+      fontWeight: FontWeight.w700,
+      letterSpacing: -0.64,
+      color: colors.onSurface,
+    ),
+    headlineMedium: TextStyle(
+      fontSize: 24,
+      height: 1.33,
+      fontWeight: FontWeight.w600,
+      letterSpacing: -0.24,
+      color: colors.onSurface,
+    ),
+    bodyLarge: TextStyle(
+      fontSize: 18,
+      height: 1.55,
+      fontWeight: FontWeight.w400,
+      color: colors.onSurface,
+    ),
+    bodyMedium: TextStyle(
+      fontSize: 16,
+      height: 1.5,
+      fontWeight: FontWeight.w400,
+      color: colors.onSurface,
+    ),
+    labelLarge: TextStyle(
+      fontSize: 14,
+      height: 1.43,
+      fontWeight: FontWeight.w600,
+      letterSpacing: 0.28,
+      color: colors.onSurface,
+    ),
+    labelSmall: TextStyle(
+      fontSize: 12,
+      height: 1.33,
+      fontWeight: FontWeight.w500,
+      letterSpacing: 0.12,
+      color: colors.onSurfaceVariant,
+    ),
+  );
 }

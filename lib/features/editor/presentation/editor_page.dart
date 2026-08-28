@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:yingjian/app/settings/app_settings.dart';
 import 'package:yingjian/features/editor/application/ai_edit_planner.dart';
 import 'package:yingjian/features/editor/application/batch_photo_exporter.dart';
 import 'package:yingjian/features/editor/application/editor_session.dart';
@@ -66,7 +67,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   BoundedBatchPhotoExporter? _batchExporter;
   Future<BatchExportSummary>? _batchCompletion;
   BatchExportSummary? _exportSummary;
-  final PhotoExportOptions _exportOptions = PhotoExportOptions(
+  PhotoExportOptions _exportOptions = PhotoExportOptions(
     size: PhotoExportSize.longEdge,
     longEdgePixels: 2048,
     quality: PhotoExportQuality.standard,
@@ -100,6 +101,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   bool _manualToolsVisible = false;
   bool _immersivePreview = false;
   MetaOpCapabilitiesProvider? _metaOpCapabilitiesProvider;
+  bool _loadedExportPreference = false;
 
   @override
   void initState() {
@@ -169,6 +171,19 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (!_loadedExportPreference) {
+      _loadedExportPreference = true;
+      final preference = context.read<AppSettings>().exportQuality;
+      _exportOptions = PhotoExportOptions(
+        size: PhotoExportSize.longEdge,
+        longEdgePixels: 2048,
+        quality: switch (preference) {
+          AppExportQuality.high => PhotoExportQuality.high,
+          AppExportQuality.standard => PhotoExportQuality.standard,
+          AppExportQuality.compact => PhotoExportQuality.compact,
+        },
+      );
+    }
     _photoSharer ??= context.read<PhotoSharer>();
     _photoImporter ??= context.read<PhotoImporter>();
     final capabilitiesProvider = context.read<MetaOpCapabilitiesProvider>();
@@ -761,8 +776,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           resource.id: resource.byteLength,
       },
     );
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(
+    final applied = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
         builder: (_) => VisualTracksPage(
           photo: photo,
           initialRecipe: _editorSession.recipe,
@@ -778,6 +793,11 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       ),
     );
     _loadEditableRecipe();
+    if (applied == true && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('视觉轨道：已应用时代氛围与光照')));
+    }
   }
 
   Future<void> _redoEdit() async {
@@ -3472,6 +3492,51 @@ class _EditorCommandBar extends StatelessWidget {
                             ],
                           )
                         else ...[
+                          Center(
+                            child: Container(
+                              width: 48,
+                              height: 4,
+                              decoration: BoxDecoration(
+                                color: colors.onSurfaceVariant.withValues(
+                                  alpha: 0.35,
+                                ),
+                                borderRadius: BorderRadius.circular(99),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              _QuickEditChip(
+                                key: const ValueKey(
+                                  'editor-quick-natural-skin',
+                                ),
+                                label: '自然',
+                                onPressed: editingEnabled
+                                    ? () => onQuickEdit('皮肤自然一点')
+                                    : null,
+                              ),
+                              const SizedBox(width: 8),
+                              _QuickEditChip(
+                                key: const ValueKey('editor-visual-tracks'),
+                                label: '氛围',
+                                emphasized: true,
+                                onPressed: editingEnabled
+                                    ? onVisualTracks
+                                    : null,
+                              ),
+                              const SizedBox(width: 8),
+                              _QuickEditChip(
+                                key: const ValueKey('editor-lighting-track'),
+                                label: context.l10n.lightingTrack,
+                                onPressed: editingEnabled
+                                    ? onVisualTracks
+                                    : null,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
                           Row(
                             children: [
                               Expanded(
@@ -3483,80 +3548,34 @@ class _EditorCommandBar extends StatelessWidget {
                                   style: OutlinedButton.styleFrom(
                                     alignment: Alignment.centerLeft,
                                     foregroundColor: colors.onSurfaceVariant,
-                                    minimumSize: const Size.fromHeight(54),
+                                    minimumSize: const Size.fromHeight(52),
                                   ),
-                                  icon: const Icon(Icons.auto_awesome_outlined),
+                                  icon: const Icon(
+                                    Icons.mic_none_rounded,
+                                    color: Color(0xFFE6BC45),
+                                  ),
                                   label: Text(context.l10n.voiceEditPrompt),
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                              IconButton.filled(
-                                key: const ValueKey('voice-edit-microphone'),
-                                tooltip: context.l10n.voiceEditEntry,
-                                onPressed: editingEnabled ? onVoiceEdit : null,
-                                constraints: const BoxConstraints.tightFor(
-                                  width: 54,
-                                  height: 54,
+                              const SizedBox(width: 10),
+                              Semantics(
+                                key: const ValueKey('editor-open-tools'),
+                                button: true,
+                                child: FilledButton.tonal(
+                                  key: const ValueKey('editor-manual-entry'),
+                                  onPressed: editingEnabled
+                                      ? onManualEdit
+                                      : null,
+                                  style: FilledButton.styleFrom(
+                                    minimumSize: const Size(106, 52),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                    ),
+                                  ),
+                                  child: Text(context.l10n.adjustPhoto),
                                 ),
-                                icon: const Icon(Icons.mic_none_outlined),
                               ),
                             ],
-                          ),
-                          const SizedBox(height: 8),
-                          SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: Row(
-                              children: [
-                                _QuickEditChip(
-                                  key: const ValueKey('editor-visual-tracks'),
-                                  label: context.l10n.visualTracksEntry,
-                                  onPressed: editingEnabled
-                                      ? onVisualTracks
-                                      : null,
-                                ),
-                                const SizedBox(width: 8),
-                                _QuickEditChip(
-                                  key: const ValueKey('editor-quick-brighter'),
-                                  label: context.l10n.quickEditBrighter,
-                                  onPressed: editingEnabled
-                                      ? () => onQuickEdit('照片亮一点')
-                                      : null,
-                                ),
-                                const SizedBox(width: 8),
-                                _QuickEditChip(
-                                  key: const ValueKey(
-                                    'editor-quick-natural-skin',
-                                  ),
-                                  label: context.l10n.quickEditNaturalSkin,
-                                  onPressed: editingEnabled
-                                      ? () => onQuickEdit('皮肤自然一点')
-                                      : null,
-                                ),
-                                const SizedBox(width: 8),
-                                _QuickEditChip(
-                                  key: const ValueKey(
-                                    'editor-quick-atmosphere',
-                                  ),
-                                  label: context.l10n.quickEditSoftBackground,
-                                  onPressed: editingEnabled
-                                      ? () => onQuickEdit('背景柔和一点')
-                                      : null,
-                                ),
-                              ],
-                            ),
-                          ),
-                          Semantics(
-                            key: const ValueKey('editor-open-tools'),
-                            button: true,
-                            child: Align(
-                              alignment: Alignment.center,
-                              child: TextButton.icon(
-                                key: const ValueKey('editor-manual-entry'),
-                                onPressed: editingEnabled ? onManualEdit : null,
-                                icon: const Icon(Icons.tune, size: 18),
-                                label: Text(context.l10n.adjustPhoto),
-                              ),
-                            ),
                           ),
                         ],
                       ],
@@ -3633,17 +3652,33 @@ class _QuickEditChip extends StatelessWidget {
   const _QuickEditChip({
     required this.label,
     required this.onPressed,
+    this.emphasized = false,
     super.key,
   });
 
   final String label;
   final VoidCallback? onPressed;
+  final bool emphasized;
 
   @override
   Widget build(BuildContext context) => ActionChip(
     onPressed: onPressed,
     label: Text(label),
-    visualDensity: VisualDensity.compact,
+    backgroundColor: emphasized
+        ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.12)
+        : Colors.transparent,
+    side: BorderSide(
+      color: emphasized
+          ? Theme.of(context).colorScheme.primary
+          : Theme.of(context).colorScheme.outline,
+    ),
+    labelStyle: TextStyle(
+      color: emphasized
+          ? Theme.of(context).colorScheme.primary
+          : Theme.of(context).colorScheme.onSurface,
+      fontWeight: FontWeight.w700,
+    ),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
   );
 }
 

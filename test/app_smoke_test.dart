@@ -242,6 +242,8 @@ void main() {
       '皮肤自然一点',
     );
     await tester.tap(find.byKey(const ValueKey('voice-edit-submit')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('voice-edit-apply-preview')));
     await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.byKey(ValueKey('ai-target-${targetIds[0]}')), findsOneWidget);
@@ -333,6 +335,8 @@ void main() {
       '照片亮一点',
     );
     await tester.tap(find.byKey(const ValueKey('voice-edit-submit')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('voice-edit-apply-preview')));
     await tester.pumpAndSettle();
 
     expect(store.project!.undoHistory, isEmpty);
@@ -445,7 +449,7 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.byKey(const ValueKey('editor-quick-brighter')),
+        find.byKey(const ValueKey('editor-visual-tracks')),
         findsOneWidget,
       );
       expect(
@@ -3191,9 +3195,14 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('匿名诊断'), findsOneWidget);
-    expect(find.text('隐私政策'), findsOneWidget);
     expect(find.text('去评分'), findsOneWidget);
 
+    final legal = find.byKey(const ValueKey('settings-legal'));
+    await tester.ensureVisible(legal);
+    await tester.pumpAndSettle();
+    await tester.tap(legal);
+    await tester.pumpAndSettle();
+    expect(find.text('隐私政策'), findsOneWidget);
     await tester.tap(find.text('隐私政策'));
     await tester.pumpAndSettle();
 

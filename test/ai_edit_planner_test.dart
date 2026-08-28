@@ -191,6 +191,39 @@ void main() {
     ]);
   });
 
+  test('portrait brightness and restrained background stay explicit', () async {
+    final availability = MetaOpAvailability.resolve(
+      catalog: MetaOpCatalog.standard,
+      capabilities: iosMetaOpCapabilities,
+      policy: standardMetaOpProductPolicy,
+      applicability: const {'photo', 'face'},
+    );
+
+    final outcome = await const LocalAiEditPlanner().plan(
+      AiEditPlanningRequest(
+        intent: '脸上亮一点，背景不要太艳',
+        baseStateVersion: 22,
+        currentState: EditState.empty,
+        capabilities: availability.aiCapabilities(MetaOpCatalog.standard),
+        photoAnalysis: const AiPhotoAnalysis(
+          scene: 'people',
+          targetIds: ['face-a'],
+        ),
+        photoId: 'photo-1',
+      ),
+    );
+
+    final proposal = outcome as AiEditProposal;
+    expect(proposal.changes, hasLength(2));
+    expect(proposal.changes.map((change) => change.address.metaOpId), [
+      MetaOpIds.skinToneLighting,
+      MetaOpIds.semanticAdjustments,
+    ]);
+    expect(proposal.changes.first.address.targetId, 'face-a');
+    expect(proposal.changes.last.address.parameterId, 'backgroundSaturation');
+    expect(proposal.changes.last.value, -8);
+  });
+
   test('cancelled target clarification does not invent a target', () async {
     final availability = MetaOpAvailability.resolve(
       catalog: MetaOpCatalog.standard,

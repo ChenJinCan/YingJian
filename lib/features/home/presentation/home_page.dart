@@ -1,9 +1,10 @@
 import 'dart:io';
-import 'dart:math';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:yingjian/app/navigation/app_router.dart';
+import 'package:yingjian/app/theme/app_theme.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/l10n/l10n.dart';
@@ -30,9 +31,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _reload() {
-    final latestProject = _store!.loadLatest();
+    final latest = _store!.loadLatest();
     setState(() {
-      _latestProject = latestProject;
+      _latestProject = latest;
     });
   }
 
@@ -43,7 +44,11 @@ class _HomePageState extends State<HomePage> {
     if (mounted) _reload();
   }
 
-  Future<void> _startNew(PhotoProject project) async {
+  Future<void> _startNew(PhotoProject? project) async {
+    if (project == null) {
+      await _openEditor(startWithImport: true);
+      return;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -78,99 +83,160 @@ class _HomePageState extends State<HomePage> {
     await _openEditor(startWithImport: true);
   }
 
+  void _showCameraBoundary() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('首版先从相册选择照片；拍摄入口将在相机画质合同完成后开放。')),
+    );
+  }
+
+  void _showMenu(PhotoProject? project) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.add_photo_alternate_outlined),
+                title: Text(context.l10n.homePrimaryAction),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  _startNew(project);
+                },
+              ),
+              if (project != null)
+                ListTile(
+                  leading: const Icon(Icons.history_rounded),
+                  title: Text(context.l10n.continueLastEditing),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _openEditor();
+                  },
+                ),
+              ListTile(
+                leading: const Icon(Icons.settings_outlined),
+                title: Text(context.l10n.settings),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  Navigator.of(context).pushNamed(AppRoutes.settings);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
     return Scaffold(
+      key: const ValueKey('home-page'),
+      backgroundColor: AppTheme.canvas,
       body: FutureBuilder<PhotoProject?>(
+        key: const ValueKey('home-full-screen-background'),
         future: _latestProject,
         builder: (context, snapshot) {
           final project = snapshot.data;
-          return Stack(
-            fit: StackFit.expand,
-            children: [
-              IgnorePointer(
-                child: DecoratedBox(
-                  key: const ValueKey('home-full-screen-background'),
-                  decoration: BoxDecoration(
-                    gradient: RadialGradient(
-                      center: const Alignment(-0.72, -1.02),
-                      radius: 1.12,
-                      colors: [
-                        colors.primary.withValues(alpha: 0.05),
-                        colors.surface,
+          return SafeArea(
+            bottom: false,
+            child: Column(
+              children: [
+                _HomeHeader(
+                  onMenu: () => _showMenu(project),
+                  onSettings: () =>
+                      Navigator.of(context).pushNamed(AppRoutes.settings),
+                ),
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: () async => _reload(),
+                    child: ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(20, 14, 20, 22),
+                      children: [
+                        _HeroPhoto(project: project),
+                        const SizedBox(height: 16),
+                        FilledButton.icon(
+                          key: const ValueKey('home-start-editing'),
+                          onPressed: () => _startNew(project),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(54),
+                          ),
+                          icon: const Icon(Icons.photo_library_outlined),
+                          label: Text(context.l10n.homePrimaryAction),
+                        ),
+                        const SizedBox(height: 10),
+                        OutlinedButton.icon(
+                          key: const ValueKey('home-camera'),
+                          onPressed: _showCameraBoundary,
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(48),
+                            foregroundColor: AppTheme.gold,
+                            side: const BorderSide(color: AppTheme.gold),
+                          ),
+                          icon: const Icon(Icons.photo_camera_outlined),
+                          label: const Text('拍一张'),
+                        ),
+                        const SizedBox(height: 24),
+                        Text(
+                          context.l10n.recentProjects,
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 12),
+                        if (snapshot.connectionState == ConnectionState.waiting)
+                          const LinearProgressIndicator(minHeight: 2)
+                        else if (snapshot.hasError)
+                          _RestoreFailure(onRetry: _reload)
+                        else if (project == null)
+                          _EmptyRecent(onStart: () => _startNew(null))
+                        else
+                          _RecentDraftCard(
+                            project: project,
+                            onTap: () => _openEditor(),
+                          ),
                       ],
                     ),
                   ),
                 ),
-              ),
-              SafeArea(
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(
-                        20,
-                        kToolbarHeight + 22,
-                        20,
-                        28,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          const SizedBox(height: 14),
-                          _HomeHero(
-                            project: project,
-                            onStart: project == null
-                                ? () => _openEditor(startWithImport: true)
-                                : () => _startNew(project),
-                          ),
-                          if (snapshot.connectionState ==
-                              ConnectionState.waiting) ...[
-                            const SizedBox(height: 24),
-                            const LinearProgressIndicator(minHeight: 2),
-                          ] else if (snapshot.hasError) ...[
-                            const SizedBox(height: 24),
-                            _RestoreFailure(onRetry: _reload),
-                          ] else if (project != null) ...[
-                            const SizedBox(height: 28),
-                            Text(
-                              context.l10n.recentProjects,
-                              style: Theme.of(context).textTheme.labelLarge
-                                  ?.copyWith(color: colors.onSurfaceVariant),
-                            ),
-                            const SizedBox(height: 12),
-                            _ProjectResumeCard(
-                              project: project,
-                              onContinue: _openEditor,
-                            ),
-                          ],
-                        ],
-                      ),
+                NavigationBar(
+                  key: const ValueKey('home-navigation'),
+                  selectedIndex: 0,
+                  onDestinationSelected: (index) {
+                    switch (index) {
+                      case 1:
+                        _startNew(project);
+                      case 2:
+                        _openEditor(startWithImport: project == null);
+                      case 3:
+                        Navigator.of(context).pushNamed(AppRoutes.settings);
+                    }
+                  },
+                  destinations: const [
+                    NavigationDestination(
+                      icon: Icon(Icons.home_rounded),
+                      label: '首页',
                     ),
-                    Positioned(
-                      top: 0,
-                      left: 20,
-                      right: 8,
-                      child: Row(
-                        children: [
-                          const _YingjianMark(compact: true),
-                          const Spacer(),
-                          IconButton(
-                            key: const ValueKey('home-settings'),
-                            tooltip: context.l10n.settings,
-                            onPressed: () => Navigator.of(
-                              context,
-                            ).pushNamed(AppRoutes.settings),
-                            icon: const Icon(Icons.settings_outlined),
-                          ),
-                        ],
-                      ),
+                    NavigationDestination(
+                      icon: Icon(Icons.photo_library_outlined),
+                      label: '照片',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(Icons.auto_fix_high_outlined),
+                      label: '编辑',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(Icons.person_outline_rounded),
+                      label: '我的',
                     ),
                   ],
                 ),
-              ),
-            ],
+              ],
+            ),
           );
         },
       ),
@@ -178,20 +244,63 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-class _HomeHero extends StatelessWidget {
-  const _HomeHero({required this.project, required this.onStart});
+class _HomeHeader extends StatelessWidget {
+  const _HomeHeader({required this.onMenu, required this.onSettings});
+
+  final VoidCallback onMenu;
+  final VoidCallback onSettings;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(8, 2, 8, 2),
+    child: Row(
+      children: [
+        IconButton(
+          key: const ValueKey('home-menu'),
+          tooltip: '菜单',
+          onPressed: onMenu,
+          icon: const Icon(Icons.menu_rounded),
+        ),
+        Expanded(
+          child: Text(
+            context.l10n.appTitle,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+              fontWeight: FontWeight.w800,
+              letterSpacing: 2,
+            ),
+          ),
+        ),
+        IconButton(
+          key: const ValueKey('home-settings'),
+          tooltip: context.l10n.settings,
+          onPressed: onSettings,
+          icon: const Icon(Icons.settings_outlined),
+        ),
+      ],
+    ),
+  );
+}
+
+class _HeroPhoto extends StatelessWidget {
+  const _HeroPhoto({required this.project});
 
   final PhotoProject? project;
-  final VoidCallback onStart;
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
     final photo = project?.photos.firstOrNull;
+    final size = MediaQuery.sizeOf(context);
+    final availableWidth = size.width - 40;
+    final heightFraction = size.height < 700 ? 0.3 : 0.42;
+    final height = math.min(
+      availableWidth / 1.06,
+      size.height * heightFraction,
+    );
     return SizedBox(
-      height: 360,
+      height: height,
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(26),
+        borderRadius: BorderRadius.circular(16),
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -203,56 +312,30 @@ class _HomeHero extends StatelessWidget {
                 fit: BoxFit.cover,
                 errorBuilder: (_, _, _) => const _EmptyHeroBackdrop(),
               ),
-            const DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.transparent, Color(0xCC0B0D0E)],
-                  stops: [0.32, 1],
+            if (photo == null)
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding: const EdgeInsets.all(22),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        context.l10n.homeHeroTitle,
+                        style: Theme.of(context).textTheme.headlineMedium
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        context.l10n.homeTagline,
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodyMedium?.copyWith(color: AppTheme.muted),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            Positioned(
-              left: 22,
-              right: 22,
-              bottom: 22,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    context.l10n.homeHeroTitle,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    context.l10n.homeTagline,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: colors.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: FilledButton.icon(
-                      key: const ValueKey('home-start-editing'),
-                      onPressed: onStart,
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(184, 48),
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                      ),
-                      icon: const Icon(
-                        Icons.add_photo_alternate_outlined,
-                        size: 19,
-                      ),
-                      label: Text(context.l10n.homePrimaryAction),
-                    ),
-                  ),
-                ],
-              ),
-            ),
           ],
         ),
       ),
@@ -269,50 +352,54 @@ class _EmptyHeroBackdrop extends StatelessWidget {
       gradient: LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: [Color(0xFF242118), Color(0xFF111315), Color(0xFF0B0D0E)],
+        colors: [Color(0xFF4A4436), Color(0xFF262522), Color(0xFF0B0D0E)],
       ),
     ),
-    child: Align(
-      alignment: const Alignment(0.62, -0.54),
+    child: Center(
       child: Icon(
         Icons.auto_awesome_rounded,
-        size: 42,
-        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.38),
+        size: 64,
+        color: AppTheme.gold.withValues(alpha: 0.55),
       ),
     ),
   );
 }
 
-class _ProjectResumeCard extends StatelessWidget {
-  const _ProjectResumeCard({required this.project, required this.onContinue});
+class _RecentDraftCard extends StatelessWidget {
+  const _RecentDraftCard({required this.project, required this.onTap});
 
   final PhotoProject project;
-  final VoidCallback onContinue;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final localUpdatedAt = project.updatedAt.toLocal();
-    final localizations = MaterialLocalizations.of(context);
-    final summary = context.l10n.lastProjectSummary(
-      project.photos.length,
-      localizations.formatCompactDate(localUpdatedAt),
-      localizations.formatTimeOfDay(
-        TimeOfDay.fromDateTime(localUpdatedAt),
-        alwaysUse24HourFormat: true,
-      ),
-    );
-    return Card(
+    final photo = project.photos.first;
+    final local = project.updatedAt.toLocal();
+    final material = MaterialLocalizations.of(context);
+    return Material(
+      color: const Color(0xFF1B1D1E),
+      borderRadius: BorderRadius.circular(20),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         key: const ValueKey('home-resume-project'),
-        onTap: onContinue,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              _ProjectThumbnailStack(photos: project.photos),
-              const SizedBox(width: 14),
-              Expanded(
+        onTap: onTap,
+        child: Row(
+          children: [
+            SizedBox(
+              width: 142,
+              height: 104,
+              child: Image.file(
+                File(photo.localPath),
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => const ColoredBox(
+                  color: Color(0xFF252728),
+                  child: Icon(Icons.photo_outlined),
+                ),
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -324,103 +411,46 @@ class _ProjectResumeCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 5),
                     Text(
-                      summary,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      context.l10n.lastProjectSummary(
+                        project.photos.length,
+                        material.formatCompactDate(local),
+                        material.formatTimeOfDay(
+                          TimeOfDay.fromDateTime(local),
+                          alwaysUse24HourFormat: true,
+                        ),
                       ),
+                      style: Theme.of(context).textTheme.labelSmall,
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              Icon(
-                Icons.chevron_right_rounded,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ],
-          ),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(right: 12),
+              child: Icon(Icons.arrow_forward_ios_rounded, size: 17),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _ProjectThumbnailStack extends StatelessWidget {
-  const _ProjectThumbnailStack({required this.photos});
+class _EmptyRecent extends StatelessWidget {
+  const _EmptyRecent({required this.onStart});
 
-  final List<ProjectPhoto> photos;
+  final VoidCallback onStart;
 
   @override
-  Widget build(BuildContext context) => SizedBox(
-    width: 78,
-    height: 64,
-    child: Stack(
-      children: [
-        for (var index = min(2, photos.length - 1); index >= 0; index--)
-          Positioned(
-            left: index * 9,
-            top: index * 3,
-            child: Container(
-              width: 54,
-              height: 58,
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: Theme.of(context).colorScheme.surface,
-                  width: 2,
-                ),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: Image.file(
-                File(photos[index].localPath),
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) =>
-                    const Icon(Icons.photo_outlined, size: 22),
-              ),
-            ),
-          ),
-      ],
+  Widget build(BuildContext context) => OutlinedButton.icon(
+    onPressed: onStart,
+    style: OutlinedButton.styleFrom(
+      minimumSize: const Size.fromHeight(72),
+      foregroundColor: AppTheme.muted,
     ),
+    icon: const Icon(Icons.photo_outlined),
+    label: Text(context.l10n.noRecentProjects),
   );
-}
-
-class _YingjianMark extends StatelessWidget {
-  const _YingjianMark({this.compact = false});
-
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: compact ? 28 : 46,
-          height: compact ? 28 : 46,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: colors.primary.withValues(alpha: 0.12),
-            border: Border.all(color: colors.primary.withValues(alpha: 0.34)),
-          ),
-          child: Icon(
-            Icons.auto_awesome,
-            color: colors.primary,
-            size: compact ? 14 : 20,
-          ),
-        ),
-        SizedBox(width: compact ? 9 : 14),
-        Text(
-          context.l10n.appTitle,
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-            fontWeight: FontWeight.w700,
-            letterSpacing: 4,
-          ),
-        ),
-      ],
-    );
-  }
 }
 
 class _RestoreFailure extends StatelessWidget {
@@ -429,18 +459,12 @@ class _RestoreFailure extends StatelessWidget {
   final VoidCallback onRetry;
 
   @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      liveRegion: true,
-      child: Column(
-        children: [
-          const Icon(Icons.error_outline),
-          const SizedBox(height: 8),
-          Text(context.l10n.projectRestoreFailed),
-          const SizedBox(height: 8),
-          OutlinedButton(onPressed: onRetry, child: Text(context.l10n.retry)),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Semantics(
+    liveRegion: true,
+    child: OutlinedButton.icon(
+      onPressed: onRetry,
+      icon: const Icon(Icons.refresh_rounded),
+      label: Text(context.l10n.projectRestoreFailed),
+    ),
+  );
 }

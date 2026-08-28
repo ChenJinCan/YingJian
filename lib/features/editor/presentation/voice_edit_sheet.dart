@@ -1,8 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:yingjian/app/theme/app_theme.dart';
 import 'package:yingjian/features/editor/application/speech_transcriber.dart';
 import 'package:yingjian/l10n/l10n.dart';
+
+enum _VoiceStage { compose, confirmation, clarification }
 
 class VoiceEditSheet extends StatefulWidget {
   const VoiceEditSheet({
@@ -20,9 +23,11 @@ class VoiceEditSheet extends StatefulWidget {
 
 class _VoiceEditSheetState extends State<VoiceEditSheet> {
   final TextEditingController _controller = TextEditingController();
+  _VoiceStage _stage = _VoiceStage.compose;
   bool _listening = false;
   bool _applying = false;
   String? _error;
+  List<String> _summary = const [];
 
   @override
   void dispose() {
@@ -37,6 +42,7 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
       return;
     }
     setState(() {
+      _stage = _VoiceStage.compose;
       _listening = true;
       _error = null;
     });
@@ -56,12 +62,91 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
     }
   }
 
-  Future<void> _submit() async {
+  void _prepare() {
     if (_applying || _listening) return;
-    if (_controller.text.trim().isEmpty) {
+    final intent = _controller.text.trim();
+    if (intent.isEmpty) {
       setState(() => _error = context.l10n.voiceEditUnsupported);
       return;
     }
+    if (_needsBrightnessClarification(intent)) {
+      setState(() {
+        _stage = _VoiceStage.clarification;
+        _error = null;
+      });
+      return;
+    }
+    setState(() {
+      _summary = _summarize(intent);
+      _stage = _VoiceStage.confirmation;
+      _error = null;
+    });
+  }
+
+  bool _needsBrightnessClarification(String intent) {
+    final lower = intent.toLowerCase();
+    final brightness = lower.contains('亮') || lower.contains('brighter');
+    final scoped = [
+      '人物',
+      '人像',
+      '脸',
+      '照片',
+      '整张',
+      '整体',
+      'person',
+      'face',
+      'photo',
+      'whole',
+    ].any(lower.contains);
+    return brightness && !scoped;
+  }
+
+  List<String> _summarize(String intent) {
+    final lower = intent.toLowerCase();
+    final changes = <String>[];
+    if (lower.contains('亮') || lower.contains('brighter')) {
+      if (['人物', '人像', '脸', 'person', 'face'].any(lower.contains)) {
+        changes.add(_zh ? '人像提亮 +12' : 'Portrait brightness +12');
+      } else {
+        changes.add(_zh ? '整体提亮 +12' : 'Photo brightness +12');
+      }
+    }
+    if ((lower.contains('背景') &&
+            (lower.contains('不要太艳') || lower.contains('柔和'))) ||
+        lower.contains('soft background')) {
+      changes.add(_zh ? '背景饱和 -8' : 'Background saturation -8');
+    }
+    if (lower.contains('暖')) {
+      changes.add(_zh ? '色温 +12' : 'Warmth +12');
+    }
+    if (lower.contains('冷')) {
+      changes.add(_zh ? '色温 -12' : 'Warmth -12');
+    }
+    if (changes.isEmpty) {
+      changes.add(_zh ? '转换为安全参数配方' : 'Convert to a safe parameter recipe');
+    }
+    return changes;
+  }
+
+  bool get _zh => Localizations.localeOf(context).languageCode == 'zh';
+
+  void _resolveClarification({required bool portraitOnly}) {
+    final base = _controller.text.trim();
+    _controller.text = portraitOnly
+        ? '$base，${_zh ? '只调整人物' : 'only adjust the person'}'
+        : '$base，${_zh ? '调整整张照片' : 'adjust the whole photo'}';
+    setState(() {
+      _summary = [
+        portraitOnly
+            ? (_zh ? '人像提亮 +12' : 'Portrait brightness +12')
+            : (_zh ? '整体提亮 +12' : 'Photo brightness +12'),
+      ];
+      _stage = _VoiceStage.confirmation;
+    });
+  }
+
+  Future<void> _apply() async {
+    if (_applying || _listening) return;
     setState(() {
       _applying = true;
       _error = null;
@@ -69,121 +154,270 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
     try {
       final applied = await widget.onSubmit(_controller.text.trim());
       if (!applied && mounted) {
-        setState(() => _error = context.l10n.voiceEditUnsupported);
+        setState(() {
+          _stage = _VoiceStage.compose;
+          _error = context.l10n.voiceEditUnsupported;
+        });
       }
     } finally {
       if (mounted) setState(() => _applying = false);
     }
   }
 
+  void _restart() {
+    setState(() {
+      _stage = _VoiceStage.compose;
+      _summary = const [];
+      _error = null;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
     return SafeArea(
       top: false,
-      child: SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(
-          20,
-          12,
-          20,
-          20 + MediaQuery.viewInsetsOf(context).bottom,
+      child: AnimatedPadding(
+        duration: const Duration(milliseconds: 180),
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 5,
-                decoration: BoxDecoration(
-                  color: colors.onSurfaceVariant.withValues(alpha: 0.35),
-                  borderRadius: BorderRadius.circular(99),
-                ),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.72,
+          ),
+          child: Material(
+            color: AppTheme.canvas,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 220),
+                child: switch (_stage) {
+                  _VoiceStage.compose => _buildCompose(context),
+                  _VoiceStage.confirmation => _buildConfirmation(context),
+                  _VoiceStage.clarification => _buildClarification(context),
+                },
               ),
             ),
-            const SizedBox(height: 16),
-            Text(
-              context.l10n.voiceEditTitle,
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    key: const ValueKey('voice-edit-text-field'),
-                    controller: _controller,
-                    minLines: 1,
-                    maxLines: 2,
-                    textInputAction: TextInputAction.done,
-                    onSubmitted: (_) => unawaited(_submit()),
-                    decoration: InputDecoration(
-                      hintText: context.l10n.voiceEditHint,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                IconButton.filled(
-                  key: const ValueKey('voice-edit-record'),
-                  tooltip: _listening
-                      ? context.l10n.voiceEditStop
-                      : context.l10n.voiceEditRecord,
-                  onPressed: _applying ? null : _toggleListening,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 54,
-                    height: 54,
-                  ),
-                  icon: Icon(_listening ? Icons.stop : Icons.mic_outlined),
-                ),
-              ],
-            ),
-            if (_listening) ...[
-              const SizedBox(height: 12),
-              Semantics(
-                liveRegion: true,
-                child: Row(
-                  key: const ValueKey('voice-edit-listening'),
-                  children: [
-                    const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    const SizedBox(width: 10),
-                    Text(context.l10n.voiceEditListening),
-                  ],
-                ),
-              ),
-            ],
-            if (_error != null) ...[
-              const SizedBox(height: 12),
-              Semantics(
-                liveRegion: true,
-                child: Text(
-                  _error!,
-                  key: const ValueKey('voice-edit-error'),
-                  style: TextStyle(color: colors.error),
-                ),
-              ),
-            ],
-            const SizedBox(height: 14),
-            FilledButton.icon(
-              key: const ValueKey('voice-edit-submit'),
-              onPressed: _applying || _listening ? null : _submit,
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(48),
-              ),
-              icon: _applying
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.auto_fix_high_outlined),
-              label: Text(context.l10n.voiceEditApply),
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
+
+  Widget _handle(BuildContext context) => Column(
+    children: [
+      Container(
+        width: 38,
+        height: 5,
+        decoration: BoxDecoration(
+          color: AppTheme.muted.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(99),
+        ),
+      ),
+      const SizedBox(height: 16),
+      Text(
+        _zh ? '语音调整' : 'Voice adjustment',
+        style: Theme.of(
+          context,
+        ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+      ),
+    ],
+  );
+
+  Widget _buildCompose(BuildContext context) => Column(
+    key: const ValueKey('voice-compose'),
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      _handle(context),
+      const SizedBox(height: 22),
+      TextField(
+        key: const ValueKey('voice-edit-text-field'),
+        controller: _controller,
+        minLines: 2,
+        maxLines: 4,
+        textInputAction: TextInputAction.done,
+        onSubmitted: (_) => _prepare(),
+        decoration: InputDecoration(
+          hintText: context.l10n.voiceEditHint,
+          prefixIcon: const Icon(Icons.keyboard_alt_outlined),
+        ),
+      ),
+      const SizedBox(height: 12),
+      if (_listening)
+        Semantics(
+          liveRegion: true,
+          child: Row(
+            key: const ValueKey('voice-edit-listening'),
+            children: [
+              const SizedBox.square(
+                dimension: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 10),
+              Text(context.l10n.voiceEditListening),
+            ],
+          ),
+        ),
+      if (_error != null) ...[
+        const SizedBox(height: 10),
+        Text(
+          _error!,
+          key: const ValueKey('voice-edit-error'),
+          style: TextStyle(color: Theme.of(context).colorScheme.error),
+        ),
+      ],
+      const SizedBox(height: 18),
+      Row(
+        children: [
+          IconButton.filledTonal(
+            key: const ValueKey('voice-edit-record'),
+            tooltip: _listening
+                ? context.l10n.voiceEditStop
+                : context.l10n.voiceEditRecord,
+            onPressed: _applying ? null : _toggleListening,
+            constraints: const BoxConstraints.tightFor(width: 54, height: 54),
+            icon: Icon(_listening ? Icons.stop_rounded : Icons.mic_rounded),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: FilledButton.icon(
+              key: const ValueKey('voice-edit-submit'),
+              onPressed: _applying || _listening ? null : _prepare,
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(54),
+              ),
+              icon: const Icon(Icons.arrow_forward_rounded),
+              label: Text(_zh ? '确认意图' : 'Review intent'),
+            ),
+          ),
+        ],
+      ),
+    ],
+  );
+
+  Widget _buildConfirmation(BuildContext context) => Column(
+    key: const ValueKey('voice-confirmation'),
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      _handle(context),
+      const SizedBox(height: 26),
+      Text(
+        '“${_controller.text.trim()}”',
+        key: const ValueKey('voice-intent-quote'),
+        textAlign: TextAlign.center,
+        style: Theme.of(context).textTheme.titleMedium,
+      ),
+      const SizedBox(height: 18),
+      Wrap(
+        alignment: WrapAlignment.center,
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (var index = 0; index < _summary.length; index++)
+            InputChip(
+              key: ValueKey('voice-summary-$index'),
+              label: Text(_summary[index]),
+              onDeleted: () => setState(
+                () => _summary = [
+                  for (var i = 0; i < _summary.length; i++)
+                    if (i != index) _summary[i],
+                ],
+              ),
+            ),
+        ],
+      ),
+      const SizedBox(height: 26),
+      FilledButton(
+        key: const ValueKey('voice-edit-apply-preview'),
+        onPressed: _applying || _summary.isEmpty ? null : _apply,
+        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+        child: _applying
+            ? const SizedBox.square(
+                dimension: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Text(_zh ? '应用预览' : 'Apply preview'),
+      ),
+      TextButton(
+        key: const ValueKey('voice-edit-restart'),
+        onPressed: _applying ? null : _restart,
+        child: Text(_zh ? '重新说' : 'Start over'),
+      ),
+      const SizedBox(height: 14),
+      Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(
+            Icons.lock_outline_rounded,
+            size: 15,
+            color: AppTheme.muted,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            _zh ? '本次调整在本机完成' : 'This adjustment stays on device',
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
+        ],
+      ),
+    ],
+  );
+
+  Widget _buildClarification(BuildContext context) => Column(
+    key: const ValueKey('voice-clarification'),
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      _handle(context),
+      const SizedBox(height: 30),
+      Text(
+        _zh
+            ? '你想让人物更亮，\n还是整张照片更亮？'
+            : 'Should the person be brighter,\nor the whole photo?',
+        textAlign: TextAlign.center,
+        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+          fontWeight: FontWeight.w800,
+          height: 1.38,
+        ),
+      ),
+      const SizedBox(height: 28),
+      FilledButton(
+        key: const ValueKey('voice-clarify-person'),
+        onPressed: () => _resolveClarification(portraitOnly: true),
+        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+        child: Text(_zh ? '只调整人物' : 'Person only'),
+      ),
+      const SizedBox(height: 12),
+      FilledButton.tonal(
+        key: const ValueKey('voice-clarify-photo'),
+        onPressed: () => _resolveClarification(portraitOnly: false),
+        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+        child: Text(_zh ? '调整整张' : 'Whole photo'),
+      ),
+      const SizedBox(height: 16),
+      Text(
+        _zh ? '没有听清？可以重新说一次' : 'Not quite right? Try speaking again.',
+        textAlign: TextAlign.center,
+        style: Theme.of(context).textTheme.labelSmall,
+      ),
+      const SizedBox(height: 8),
+      Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          TextButton.icon(
+            onPressed: _toggleListening,
+            icon: const Icon(Icons.mic_rounded),
+            label: Text(_zh ? '重新说' : 'Speak again'),
+          ),
+          const SizedBox(width: 8),
+          TextButton.icon(
+            onPressed: _restart,
+            icon: const Icon(Icons.keyboard_alt_outlined),
+            label: Text(_zh ? '改用文字' : 'Use text'),
+          ),
+        ],
+      ),
+    ],
+  );
 }

@@ -86,6 +86,14 @@ void main() {
       expect(diagnostics, findsOneWidget);
       expect(tester.widget<SwitchListTile>(diagnostics).value, isFalse);
 
+      await tester.tap(find.byKey(const ValueKey('settings-export-quality')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('节省空间'));
+      await tester.pumpAndSettle();
+      expect(settings.exportQuality, AppExportQuality.compact);
+
+      await tester.tap(find.byKey(const ValueKey('settings-legal')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('settings-privacy-policy')));
       await tester.pumpAndSettle();
       expect(
@@ -98,6 +106,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('settings-page')), findsOneWidget);
 
+      await tester.tap(find.byKey(const ValueKey('settings-legal')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('settings-terms-of-use')));
       await tester.pumpAndSettle();
       expect(
@@ -252,12 +262,15 @@ void main() {
     expect(voiceEntry.hitTestable(), findsOneWidget);
     await tester.tap(voiceEntry);
     await tester.pumpAndSettle();
-    expect(find.text('想怎么改？'), findsOneWidget);
+    expect(find.byKey(const ValueKey('voice-compose')), findsOneWidget);
     await tester.enterText(
       find.byKey(const ValueKey('voice-edit-text-field')),
       '照片亮一点',
     );
     await tester.tap(find.byKey(const ValueKey('voice-edit-submit')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('voice-confirmation')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('voice-edit-apply-preview')));
     await tester.pumpAndSettle();
     expect(
       (await store.loadLatest())!.effectiveRecipeFor(importedPhoto.id).exposure,
@@ -278,6 +291,8 @@ void main() {
       '皮肤自然一点',
     );
     await tester.tap(find.byKey(const ValueKey('voice-edit-submit')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('voice-edit-apply-preview')));
     await tester.pump(const Duration(milliseconds: 300));
     final aiTargetChoices = find.byWidgetPredicate((widget) {
       final key = widget.key;
@@ -620,7 +635,10 @@ void main() {
       const Offset(0, -180),
     );
     await tester.pumpAndSettle();
-    await tester.drag(faceSlimControl, const Offset(50, 0));
+    await tester.ensureVisible(faceSlimControl);
+    await tester.pumpAndSettle();
+    expect(faceSlimControl.hitTestable(), findsOneWidget);
+    await tester.drag(faceSlimControl, const Offset(90, 0));
     await tester.pumpAndSettle();
     expect(
       (await store.loadLatest())!
@@ -756,6 +774,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('visual-tracks-page')), findsOneWidget);
     expect(find.byKey(const ValueKey('visual-tracks-preview')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('visual-tracks-open-era')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('visual-tracks-open-era')));
+    await tester.pumpAndSettle();
     final eraBefore = (await store.loadLatest())!.effectiveRecipeFor(
       importedPhoto.id,
     );
@@ -768,8 +792,16 @@ void main() {
       importedPhoto.id,
     );
     expect(eraAfter, isNot(eraBefore));
-    await tester.tap(find.text('光照'));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('visual-tracks-continue')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('visual-track-lighting-tab')));
+    await tester.pumpAndSettle();
+    final target = find.byKey(const ValueKey('lighting-overlay-target-0'));
+    if (target.evaluate().isNotEmpty) {
+      await tester.tap(target);
+      await tester.pumpAndSettle();
+    }
     expect(find.byKey(const ValueKey('lighting-arc-track')), findsOneWidget);
     await tester.drag(
       find.byKey(const ValueKey('lighting-arc-track')),
@@ -794,11 +826,13 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('save-current')));
     await tester.tap(find.byKey(const ValueKey('save-confirm')));
     await tester.pump();
-    // Vision/Core Image cold starts on the iOS simulator can exceed 30 seconds
-    // once portrait, semantic masks, filters, and geometry are combined.
+    // Vision/Core Image cold starts on the iOS simulator can take several
+    // minutes once portrait, semantic masks, filters, geometry, and targeted
+    // directional lighting are combined. Wait for the real terminal result or
+    // error instead of treating an intermediate native render as completion.
     for (
       var attempt = 0;
-      attempt < 900 && exporter.results.isEmpty && exporter.errors.isEmpty;
+      attempt < 2400 && exporter.results.isEmpty && exporter.errors.isEmpty;
       attempt++
     ) {
       await tester.pump(const Duration(milliseconds: 100));
@@ -809,7 +843,7 @@ void main() {
     expect(exporter.results, hasLength(1));
     expect(exporter.options.single.size, PhotoExportSize.longEdge);
     expect(exporter.options.single.longEdgePixels, 2048);
-    expect(exporter.options.single.quality, PhotoExportQuality.standard);
+    expect(exporter.options.single.quality, PhotoExportQuality.high);
     expect(exporter.recipes.single.portraitStrength, 0);
     final exportedPortrait = exporter.recipes.single.targetedPortraitRecipe;
     expect(exportedPortrait.adjustments, hasLength(2));

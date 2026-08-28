@@ -15,6 +15,7 @@ void main() {
     expect(settings.locale, isNull);
     expect(settings.diagnosticsEnabled, isFalse);
     expect(settings.onboardingComplete, isFalse);
+    expect(settings.exportQuality, AppExportQuality.high);
   });
 
   test('persists onboarding completion', () async {
@@ -52,6 +53,15 @@ void main() {
 
     expect(restored.themeMode, ThemeMode.dark);
     expect(restored.locale, const Locale('en'));
+  });
+
+  test('persists the default export quality', () async {
+    final settings = await AppSettings.load();
+
+    await settings.setExportQuality(AppExportQuality.compact);
+    final restored = await AppSettings.load();
+
+    expect(restored.exportQuality, AppExportQuality.compact);
   });
 
   test('clears the locale override to follow the device again', () async {

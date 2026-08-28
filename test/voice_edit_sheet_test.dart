@@ -26,6 +26,9 @@ void main() {
       '照片亮一点',
     );
     await tester.tap(find.byKey(const ValueKey('voice-edit-submit')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('voice-confirmation')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('voice-edit-apply-preview')));
     await tester.pump();
 
     expect(applied, '照片亮一点');
@@ -70,6 +73,30 @@ void main() {
     expect(find.byKey(const ValueKey('voice-edit-record')), findsOneWidget);
     expect(find.byKey(const ValueKey('voice-edit-submit')), findsOneWidget);
     expect(find.byType(ActionChip), findsNothing);
+  });
+
+  testWidgets('ambiguous brightness asks for the smallest safe clarification', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _TestHost(
+        child: VoiceEditSheet(
+          transcriber: _FakeSpeechTranscriber(),
+          onSubmit: (_) => true,
+        ),
+      ),
+    );
+
+    await tester.enterText(
+      find.byKey(const ValueKey('voice-edit-text-field')),
+      '亮一点',
+    );
+    await tester.tap(find.byKey(const ValueKey('voice-edit-submit')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('voice-clarification')), findsOneWidget);
+    expect(find.byKey(const ValueKey('voice-clarify-person')), findsOneWidget);
+    expect(find.byKey(const ValueKey('voice-clarify-photo')), findsOneWidget);
   });
 }
 

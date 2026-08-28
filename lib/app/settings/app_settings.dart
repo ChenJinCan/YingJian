@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+enum AppExportQuality { high, standard, compact }
+
 class AppSettings extends ChangeNotifier {
   AppSettings._(this._preferences) {
     _themeMode = _readThemeMode();
     _locale = _readLocale();
     _diagnosticsEnabled = _preferences.getBool(_diagnosticsEnabledKey) ?? false;
+    _exportQuality = _readExportQuality();
     _onboardingComplete =
         _preferences.getBool(_onboardingCompleteKey) ??
         _hasExistingAppPreference();
@@ -15,12 +18,14 @@ class AppSettings extends ChangeNotifier {
   static const _localeKey = 'app.locale';
   static const _diagnosticsEnabledKey = 'privacy.diagnostics_enabled';
   static const _onboardingCompleteKey = 'app.onboarding_complete';
+  static const _exportQualityKey = 'export.default_quality';
 
   final SharedPreferences _preferences;
   late ThemeMode _themeMode;
   late Locale? _locale;
   late bool _diagnosticsEnabled;
   late bool _onboardingComplete;
+  late AppExportQuality _exportQuality;
 
   static Future<AppSettings> load() async {
     final preferences = await SharedPreferences.getInstance();
@@ -31,6 +36,7 @@ class AppSettings extends ChangeNotifier {
   Locale? get locale => _locale;
   bool get diagnosticsEnabled => _diagnosticsEnabled;
   bool get onboardingComplete => _onboardingComplete;
+  AppExportQuality get exportQuality => _exportQuality;
 
   Future<void> completeOnboarding() async {
     if (_onboardingComplete) return;
@@ -88,6 +94,14 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setExportQuality(AppExportQuality value) async {
+    if (_exportQuality == value) return;
+    final saved = await _preferences.setString(_exportQualityKey, value.name);
+    if (!saved) throw StateError('Unable to persist export quality');
+    _exportQuality = value;
+    notifyListeners();
+  }
+
   ThemeMode _readThemeMode() {
     final stored = _preferences.getString(_themeModeKey);
     return ThemeMode.values.firstWhere(
@@ -108,6 +122,14 @@ class AppSettings extends ChangeNotifier {
       languageCode: parts.first,
       scriptCode: second?.length == 4 ? second : null,
       countryCode: second?.length == 4 ? third : second,
+    );
+  }
+
+  AppExportQuality _readExportQuality() {
+    final stored = _preferences.getString(_exportQualityKey);
+    return AppExportQuality.values.firstWhere(
+      (value) => value.name == stored,
+      orElse: () => AppExportQuality.high,
     );
   }
 
