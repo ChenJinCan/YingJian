@@ -120,6 +120,52 @@ void main() {
     expect(find.textContaining('14:30'), findsOneWidget);
   });
 
+  testWidgets('home lists multiple drafts and opens the selected draft', (
+    tester,
+  ) async {
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    PhotoProject project(String id, String photoId, int hour) => PhotoProject(
+      id: id,
+      createdAt: DateTime.utc(2026, 8, 28, hour),
+      updatedAt: DateTime.utc(2026, 8, 28, hour),
+      photos: [
+        ProjectPhoto(
+          id: photoId,
+          localPath: photoFile.path,
+          originalName: '$photoId.png',
+        ),
+      ],
+      flowState: PhotoProjectFlowState.editing,
+    );
+    final first = project('project-1', 'photo-1', 8);
+    final second = project('project-2', 'photo-2', 9);
+    final store = MemoryPhotoProjectStore.withProjects([first, second]);
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+
+    await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('home-draft-project-1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-draft-project-2')), findsOneWidget);
+
+    final firstDraft = find.byKey(const ValueKey('home-draft-project-1'));
+    await tester.drag(find.byType(ListView), const Offset(0, -320));
+    await tester.pumpAndSettle();
+    await tester.tap(firstDraft);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('photo-preview-photo-1')), findsOneWidget);
+    expect(store.project?.id, first.id);
+    expect(
+      store.projects.map((project) => project.id),
+      containsAll(<String>[first.id, second.id]),
+    );
+  });
+
   testWidgets('future meta ops open visibly read-only until update', (
     tester,
   ) async {
@@ -335,9 +381,11 @@ void main() {
     expect(find.byKey(const ValueKey('voice-edit-text-field')), findsOneWidget);
   });
 
-  testWidgets('starting over requires confirmation before deleting copies', (
-    tester,
-  ) async {
+  testWidgets('starting a new draft keeps the existing draft', (tester) async {
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
     final project = PhotoProject(
       id: 'project-1',
       createdAt: DateTime(2026, 8, 4),
@@ -354,18 +402,31 @@ void main() {
     final store = MemoryPhotoProjectStore(project);
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
     final settings = await AppSettings.load();
-    await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoProjectStore: store,
+        photoImporter: FakePhotoImporter([
+          ProjectPhoto(
+            id: 'photo-2',
+            localPath: photoFile.path,
+            originalName: 'second.png',
+          ),
+        ]),
+      ),
+    );
     await tester.pumpAndSettle();
 
     await tester.ensureVisible(find.byKey(const ValueKey('home-new-project')));
     await tester.tap(find.byKey(const ValueKey('home-new-project')));
     await tester.pumpAndSettle();
-    expect(find.textContaining('系统相册原图不会被删除'), findsOneWidget);
-    expect(store.project, project);
+    expect(find.byKey(const ValueKey('photo-preview-photo-2')), findsOneWidget);
+    expect(store.projects.map((draft) => draft.id), contains(project.id));
 
-    await tester.tap(find.text('取消'));
+    await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
-    expect(store.project, project);
+    expect(find.byKey(const ValueKey('home-draft-project-1')), findsOneWidget);
+    expect(store.projects, hasLength(2));
   });
 
   testWidgets('user imports photos and sees an app-owned preview', (

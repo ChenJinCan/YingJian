@@ -227,17 +227,59 @@ final class FakePhotoImporter implements EditingResourceImporter {
   }
 }
 
-final class MemoryPhotoProjectStore implements PhotoProjectLifecycleStore {
-  MemoryPhotoProjectStore([this.project]);
+final class MemoryPhotoProjectStore implements PhotoProjectCatalogStore {
+  MemoryPhotoProjectStore([PhotoProject? project])
+    : _projects = project == null ? [] : [project],
+      _activeProjectId = project?.id;
 
-  PhotoProject? project;
+  MemoryPhotoProjectStore.withProjects(List<PhotoProject> projects)
+    : _projects = List.of(projects),
+      _activeProjectId = projects.firstOrNull?.id {
+    _sortProjects();
+  }
+
+  final List<PhotoProject> _projects;
+  String? _activeProjectId;
+  bool _startingNewProject = false;
+
+  List<PhotoProject> get projects => List.unmodifiable(_projects);
+
+  PhotoProject? get project {
+    if (_startingNewProject) return null;
+    final active = _projects
+        .where((candidate) => candidate.id == _activeProjectId)
+        .firstOrNull;
+    return active ?? _projects.firstOrNull;
+  }
 
   @override
   Future<PhotoProject?> loadLatest() async => project;
 
   @override
+  Future<List<PhotoProject>> loadProjects() async => projects;
+
+  @override
+  Future<void> activateProject(String projectId) async {
+    if (!_projects.any((project) => project.id == projectId)) {
+      throw StateError('Photo project does not exist');
+    }
+    _activeProjectId = projectId;
+    _startingNewProject = false;
+  }
+
+  @override
+  Future<void> startNewProject() async {
+    _activeProjectId = null;
+    _startingNewProject = true;
+  }
+
+  @override
   Future<void> save(PhotoProject project) async {
-    this.project = project;
+    _projects.removeWhere((candidate) => candidate.id == project.id);
+    _projects.add(project);
+    _sortProjects();
+    _activeProjectId = project.id;
+    _startingNewProject = false;
   }
 
   @override
@@ -245,7 +287,12 @@ final class MemoryPhotoProjectStore implements PhotoProjectLifecycleStore {
 
   @override
   Future<void> deleteProject(PhotoProject project) async {
-    this.project = null;
+    _projects.removeWhere((candidate) => candidate.id == project.id);
+    if (_activeProjectId == project.id) _activeProjectId = null;
+  }
+
+  void _sortProjects() {
+    _projects.sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
   }
 }
 

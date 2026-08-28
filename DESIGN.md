@@ -110,6 +110,13 @@ The brand personality is centered on being a "quiet companion" rather than a com
 
 The design system utilizes **Deep Minimalism** mixed with **Floating Tactile** elements. It prioritizes "Result-Oriented" interactions, removing the friction of technical sliders in favor of conversational, colloquial Chinese commands. The emotional response should be one of instant gratification and creative empowerment without the intimidation of professional editing jargon.
 
+## Interaction Structure
+
+- Each editing project contains exactly one photo, so the editor never exposes photo counts, strips, sorting, batch scope, or an add-photo action.
+- The home screen may contain multiple independent draft cards, ordered by most recently updated. Tapping a card opens that exact draft.
+- “Choose a photo” always creates a new draft and never requires deleting an existing draft. Deletion is an explicit action scoped to the currently opened draft.
+- The most recent draft may appear as the hero and primary continue action, while every other draft remains directly reachable in the recent-drafts list.
+
 ## Colors
 
 This design system employs a high-contrast, dark-first palette to ensure the photo content is the primary source of light and color on the screen.

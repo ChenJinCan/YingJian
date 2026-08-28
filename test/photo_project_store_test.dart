@@ -9,6 +9,11 @@ import 'package:yingjian/features/editor/domain/semantic_editing_recipe.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/project/infrastructure/json_photo_project_store.dart';
 
+File projectSnapshot(Directory root, String projectId) {
+  final encoded = base64Url.encode(utf8.encode(projectId)).replaceAll('=', '');
+  return File('${root.path}/projects/$encoded.json');
+}
+
 void main() {
   test(
     'rejects a project whose canonical state disagrees with pixels',
@@ -74,6 +79,49 @@ void main() {
 
     expect(restored, project);
   });
+
+  test(
+    'keeps multiple one-photo projects and restores the active one',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'yingjian-project-catalog-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final store = JsonPhotoProjectStore(directory: () async => directory);
+      final first = PhotoProject(
+        id: 'project-1',
+        createdAt: DateTime.utc(2026, 8, 28, 8),
+        updatedAt: DateTime.utc(2026, 8, 28, 9),
+        photos: const [
+          ProjectPhoto(
+            id: 'photo-1',
+            localPath: '/app/media/photo-1.jpg',
+            originalName: 'first.jpg',
+          ),
+        ],
+      );
+      final second = PhotoProject(
+        id: 'project-2',
+        createdAt: DateTime.utc(2026, 8, 28, 10),
+        updatedAt: DateTime.utc(2026, 8, 28, 11),
+        photos: const [
+          ProjectPhoto(
+            id: 'photo-2',
+            localPath: '/app/media/photo-2.jpg',
+            originalName: 'second.jpg',
+          ),
+        ],
+      );
+
+      await store.save(first);
+      await store.startNewProject();
+      await store.save(second);
+
+      expect(await store.loadProjects(), [second, first]);
+      await store.activateProject('project-1');
+      expect(await store.loadLatest(), first);
+    },
+  );
 
   test(
     'a later save atomically replaces the previous project snapshot',
@@ -282,7 +330,7 @@ void main() {
       );
       final store = JsonPhotoProjectStore(directory: () async => originalRoot);
       await store.save(project);
-      final snapshot = File('${originalRoot.path}/projects/latest.json');
+      final snapshot = projectSnapshot(originalRoot, project.id);
       expect(
         await snapshot.readAsString(),
         contains('"backgroundImagePath":"resources/aa/$sha.jpg"'),
@@ -372,7 +420,7 @@ void main() {
       await resourceFile.parent.create(recursive: true);
       await resourceFile.writeAsBytes(const [1, 2, 3]);
       final blockingTemporary = Directory(
-        '${root.path}/projects/latest.json.tmp',
+        '${projectSnapshot(root, 'project-1').path}.tmp',
       );
       await blockingTemporary.create(recursive: true);
       final registry = EditingResourceRegistry.empty
@@ -485,13 +533,15 @@ void main() {
       final store = JsonPhotoProjectStore(directory: () async => root);
 
       final migrated = await store.loadLatest();
-      final persisted = jsonDecode(await snapshot.readAsString()) as Map;
+      final migratedSnapshot = projectSnapshot(root, 'legacy-history');
+      final persisted =
+          jsonDecode(await migratedSnapshot.readAsString()) as Map;
       final reopened = await store.loadLatest();
 
       expect(migrated!.hasValidHistoryReplay, isTrue);
       expect(persisted['schemaVersion'], PhotoProject.schemaVersion);
       expect(reopened, migrated);
-      expect(await File('${snapshot.path}.tmp').exists(), isFalse);
+      expect(await File('${migratedSnapshot.path}.tmp').exists(), isFalse);
     },
   );
 
@@ -515,7 +565,9 @@ void main() {
     final snapshot = File('${root.path}/projects/latest.json');
     await snapshot.parent.create(recursive: true);
     await snapshot.writeAsString(jsonEncode(legacy));
-    await Directory('${snapshot.path}.tmp').create();
+    await Directory(
+      '${projectSnapshot(root, 'legacy-safe').path}.tmp',
+    ).create(recursive: true);
 
     final restored = await JsonPhotoProjectStore(
       directory: () async => root,
@@ -598,7 +650,7 @@ void main() {
 
     expect(await store.loadLatest(), isNull);
     expect(await appCopy.exists(), isFalse);
-    expect(await backgroundCopy.exists(), isFalse);
+    expect(await backgroundCopy.exists(), isTrue);
     expect(await preview.exists(), isFalse);
     expect(await analysis.exists(), isFalse);
     expect(await debugArtifact.exists(), isFalse);

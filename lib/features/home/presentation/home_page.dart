@@ -18,7 +18,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   PhotoProjectStore? _store;
-  Future<PhotoProject?>? _latestProject;
+  Future<List<PhotoProject>>? _projects;
 
   @override
   void didChangeDependencies() {
@@ -26,61 +26,59 @@ class _HomePageState extends State<HomePage> {
     final store = context.read<PhotoProjectStore>();
     if (!identical(store, _store)) {
       _store = store;
-      _latestProject = store.loadLatest();
+      _projects = _loadProjects(store);
     }
   }
 
   void _reload() {
-    final latest = _store!.loadLatest();
+    final projects = _loadProjects(_store!);
     setState(() {
-      _latestProject = latest;
+      _projects = projects;
     });
   }
 
-  Future<void> _openEditor({bool startWithImport = false}) async {
+  Future<List<PhotoProject>> _loadProjects(PhotoProjectStore store) async {
+    if (store is PhotoProjectCatalogStore) return store.loadProjects();
+    final latest = await store.loadLatest();
+    return latest == null ? const [] : [latest];
+  }
+
+  Future<void> _openEditor({
+    PhotoProject? project,
+    bool startNew = false,
+  }) async {
+    final store = _store;
+    if (store is PhotoProjectCatalogStore) {
+      if (startNew) {
+        await store.startNewProject();
+      } else if (project != null) {
+        await store.activateProject(project.id);
+      }
+    }
+    if (!mounted) return;
     await Navigator.of(
       context,
-    ).pushNamed(AppRoutes.editor, arguments: startWithImport);
+    ).pushNamed(AppRoutes.editor, arguments: startNew);
     if (mounted) _reload();
   }
 
-  Future<void> _startNew(PhotoProject? project) async {
-    if (project == null) {
-      await _openEditor(startWithImport: true);
-      return;
-    }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(context.l10n.startNewProject),
-        content: Text(context.l10n.deleteProjectConfirmation),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text(context.l10n.cancel),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text(context.l10n.deleteAndStartNew),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    final store = _store;
-    if (store is! PhotoProjectLifecycleStore) return;
+  Future<void> _startNew() => _openEditor(startNew: true);
+
+  Future<void> _runPrimaryAction() async {
+    List<PhotoProject>? projects;
     try {
-      await store.deleteProject(project);
+      projects = await _projects;
     } on Object {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(context.l10n.projectDeleteFailed)));
+      if (mounted) await _openEditor();
       return;
     }
     if (!mounted) return;
-    _reload();
-    await _openEditor(startWithImport: true);
+    final latest = projects?.firstOrNull;
+    if (latest == null) {
+      await _startNew();
+    } else {
+      await _openEditor(project: latest);
+    }
   }
 
   @override
@@ -88,11 +86,12 @@ class _HomePageState extends State<HomePage> {
     return Scaffold(
       key: const ValueKey('home-page'),
       backgroundColor: AppTheme.canvas,
-      body: FutureBuilder<PhotoProject?>(
+      body: FutureBuilder<List<PhotoProject>>(
         key: const ValueKey('home-full-screen-background'),
-        future: _latestProject,
+        future: _projects,
         builder: (context, snapshot) {
-          final project = snapshot.data;
+          final projects = snapshot.data ?? const <PhotoProject>[];
+          final latestProject = projects.firstOrNull;
           return SafeArea(
             bottom: false,
             child: Column(
@@ -108,32 +107,30 @@ class _HomePageState extends State<HomePage> {
                       physics: const AlwaysScrollableScrollPhysics(),
                       padding: const EdgeInsets.fromLTRB(20, 14, 20, 22),
                       children: [
-                        _HeroPhoto(project: project),
+                        _HeroPhoto(project: latestProject),
                         const SizedBox(height: 16),
                         FilledButton.icon(
                           key: const ValueKey('home-start-editing'),
-                          onPressed: project == null
-                              ? () => _startNew(null)
-                              : () => _openEditor(),
+                          onPressed: _runPrimaryAction,
                           style: FilledButton.styleFrom(
                             minimumSize: const Size.fromHeight(54),
                           ),
                           icon: Icon(
-                            project == null
+                            latestProject == null
                                 ? Icons.photo_library_outlined
                                 : Icons.auto_fix_high_rounded,
                           ),
                           label: Text(
-                            project == null
+                            latestProject == null
                                 ? context.l10n.homePrimaryAction
                                 : context.l10n.continueLastEditing,
                           ),
                         ),
-                        if (project != null) ...[
+                        if (latestProject != null) ...[
                           const SizedBox(height: 10),
                           OutlinedButton.icon(
                             key: const ValueKey('home-new-project'),
-                            onPressed: () => _startNew(project),
+                            onPressed: _startNew,
                             style: OutlinedButton.styleFrom(
                               minimumSize: const Size.fromHeight(48),
                               foregroundColor: AppTheme.gold,
@@ -156,13 +153,24 @@ class _HomePageState extends State<HomePage> {
                           const LinearProgressIndicator(minHeight: 2)
                         else if (snapshot.hasError)
                           _RestoreFailure(onRetry: _reload)
-                        else if (project == null)
-                          _EmptyRecent(onStart: () => _startNew(null))
+                        else if (projects.isEmpty)
+                          _EmptyRecent(onStart: _startNew)
                         else
-                          _RecentDraftCard(
-                            project: project,
-                            onTap: () => _openEditor(),
-                          ),
+                          for (var index = 0; index < projects.length; index++)
+                            Padding(
+                              padding: EdgeInsets.only(
+                                bottom: index == projects.length - 1 ? 0 : 10,
+                              ),
+                              child: _RecentDraftCard(
+                                key: ValueKey(
+                                  'home-draft-${projects[index].id}',
+                                ),
+                                project: projects[index],
+                                isLatest: index == 0,
+                                onTap: () =>
+                                    _openEditor(project: projects[index]),
+                              ),
+                            ),
                       ],
                     ),
                   ),
@@ -292,9 +300,15 @@ class _EmptyHeroBackdrop extends StatelessWidget {
 }
 
 class _RecentDraftCard extends StatelessWidget {
-  const _RecentDraftCard({required this.project, required this.onTap});
+  const _RecentDraftCard({
+    required this.project,
+    required this.isLatest,
+    required this.onTap,
+    super.key,
+  });
 
   final PhotoProject project;
+  final bool isLatest;
   final VoidCallback onTap;
 
   @override
@@ -307,7 +321,7 @@ class _RecentDraftCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(20),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        key: const ValueKey('home-resume-project'),
+        key: isLatest ? const ValueKey('home-resume-project') : null,
         onTap: onTap,
         child: Row(
           children: [

@@ -123,6 +123,66 @@ void main() {
     },
   );
 
+  testWidgets('home keeps and opens multiple independent one-photo drafts', (
+    tester,
+  ) async {
+    final fixtureDirectory = await Directory.systemTemp.createTemp(
+      'yingjian-ios-draft-catalog-',
+    );
+    addTearDown(() => fixtureDirectory.delete(recursive: true));
+    final source = File('${fixtureDirectory.path}/portrait.png');
+    await source.writeAsBytes(await _createPngFixtureBytes(), flush: true);
+    final projectRoot = Directory('${fixtureDirectory.path}/project');
+    final store = JsonPhotoProjectStore(directory: () async => projectRoot);
+    PhotoProject draft(String id, String photoId, int hour) => PhotoProject(
+      id: id,
+      createdAt: DateTime.utc(2026, 8, 28, hour),
+      updatedAt: DateTime.utc(2026, 8, 28, hour),
+      photos: [
+        ProjectPhoto(
+          id: photoId,
+          localPath: source.path,
+          originalName: '$photoId.png',
+        ),
+      ],
+      flowState: PhotoProjectFlowState.editing,
+    );
+    await store.save(draft('draft-1', 'photo-1', 8));
+    await store.startNewProject();
+    await store.save(draft('draft-2', 'photo-2', 9));
+    final importer = AppOwnedPhotoImporter(
+      source: _SelectedPhotoSource([
+        SelectedPhoto(path: source.path, name: 'new.png'),
+      ]),
+      mediaDirectory: () async => Directory('${projectRoot.path}/media'),
+      createId: () => 'photo-3',
+    );
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+
+    await tester.pumpWidget(
+      buildTestApp(settings, photoImporter: importer, photoProjectStore: store),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('home-draft-draft-1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-draft-draft-2')), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const ValueKey('home-new-project')));
+    await tester.tap(find.byKey(const ValueKey('home-new-project')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('photo-preview-photo-3')), findsOneWidget);
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(await store.loadProjects(), hasLength(3));
+    final firstDraft = find.byKey(const ValueKey('home-draft-draft-1'));
+    await tester.drag(find.byType(ListView), const Offset(0, -360));
+    await tester.pumpAndSettle();
+    await tester.tap(firstDraft);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('photo-preview-photo-1')), findsOneWidget);
+  });
+
   testWidgets('iOS runtime completes the production one-photo MVP journey', (
     tester,
   ) async {
@@ -184,12 +244,13 @@ void main() {
     expect(importedPhoto.colorSpace, PhotoColorSpace.srgb);
     expect(importedPhoto.inputFormat, PhotoInputFormat.png);
     expect(await File(importedPhoto.localPath).readAsBytes(), sourceBytes);
+    final snapshotFiles = await Directory('${projectRoot.path}/projects')
+        .list()
+        .where((entity) => entity is File && entity.path.endsWith('.json'))
+        .toList();
+    expect(snapshotFiles, hasLength(1));
     final snapshot =
-        jsonDecode(
-              await File(
-                '${projectRoot.path}/projects/latest.json',
-              ).readAsString(),
-            )
+        jsonDecode(await File(snapshotFiles.single.path).readAsString())
             as Map<String, Object?>;
     final snapshotPhotos = snapshot['photos']! as List<Object?>;
     expect(

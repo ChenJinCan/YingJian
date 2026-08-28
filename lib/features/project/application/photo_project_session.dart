@@ -92,6 +92,15 @@ abstract interface class PhotoProjectLifecycleStore
   Future<void> deleteProject(PhotoProject project);
 }
 
+abstract interface class PhotoProjectCatalogStore
+    implements PhotoProjectLifecycleStore {
+  Future<List<PhotoProject>> loadProjects();
+
+  Future<void> activateProject(String projectId);
+
+  Future<void> startNewProject();
+}
+
 enum PhotoImportResult { imported, canceled, rejected, limitReached }
 
 @immutable
