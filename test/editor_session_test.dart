@@ -133,6 +133,17 @@ void main() {
       expect(session.canUndo, isFalse);
     });
 
+    test('cancels an unfinished gesture without creating history', () {
+      final session = EditorSession(initialRecipe: EditRecipe(exposure: 0.2));
+
+      session.beginAdjustment();
+      session.preview(session.recipe.copyWith(exposure: 0.7));
+      session.cancelAdjustment();
+
+      expect(session.recipe, EditRecipe(exposure: 0.2));
+      expect(session.canUndo, isFalse);
+    });
+
     test('previews exposure through the meta-op contract as one undo step', () {
       final session = EditorSession(initialRecipe: EditRecipe(warmth: 0.25));
       const address = OpAddress(

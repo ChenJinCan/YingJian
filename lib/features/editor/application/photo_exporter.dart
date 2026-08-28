@@ -10,6 +10,18 @@ abstract interface class PhotoExporter {
   });
 }
 
+abstract interface class PhotoLibraryPermissionAwareExporter {}
+
+abstract interface class PhotoLibrarySettingsOpener {
+  Future<void> openPhotoLibrarySettings();
+}
+
+enum PhotoExportStage { preparing, savingToPhotoLibrary }
+
+abstract interface class PhotoExportStageAware {
+  ValueListenable<PhotoExportStage> get stage;
+}
+
 abstract interface class ConfigurablePhotoExporter implements PhotoExporter {
   Future<ExportedPhoto> exportWithOptions({
     required ProjectPhoto photo,

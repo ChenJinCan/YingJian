@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
@@ -7,12 +8,37 @@ import 'package:yingjian/features/editor/domain/legacy_edit_recipe_adapter.dart'
 import 'package:yingjian/features/editor/domain/render_plan.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 
-final class MethodChannelPhotoExporter implements CanonicalPhotoExporter {
+final class MethodChannelPhotoExporter
+    implements
+        CanonicalPhotoExporter,
+        PhotoLibraryPermissionAwareExporter,
+        PhotoLibrarySettingsOpener,
+        PhotoExportStageAware {
   MethodChannelPhotoExporter({
     this.channel = const MethodChannel('yingjian/photo_export'),
-  });
+  }) {
+    channel.setMethodCallHandler(_handlePlatformCall);
+  }
 
   final MethodChannel channel;
+  @override
+  final ValueNotifier<PhotoExportStage> stage = ValueNotifier(
+    PhotoExportStage.preparing,
+  );
+
+  Future<Object?> _handlePlatformCall(MethodCall call) async {
+    if (call.method != 'exportStage') return null;
+    final arguments = call.arguments;
+    if (arguments is Map &&
+        arguments['stage'] == PhotoExportStage.savingToPhotoLibrary.name) {
+      stage.value = PhotoExportStage.savingToPhotoLibrary;
+    }
+    return null;
+  }
+
+  @override
+  Future<void> openPhotoLibrarySettings() =>
+      channel.invokeMethod<void>('openPhotoSettings');
 
   @override
   Future<ExportedPhoto> export({
@@ -45,6 +71,7 @@ final class MethodChannelPhotoExporter implements CanonicalPhotoExporter {
     required EditContext editContext,
     required PhotoExportOptions options,
   }) async {
+    stage.value = PhotoExportStage.preparing;
     final pipeline = imagePipelineForCurrentPlatform(
       recipe,
       sourceId: photo.id,

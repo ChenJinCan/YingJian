@@ -4,6 +4,7 @@ import 'dart:ui' show SemanticsAction, SemanticsFlag;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
@@ -27,6 +28,7 @@ void main() {
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
     final settings = await AppSettings.load();
     await tester.pumpWidget(buildTestApp(settings));
+    await tester.pumpAndSettle();
 
     expect(find.text('映见'), findsOneWidget);
     expect(find.text('让变美更容易'), findsOneWidget);
@@ -44,12 +46,9 @@ void main() {
       tester.view.physicalSize.height / tester.view.devicePixelRatio,
     );
     expect(find.byKey(const ValueKey('home-journey-guide')), findsNothing);
-
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
-    expect(find.text('选择一张照片'), findsOneWidget);
+    expect(find.text('最近项目'), findsNothing);
+    expect(find.text('还没有项目，选一张照片开始吧'), findsNothing);
+    expect(find.byKey(const ValueKey('home-new-project')), findsNothing);
   });
 
   testWidgets('follows a persisted English locale', (tester) async {
@@ -61,7 +60,7 @@ void main() {
     expect(find.text('One photo. Refined with focus.'), findsOneWidget);
   });
 
-  testWidgets('English unfinished-project count uses singular grammar', (
+  testWidgets('English draft metadata only presents the last edit time', (
     tester,
   ) async {
     final store = MemoryPhotoProjectStore(
@@ -85,8 +84,8 @@ void main() {
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('1 photo ·'), findsOneWidget);
-    expect(find.textContaining('1 photos'), findsNothing);
+    expect(find.textContaining('Last edited'), findsOneWidget);
+    expect(find.textContaining('1 photo'), findsNothing);
   });
 
   testWidgets('home exposes an unfinished project and its last edit time', (
@@ -113,11 +112,63 @@ void main() {
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
     await tester.pumpAndSettle();
 
-    expect(find.text('未完成项目'), findsOneWidget);
-    expect(find.text('选择照片开始'), findsOneWidget);
+    expect(find.text('未完成项目'), findsNothing);
+    expect(find.text('选择新照片'), findsOneWidget);
     expect(find.byKey(const ValueKey('home-resume-project')), findsOneWidget);
-    expect(find.textContaining('1 张照片'), findsOneWidget);
+    expect(find.textContaining('1 张照片'), findsNothing);
     expect(find.textContaining('14:30'), findsOneWidget);
+    expect(find.text('编辑中'), findsOneWidget);
+  });
+
+  testWidgets('home distinguishes exported drafts from later edits', (
+    tester,
+  ) async {
+    const photo = ProjectPhoto(
+      id: 'status-photo',
+      localPath: '/private/project/status.jpg',
+      originalName: 'status.jpg',
+    );
+    final exported = PhotoProject(
+      id: 'exported-draft',
+      createdAt: DateTime.utc(2026, 8, 28, 8),
+      updatedAt: DateTime.utc(2026, 8, 28, 9),
+      photos: [photo],
+      lastSuccessfulExportEditStateVersion: 0,
+    );
+    final changed = PhotoProject(
+      id: 'changed-draft',
+      createdAt: DateTime.utc(2026, 8, 28, 10),
+      updatedAt: DateTime.utc(2026, 8, 28, 11),
+      photos: const [
+        ProjectPhoto(
+          id: 'changed-photo',
+          localPath: '/private/project/changed.jpg',
+          originalName: 'changed.jpg',
+        ),
+      ],
+      editState: const EditState(version: 1),
+      lastSuccessfulExportEditStateVersion: 0,
+    );
+    final store = MemoryPhotoProjectStore.withProjects([exported, changed]);
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('home-featured-draft-changed-draft')),
+        matching: find.text('有新修改'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('home-draft-exported-draft')),
+        matching: find.text('已导出'),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('home lists multiple drafts and opens the selected draft', (
@@ -149,8 +200,13 @@ void main() {
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
     await tester.pumpAndSettle();
 
+    expect(
+      find.byKey(const ValueKey('home-featured-draft-project-2')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('home-draft-project-2')), findsNothing);
     expect(find.byKey(const ValueKey('home-draft-project-1')), findsOneWidget);
-    expect(find.byKey(const ValueKey('home-draft-project-2')), findsOneWidget);
+    expect(find.text('其他草稿'), findsOneWidget);
 
     final firstDraft = find.byKey(const ValueKey('home-draft-project-1'));
     await tester.drag(find.byType(ListView), const Offset(0, -320));
@@ -165,6 +221,57 @@ void main() {
       containsAll(<String>[first.id, second.id]),
     );
   });
+
+  testWidgets(
+    'home deletes only the selected draft after a safe confirmation',
+    (tester) async {
+      final photoFile = File(
+        'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+        'Icon-App-1024x1024@1x.png',
+      );
+      PhotoProject project(String id, String photoId, int hour) => PhotoProject(
+        id: id,
+        createdAt: DateTime.utc(2026, 8, 28, hour),
+        updatedAt: DateTime.utc(2026, 8, 28, hour),
+        photos: [
+          ProjectPhoto(
+            id: photoId,
+            localPath: photoFile.path,
+            originalName: '$photoId.png',
+          ),
+        ],
+        flowState: PhotoProjectFlowState.editing,
+      );
+      final older = project('draft-older', 'photo-older', 8);
+      final latest = project('draft-latest', 'photo-latest', 9);
+      final store = MemoryPhotoProjectStore.withProjects([older, latest]);
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+      await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('home-delete-draft-draft-older')),
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('home-delete-draft-draft-older')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('只会删除映见中的草稿，不会删除系统相册原图。'), findsOne);
+      await tester.tap(find.byKey(const ValueKey('home-confirm-delete-draft')));
+      await tester.pumpAndSettle();
+
+      expect(store.projects.map((project) => project.id), [latest.id]);
+      expect(
+        find.byKey(const ValueKey('home-draft-draft-older')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('home-featured-draft-draft-latest')),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets('future meta ops open visibly read-only until update', (
     tester,
@@ -224,8 +331,17 @@ void main() {
   ) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(
+          disableAnimations: true,
+          reduceMotion: true,
+          highContrast: true,
+        );
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
     final photoFile = File(
       'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
       'Icon-App-1024x1024@1x.png',
@@ -283,12 +399,43 @@ void main() {
       find.byKey(const ValueKey('voice-edit-text-field')),
       '皮肤自然一点',
     );
-    await tester.tap(find.byKey(const ValueKey('voice-edit-submit')));
+    tester.testTextInput.hide();
+    await tester.pumpAndSettle();
+    final submit = find.byKey(const ValueKey('voice-edit-submit'));
+    await tester.ensureVisible(submit);
+    await tester.pumpAndSettle();
+    await tester.tap(submit);
     await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.byKey(ValueKey('ai-target-${targetIds[0]}')), findsOneWidget);
     expect(find.byKey(ValueKey('ai-target-${targetIds[1]}')), findsOneWidget);
+    expect(
+      find.byKey(ValueKey('ai-target-overlay-${targetIds[0]}')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(ValueKey('ai-target-overlay-${targetIds[1]}')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
     expect(store.project!.undoHistory, isEmpty);
+
+    await tester.tap(find.byKey(const ValueKey('ai-target-cancel')));
+    await tester.pumpAndSettle();
+    expect(store.project!.undoHistory, isEmpty);
+    expect(find.byKey(ValueKey('ai-target-${targetIds[0]}')), findsNothing);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('voice-edit-text-field')),
+      '皮肤自然一点',
+    );
+    tester.testTextInput.hide();
+    await tester.pumpAndSettle();
+    final secondSubmit = find.byKey(const ValueKey('voice-edit-submit'));
+    await tester.ensureVisible(secondSubmit);
+    await tester.pumpAndSettle();
+    await tester.tap(secondSubmit);
+    await tester.pump(const Duration(milliseconds: 300));
 
     await tester.tap(find.byKey(ValueKey('ai-target-${targetIds[1]}')));
     await tester.pumpAndSettle();
@@ -460,7 +607,68 @@ void main() {
       findsOneWidget,
     );
     expect(find.byKey(const ValueKey('voice-edit-entry')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('editor-quick-suggestion-0')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('editor-quick-suggestion-1')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('editor-quick-suggestion-2')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('editor-lighting-track')), findsNothing);
     expect(find.text('无法读取这张照片'), findsNothing);
+  });
+
+  testWidgets('default command dock stays reachable at two-times text', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoImporter: FakePhotoImporter([
+          ProjectPhoto(
+            id: 'large-text-dock-photo',
+            localPath: photoFile.path,
+            originalName: '大字体.png',
+          ),
+        ]),
+      ),
+    );
+    await _openEditorFromHome(tester);
+
+    expect(find.byKey(const ValueKey('voice-edit-entry')), findsOneWidget);
+    expect(find.byKey(const ValueKey('editor-manual-entry')), findsOneWidget);
+    for (var index = 0; index < 3; index += 1) {
+      expect(
+        find.byKey(ValueKey('editor-quick-suggestion-$index')),
+        findsOneWidget,
+      );
+    }
+    await tester.tap(find.byKey(const ValueKey('editor-quick-suggestion-2')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('visual-tracks-dock')), findsOneWidget);
+    expect(find.byKey(const ValueKey('visual-track-era-tab')), findsOneWidget);
+    expect(find.byType(BackdropFilter), findsNothing);
+    expect(
+      find.byKey(const ValueKey('visual-track-lighting-tab')),
+      findsOneWidget,
+    );
   });
 
   testWidgets(
@@ -497,7 +705,7 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.byKey(const ValueKey('editor-visual-tracks')),
+        find.byKey(const ValueKey('editor-quick-suggestion-2')),
         findsOneWidget,
       );
       expect(
@@ -513,6 +721,10 @@ void main() {
       );
       expect(find.byKey(const ValueKey('editor-tools-dock')), findsOneWidget);
       expect(find.byKey(const ValueKey('editor-tools-sheet')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('editor-canvas-interaction-hint')),
+        findsOneWidget,
+      );
 
       await tester.tap(
         find.byKey(const ValueKey('editor-preview-fullscreen')).hitTestable(),
@@ -525,12 +737,28 @@ void main() {
       );
       expect(find.byKey(const ValueKey('editor-tools-dock')), findsNothing);
       expect(find.byKey(const ValueKey('editor-export')), findsNothing);
-
-      await tester.tap(
-        find.byKey(const ValueKey('editor-fullscreen-preview-surface')),
+      expect(
+        find.byKey(const ValueKey('editor-canvas-interaction-hint')),
+        findsNothing,
       );
+
+      tester
+          .widget<GestureDetector>(
+            find.byKey(const ValueKey('editor-fullscreen-preview-surface')),
+          )
+          .onTap!();
       await tester.pumpAndSettle();
 
+      expect(
+        find.byKey(const ValueKey('editor-fullscreen-preview')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('editor-fullscreen-close')),
+        findsNothing,
+      );
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
       expect(
         find.byKey(const ValueKey('editor-fullscreen-preview')),
         findsNothing,
@@ -539,7 +767,7 @@ void main() {
     },
   );
 
-  testWidgets('a rejected photo is explained while valid photos continue', (
+  testWidgets('a valid single-photo import proceeds without stale failures', (
     tester,
   ) async {
     final photoFile = File(
@@ -571,8 +799,8 @@ void main() {
 
     await _openEditorFromHome(tester);
 
-    expect(find.textContaining('动态照片.png'), findsOneWidget);
-    expect(find.textContaining('暂不支持动态图片'), findsOneWidget);
+    expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
+    expect(find.textContaining('动态照片.png'), findsNothing);
   });
 
   testWidgets('a fully rejected import remains recoverable', (tester) async {
@@ -592,13 +820,15 @@ void main() {
 
     await _openEditorFromHome(tester);
 
+    expect(find.byKey(const ValueKey('home-page')), findsOneWidget);
+    expect(find.byKey(const ValueKey('editor-page')), findsNothing);
     expect(find.textContaining('损坏照片.jpg'), findsOneWidget);
     expect(find.textContaining('无法读取'), findsOneWidget);
-    expect(find.text('选择照片'), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-import-retry')), findsOneWidget);
     expect(find.semantics.byFlag(SemanticsFlag.isLiveRegion), findsWidgets);
   });
 
-  testWidgets('cancelled import is explicit and remains retryable', (
+  testWidgets('cancelled import silently remains on the home page', (
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
@@ -609,8 +839,10 @@ void main() {
 
     await _openEditorFromHome(tester);
 
-    expect(find.text('未添加任何照片'), findsOneWidget);
-    expect(find.text('选择照片'), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-page')), findsOneWidget);
+    expect(find.byKey(const ValueKey('editor-page')), findsNothing);
+    expect(find.text('未添加任何照片'), findsNothing);
+    expect(find.byKey(const ValueKey('home-start-editing')), findsOneWidget);
   });
 
   testWidgets('import progress is announced while local copying is active', (
@@ -627,13 +859,51 @@ void main() {
 
     final progress = find.semantics.byPredicate(
       (node) =>
-          node.label.contains('正在导入照片') && node.flagsCollection.isLiveRegion,
+          node.label.contains('正在准备照片') && node.flagsCollection.isLiveRegion,
     );
     expect(progress, findsOne);
     expect(progress.evaluate().single.flagsCollection.isLiveRegion, isTrue);
+    expect(find.byKey(const ValueKey('editor-page')), findsNothing);
 
     importer.cancel();
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('cancelling photo preparation cleans a late working copy', (
+    tester,
+  ) async {
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final importer = _DeferredPhotoImporter();
+    final store = MemoryPhotoProjectStore();
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(settings, photoImporter: importer, photoProjectStore: store),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('home-cancel-import')));
+    await tester.pump();
+    importer.complete(
+      PhotoImportBatch(
+        photos: [
+          ProjectPhoto(
+            id: 'late-photo',
+            localPath: photoFile.path,
+            originalName: '迟到照片.png',
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('home-page')), findsOneWidget);
+    expect(find.byKey(const ValueKey('editor-page')), findsNothing);
+    expect(store.projects, isEmpty);
   });
 
   testWidgets('photo picker timeout restores a retryable import button', (
@@ -652,11 +922,12 @@ void main() {
 
     await _openEditorFromHome(tester);
 
+    expect(find.byKey(const ValueKey('home-page')), findsOneWidget);
     expect(find.text('照片导入失败，请重试'), findsOneWidget);
-    final retry = find.byKey(const ValueKey('editor-select-photos'));
+    final retry = find.byKey(const ValueKey('home-import-retry'));
     expect(retry, findsOneWidget);
     expect(tester.widget<FilledButton>(retry).onPressed, isNotNull);
-    expect(find.text('正在导入照片…'), findsNothing);
+    expect(find.text('正在准备照片…'), findsNothing);
   });
 
   testWidgets('import opens a neutral editor without another decision', (
@@ -1086,7 +1357,7 @@ void main() {
 
     expect(exporter.exportedPhoto, photo);
     expect(exporter.exportedRecipe?.exposure, greaterThan(0));
-    expect(find.text('已保存 1 张照片'), findsOneWidget);
+    expect(find.text('已保存到系统相册'), findsOneWidget);
     final exportStatesBeforeShare = Map.of(store.project!.exportStates);
     await tester.ensureVisible(find.byKey(const ValueKey('save-share')));
     await tester.tap(find.byKey(const ValueKey('save-share')));
@@ -1107,10 +1378,10 @@ void main() {
 
     await tester.ensureVisible(find.byKey(const ValueKey('save-share')));
     await tester.tap(find.byKey(const ValueKey('save-share')));
-    await _pumpUntilText(tester, '已取消分享，保存结果不受影响');
+    await _pumpUntilText(tester, '已取消分享，成片仍已保存到系统相册');
 
-    expect(find.text('已取消分享，保存结果不受影响'), findsOneWidget);
-    expect(find.text('已保存 1 张照片'), findsOneWidget);
+    expect(find.text('已取消分享，成片仍已保存到系统相册'), findsOneWidget);
+    expect(find.text('已保存到系统相册'), findsOneWidget);
     expect(find.text('分享已保存照片'), findsOneWidget);
     expect(store.project?.exportStates, exportStatesBeforeShare);
     await tester.tap(find.byKey(const ValueKey('save-finish')));
@@ -1127,7 +1398,49 @@ void main() {
     expect(find.byKey(const ValueKey('editor-save-success')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('save-finish')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('home-start-editing')), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-resume-project')), findsOneWidget);
+    expect(find.text('已导出'), findsOneWidget);
+  });
+
+  testWidgets('an exported draft reopens for editing and can export again', (
+    tester,
+  ) async {
+    final photoFile = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    final photo = ProjectPhoto(
+      id: 'reexport-photo',
+      localPath: photoFile.path,
+      originalName: '重新导出.png',
+    );
+    final project = PhotoProject(
+      id: 'reexport-project',
+      createdAt: DateTime.utc(2026, 8, 28),
+      updatedAt: DateTime.utc(2026, 8, 28),
+      photos: [photo],
+      flowState: PhotoProjectFlowState.exported,
+      exportStates: {photo.id: PhotoExportState.saved},
+    );
+    final exporter = FakePhotoExporter();
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoProjectStore: MemoryPhotoProjectStore(project),
+        photoExporter: exporter,
+      ),
+    );
+
+    await _openEditorFromHome(tester);
+    expect(find.byKey(const ValueKey('editor-save-success')), findsNothing);
+    expect(find.byKey(const ValueKey('editor-bottom-command-bar')), findsOne);
+    await tester.tap(find.byKey(const ValueKey('editor-export')));
+    await tester.pumpAndSettle();
+
+    expect(exporter.exportedPhoto, photo);
+    expect(find.text('已保存到系统相册'), findsOneWidget);
   });
 
   testWidgets('system share failure preserves the saved result', (
@@ -1139,10 +1452,10 @@ void main() {
 
     await tester.ensureVisible(find.byKey(const ValueKey('save-share')));
     await tester.tap(find.byKey(const ValueKey('save-share')));
-    await _pumpUntilText(tester, '暂时无法分享，保存结果不受影响');
+    await _pumpUntilText(tester, '暂时无法分享，成片仍已保存到系统相册');
 
-    expect(find.text('暂时无法分享，保存结果不受影响'), findsOneWidget);
-    expect(find.text('已保存 1 张照片'), findsOneWidget);
+    expect(find.text('暂时无法分享，成片仍已保存到系统相册'), findsOneWidget);
+    expect(find.text('已保存到系统相册'), findsOneWidget);
     expect(find.text('分享已保存照片'), findsOneWidget);
     expect(store.project?.exportStates, exportStatesBeforeShare);
   });
@@ -1173,7 +1486,7 @@ void main() {
     );
 
     sharer.complete(PhotoShareOutcome.canceled);
-    await _pumpUntilText(tester, '已取消分享，保存结果不受影响');
+    await _pumpUntilText(tester, '已取消分享，成片仍已保存到系统相册');
     expect(find.text('分享已保存照片'), findsOneWidget);
   });
 
@@ -1546,6 +1859,26 @@ void main() {
     expect(faceSlimTab.hitTestable(), findsOneWidget);
     await _openManualMetaOp(tester, MetaOpIds.exposure);
     expect(exposureTab, findsOneWidget);
+    await tester.tap(exposureTab);
+    await tester.pumpAndSettle();
+    final exposureSemantics = tester.getSemantics(
+      find.descendant(
+        of: find.byKey(const ValueKey('editor-adjustment-exposure')),
+        matching: find.byWidgetPredicate(
+          (widget) => widget is Semantics && widget.properties.slider == true,
+        ),
+      ),
+    );
+    expect(exposureSemantics.label, isNotEmpty);
+    expect(exposureSemantics.value, '0');
+    expect(
+      exposureSemantics.getSemanticsData().hasAction(SemanticsAction.increase),
+      isTrue,
+    );
+    expect(
+      exposureSemantics.getSemanticsData().hasAction(SemanticsAction.decrease),
+      isTrue,
+    );
     expect(
       find.byKey(const ValueKey('editor-adjustment-tab-faceSlim')),
       findsNothing,
@@ -2349,14 +2682,174 @@ void main() {
       buildTestApp(settings, photoProjectStore: _FailingProjectStore()),
     );
 
-    await _openEditorFromHome(tester);
-
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('home-page')), findsOneWidget);
+    expect(find.text('需要恢复'), findsOneWidget);
     expect(find.text('无法恢复上次项目'), findsOneWidget);
     expect(find.text('重试'), findsOneWidget);
     expect(find.semantics.byFlag(SemanticsFlag.isLiveRegion), findsWidgets);
   });
 
+  testWidgets(
+    'manual edit blocks export and route exit until its atomic save completes',
+    (tester) async {
+      final photoFile = File(
+        'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+        'Icon-App-1024x1024@1x.png',
+      );
+      final project = PhotoProject(
+        id: 'pending-edit-project',
+        createdAt: DateTime.utc(2026, 8, 28),
+        updatedAt: DateTime.utc(2026, 8, 28),
+        photos: [
+          ProjectPhoto(
+            id: 'pending-edit-photo',
+            localPath: photoFile.path,
+            originalName: '等待保存.png',
+          ),
+        ],
+        flowState: PhotoProjectFlowState.editing,
+      );
+      final store = _DeferredEditProjectStore(project);
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+      await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
+      await _openEditorFromHome(tester);
+      await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
+      await tester.pumpAndSettle();
+
+      store.deferNextSave();
+      final adjustment = find.byKey(
+        const ValueKey('editor-adjustment-exposure'),
+      );
+      await tester.ensureVisible(adjustment);
+      final slider = tester.widget<Slider>(
+        find.descendant(of: adjustment, matching: find.byType(Slider)),
+      );
+      final changedValue = (slider.value + 0.1).clamp(slider.min, slider.max);
+      slider.onChangeStart!(slider.value);
+      slider.onChanged!(changedValue);
+      slider.onChangeEnd!(changedValue);
+      for (var attempt = 0; attempt < 10; attempt += 1) {
+        await tester.pump(const Duration(milliseconds: 50));
+        if (store.saveStarted.isCompleted) break;
+      }
+      expect(store.saveStarted.isCompleted, isTrue);
+
+      expect(find.byKey(const ValueKey('editor-edit-save-pending')), findsOne);
+      expect(
+        tester
+            .widget<FilledButton>(find.byKey(const ValueKey('editor-export')))
+            .onPressed,
+        isNull,
+      );
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
+      expect(find.byKey(const ValueKey('editor-tools-dock')), findsNothing);
+
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
+
+      store.completeSave();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('home-page')), findsOneWidget);
+      expect(store.project.undoHistory, hasLength(1));
+    },
+  );
+
+  testWidgets(
+    'failed manual edit save offers inline retry and discard without corrupting history',
+    (tester) async {
+      final photoFile = File(
+        'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+        'Icon-App-1024x1024@1x.png',
+      );
+      final project = PhotoProject(
+        id: 'failed-edit-project',
+        createdAt: DateTime.utc(2026, 8, 28),
+        updatedAt: DateTime.utc(2026, 8, 28),
+        photos: [
+          ProjectPhoto(
+            id: 'failed-edit-photo',
+            localPath: photoFile.path,
+            originalName: '保存恢复.png',
+          ),
+        ],
+        flowState: PhotoProjectFlowState.editing,
+      );
+      final store = _ArmableFailProjectStore(project)..failSaves = true;
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+      await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
+      await _openEditorFromHome(tester);
+      await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
+      await tester.pumpAndSettle();
+
+      final adjustment = find.byKey(
+        const ValueKey('editor-adjustment-exposure'),
+      );
+      await tester.ensureVisible(adjustment);
+      final initialSlider = tester.widget<Slider>(
+        find.descendant(of: adjustment, matching: find.byType(Slider)),
+      );
+      final initialValue = (initialSlider.value + 0.1).clamp(
+        initialSlider.min,
+        initialSlider.max,
+      );
+      initialSlider.onChangeStart!(initialSlider.value);
+      initialSlider.onChanged!(initialValue);
+      initialSlider.onChangeEnd!(initialValue);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('editor-edit-save-failed')), findsOne);
+      expect(find.text('本次调整尚未保存，当前仍显示上次安全结果。'), findsOne);
+      expect(find.byKey(const ValueKey('editor-edit-save-retry')), findsOne);
+      expect(find.byKey(const ValueKey('editor-edit-save-discard')), findsOne);
+      expect(store.project.undoHistory, isEmpty);
+      expect(
+        tester
+            .widget<FilledButton>(find.byKey(const ValueKey('editor-export')))
+            .onPressed,
+        isNull,
+      );
+
+      store.failSaves = false;
+      await tester.tap(find.byKey(const ValueKey('editor-edit-save-retry')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('editor-edit-save-failed')),
+        findsNothing,
+      );
+      expect(store.project.undoHistory, hasLength(1));
+
+      store.failSaves = true;
+      final slider = tester.widget<Slider>(
+        find.descendant(of: adjustment, matching: find.byType(Slider)),
+      );
+      slider.onChangeStart!(slider.value);
+      slider.onChanged!((slider.value - 0.1).clamp(slider.min, slider.max));
+      slider.onChangeEnd!((slider.value - 0.1).clamp(slider.min, slider.max));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('editor-edit-save-failed')), findsOne);
+      await tester.tap(find.byKey(const ValueKey('editor-edit-save-discard')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('editor-edit-save-failed')),
+        findsNothing,
+      );
+      expect(store.project.undoHistory, hasLength(1));
+    },
+  );
+
   testWidgets('a complete export failure remains retryable', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(() async {
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+      await tester.binding.setSurfaceSize(null);
+    });
     final photoFile = File(
       'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
       'Icon-App-1024x1024@1x.png',
@@ -2389,10 +2882,69 @@ void main() {
     await tester.tap(saveButton);
     await tester.pumpAndSettle();
 
-    expect(find.text('已保存 0 张 · 失败 1 张 · 取消 0 张'), findsWidgets);
+    expect(find.text('暂时无法导出'), findsOneWidget);
     expect(find.byKey(const ValueKey('export-retry-failed')), findsOneWidget);
     expect(find.semantics.byFlag(SemanticsFlag.isLiveRegion), findsWidgets);
+    expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'photo permission denial keeps the draft and never auto-retries',
+    (tester) async {
+      final photoFile = File(
+        'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+        'Icon-App-1024x1024@1x.png',
+      );
+      final project = PhotoProject(
+        id: 'permission-project',
+        createdAt: DateTime.utc(2026, 8, 28),
+        updatedAt: DateTime.utc(2026, 8, 28),
+        photos: [
+          ProjectPhoto(
+            id: 'permission-photo',
+            localPath: photoFile.path,
+            originalName: '权限样片.png',
+          ),
+        ],
+      );
+      final exporter = _PermissionDeniedPhotoExporter();
+      final store = MemoryPhotoProjectStore(project);
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoProjectStore: store,
+          photoExporter: exporter,
+        ),
+      );
+      await _openEditorFromHome(tester);
+      await tester.tap(find.byKey(const ValueKey('editor-export')));
+      await tester.pumpAndSettle();
+      expect(find.text('映见需要添加照片权限，才能把成片保存到系统相册。'), findsOne);
+      await tester.tap(
+        find.byKey(const ValueKey('export-permission-continue')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('export-open-settings')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('export-continue-editing')),
+        findsOneWidget,
+      );
+      expect(store.project, isNotNull);
+      expect(exporter.calls, 1);
+      await tester.tap(find.byKey(const ValueKey('export-open-settings')));
+      await tester.pump();
+      expect(exporter.settingsCalls, 1);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(exporter.calls, 1);
+    },
+  );
 
   testWidgets('leaving during export drains a late share file', (tester) async {
     final photoFile = File(
@@ -2431,9 +2983,30 @@ void main() {
     await tester.tap(saveButton);
     await tester.pump(const Duration(milliseconds: 300));
 
+    expect(find.text('正在准备成片…'), findsOneWidget);
+    expect(find.textContaining('1 / 1'), findsNothing);
+    expect(find.textContaining('第1张'), findsNothing);
+    expect(find.byKey(const ValueKey('export-cancel-remaining')), findsNothing);
+
+    exporter.beginSavingToPhotoLibrary();
+    await tester.pump();
+    expect(find.text('正在保存到系统相册…'), findsOneWidget);
+    expect(find.text('正在准备成片…'), findsNothing);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(find.text('正在保存到系统相册…'), findsOneWidget);
+    expect(exporter.calls, 1);
+
     await tester.tap(find.byType(BackButton));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
     exporter.complete();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('save-finish')));
+    await tester.pumpAndSettle();
     for (
       var attempt = 0;
       attempt < 10 && sharer.discardedPaths == null;
@@ -2592,6 +3165,7 @@ void main() {
 }
 
 Future<void> _tapEditorEntryFromHome(WidgetTester tester) async {
+  await tester.pumpAndSettle();
   final resume = find.byKey(const ValueKey('home-resume-project'));
   if (resume.evaluate().isNotEmpty) {
     await tester.tap(resume);
@@ -2856,6 +3430,36 @@ final class _ArmableFailProjectStore implements PhotoProjectStore {
   }
 }
 
+final class _DeferredEditProjectStore implements PhotoProjectStore {
+  _DeferredEditProjectStore(this.project);
+
+  PhotoProject project;
+  bool _defer = false;
+  Completer<void> saveStarted = Completer<void>();
+  Completer<void> _saveRelease = Completer<void>();
+
+  void deferNextSave() {
+    _defer = true;
+    saveStarted = Completer<void>();
+    _saveRelease = Completer<void>();
+  }
+
+  void completeSave() => _saveRelease.complete();
+
+  @override
+  Future<PhotoProject?> loadLatest() async => project;
+
+  @override
+  Future<void> save(PhotoProject project) async {
+    if (_defer) {
+      _defer = false;
+      saveStarted.complete();
+      await _saveRelease.future;
+    }
+    this.project = project;
+  }
+}
+
 final class _AlwaysFailPhotoExporter implements PhotoExporter {
   @override
   Future<ExportedPhoto> export({
@@ -2863,6 +3467,29 @@ final class _AlwaysFailPhotoExporter implements PhotoExporter {
     required EditRecipe recipe,
   }) {
     throw StateError('fixture export failure');
+  }
+}
+
+final class _PermissionDeniedPhotoExporter
+    implements
+        PhotoExporter,
+        PhotoLibraryPermissionAwareExporter,
+        PhotoLibrarySettingsOpener {
+  int calls = 0;
+  int settingsCalls = 0;
+
+  @override
+  Future<ExportedPhoto> export({
+    required ProjectPhoto photo,
+    required EditRecipe recipe,
+  }) async {
+    calls += 1;
+    throw PlatformException(code: 'photoAccessDenied');
+  }
+
+  @override
+  Future<void> openPhotoLibrarySettings() async {
+    settingsCalls += 1;
   }
 }
 
@@ -2874,6 +3501,8 @@ final class _DeferredPhotoImporter implements PhotoImporter {
       _completion.future;
 
   void cancel() => _completion.complete(const PhotoImportBatch());
+
+  void complete(PhotoImportBatch batch) => _completion.complete(batch);
 }
 
 final class _ThrowingPhotoImporter implements PhotoImporter {
@@ -2907,14 +3536,27 @@ final class _DeferredPhotoSharer implements PhotoSharer {
   void complete(PhotoShareOutcome outcome) => _completion.complete(outcome);
 }
 
-final class _DeferredPhotoExporter implements PhotoExporter {
+final class _DeferredPhotoExporter
+    implements PhotoExporter, PhotoExportStageAware {
   final Completer<ExportedPhoto> _completion = Completer<ExportedPhoto>();
+  int calls = 0;
+  @override
+  final ValueNotifier<PhotoExportStage> stage = ValueNotifier(
+    PhotoExportStage.preparing,
+  );
 
   @override
   Future<ExportedPhoto> export({
     required ProjectPhoto photo,
     required EditRecipe recipe,
-  }) => _completion.future;
+  }) {
+    calls += 1;
+    return _completion.future;
+  }
+
+  void beginSavingToPhotoLibrary() {
+    stage.value = PhotoExportStage.savingToPhotoLibrary;
+  }
 
   void complete() {
     _completion.complete(

@@ -209,6 +209,16 @@ class EditorSession extends ChangeNotifier {
     }
   }
 
+  void cancelAdjustment() {
+    final start = _adjustmentStart;
+    if (start == null) return;
+    _adjustmentStart = null;
+    if (_recipe != start) {
+      _recipe = start;
+      notifyListeners();
+    }
+  }
+
   void undo() {
     _adjustmentStart = null;
     if (_history.isEmpty) {

@@ -39,6 +39,38 @@ class AppLocalizationsZh extends AppLocalizations {
   String get recentProjects => '最近项目';
 
   @override
+  String get otherDrafts => '其他草稿';
+
+  @override
+  String get selectNewPhoto => '选择新照片';
+
+  @override
+  String get deleteDraft => '删除草稿';
+
+  @override
+  String get draftDeleteConfirmation => '只会删除映见中的草稿，不会删除系统相册原图。';
+
+  @override
+  String get draftStatusEditing => '编辑中';
+
+  @override
+  String get draftStatusExported => '已导出';
+
+  @override
+  String get draftStatusModified => '有新修改';
+
+  @override
+  String get draftStatusNeedsUpdate => '需要更新';
+
+  @override
+  String get draftStatusNeedsRecovery => '需要恢复';
+
+  @override
+  String lastEditedAt(String date, String time) {
+    return '最后编辑于 $date $time';
+  }
+
+  @override
   String get noRecentProjects => '还没有项目，选一张照片开始吧';
 
   @override
@@ -98,6 +130,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get importingPhotos => '正在导入照片…';
 
   @override
+  String get preparingPhoto => '正在准备照片…';
+
+  @override
   String get restoringProject => '正在恢复项目…';
 
   @override
@@ -144,6 +179,15 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get projectSaveFailed => '无法保存本次调整，请重试';
+
+  @override
+  String get editSavePending => '正在保存本次调整';
+
+  @override
+  String get editSaveRecoveryMessage => '本次调整尚未保存，当前仍显示上次安全结果。';
+
+  @override
+  String get discardAdjustment => '放弃本次调整';
 
   @override
   String get removePhoto => '移除照片';
@@ -613,10 +657,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get photoShareCompleted => '已通过系统分享完成操作';
 
   @override
-  String get photoShareCanceled => '已取消分享，保存结果不受影响';
+  String get photoShareCanceled => '已取消分享，成片仍已保存到系统相册';
 
   @override
-  String get photoShareFailed => '暂时无法分享，保存结果不受影响';
+  String get photoShareFailed => '暂时无法分享，成片仍已保存到系统相册';
 
   @override
   String get continueEditing => '继续编辑';
@@ -718,6 +762,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get voiceEditPrompt => '还想怎么改？';
 
   @override
+  String get quickNatural => '自然一点';
+
+  @override
+  String get quickBrighten => '亮一点';
+
+  @override
+  String get quickAtmosphere => '换氛围';
+
+  @override
   String get quickEditBrighter => '更亮一点';
 
   @override
@@ -757,7 +810,28 @@ class AppLocalizationsZh extends AppLocalizations {
   String get metaOpSearchNoResults => '没有找到可用能力';
 
   @override
-  String get savePhotos => '保存';
+  String get savePhotos => '导出';
+
+  @override
+  String get preparingExport => '正在准备成片…';
+
+  @override
+  String get canvasInteractionHint => '点按全屏 · 长按看原图';
+
+  @override
+  String get savingToSystemPhotos => '正在保存到系统相册…';
+
+  @override
+  String get savedToSystemPhotos => '已保存到系统相册';
+
+  @override
+  String get exportFailedTitle => '暂时无法导出';
+
+  @override
+  String get photoPermissionPurpose => '映见需要添加照片权限，才能把成片保存到系统相册。';
+
+  @override
+  String get goToSystemSettings => '前往系统设置';
 
   @override
   String get saveOptionsTitle => '完成优化';

@@ -158,6 +158,66 @@ abstract class AppLocalizations {
   /// **'最近项目'**
   String get recentProjects;
 
+  /// No description provided for @otherDrafts.
+  ///
+  /// In zh, this message translates to:
+  /// **'其他草稿'**
+  String get otherDrafts;
+
+  /// No description provided for @selectNewPhoto.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择新照片'**
+  String get selectNewPhoto;
+
+  /// No description provided for @deleteDraft.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除草稿'**
+  String get deleteDraft;
+
+  /// No description provided for @draftDeleteConfirmation.
+  ///
+  /// In zh, this message translates to:
+  /// **'只会删除映见中的草稿，不会删除系统相册原图。'**
+  String get draftDeleteConfirmation;
+
+  /// No description provided for @draftStatusEditing.
+  ///
+  /// In zh, this message translates to:
+  /// **'编辑中'**
+  String get draftStatusEditing;
+
+  /// No description provided for @draftStatusExported.
+  ///
+  /// In zh, this message translates to:
+  /// **'已导出'**
+  String get draftStatusExported;
+
+  /// No description provided for @draftStatusModified.
+  ///
+  /// In zh, this message translates to:
+  /// **'有新修改'**
+  String get draftStatusModified;
+
+  /// No description provided for @draftStatusNeedsUpdate.
+  ///
+  /// In zh, this message translates to:
+  /// **'需要更新'**
+  String get draftStatusNeedsUpdate;
+
+  /// No description provided for @draftStatusNeedsRecovery.
+  ///
+  /// In zh, this message translates to:
+  /// **'需要恢复'**
+  String get draftStatusNeedsRecovery;
+
+  /// No description provided for @lastEditedAt.
+  ///
+  /// In zh, this message translates to:
+  /// **'最后编辑于 {date} {time}'**
+  String lastEditedAt(String date, String time);
+
   /// No description provided for @noRecentProjects.
   ///
   /// In zh, this message translates to:
@@ -272,6 +332,12 @@ abstract class AppLocalizations {
   /// **'正在导入照片…'**
   String get importingPhotos;
 
+  /// No description provided for @preparingPhoto.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在准备照片…'**
+  String get preparingPhoto;
+
   /// No description provided for @restoringProject.
   ///
   /// In zh, this message translates to:
@@ -343,6 +409,24 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'无法保存本次调整，请重试'**
   String get projectSaveFailed;
+
+  /// No description provided for @editSavePending.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在保存本次调整'**
+  String get editSavePending;
+
+  /// No description provided for @editSaveRecoveryMessage.
+  ///
+  /// In zh, this message translates to:
+  /// **'本次调整尚未保存，当前仍显示上次安全结果。'**
+  String get editSaveRecoveryMessage;
+
+  /// No description provided for @discardAdjustment.
+  ///
+  /// In zh, this message translates to:
+  /// **'放弃本次调整'**
+  String get discardAdjustment;
 
   /// No description provided for @removePhoto.
   ///
@@ -1265,13 +1349,13 @@ abstract class AppLocalizations {
   /// No description provided for @photoShareCanceled.
   ///
   /// In zh, this message translates to:
-  /// **'已取消分享，保存结果不受影响'**
+  /// **'已取消分享，成片仍已保存到系统相册'**
   String get photoShareCanceled;
 
   /// No description provided for @photoShareFailed.
   ///
   /// In zh, this message translates to:
-  /// **'暂时无法分享，保存结果不受影响'**
+  /// **'暂时无法分享，成片仍已保存到系统相册'**
   String get photoShareFailed;
 
   /// No description provided for @continueEditing.
@@ -1472,6 +1556,24 @@ abstract class AppLocalizations {
   /// **'还想怎么改？'**
   String get voiceEditPrompt;
 
+  /// No description provided for @quickNatural.
+  ///
+  /// In zh, this message translates to:
+  /// **'自然一点'**
+  String get quickNatural;
+
+  /// No description provided for @quickBrighten.
+  ///
+  /// In zh, this message translates to:
+  /// **'亮一点'**
+  String get quickBrighten;
+
+  /// No description provided for @quickAtmosphere.
+  ///
+  /// In zh, this message translates to:
+  /// **'换氛围'**
+  String get quickAtmosphere;
+
   /// No description provided for @quickEditBrighter.
   ///
   /// In zh, this message translates to:
@@ -1553,8 +1655,50 @@ abstract class AppLocalizations {
   /// No description provided for @savePhotos.
   ///
   /// In zh, this message translates to:
-  /// **'保存'**
+  /// **'导出'**
   String get savePhotos;
+
+  /// No description provided for @preparingExport.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在准备成片…'**
+  String get preparingExport;
+
+  /// No description provided for @canvasInteractionHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'点按全屏 · 长按看原图'**
+  String get canvasInteractionHint;
+
+  /// No description provided for @savingToSystemPhotos.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在保存到系统相册…'**
+  String get savingToSystemPhotos;
+
+  /// No description provided for @savedToSystemPhotos.
+  ///
+  /// In zh, this message translates to:
+  /// **'已保存到系统相册'**
+  String get savedToSystemPhotos;
+
+  /// No description provided for @exportFailedTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂时无法导出'**
+  String get exportFailedTitle;
+
+  /// No description provided for @photoPermissionPurpose.
+  ///
+  /// In zh, this message translates to:
+  /// **'映见需要添加照片权限，才能把成片保存到系统相册。'**
+  String get photoPermissionPurpose;
+
+  /// No description provided for @goToSystemSettings.
+  ///
+  /// In zh, this message translates to:
+  /// **'前往系统设置'**
+  String get goToSystemSettings;
 
   /// No description provided for @saveOptionsTitle.
   ///

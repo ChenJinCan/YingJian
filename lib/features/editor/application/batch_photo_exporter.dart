@@ -52,6 +52,7 @@ final class BoundedBatchPhotoExporter {
   final void Function(String photoId, String localPath)? onSharePathCreated;
   bool _cancelRequested = false;
   bool _running = false;
+  Object? lastError;
 
   bool get isRunning => _running;
 
@@ -102,12 +103,17 @@ final class BoundedBatchPhotoExporter {
       return retryFailuresOnly
           ? state == PhotoExportState.failed ||
                 state == PhotoExportState.cancelled
-          : state == PhotoExportState.notQueued;
+          : state == PhotoExportState.notQueued ||
+                (photoIds != null &&
+                    (state == PhotoExportState.saved ||
+                        state == PhotoExportState.failed ||
+                        state == PhotoExportState.cancelled));
     }).toList();
     if (targets.isEmpty) throw StateError('There are no photos to export');
 
     _running = true;
     _cancelRequested = false;
+    lastError = null;
     final sharePathsByPhotoId = <String, String>{};
     try {
       for (final photo in targets) {
@@ -148,7 +154,8 @@ final class BoundedBatchPhotoExporter {
           if (sharePath != null && sharePath.isNotEmpty) {
             sharePathsByPhotoId[photo.id] = sharePath;
           }
-        } on Object {
+        } on Object catch (error) {
+          lastError = error;
           await session.setPhotoExportState(photo.id, PhotoExportState.failed);
         }
       }

@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -165,8 +167,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(
+      find.byKey(const ValueKey('home-featured-draft-draft-2')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('home-draft-draft-2')), findsNothing);
     expect(find.byKey(const ValueKey('home-draft-draft-1')), findsOneWidget);
-    expect(find.byKey(const ValueKey('home-draft-draft-2')), findsOneWidget);
     await tester.ensureVisible(find.byKey(const ValueKey('home-new-project')));
     await tester.tap(find.byKey(const ValueKey('home-new-project')));
     await tester.pumpAndSettle();
@@ -182,6 +188,77 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('photo-preview-photo-1')), findsOneWidget);
   });
+
+  testWidgets(
+    'home import cancellation, rejection, timeout, and retry stay on production routing',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+
+      await tester.pumpWidget(
+        buildTestApp(settings, photoImporter: FakePhotoImporter()),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('home-page')), findsOneWidget);
+      expect(find.byKey(const ValueKey('editor-page')), findsNothing);
+      expect(find.byKey(const ValueKey('home-import-retry')), findsNothing);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoImporter: FakePhotoImporter(const [], const [
+            PhotoImportFailure(
+              photoName: 'bad.gif',
+              reason: PhotoImportFailureReason.animatedImage,
+            ),
+          ]),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('home-import-retry')), findsOneWidget);
+      expect(find.textContaining('bad.gif'), findsOneWidget);
+
+      final source = File(
+        'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+        'Icon-App-1024x1024@1x.png',
+      );
+      final retrying = _TimeoutThenSuccessImporter(
+        ProjectPhoto(
+          id: 'retry-photo',
+          localPath: source.path,
+          originalName: 'retry.png',
+        ),
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoImporter: retrying,
+          photoProjectStore: MemoryPhotoProjectStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('home-import-retry')), findsOneWidget);
+      expect(find.text('照片导入失败，请重试'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('home-import-retry')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('photo-preview-retry-photo')),
+        findsOneWidget,
+      );
+      expect(retrying.calls, 2);
+    },
+  );
 
   testWidgets('iOS runtime completes the production one-photo MVP journey', (
     tester,
@@ -332,9 +409,13 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     final aiTargetChoices = find.byWidgetPredicate((widget) {
       final key = widget.key;
-      return key is ValueKey<String> && key.value.startsWith('ai-target-');
+      return widget is ListTile &&
+          key is ValueKey<String> &&
+          key.value.startsWith('ai-target-');
     });
     expect(aiTargetChoices, findsNWidgets(2));
+    await tester.ensureVisible(aiTargetChoices.last);
+    await tester.pumpAndSettle();
     await tester.tap(aiTargetChoices.last);
     await tester.pumpAndSettle();
     final aiProject = (await store.loadLatest())!;
@@ -807,7 +888,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('editor-tools-done')));
     await tester.pumpAndSettle();
     final visualTracksEntry = find.byKey(
-      const ValueKey('editor-visual-tracks'),
+      const ValueKey('editor-quick-suggestion-2'),
     );
     await tester.ensureVisible(visualTracksEntry);
     await tester.tap(visualTracksEntry);
@@ -858,6 +939,9 @@ void main() {
     await tester.ensureVisible(saveButton);
     await tester.tap(saveButton);
     await tester.pumpAndSettle();
+    expect(find.text('映见需要添加照片权限，才能把成片保存到系统相册。'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('export-permission-continue')));
+    await tester.pump();
     // Vision/Core Image cold starts on the iOS simulator can take several
     // minutes once portrait, semantic masks, filters, geometry, and targeted
     // directional lighting are combined. Wait for the real terminal result or
@@ -917,7 +1001,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
     }
     expect(saveSuccess, findsOneWidget);
-    expect(find.text('已保存 1 张照片'), findsOneWidget);
+    expect(find.text('已保存到系统相册'), findsOneWidget);
     expect(await source.readAsBytes(), sourceBytes);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
@@ -943,14 +1027,11 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-resume-project')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
-    expect(find.byKey(const ValueKey('editor-save-success')), findsOneWidget);
-    expect(find.text('已保存 1 张照片'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('save-finish')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('home-start-editing')), findsOneWidget);
+    expect(find.byKey(const ValueKey('editor-save-success')), findsNothing);
+    expect(find.byKey(const ValueKey('editor-bottom-command-bar')), findsOne);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
-    expect(restoredPreviewRenderer.disposeCount, 0);
+    expect(restoredPreviewRenderer.disposeCount, greaterThan(0));
   });
 }
 
@@ -1079,7 +1160,25 @@ final class _SelectedPhotoSource implements PhotoSource {
   }
 }
 
-final class _NativeExportProbe implements ConfigurablePhotoExporter {
+final class _TimeoutThenSuccessImporter implements PhotoImporter {
+  _TimeoutThenSuccessImporter(this.photo);
+
+  final ProjectPhoto photo;
+  int calls = 0;
+
+  @override
+  Future<PhotoImportBatch> importPhotos({required int limit}) async {
+    calls += 1;
+    if (calls == 1) throw TimeoutException('fixture timeout');
+    return PhotoImportBatch(photos: [photo]);
+  }
+}
+
+final class _NativeExportProbe
+    implements
+        ConfigurablePhotoExporter,
+        PhotoLibraryPermissionAwareExporter,
+        PhotoExportStageAware {
   _NativeExportProbe({required this.delegate});
 
   final PhotoExporter delegate;
@@ -1088,6 +1187,10 @@ final class _NativeExportProbe implements ConfigurablePhotoExporter {
   final List<ExportedPhoto> results = [];
   final List<Object> errors = [];
   final List<PhotoExportOptions> options = [];
+
+  @override
+  ValueListenable<PhotoExportStage> get stage =>
+      (delegate as PhotoExportStageAware).stage;
 
   @override
   Future<ExportedPhoto> export({

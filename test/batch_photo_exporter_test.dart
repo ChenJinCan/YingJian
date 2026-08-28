@@ -124,6 +124,28 @@ void main() {
     },
   );
 
+  test('an explicitly selected saved photo can be exported again', () async {
+    final photo = _photos(1).single;
+    final session = PhotoProjectSession(
+      importer: FakePhotoImporter(),
+      store: MemoryPhotoProjectStore(
+        _project([
+          photo,
+        ]).copyWith(exportStates: {photo.id: PhotoExportState.saved}),
+      ),
+    );
+    await session.restore();
+    final exporter = _RecordingExporter();
+
+    final summary = await BoundedBatchPhotoExporter(
+      session: session,
+      exporter: exporter,
+    ).export(photoIds: {photo.id});
+
+    expect(exporter.calls, [photo.id]);
+    expect(summary.savedCount, 1);
+  });
+
   test(
     'restart marks interrupted work cancelled without replaying it',
     () async {

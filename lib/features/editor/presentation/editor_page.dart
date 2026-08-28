@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
 import 'package:yingjian/features/editor/application/ai_edit_planner.dart';
@@ -60,6 +61,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   int _selectedIndex = 0;
   bool _busy = false;
   bool _exporting = false;
+  PhotoExportStage _exportStage = PhotoExportStage.preparing;
+  bool _showCanvasInteractionHint = true;
   bool _sharing = false;
   Future<void>? _shareCompletion;
   BoundedBatchPhotoExporter? _batchExporter;
@@ -92,12 +95,18 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   _PendingManualRender? _pendingManualRender;
   final Map<String, EditRecipe> _lastRenderedRecipeByPhotoId = {};
   Future<void> _recipePersistence = Future.value();
+  int _recipePersistenceJobs = 0;
+  _RecipeSaveFailure? _recipeSaveFailure;
+  Completer<void>? _recipeSettlement;
+  bool _allowRoutePop = false;
   bool _handledStartWithImport = false;
   bool _manualToolsVisible = false;
   VisualTrackKind? _visualTrackKind;
   bool _immersivePreview = false;
   MetaOpCapabilitiesProvider? _metaOpCapabilitiesProvider;
   bool _loadedExportPreference = false;
+  bool _explainedPhotoPermission = false;
+  bool _photoPermissionDenied = false;
 
   @override
   void initState() {
@@ -113,6 +122,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached) {
+      _editorSession.cancelAdjustment();
+      _loadEditableRecipe();
       _analysisCancellation?.cancel();
       final analysisCompletion = _analysisCompletion;
       _lifecycleAnalysisUpdates = _lifecycleAnalysisUpdates.then((_) async {
@@ -229,16 +240,14 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
 
   Future<void> _restoreProject(PhotoProjectSession session) async {
     await session.restore(enforceSinglePhoto: true);
-    final recoveredSummary = await BoundedBatchPhotoExporter.recoverInterrupted(
-      session,
-    );
+    await BoundedBatchPhotoExporter.recoverInterrupted(session);
+    if (session.project?.flowState == PhotoProjectFlowState.exported) {
+      await session.transitionTo(PhotoProjectFlowState.editing);
+    }
     final project = session.project;
     final analysisRefreshRequired = await _restoreCachedPortraitApplicability(
       session,
     );
-    if (mounted && recoveredSummary != null) {
-      setState(() => _exportSummary = recoveredSummary);
-    }
     _loadEditableRecipe();
     final focusPhotoId = project?.focusPhotoId;
     if (focusPhotoId != null) {
@@ -490,7 +499,15 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       editableRecipe: editableRecipe,
       renderedRecipe: renderedRecipe,
     );
-    _pendingManualRender = request;
+    final previousSettlement = _recipeSettlement;
+    if (previousSettlement != null && !previousSettlement.isCompleted) {
+      previousSettlement.complete();
+    }
+    _recipeSettlement = Completer<void>();
+    setState(() {
+      _pendingManualRender = request;
+      _recipeSaveFailure = null;
+    });
     if (_lastRenderedRecipeByPhotoId[photoId] == renderedRecipe) {
       _acceptRenderedRecipe(request);
     }
@@ -508,10 +525,32 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
 
   void _acceptRenderedRecipe(_PendingManualRender request) {
     if (!identical(_pendingManualRender, request)) return;
-    _pendingManualRender = null;
-    _recipePersistence = _recipePersistence.then(
-      (_) => _persistRecipe(request.editableRecipe),
+    setState(() => _pendingManualRender = null);
+    _queueRecipePersistence(
+      request.editableRecipe,
+      settlement: _recipeSettlement,
     );
+  }
+
+  void _queueRecipePersistence(
+    EditRecipe desiredRecipe, {
+    Completer<void>? settlement,
+  }) {
+    setState(() => _recipePersistenceJobs += 1);
+    _recipePersistence = _recipePersistence
+        .then((_) => _persistRecipe(desiredRecipe))
+        .whenComplete(() {
+          if (!mounted) {
+            if (settlement != null && !settlement.isCompleted) {
+              settlement.complete();
+            }
+            return;
+          }
+          setState(() => _recipePersistenceJobs -= 1);
+          if (settlement != null && !settlement.isCompleted) {
+            settlement.complete();
+          }
+        });
   }
 
   void _handleRecipeRenderFailed(String photoId, EditRecipe recipe) {
@@ -529,7 +568,9 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         request.renderedRecipe != recipe) {
       return;
     }
-    _pendingManualRender = null;
+    setState(() => _pendingManualRender = null);
+    final settlement = _recipeSettlement;
+    if (settlement != null && !settlement.isCompleted) settlement.complete();
     if (_editorSession.recipe == request.editableRecipe) {
       _loadEditableRecipe();
     }
@@ -542,7 +583,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
 
   Future<void> _persistRecipe(EditRecipe desiredRecipe) async {
     if (_exportSummary != null || _exporting || _sharing) return;
-    var committedGroupEdit = false;
+    var committedEdit = false;
     try {
       final session = _session;
       final project = session?.project;
@@ -573,21 +614,74 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         ),
         resourceImporter: importer is EditingResourceImporter ? importer : null,
       );
-      committedGroupEdit = commit.appliedToGroup;
+      committedEdit = commit.result is AcceptedEdit;
+      if (mounted) {
+        setState(() => _recipeSaveFailure = null);
+      }
     } on Object {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
+        setState(() {
+          _recipeSaveFailure = _RecipeSaveFailure(desiredRecipe: desiredRecipe);
+        });
       }
     } finally {
       if (mounted && _editorSession.recipe == desiredRecipe) {
         _loadEditableRecipe();
       }
-      if (committedGroupEdit && mounted) {
+      if (committedEdit && mounted) {
         _showEditFeedback(context.l10n.editApplied);
       }
     }
+  }
+
+  void _retryRecipeSave() {
+    final failure = _recipeSaveFailure;
+    if (failure == null || _recipePersistenceJobs > 0) return;
+    final settlement = Completer<void>();
+    _recipeSettlement = settlement;
+    setState(() => _recipeSaveFailure = null);
+    _queueRecipePersistence(failure.desiredRecipe, settlement: settlement);
+  }
+
+  void _discardFailedRecipe() {
+    if (_recipeSaveFailure == null || _recipePersistenceJobs > 0) return;
+    setState(() => _recipeSaveFailure = null);
+    _loadEditableRecipe();
+  }
+
+  bool get _hasUnsettledRecipe =>
+      _pendingManualRender != null ||
+      _recipePersistenceJobs > 0 ||
+      _recipeSaveFailure != null;
+
+  bool get _hasLocalEditorLayer =>
+      _immersivePreview || _visualTrackKind != null || _manualToolsVisible;
+
+  void _handleBlockedPop() {
+    if (_exporting) return;
+    if (_immersivePreview) {
+      setState(() => _immersivePreview = false);
+      return;
+    }
+    if (_visualTrackKind != null) {
+      setState(() => _visualTrackKind = null);
+      return;
+    }
+    if (_manualToolsVisible) {
+      _editorSession.cancelAdjustment();
+      _loadEditableRecipe();
+      setState(() => _manualToolsVisible = false);
+      return;
+    }
+    if (_hasUnsettledRecipe) unawaited(_settleRecipeAndPop());
+  }
+
+  Future<void> _settleRecipeAndPop() async {
+    await _recipeSettlement?.future;
+    await _recipePersistence;
+    if (!mounted || _hasUnsettledRecipe) return;
+    setState(() => _allowRoutePop = true);
+    Navigator.of(context).pop();
   }
 
   void _showEditFeedback(String message) {
@@ -756,7 +850,10 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
               )
               .toList() ??
           const <StableEditTarget>[];
-      final selectedTargetId = await _chooseAiTarget(candidates);
+      final selectedTargetId = await _chooseAiTarget(
+        project.photos.firstWhere((photo) => photo.id == photoId),
+        candidates,
+      );
       if (selectedTargetId == null) return false;
       proposal = outcome.resolve(selectedTargetId);
     } else {
@@ -832,7 +929,10 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<String?> _chooseAiTarget(List<StableEditTarget> candidates) async {
+  Future<String?> _chooseAiTarget(
+    ProjectPhoto photo,
+    List<StableEditTarget> candidates,
+  ) async {
     if (candidates.isEmpty) return null;
     if (candidates.length == 1) return candidates.single.id;
     FocusManager.instance.primaryFocus?.unfocus();
@@ -841,6 +941,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     return showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
         title: Text(context.l10n.choosePersonTitle),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -848,15 +949,92 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           children: [
             Text(context.l10n.choosePersonHint),
             const SizedBox(height: 12),
+            AspectRatio(
+              aspectRatio: 4 / 3,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.file(
+                      File(photo.localPath),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) =>
+                          const ColoredBox(color: Color(0xFF252728)),
+                    ),
+                    for (var index = 0; index < candidates.length; index++)
+                      Positioned.fromRect(
+                        rect: Rect.fromLTRB(
+                          candidates[index].region.left * 240,
+                          candidates[index].region.top * 180,
+                          candidates[index].region.right * 240,
+                          candidates[index].region.bottom * 180,
+                        ),
+                        child: IgnorePointer(
+                          child: Container(
+                            key: ValueKey(
+                              'ai-target-overlay-${candidates[index].id}',
+                            ),
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                color: Theme.of(context).colorScheme.primary,
+                                width: 2,
+                              ),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            alignment: Alignment.topLeft,
+                            child: CircleAvatar(
+                              radius: 13,
+                              child: Text('${index + 1}'),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
             for (var index = 0; index < candidates.length; index++)
               ListTile(
                 key: ValueKey('ai-target-${candidates[index].id}'),
-                leading: CircleAvatar(child: Text('${index + 1}')),
+                leading: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: SizedBox.square(
+                        dimension: 44,
+                        child: Image.file(
+                          File(photo.localPath),
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) =>
+                              const ColoredBox(color: Color(0xFF252728)),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      right: -5,
+                      top: -5,
+                      child: CircleAvatar(
+                        radius: 11,
+                        child: Text('${index + 1}'),
+                      ),
+                    ),
+                  ],
+                ),
                 title: Text('${context.l10n.choosePersonTitle} ${index + 1}'),
                 onTap: () => Navigator.pop(context, candidates[index].id),
               ),
           ],
         ),
+        actions: [
+          TextButton(
+            key: const ValueKey('ai-target-cancel'),
+            onPressed: () => Navigator.pop(context),
+            child: Text(context.l10n.cancel),
+          ),
+        ],
       ),
     );
   }
@@ -962,7 +1140,33 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
 
   Future<void> _showSaveOptions() async {
     final project = _session?.project;
-    if (project == null || _exporting || _sharing) return;
+    if (project == null || _exporting || _sharing || _hasUnsettledRecipe) {
+      return;
+    }
+    final exporter = context.read<PhotoExporter>();
+    if (!_explainedPhotoPermission &&
+        exporter is PhotoLibraryPermissionAwareExporter) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(context.l10n.saveToAlbum),
+          content: Text(context.l10n.photoPermissionPurpose),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(context.l10n.cancel),
+            ),
+            FilledButton(
+              key: const ValueKey('export-permission-continue'),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(context.l10n.saveToAlbum),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      _explainedPhotoPermission = true;
+    }
     await _exportBatch(photoIds: {project.photos.single.id});
   }
 
@@ -978,13 +1182,31 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     if (!mounted) {
       return;
     }
-    setState(() => _exporting = true);
+    final exporter = context.read<PhotoExporter>();
+    final PhotoExportStageAware? stagedExporter =
+        exporter is PhotoExportStageAware
+        ? exporter as PhotoExportStageAware
+        : null;
+    VoidCallback? exportStageListener;
+    if (stagedExporter != null) {
+      exportStageListener = () {
+        if (!mounted || !_exporting) return;
+        setState(() => _exportStage = stagedExporter.stage.value);
+      };
+      stagedExporter.stage.addListener(exportStageListener);
+    }
+    setState(() {
+      _exporting = true;
+      _exportStage = stagedExporter != null
+          ? stagedExporter.stage.value
+          : PhotoExportStage.preparing;
+    });
     final attemptPhotoIds = <String>{};
     Future<BatchExportSummary>? completion;
     try {
       final batch = BoundedBatchPhotoExporter(
         session: _session!,
-        exporter: context.read<PhotoExporter>(),
+        exporter: exporter,
         options: _exportOptions,
         onSharePathCreated: (photoId, localPath) {
           attemptPhotoIds.add(photoId);
@@ -998,6 +1220,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       );
       _batchCompletion = completion;
       final summary = await completion;
+      final error = batch.lastError;
       await _discardShareFiles(
         photoIds: attemptPhotoIds.difference(
           summary.sharePathsByPhotoId.keys.toSet(),
@@ -1012,26 +1235,26 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         cancelledCount: summary.cancelledCount,
         sharePathsByPhotoId: Map.unmodifiable(_ownedSharePathsByPhotoId),
       );
-      setState(() => _exportSummary = displaySummary);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            context.l10n.exportSummary(
-              summary.savedCount,
-              summary.failedCount,
-              summary.cancelledCount,
-            ),
-          ),
-        ),
-      );
+      setState(() {
+        _exportSummary = displaySummary;
+        _photoPermissionDenied =
+            error is PlatformException && error.code == 'photoAccessDenied';
+      });
     } on Object {
       await _discardShareFiles(photoIds: attemptPhotoIds);
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(context.l10n.photoExportFailed)));
+        setState(
+          () => _exportSummary = const BatchExportSummary(
+            savedCount: 0,
+            failedCount: 1,
+            cancelledCount: 0,
+          ),
+        );
       }
     } finally {
+      if (stagedExporter != null && exportStageListener != null) {
+        stagedExporter.stage.removeListener(exportStageListener);
+      }
       if (identical(_batchCompletion, completion)) {
         _batchCompletion = null;
       }
@@ -1121,7 +1344,19 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       await session.transitionTo(PhotoProjectFlowState.editing);
     }
     await _discardShareFiles();
-    if (mounted) setState(() => _exportSummary = null);
+    if (mounted) {
+      setState(() {
+        _exportSummary = null;
+        _photoPermissionDenied = false;
+      });
+    }
+  }
+
+  Future<void> _openPhotoSettings() async {
+    final exporter = context.read<PhotoExporter>();
+    if (exporter is PhotoLibrarySettingsOpener) {
+      await (exporter as PhotoLibrarySettingsOpener).openPhotoLibrarySettings();
+    }
   }
 
   void _ownSharePath(String photoId, String localPath) {
@@ -1249,10 +1484,17 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                 _editorSession.recipe,
               );
         final editingEnabled =
-            session.canEdit && !_sharing && _exportSummary == null;
+            session.canEdit &&
+            !_sharing &&
+            _exportSummary == null &&
+            !_hasUnsettledRecipe;
         final hasPhotosReadyToExport =
             session.project?.exportStates.values.any(
-              (state) => state == PhotoExportState.notQueued,
+              (state) =>
+                  state == PhotoExportState.notQueued ||
+                  state == PhotoExportState.saved ||
+                  state == PhotoExportState.failed ||
+                  state == PhotoExportState.cancelled,
             ) ??
             false;
         final selectedPhoto = photos.isEmpty ? null : photos[_selectedIndex];
@@ -1287,254 +1529,268 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
             ? const <NormalizedTargetRegion>[]
             : _bodyTargetRegionsByPhotoId[selectedPhoto.id] ?? const [];
         const photoToolsVisible = true;
-        return Scaffold(
-          key: const ValueKey('editor-page'),
-          backgroundColor: _immersivePreview ? const Color(0xFF0B0D0E) : null,
-          appBar: _immersivePreview
-              ? null
-              : AppBar(
-                  title: photos.isEmpty
-                      ? null
-                      : Text(
-                          context.l10n.appTitle,
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 2,
-                              ),
-                        ),
-                  actions: photos.isEmpty
-                      ? null
-                      : [
-                          IconButton(
-                            key: const ValueKey('editor-undo'),
-                            tooltip: context.l10n.undo,
-                            onPressed: editingEnabled && session.canUndo
-                                ? () => unawaited(_undoEdit())
-                                : null,
-                            icon: const Icon(Icons.undo_rounded),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 4),
-                            child: FilledButton(
-                              key: const ValueKey('editor-export'),
-                              onPressed:
-                                  editingEnabled && hasPhotosReadyToExport
-                                  ? () => unawaited(_showSaveOptions())
-                                  : null,
-                              style: FilledButton.styleFrom(
-                                minimumSize: const Size(72, 48),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 18,
+        return PopScope(
+          canPop:
+              _allowRoutePop ||
+              (!_hasUnsettledRecipe && !_hasLocalEditorLayer && !_exporting),
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) _handleBlockedPop();
+          },
+          child: Scaffold(
+            key: const ValueKey('editor-page'),
+            backgroundColor: _immersivePreview ? const Color(0xFF0B0D0E) : null,
+            appBar: _immersivePreview
+                ? null
+                : AppBar(
+                    title: photos.isEmpty
+                        ? null
+                        : Text(
+                            context.l10n.appTitle,
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 2,
                                 ),
-                              ),
-                              child: Text(context.l10n.savePhotos),
-                            ),
                           ),
-                          PopupMenuButton<String>(
-                            tooltip: MaterialLocalizations.of(
-                              context,
-                            ).showMenuTooltip,
-                            onSelected: (value) {
-                              switch (value) {
-                                case 'undo':
-                                  unawaited(_undoEdit());
-                                case 'redo':
-                                  unawaited(_redoEdit());
-                                case 'reset':
-                                  unawaited(_resetEdit());
-                                case 'delete':
-                                  unawaited(_deleteProject());
-                              }
-                            },
-                            itemBuilder: (context) => [
-                              PopupMenuItem(
-                                value: 'undo',
-                                enabled: editingEnabled && session.canUndo,
-                                child: Text(context.l10n.undo),
+                    actions: photos.isEmpty
+                        ? null
+                        : [
+                            IconButton(
+                              key: const ValueKey('editor-undo'),
+                              tooltip: context.l10n.undo,
+                              onPressed: editingEnabled && session.canUndo
+                                  ? () => unawaited(_undoEdit())
+                                  : null,
+                              icon: const Icon(Icons.undo_rounded),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: FilledButton(
+                                key: const ValueKey('editor-export'),
+                                onPressed:
+                                    editingEnabled && hasPhotosReadyToExport
+                                    ? () => unawaited(_showSaveOptions())
+                                    : null,
+                                style: FilledButton.styleFrom(
+                                  minimumSize: const Size(72, 48),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 18,
+                                  ),
+                                ),
+                                child: Text(context.l10n.savePhotos),
                               ),
-                              PopupMenuItem(
-                                value: 'redo',
-                                enabled: editingEnabled && session.canRedo,
-                                child: Text(context.l10n.redo),
+                            ),
+                            PopupMenuButton<String>(
+                              tooltip: MaterialLocalizations.of(
+                                context,
+                              ).showMenuTooltip,
+                              onSelected: (value) {
+                                switch (value) {
+                                  case 'redo':
+                                    unawaited(_redoEdit());
+                                  case 'reset':
+                                    unawaited(_resetEdit());
+                                  case 'delete':
+                                    unawaited(_deleteProject());
+                                }
+                              },
+                              itemBuilder: (context) => [
+                                PopupMenuItem(
+                                  value: 'redo',
+                                  enabled: editingEnabled && session.canRedo,
+                                  child: Text(context.l10n.redo),
+                                ),
+                                PopupMenuItem(
+                                  value: 'reset',
+                                  enabled:
+                                      editingEnabled &&
+                                      session.canResetScopedEdit,
+                                  child: Text(context.l10n.reset),
+                                ),
+                                const PopupMenuDivider(),
+                                PopupMenuItem(
+                                  value: 'delete',
+                                  enabled: !_exporting && !_sharing,
+                                  child: Text(context.l10n.deleteProject),
+                                ),
+                              ],
+                            ),
+                            if (MediaQuery.sizeOf(context).width >= 700)
+                              IconButton(
+                                tooltip: context.l10n.deleteProject,
+                                onPressed: _exporting || _sharing
+                                    ? null
+                                    : () => unawaited(_deleteProject()),
+                                icon: const Icon(Icons.delete_outline),
                               ),
-                              PopupMenuItem(
-                                value: 'reset',
-                                enabled:
-                                    editingEnabled &&
-                                    session.canResetScopedEdit,
-                                child: Text(context.l10n.reset),
-                              ),
-                              const PopupMenuDivider(),
-                              PopupMenuItem(
-                                value: 'delete',
-                                enabled: !_exporting && !_sharing,
-                                child: Text(context.l10n.deleteProject),
+                          ],
+                  ),
+            bottomNavigationBar:
+                _immersivePreview ||
+                    _manualToolsVisible ||
+                    _visualTrackKind != null ||
+                    _exporting ||
+                    _exportSummary != null
+                ? null
+                : photos.isEmpty ||
+                      session.isRestoring ||
+                      session.restoreError != null
+                ? null
+                : _EditorCommandBar(
+                    editingEnabled: editingEnabled,
+                    exporting: _exporting,
+                    sharing: _sharing,
+                    exportSummary: _exportSummary,
+                    feedback: _editFeedback,
+                    onVoiceEdit: () => unawaited(_showVoiceEditSheet()),
+                    onManualEdit: () => setState(() {
+                      _visualTrackKind = null;
+                      _manualToolsVisible = true;
+                    }),
+                    onAtmosphere: () => _openVisualTrack(VisualTrackKind.era),
+                    onUndo: () => unawaited(_undoEdit()),
+                    onQuickEdit: (instruction) =>
+                        unawaited(_applyQuickInstruction(instruction)),
+                    onCancelExport: _cancelBatchExport,
+                    onContinueEditing: () => unawaited(_continueEditing()),
+                  ),
+            body: _immersivePreview && selectedPhoto != null
+                ? _FullscreenPhotoPreview(
+                    photo: selectedPhoto,
+                    recipe: previewRecipe,
+                    editState: session.project!.renderStateFor(
+                      selectedPhoto.id,
+                      recipe: previewRecipe,
+                    ),
+                    editContext: _renderContextFor(
+                      session.project!,
+                      selectedPhoto.id,
+                    ),
+                    renderer: context.read<PhotoPreviewRenderer>(),
+                    position: _selectedIndex + 1,
+                    count: photos.length,
+                    onClose: () => setState(() => _immersivePreview = false),
+                  )
+                : SafeArea(
+                    child: _exporting
+                        ? _SavingProgressView(stage: _exportStage)
+                        : _exportSummary != null &&
+                              _exportSummary!.failedCount == 0 &&
+                              _exportSummary!.cancelledCount == 0
+                        ? _SaveSuccessView(
+                            onFinish: _finishSaving,
+                            onShare: _exportSummary!.canShare
+                                ? () => unawaited(_shareExportedPhotos())
+                                : null,
+                            sharing: _sharing,
+                          )
+                        : _exportSummary != null
+                        ? _PartialSaveView(
+                            exporting: _exporting,
+                            sharing: _sharing,
+                            permissionDenied: _photoPermissionDenied,
+                            onRetry: () => unawaited(
+                              _exportBatch(retryFailuresOnly: true),
+                            ),
+                            onBackToEditing: () =>
+                                unawaited(_continueEditing()),
+                            onOpenSettings: () =>
+                                unawaited(_openPhotoSettings()),
+                          )
+                        : session.isRestoring
+                        ? Semantics(
+                            liveRegion: true,
+                            label: context.l10n.restoringProject,
+                            child: const Center(
+                              child: CircularProgressIndicator(),
+                            ),
+                          )
+                        : session.restoreError != null
+                        ? _RestoreError(
+                            onRetry: () =>
+                                session.restore(enforceSinglePhoto: true),
+                          )
+                        : photos.isEmpty
+                        ? _EmptyProject(
+                            busy: _busy,
+                            failures: session.importFailures,
+                            onImport: _importPhotos,
+                          )
+                        : Column(
+                            children: [
+                              if (_recipePersistenceJobs > 0 ||
+                                  _pendingManualRender != null)
+                                const _EditSavePending(),
+                              if (_recipeSaveFailure != null)
+                                _EditSaveRecovery(
+                                  onRetry: _retryRecipeSave,
+                                  onDiscard: _discardFailedRecipe,
+                                ),
+                              Expanded(
+                                child: _PhotoWorkspace(
+                                  photos: photos,
+                                  project: session.project!,
+                                  importFailures: session.importFailures,
+                                  selectedIndex: _selectedIndex,
+                                  exporting: _exporting,
+                                  editingEnabled: editingEnabled,
+                                  previewRecipe: previewRecipe,
+                                  flowState: session.flowState,
+                                  editorSession: _editorSession,
+                                  portraitApplicable: portraitApplicable,
+                                  faceSlimApplicable: faceSlimApplicable,
+                                  faceSlimReason: faceSlimReason,
+                                  faceSlimTargetCount: faceSlimTargetCount,
+                                  faceTargetRegions: faceTargetRegions,
+                                  bodyApplicable: bodyApplicable,
+                                  bodyTargetCount: bodyTargetCount,
+                                  bodyTargetRegions: bodyTargetRegions,
+                                  photoToolsVisible: photoToolsVisible,
+                                  manualToolsVisible: _manualToolsVisible,
+                                  visualTrackKind: _visualTrackKind,
+                                  feedback: _editFeedback,
+                                  showCanvasInteractionHint:
+                                      _showCanvasInteractionHint,
+                                  exportSummary: _exportSummary,
+                                  onRetryExport: () => unawaited(
+                                    _exportBatch(retryFailuresOnly: true),
+                                  ),
+                                  sharing: _sharing,
+                                  onShareExport: () =>
+                                      unawaited(_shareExportedPhotos()),
+                                  onRecipeCommitted: _requestRecipePersistence,
+                                  onRecipeRendered: (recipe) =>
+                                      _handleRecipeRendered(
+                                        photos[_selectedIndex].id,
+                                        recipe,
+                                      ),
+                                  onRecipeRenderFailed: (recipe) =>
+                                      _handleRecipeRenderFailed(
+                                        photos[_selectedIndex].id,
+                                        recipe,
+                                      ),
+                                  onUndo: () => unawaited(_undoEdit()),
+                                  onOpenTools: () => setState(() {
+                                    _visualTrackKind = null;
+                                    _manualToolsVisible = true;
+                                  }),
+                                  onCloseTools: () {
+                                    _editorSession.cancelAdjustment();
+                                    _loadEditableRecipe();
+                                    setState(() => _manualToolsVisible = false);
+                                  },
+                                  onCloseVisualTrack: () =>
+                                      setState(() => _visualTrackKind = null),
+                                  onOpenFullscreen: () => setState(() {
+                                    _showCanvasInteractionHint = false;
+                                    _immersivePreview = true;
+                                  }),
+                                ),
                               ),
                             ],
                           ),
-                          if (MediaQuery.sizeOf(context).width >= 700)
-                            IconButton(
-                              tooltip: context.l10n.deleteProject,
-                              onPressed: _exporting || _sharing
-                                  ? null
-                                  : () => unawaited(_deleteProject()),
-                              icon: const Icon(Icons.delete_outline),
-                            ),
-                        ],
-                ),
-          bottomNavigationBar:
-              _immersivePreview ||
-                  _manualToolsVisible ||
-                  _visualTrackKind != null ||
-                  _exporting
-              ? null
-              : (_exportSummary?.failedCount == 0 &&
-                    _exportSummary?.cancelledCount == 0)
-              ? null
-              : photos.isEmpty ||
-                    session.isRestoring ||
-                    session.restoreError != null
-              ? null
-              : _EditorCommandBar(
-                  editingEnabled: editingEnabled,
-                  canUndo: session.canUndo,
-                  canRedo: session.canRedo,
-                  isEdited: session.canResetScopedEdit,
-                  exporting: _exporting,
-                  sharing: _sharing,
-                  exportSummary: _exportSummary,
-                  feedback: _editFeedback,
-                  onVoiceEdit: () => unawaited(_showVoiceEditSheet()),
-                  onManualEdit: () => setState(() {
-                    _visualTrackKind = null;
-                    _manualToolsVisible = true;
-                  }),
-                  onAtmosphere: () => _openVisualTrack(VisualTrackKind.era),
-                  onLighting: () => _openVisualTrack(VisualTrackKind.lighting),
-                  onUndo: () => unawaited(_undoEdit()),
-                  onRedo: () => unawaited(_redoEdit()),
-                  onReset: () => unawaited(_resetEdit()),
-                  onQuickEdit: (instruction) =>
-                      unawaited(_applyQuickInstruction(instruction)),
-                  onCancelExport: _cancelBatchExport,
-                  onContinueEditing: () => unawaited(_continueEditing()),
-                ),
-          body: _immersivePreview && selectedPhoto != null
-              ? _FullscreenPhotoPreview(
-                  photo: selectedPhoto,
-                  recipe: previewRecipe,
-                  editState: session.project!.renderStateFor(
-                    selectedPhoto.id,
-                    recipe: previewRecipe,
                   ),
-                  editContext: _renderContextFor(
-                    session.project!,
-                    selectedPhoto.id,
-                  ),
-                  renderer: context.read<PhotoPreviewRenderer>(),
-                  position: _selectedIndex + 1,
-                  count: photos.length,
-                  onClose: () => setState(() => _immersivePreview = false),
-                )
-              : SafeArea(
-                  child: _exporting
-                      ? _SavingProgressView(
-                          project: session.project!,
-                          onCancel: _cancelBatchExport,
-                        )
-                      : _exportSummary != null &&
-                            _exportSummary!.failedCount == 0 &&
-                            _exportSummary!.cancelledCount == 0
-                      ? _SaveSuccessView(
-                          count: _exportSummary!.savedCount,
-                          onFinish: _finishSaving,
-                          onShare: _exportSummary!.canShare
-                              ? () => unawaited(_shareExportedPhotos())
-                              : null,
-                          sharing: _sharing,
-                        )
-                      : _exportSummary != null
-                      ? _PartialSaveView(
-                          summary: _exportSummary!,
-                          project: session.project!,
-                          exporting: _exporting,
-                          sharing: _sharing,
-                          onRetry: () =>
-                              unawaited(_exportBatch(retryFailuresOnly: true)),
-                          onViewSaved: () => unawaited(_shareExportedPhotos()),
-                          onBackToEditing: () => unawaited(_continueEditing()),
-                        )
-                      : session.isRestoring
-                      ? Semantics(
-                          liveRegion: true,
-                          label: context.l10n.restoringProject,
-                          child: const Center(
-                            child: CircularProgressIndicator(),
-                          ),
-                        )
-                      : session.restoreError != null
-                      ? _RestoreError(
-                          onRetry: () =>
-                              session.restore(enforceSinglePhoto: true),
-                        )
-                      : photos.isEmpty
-                      ? _EmptyProject(
-                          busy: _busy,
-                          failures: session.importFailures,
-                          onImport: _importPhotos,
-                        )
-                      : _PhotoWorkspace(
-                          photos: photos,
-                          project: session.project!,
-                          importFailures: session.importFailures,
-                          selectedIndex: _selectedIndex,
-                          exporting: _exporting,
-                          editingEnabled: editingEnabled,
-                          previewRecipe: previewRecipe,
-                          flowState: session.flowState,
-                          editorSession: _editorSession,
-                          portraitApplicable: portraitApplicable,
-                          faceSlimApplicable: faceSlimApplicable,
-                          faceSlimReason: faceSlimReason,
-                          faceSlimTargetCount: faceSlimTargetCount,
-                          faceTargetRegions: faceTargetRegions,
-                          bodyApplicable: bodyApplicable,
-                          bodyTargetCount: bodyTargetCount,
-                          bodyTargetRegions: bodyTargetRegions,
-                          photoToolsVisible: photoToolsVisible,
-                          manualToolsVisible: _manualToolsVisible,
-                          visualTrackKind: _visualTrackKind,
-                          feedback: _editFeedback,
-                          exportSummary: _exportSummary,
-                          onRetryExport: () =>
-                              unawaited(_exportBatch(retryFailuresOnly: true)),
-                          sharing: _sharing,
-                          onShareExport: () =>
-                              unawaited(_shareExportedPhotos()),
-                          onRecipeCommitted: _requestRecipePersistence,
-                          onRecipeRendered: (recipe) => _handleRecipeRendered(
-                            photos[_selectedIndex].id,
-                            recipe,
-                          ),
-                          onRecipeRenderFailed: (recipe) =>
-                              _handleRecipeRenderFailed(
-                                photos[_selectedIndex].id,
-                                recipe,
-                              ),
-                          onUndo: () => unawaited(_undoEdit()),
-                          onOpenTools: () => setState(() {
-                            _visualTrackKind = null;
-                            _manualToolsVisible = true;
-                          }),
-                          onCloseTools: () =>
-                              setState(() => _manualToolsVisible = false),
-                          onCloseVisualTrack: () =>
-                              setState(() => _visualTrackKind = null),
-                          onOpenFullscreen: () =>
-                              setState(() => _immersivePreview = true),
-                        ),
-                ),
+          ),
         );
       },
     );
@@ -1661,6 +1917,7 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.manualToolsVisible,
     required this.visualTrackKind,
     required this.feedback,
+    required this.showCanvasInteractionHint,
     required this.onRetryExport,
     required this.sharing,
     required this.onShareExport,
@@ -1696,6 +1953,7 @@ class _PhotoWorkspace extends StatelessWidget {
   final bool manualToolsVisible;
   final VisualTrackKind? visualTrackKind;
   final _EditFeedback? feedback;
+  final bool showCanvasInteractionHint;
   final VoidCallback onRetryExport;
   final bool sharing;
   final VoidCallback onShareExport;
@@ -1833,6 +2091,38 @@ class _PhotoWorkspace extends StatelessWidget {
                               child: SizedBox.expand(child: previewCard),
                             ),
                           ),
+                          if (showCanvasInteractionHint)
+                            Align(
+                              alignment: Alignment.bottomCenter,
+                              child: IgnorePointer(
+                                child: Semantics(
+                                  key: const ValueKey(
+                                    'editor-canvas-interaction-hint',
+                                  ),
+                                  label: context.l10n.canvasInteractionHint,
+                                  child: Container(
+                                    margin: const EdgeInsets.all(12),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 8,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.surfaceContainerHigh,
+                                      borderRadius: BorderRadius.circular(18),
+                                    ),
+                                    child: Text(
+                                      context.l10n.canvasInteractionHint,
+                                      textAlign: TextAlign.center,
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.labelMedium,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
                         ],
                       )
                     : AspectRatio(aspectRatio: 4 / 3, child: previewCard),
@@ -2344,6 +2634,84 @@ class _EditFeedback {
   final String message;
 }
 
+class _RecipeSaveFailure {
+  const _RecipeSaveFailure({required this.desiredRecipe});
+
+  final EditRecipe desiredRecipe;
+}
+
+class _EditSavePending extends StatelessWidget {
+  const _EditSavePending();
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    key: const ValueKey('editor-edit-save-pending'),
+    liveRegion: true,
+    label: context.l10n.editSavePending,
+    child: const LinearProgressIndicator(minHeight: 3),
+  );
+}
+
+class _EditSaveRecovery extends StatelessWidget {
+  const _EditSaveRecovery({required this.onRetry, required this.onDiscard});
+
+  final VoidCallback onRetry;
+  final VoidCallback onDiscard;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Semantics(
+      key: const ValueKey('editor-edit-save-failed'),
+      liveRegion: true,
+      container: true,
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: colors.errorContainer,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              context.l10n.projectSaveFailed,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                color: colors.onErrorContainer,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              context.l10n.editSaveRecoveryMessage,
+              style: TextStyle(color: colors.onErrorContainer),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.tonal(
+                  key: const ValueKey('editor-edit-save-retry'),
+                  onPressed: onRetry,
+                  child: Text(context.l10n.retry),
+                ),
+                TextButton(
+                  key: const ValueKey('editor-edit-save-discard'),
+                  onPressed: onDiscard,
+                  child: Text(context.l10n.discardAdjustment),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _PendingManualRender {
   const _PendingManualRender({
     required this.photoId,
@@ -2396,13 +2764,11 @@ class _ResultFeedbackPill extends StatelessWidget {
 
 class _SaveSuccessView extends StatelessWidget {
   const _SaveSuccessView({
-    required this.count,
     required this.onFinish,
     required this.onShare,
     required this.sharing,
   });
 
-  final int count;
   final VoidCallback onFinish;
   final VoidCallback? onShare;
   final bool sharing;
@@ -2428,7 +2794,7 @@ class _SaveSuccessView extends StatelessWidget {
             ),
             const SizedBox(height: 24),
             Text(
-              context.l10n.saveSuccess(count),
+              context.l10n.savedToSystemPhotos,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.headlineSmall,
             ),
@@ -2461,9 +2827,6 @@ class _SaveSuccessView extends StatelessWidget {
 class _EditorCommandBar extends StatelessWidget {
   const _EditorCommandBar({
     required this.editingEnabled,
-    required this.canUndo,
-    required this.canRedo,
-    required this.isEdited,
     required this.exporting,
     required this.sharing,
     required this.exportSummary,
@@ -2471,19 +2834,13 @@ class _EditorCommandBar extends StatelessWidget {
     required this.onVoiceEdit,
     required this.onManualEdit,
     required this.onAtmosphere,
-    required this.onLighting,
     required this.onUndo,
-    required this.onRedo,
-    required this.onReset,
     required this.onQuickEdit,
     required this.onCancelExport,
     required this.onContinueEditing,
   });
 
   final bool editingEnabled;
-  final bool canUndo;
-  final bool canRedo;
-  final bool isEdited;
   final bool exporting;
   final bool sharing;
   final BatchExportSummary? exportSummary;
@@ -2491,10 +2848,7 @@ class _EditorCommandBar extends StatelessWidget {
   final VoidCallback onVoiceEdit;
   final VoidCallback onManualEdit;
   final VoidCallback onAtmosphere;
-  final VoidCallback onLighting;
   final VoidCallback onUndo;
-  final VoidCallback onRedo;
-  final VoidCallback onReset;
   final ValueChanged<String> onQuickEdit;
   final VoidCallback onCancelExport;
   final VoidCallback onContinueEditing;
@@ -2533,114 +2887,81 @@ class _EditorCommandBar extends StatelessWidget {
                           ),
                           const SizedBox(height: 10),
                         ],
-                        if (constraints.maxWidth >= 700 &&
-                            MediaQuery.textScalerOf(context).scale(1) <= 1.3)
-                          Row(
-                            children: [
-                              TextButton(
-                                onPressed: editingEnabled && canUndo
-                                    ? onUndo
-                                    : null,
-                                child: Text(context.l10n.undo),
+                        Center(
+                          child: Container(
+                            width: 48,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: colors.onSurfaceVariant.withValues(
+                                alpha: 0.35,
                               ),
-                              TextButton(
-                                onPressed: editingEnabled && canRedo
-                                    ? onRedo
-                                    : null,
-                                child: Text(context.l10n.redo),
-                              ),
-                              TextButton(
-                                onPressed: editingEnabled && isEdited
-                                    ? onReset
-                                    : null,
-                                child: Text(context.l10n.reset),
-                              ),
-                              const Spacer(),
-                              OutlinedButton.icon(
-                                key: const ValueKey('voice-edit-entry'),
-                                onPressed: editingEnabled ? onVoiceEdit : null,
-                                icon: const Icon(Icons.mic_none_outlined),
-                                label: Text(context.l10n.voiceEditEntry),
-                              ),
-                              const SizedBox(width: 8),
-                              Semantics(
-                                key: const ValueKey('editor-open-tools'),
-                                button: true,
-                                child: TextButton.icon(
-                                  key: const ValueKey('editor-manual-entry'),
-                                  onPressed: editingEnabled
-                                      ? onManualEdit
-                                      : null,
-                                  icon: const Icon(Icons.tune, size: 18),
-                                  label: Text(context.l10n.adjustPhoto),
-                                ),
-                              ),
-                            ],
-                          )
-                        else ...[
-                          Center(
-                            child: Container(
-                              width: 48,
-                              height: 4,
-                              decoration: BoxDecoration(
-                                color: colors.onSurfaceVariant.withValues(
-                                  alpha: 0.35,
-                                ),
-                                borderRadius: BorderRadius.circular(99),
-                              ),
+                              borderRadius: BorderRadius.circular(99),
                             ),
                           ),
-                          const SizedBox(height: 12),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              _QuickEditChip(
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _QuickSuggestionButton(
                                 key: const ValueKey(
-                                  'editor-quick-natural-skin',
+                                  'editor-quick-suggestion-0',
                                 ),
-                                label: '自然',
+                                label: context.l10n.quickNatural,
                                 onPressed: editingEnabled
                                     ? () => onQuickEdit('皮肤自然一点')
                                     : null,
                               ),
-                              const SizedBox(width: 8),
-                              _QuickEditChip(
-                                key: const ValueKey('editor-visual-tracks'),
-                                label: '氛围',
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: _QuickSuggestionButton(
+                                key: const ValueKey(
+                                  'editor-quick-suggestion-1',
+                                ),
+                                label: context.l10n.quickBrighten,
+                                onPressed: editingEnabled
+                                    ? () => onQuickEdit('照片亮一点')
+                                    : null,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: _QuickSuggestionButton(
+                                key: const ValueKey(
+                                  'editor-quick-suggestion-2',
+                                ),
+                                label: context.l10n.quickAtmosphere,
                                 emphasized: true,
                                 onPressed: editingEnabled ? onAtmosphere : null,
                               ),
-                              const SizedBox(width: 8),
-                              _QuickEditChip(
-                                key: const ValueKey('editor-lighting-track'),
-                                label: context.l10n.lightingTrack,
-                                onPressed: editingEnabled ? onLighting : null,
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  key: const ValueKey('voice-edit-entry'),
-                                  onPressed: editingEnabled
-                                      ? onVoiceEdit
-                                      : null,
-                                  style: OutlinedButton.styleFrom(
-                                    alignment: Alignment.centerLeft,
-                                    foregroundColor: colors.onSurfaceVariant,
-                                    minimumSize: const Size.fromHeight(52),
-                                  ),
-                                  icon: const Icon(
-                                    Icons.mic_none_rounded,
-                                    color: Color(0xFFE6BC45),
-                                  ),
-                                  label: Text(context.l10n.voiceEditPrompt),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: OutlinedButton.icon(
+                                key: const ValueKey('voice-edit-entry'),
+                                onPressed: editingEnabled ? onVoiceEdit : null,
+                                style: OutlinedButton.styleFrom(
+                                  alignment: Alignment.centerLeft,
+                                  foregroundColor: colors.onSurfaceVariant,
+                                  minimumSize: const Size.fromHeight(52),
                                 ),
+                                icon: const Icon(
+                                  Icons.mic_none_rounded,
+                                  color: Color(0xFFE6BC45),
+                                ),
+                                label: Text(context.l10n.voiceEditPrompt),
                               ),
-                              const SizedBox(width: 10),
-                              Semantics(
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              flex: 2,
+                              child: Semantics(
                                 key: const ValueKey('editor-open-tools'),
                                 button: true,
                                 child: FilledButton.tonal(
@@ -2649,17 +2970,17 @@ class _EditorCommandBar extends StatelessWidget {
                                       ? onManualEdit
                                       : null,
                                   style: FilledButton.styleFrom(
-                                    minimumSize: const Size(106, 52),
+                                    minimumSize: const Size.fromHeight(52),
                                     padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
+                                      horizontal: 12,
                                     ),
                                   ),
                                   child: Text(context.l10n.adjustPhoto),
                                 ),
                               ),
-                            ],
-                          ),
-                        ],
+                            ),
+                          ],
+                        ),
                       ],
                     ),
             ),
@@ -2708,8 +3029,8 @@ class _EditorCommandBar extends StatelessWidget {
   }
 }
 
-class _QuickEditChip extends StatelessWidget {
-  const _QuickEditChip({
+class _QuickSuggestionButton extends StatelessWidget {
+  const _QuickSuggestionButton({
     required this.label,
     required this.onPressed,
     this.emphasized = false,
@@ -2721,24 +3042,30 @@ class _QuickEditChip extends StatelessWidget {
   final bool emphasized;
 
   @override
-  Widget build(BuildContext context) => ActionChip(
+  Widget build(BuildContext context) => OutlinedButton(
     onPressed: onPressed,
-    label: Text(label),
-    backgroundColor: emphasized
-        ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.12)
-        : Colors.transparent,
-    side: BorderSide(
-      color: emphasized
-          ? Theme.of(context).colorScheme.primary
-          : Theme.of(context).colorScheme.outline,
-    ),
-    labelStyle: TextStyle(
-      color: emphasized
+    style: OutlinedButton.styleFrom(
+      minimumSize: const Size.fromHeight(48),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+      foregroundColor: emphasized
           ? Theme.of(context).colorScheme.primary
           : Theme.of(context).colorScheme.onSurface,
-      fontWeight: FontWeight.w700,
+      backgroundColor: emphasized
+          ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.12)
+          : Colors.transparent,
+      side: BorderSide(
+        color: emphasized
+            ? Theme.of(context).colorScheme.primary
+            : Theme.of(context).colorScheme.outline,
+      ),
     ),
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+    child: Text(
+      label,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      textAlign: TextAlign.center,
+      style: const TextStyle(fontWeight: FontWeight.w700),
+    ),
   );
 }
 
@@ -2806,121 +3133,39 @@ class _ExportSummaryCard extends StatelessWidget {
   }
 }
 
-(IconData, String) _photoStatus(
-  BuildContext context,
-  PhotoProject project,
-  String photoId,
-) {
-  switch (project.exportStates[photoId] ?? PhotoExportState.notQueued) {
-    case PhotoExportState.queued:
-      return (Icons.outbox_outlined, context.l10n.photoStatusQueued);
-    case PhotoExportState.running:
-      return (Icons.sync, context.l10n.photoStatusExporting);
-    case PhotoExportState.saved:
-      return (Icons.check_circle_outline, context.l10n.photoStatusExported);
-    case PhotoExportState.failed:
-      return (Icons.error_outline, context.l10n.photoStatusExportFailed);
-    case PhotoExportState.cancelled:
-      return (Icons.cancel_outlined, context.l10n.photoStatusExportCancelled);
-    case PhotoExportState.notQueued:
-      break;
-  }
-  if (project.analysisStates[photoId] == PhotoAnalysisState.failed) {
-    return (Icons.error_outline, context.l10n.photoStatusFailed);
-  }
-  if (project.photoOverrides.containsKey(photoId)) {
-    return (Icons.tune, context.l10n.photoStatusOverridden);
-  }
-  if (project.adaptiveCompensations.containsKey(photoId)) {
-    return (Icons.auto_fix_high, context.l10n.photoStatusAutoCompensated);
-  }
-  return (Icons.hourglass_empty, context.l10n.photoStatusUnprocessed);
-}
-
 class _SavingProgressView extends StatelessWidget {
-  const _SavingProgressView({required this.project, required this.onCancel});
+  const _SavingProgressView({required this.stage});
 
-  final PhotoProject project;
-  final VoidCallback onCancel;
+  final PhotoExportStage stage;
 
   @override
   Widget build(BuildContext context) {
-    final completed = project.exportStates.values
-        .where((state) => state == PhotoExportState.saved)
-        .length;
-    final total = project.exportStates.values
-        .where((state) => state != PhotoExportState.notQueued)
-        .length;
+    final message = stage == PhotoExportStage.savingToPhotoLibrary
+        ? context.l10n.savingToSystemPhotos
+        : context.l10n.preparingExport;
     return Semantics(
       key: const ValueKey('editor-saving-progress'),
       container: true,
       liveRegion: true,
-      label: context.l10n.savingProgress(max(1, completed + 1), total),
+      label: message,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(24, 48, 24, 24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              context.l10n.savingProgress(max(1, completed + 1), total),
+              message,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.headlineSmall,
             ),
             const SizedBox(height: 20),
-            LinearProgressIndicator(
-              value: total == 0 ? 0 : completed / total,
-              minHeight: 5,
-              borderRadius: BorderRadius.circular(99),
-            ),
-            const SizedBox(height: 30),
-            Expanded(
-              child: ListView.separated(
-                itemCount: project.photos.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 10),
-                itemBuilder: (context, index) {
-                  final photo = project.photos[index];
-                  final status = _photoStatus(context, project, photo.id);
-                  return ListTile(
-                    tileColor: Theme.of(
-                      context,
-                    ).colorScheme.surfaceContainerLow,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    leading: ClipRRect(
-                      borderRadius: BorderRadius.circular(9),
-                      child: Image.file(
-                        File(photo.localPath),
-                        width: 48,
-                        height: 48,
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                    title: Text(context.l10n.photoNumber(index + 1)),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(status.$1, size: 18),
-                        const SizedBox(width: 6),
-                        Text(status.$2),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
-            OutlinedButton(
-              key: const ValueKey('export-cancel-remaining'),
-              onPressed: onCancel,
-              child: Text(context.l10n.cancelRemainingPhotos),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              context.l10n.savedPhotosAreKept,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+            const SizedBox(height: 20),
+            const LinearProgressIndicator(minHeight: 5),
+            const Spacer(),
+            TextButton(
+              key: const ValueKey('export-continue-editing-disabled'),
+              onPressed: null,
+              child: Text(context.l10n.backToEditing),
             ),
           ],
         ),
@@ -2931,95 +3176,65 @@ class _SavingProgressView extends StatelessWidget {
 
 class _PartialSaveView extends StatelessWidget {
   const _PartialSaveView({
-    required this.summary,
-    required this.project,
     required this.exporting,
     required this.sharing,
+    required this.permissionDenied,
     required this.onRetry,
-    required this.onViewSaved,
     required this.onBackToEditing,
+    required this.onOpenSettings,
   });
 
-  final BatchExportSummary summary;
-  final PhotoProject project;
   final bool exporting;
   final bool sharing;
+  final bool permissionDenied;
   final VoidCallback onRetry;
-  final VoidCallback onViewSaved;
   final VoidCallback onBackToEditing;
+  final VoidCallback onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
-    final failed = project.photos
-        .where(
-          (photo) =>
-              project.exportStates[photo.id] == PhotoExportState.failed ||
-              project.exportStates[photo.id] == PhotoExportState.cancelled,
-        )
-        .toList(growable: false);
-    return Padding(
+    return Semantics(
       key: const ValueKey('editor-partial-save'),
-      padding: const EdgeInsets.fromLTRB(24, 42, 24, 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Icon(
-            Icons.error_outline_rounded,
-            color: Theme.of(context).colorScheme.primary,
-            size: 52,
-          ),
-          const SizedBox(height: 18),
-          Text(
-            context.l10n.partialSaveTitle(
-              summary.savedCount,
-              summary.failedCount + summary.cancelledCount,
+      liveRegion: true,
+      container: true,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 42, 24, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Icon(
+              Icons.error_outline_rounded,
+              color: Theme.of(context).colorScheme.primary,
+              size: 52,
             ),
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-          const SizedBox(height: 26),
-          Expanded(
-            child: ListView.separated(
-              itemCount: failed.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 10),
-              itemBuilder: (context, index) => ListTile(
-                tileColor: Theme.of(context).colorScheme.surfaceContainerLow,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                leading: ClipRRect(
-                  borderRadius: BorderRadius.circular(9),
-                  child: Image.file(
-                    File(failed[index].localPath),
-                    width: 52,
-                    height: 52,
-                    fit: BoxFit.cover,
-                  ),
-                ),
-                title: Text(failed[index].originalName),
-                subtitle: Text(context.l10n.photoLibraryTemporarilyUnavailable),
+            const SizedBox(height: 18),
+            Text(
+              permissionDenied
+                  ? context.l10n.photoPermissionPurpose
+                  : context.l10n.exportFailedTitle,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const Spacer(),
+            if (permissionDenied)
+              FilledButton(
+                key: const ValueKey('export-open-settings'),
+                onPressed: exporting || sharing ? null : onOpenSettings,
+                child: Text(context.l10n.goToSystemSettings),
+              )
+            else
+              FilledButton(
+                key: const ValueKey('export-retry-failed'),
+                onPressed: exporting || sharing ? null : onRetry,
+                child: Text(context.l10n.retry),
               ),
+            TextButton(
+              key: const ValueKey('export-continue-editing'),
+              onPressed: exporting ? null : onBackToEditing,
+              child: Text(context.l10n.backToEditing),
             ),
-          ),
-          FilledButton(
-            key: const ValueKey('export-retry-failed'),
-            onPressed: exporting || sharing ? null : onRetry,
-            child: Text(
-              context.l10n.retryPhotoCount(
-                summary.failedCount + summary.cancelledCount,
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: summary.canShare && !sharing ? onViewSaved : null,
-            child: Text(context.l10n.viewSavedPhotos),
-          ),
-          TextButton(
-            key: const ValueKey('export-continue-editing'),
-            onPressed: exporting ? null : onBackToEditing,
-            child: Text(context.l10n.backToEditing),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -3098,7 +3313,7 @@ String _photoImportFailureMessage(
   };
 }
 
-class _FullscreenPhotoPreview extends StatelessWidget {
+class _FullscreenPhotoPreview extends StatefulWidget {
   const _FullscreenPhotoPreview({
     required this.photo,
     required this.recipe,
@@ -3120,6 +3335,31 @@ class _FullscreenPhotoPreview extends StatelessWidget {
   final VoidCallback onClose;
 
   @override
+  State<_FullscreenPhotoPreview> createState() =>
+      _FullscreenPhotoPreviewState();
+}
+
+class _FullscreenPhotoPreviewState extends State<_FullscreenPhotoPreview> {
+  final TransformationController _transformation = TransformationController();
+  bool _controlsVisible = true;
+  bool _zoomed = false;
+
+  @override
+  void dispose() {
+    _transformation.dispose();
+    super.dispose();
+  }
+
+  void _toggleZoom() {
+    setState(() {
+      _zoomed = !_zoomed;
+      _transformation.value = _zoomed
+          ? Matrix4.diagonal3Values(2, 2, 1)
+          : Matrix4.identity();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return ColoredBox(
       key: const ValueKey('editor-fullscreen-preview'),
@@ -3127,54 +3367,69 @@ class _FullscreenPhotoPreview extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          _BeforeAfterPreview(
-            key: ValueKey('fullscreen-photo-preview-${photo.id}'),
-            sourcePath: photo.localPath,
-            recipe: recipe,
-            sourceId: photo.id,
-            editState: editState,
-            editContext: editContext,
-            renderer: renderer,
-            immersive: true,
-            onExitImmersive: onClose,
-          ),
-          SafeArea(
-            child: Align(
-              alignment: Alignment.topCenter,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
-                child: Row(
-                  children: [
-                    IconButton.filledTonal(
-                      key: const ValueKey('editor-fullscreen-close'),
-                      tooltip: MaterialLocalizations.of(
-                        context,
-                      ).backButtonTooltip,
-                      onPressed: onClose,
-                      icon: const Icon(Icons.arrow_back_rounded),
-                    ),
-                    const Spacer(),
-                    _PreviewOverlayLabel(label: '$position / $count'),
-                    const Spacer(),
-                    _PreviewOverlayLabel(
-                      label: context.l10n.fullscreenAdjusted,
-                    ),
-                  ],
-                ),
+          InteractiveViewer(
+            transformationController: _transformation,
+            minScale: 1,
+            maxScale: 4,
+            child: GestureDetector(
+              key: const ValueKey('editor-fullscreen-preview-surface'),
+              behavior: HitTestBehavior.opaque,
+              onTap: () => setState(() => _controlsVisible = !_controlsVisible),
+              onDoubleTap: _toggleZoom,
+              child: _BeforeAfterPreview(
+                key: ValueKey('fullscreen-photo-preview-${widget.photo.id}'),
+                sourcePath: widget.photo.localPath,
+                recipe: widget.recipe,
+                sourceId: widget.photo.id,
+                editState: widget.editState,
+                editContext: widget.editContext,
+                renderer: widget.renderer,
+                immersive: true,
               ),
             ),
           ),
-          SafeArea(
-            child: Align(
-              alignment: Alignment.bottomCenter,
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 18),
-                child: _PreviewOverlayLabel(
-                  label: context.l10n.fullscreenPreviewHint,
+          if (_controlsVisible)
+            SafeArea(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+                  child: Row(
+                    children: [
+                      IconButton.filledTonal(
+                        key: const ValueKey('editor-fullscreen-close'),
+                        tooltip: MaterialLocalizations.of(
+                          context,
+                        ).backButtonTooltip,
+                        onPressed: widget.onClose,
+                        icon: const Icon(Icons.arrow_back_rounded),
+                      ),
+                      const Spacer(),
+                      if (widget.count > 1)
+                        _PreviewOverlayLabel(
+                          label: '${widget.position} / ${widget.count}',
+                        ),
+                      const Spacer(),
+                      _PreviewOverlayLabel(
+                        label: context.l10n.fullscreenAdjusted,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
+          if (_controlsVisible)
+            SafeArea(
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 18),
+                  child: _PreviewOverlayLabel(
+                    label: context.l10n.fullscreenPreviewHint,
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -3213,7 +3468,6 @@ class _BeforeAfterPreview extends StatefulWidget {
     this.editState,
     this.editContext = EditContext.ios,
     this.immersive = false,
-    this.onExitImmersive,
     this.onRendered,
     this.onRenderFailed,
     super.key,
@@ -3226,7 +3480,6 @@ class _BeforeAfterPreview extends StatefulWidget {
   final EditState? editState;
   final EditContext editContext;
   final bool immersive;
-  final VoidCallback? onExitImmersive;
   final ValueChanged<EditRecipe>? onRendered;
   final ValueChanged<EditRecipe>? onRenderFailed;
 
@@ -3252,11 +3505,8 @@ class _BeforeAfterPreviewState extends State<_BeforeAfterPreview> {
           )
         : widget.editState;
     return GestureDetector(
-      key: widget.immersive
-          ? const ValueKey('editor-fullscreen-preview-surface')
-          : const ValueKey('editor-preview-surface'),
+      key: widget.immersive ? null : const ValueKey('editor-preview-surface'),
       behavior: HitTestBehavior.opaque,
-      onTap: widget.immersive ? widget.onExitImmersive : null,
       onLongPressStart: (_) => setState(() => _showOriginal = true),
       onLongPressEnd: (_) => setState(() => _showOriginal = false),
       child: Stack(

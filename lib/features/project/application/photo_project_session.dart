@@ -1274,7 +1274,13 @@ class PhotoProjectSession extends ChangeNotifier {
       );
     }
     final states = Map.of(current.exportStates)..[photoId] = state;
-    final next = current.copyWith(updatedAt: _now(), exportStates: states);
+    final next = current.copyWith(
+      updatedAt: _now(),
+      exportStates: states,
+      lastSuccessfulExportEditStateVersion: state == PhotoExportState.saved
+          ? current.editStateVersion
+          : current.lastSuccessfulExportEditStateVersion,
+    );
     await _saveAndPublish(next);
   }
 

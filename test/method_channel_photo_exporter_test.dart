@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -88,5 +90,23 @@ void main() {
     expect(exported.width, 4032);
     expect(exported.height, 3024);
     expect(exported.sharePath, '/tmp/Yingjian_42.jpg');
+  });
+
+  test('publishes the native photo-library write stage', () async {
+    final exporter = MethodChannelPhotoExporter();
+    expect(exporter.stage.value, PhotoExportStage.preparing);
+
+    final handled = Completer<void>();
+    await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .handlePlatformMessage(
+          channel.name,
+          const StandardMethodCodec().encodeMethodCall(
+            const MethodCall('exportStage', {'stage': 'savingToPhotoLibrary'}),
+          ),
+          (_) => handled.complete(),
+        );
+    await handled.future;
+
+    expect(exporter.stage.value, PhotoExportStage.savingToPhotoLibrary);
   });
 }

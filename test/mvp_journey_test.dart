@@ -47,6 +47,7 @@ void main() {
             photoExporter: exporter,
           ),
         );
+        await tester.pumpAndSettle();
 
         await tester.tap(find.byKey(const ValueKey('home-start-editing')));
         await tester.pumpAndSettle();
@@ -126,8 +127,9 @@ void main() {
         metaOpCapabilities: iosMetaOpCapabilities,
       ),
     );
+    await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+    await tester.tap(find.byKey(const ValueKey('home-resume-project')));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.byKey(const Key('photo-strip-scroll')), findsNothing);
@@ -154,7 +156,7 @@ void main() {
     expect(exposureData.hasAction(SemanticsAction.increase), isTrue);
     expect(exposureData.hasAction(SemanticsAction.decrease), isTrue);
     tester.semantics.increase(exposureSlider);
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(
       find.semantics.byPredicate(
         (node) => node.label.startsWith('亮一点') && node.value == '12',
@@ -163,7 +165,7 @@ void main() {
     );
     for (var step = 0; step < 44; step += 1) {
       tester.semantics.increase(exposureSlider);
-      await tester.pump();
+      await tester.pumpAndSettle();
     }
     final maximumExposure = exposureSlider.evaluate().single.getSemanticsData();
     expect(maximumExposure.value, '100');
@@ -267,7 +269,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(savePhotos, findsOneWidget);
-    expect(tester.getSize(find.text('保存')).height, greaterThan(20));
+    expect(tester.getSize(find.text('导出')).height, greaterThan(20));
     _expectCurrentTapSemanticsAtLeast(tester, 48);
     semantics.dispose();
     debugDefaultTargetPlatformOverride = null;

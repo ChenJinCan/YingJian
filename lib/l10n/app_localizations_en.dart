@@ -42,6 +42,39 @@ class AppLocalizationsEn extends AppLocalizations {
   String get recentProjects => 'Recent projects';
 
   @override
+  String get otherDrafts => 'Other drafts';
+
+  @override
+  String get selectNewPhoto => 'Choose a new photo';
+
+  @override
+  String get deleteDraft => 'Delete draft';
+
+  @override
+  String get draftDeleteConfirmation =>
+      'This only deletes the draft in Yingjian. The original in Photos is not deleted.';
+
+  @override
+  String get draftStatusEditing => 'Editing';
+
+  @override
+  String get draftStatusExported => 'Exported';
+
+  @override
+  String get draftStatusModified => 'New changes';
+
+  @override
+  String get draftStatusNeedsUpdate => 'Update required';
+
+  @override
+  String get draftStatusNeedsRecovery => 'Recovery required';
+
+  @override
+  String lastEditedAt(String date, String time) {
+    return 'Last edited $date $time';
+  }
+
+  @override
   String get noRecentProjects => 'No projects yet. Choose one photo to begin.';
 
   @override
@@ -110,6 +143,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get importingPhotos => 'Importing photos…';
 
   @override
+  String get preparingPhoto => 'Preparing photo…';
+
+  @override
   String get restoringProject => 'Restoring your project…';
 
   @override
@@ -158,6 +194,16 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get projectSaveFailed =>
       'This adjustment could not be saved. Try again.';
+
+  @override
+  String get editSavePending => 'Saving this adjustment';
+
+  @override
+  String get editSaveRecoveryMessage =>
+      'This adjustment is not saved. The last safe result is still shown.';
+
+  @override
+  String get discardAdjustment => 'Discard adjustment';
 
   @override
   String get removePhoto => 'Remove photo';
@@ -648,11 +694,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get photoShareCanceled =>
-      'Sharing canceled. Saved photos are unchanged.';
+      'Sharing canceled. The final photo is still saved in Photos.';
 
   @override
   String get photoShareFailed =>
-      'Sharing is unavailable. Saved photos are unchanged.';
+      'Sharing is unavailable. The final photo is still saved in Photos.';
 
   @override
   String get continueEditing => 'Continue editing';
@@ -754,6 +800,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get voiceEditPrompt => 'What else would you like to change?';
 
   @override
+  String get quickNatural => 'More natural';
+
+  @override
+  String get quickBrighten => 'Brighter';
+
+  @override
+  String get quickAtmosphere => 'Atmosphere';
+
+  @override
   String get quickEditBrighter => 'Make it brighter';
 
   @override
@@ -794,7 +849,30 @@ class AppLocalizationsEn extends AppLocalizations {
   String get metaOpSearchNoResults => 'No available adjustment found';
 
   @override
-  String get savePhotos => 'Save';
+  String get savePhotos => 'Export';
+
+  @override
+  String get preparingExport => 'Preparing final photo…';
+
+  @override
+  String get canvasInteractionHint =>
+      'Tap for full screen · Hold to view original';
+
+  @override
+  String get savingToSystemPhotos => 'Saving to Photos…';
+
+  @override
+  String get savedToSystemPhotos => 'Saved to Photos';
+
+  @override
+  String get exportFailedTitle => 'Could not export';
+
+  @override
+  String get photoPermissionPurpose =>
+      'Yingjian needs add-only photo access to save the final photo to Photos.';
+
+  @override
+  String get goToSystemSettings => 'Open Settings';
 
   @override
   String get saveOptionsTitle => 'Ready to save';

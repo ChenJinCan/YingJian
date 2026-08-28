@@ -37,7 +37,11 @@ internal class AndroidPhotoExporter(
     private val contentResolver: ContentResolver,
     private val temporaryDirectory: File? = null,
 ) {
-    fun export(sourcePath: String, pipeline: AndroidImagePipeline): AndroidPhotoExportResult {
+    fun export(
+        sourcePath: String,
+        pipeline: AndroidImagePipeline,
+        onSavingToPhotos: () -> Unit = {},
+    ): AndroidPhotoExportResult {
         val metadata = AndroidExportMetadata.fromSource(sourcePath)
         var output = AndroidExportBitmapDecoder.decode(sourcePath)
         return try {
@@ -51,6 +55,7 @@ internal class AndroidPhotoExporter(
                     message = "Temporary image storage is unavailable",
                 ),
             )
+            onSavingToPhotos()
             val assetId = saveToPhotos(output, metadata)
             AndroidPhotoExportResult(
                 assetId = assetId,

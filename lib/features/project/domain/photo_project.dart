@@ -177,7 +177,7 @@ extension PhotoExportStateTransitions on PhotoExportState {
             next == PhotoExportState.cancelled,
       PhotoExportState.failed ||
       PhotoExportState.cancelled => next == PhotoExportState.queued,
-      PhotoExportState.saved => false,
+      PhotoExportState.saved => next == PhotoExportState.queued,
     };
   }
 }
@@ -851,6 +851,7 @@ class PhotoProject {
     this.flowState = PhotoProjectFlowState.editing,
     this.focusPhotoId,
     this.groupScrollOffset = 0,
+    this.lastSuccessfulExportEditStateVersion,
   }) : photos = List.unmodifiable(photos),
        sharedStyle =
            sharedStyle ?? SharedStyle(recipe: recipe ?? EditRecipe.neutral),
@@ -1074,7 +1075,7 @@ class PhotoProject {
   // so flips and perspective never freeze later group-style edits. V8's
   // broader overridesBasicEditing flag is accepted as a conservative look
   // override during migration.
-  static const schemaVersion = 13;
+  static const schemaVersion = 14;
   static const checkpointInterval = 20;
 
   final String id;
@@ -1100,6 +1101,7 @@ class PhotoProject {
   final PhotoProjectFlowState flowState;
   final String? focusPhotoId;
   final double groupScrollOffset;
+  final int? lastSuccessfulExportEditStateVersion;
 
   /// Compatibility view for the current editor while it migrates from one
   /// global recipe to explicit group/current-photo scopes.
@@ -1534,6 +1536,7 @@ class PhotoProject {
     PhotoProjectFlowState? flowState,
     Object? focusPhotoId = _notProvided,
     double? groupScrollOffset,
+    Object? lastSuccessfulExportEditStateVersion = _notProvided,
   }) {
     return PhotoProject(
       id: id,
@@ -1572,6 +1575,10 @@ class PhotoProject {
           ? this.focusPhotoId
           : focusPhotoId as String?,
       groupScrollOffset: groupScrollOffset ?? this.groupScrollOffset,
+      lastSuccessfulExportEditStateVersion:
+          lastSuccessfulExportEditStateVersion == _notProvided
+          ? this.lastSuccessfulExportEditStateVersion
+          : lastSuccessfulExportEditStateVersion as int?,
     );
   }
 
@@ -1603,6 +1610,8 @@ class PhotoProject {
       'editState': editState.toJson(),
       'editingScope': editingScope.name,
       'groupScrollOffset': groupScrollOffset,
+      'lastSuccessfulExportEditStateVersion':
+          ?lastSuccessfulExportEditStateVersion,
       'undoHistory': undoHistory
           .map((operation) => operation.toJson())
           .toList(),
@@ -1736,6 +1745,9 @@ class PhotoProject {
           ? const []
           : (json['recentTransactionIds'] as List<Object?>? ?? const [])
                 .cast<String>(),
+      lastSuccessfulExportEditStateVersion: storedVersion < 14
+          ? null
+          : (json['lastSuccessfulExportEditStateVersion'] as num?)?.toInt(),
       groupScrollOffset: storedVersion < 5
           ? 0
           : (json['groupScrollOffset'] as num?)?.toDouble() ?? 0,
@@ -1851,6 +1863,8 @@ class PhotoProject {
         other.flowState == flowState &&
         other.focusPhotoId == focusPhotoId &&
         other.groupScrollOffset == groupScrollOffset &&
+        other.lastSuccessfulExportEditStateVersion ==
+            lastSuccessfulExportEditStateVersion &&
         listEquals(other.photos, photos);
   }
 
@@ -1878,6 +1892,7 @@ class PhotoProject {
     flowState,
     focusPhotoId,
     groupScrollOffset,
+    lastSuccessfulExportEditStateVersion,
     Object.hashAll(photos),
   ]);
 

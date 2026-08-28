@@ -2279,6 +2279,32 @@ void main() {
       expect(store.savedProject, session.project);
     });
 
+    test('tracks the last successfully exported edit version', () async {
+      final saved = _twoPhotoProject();
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+
+      await session.setPhotoExportState('photo-1', PhotoExportState.queued);
+      await session.transitionTo(PhotoProjectFlowState.exporting);
+      await session.setPhotoExportState('photo-1', PhotoExportState.running);
+      await session.setPhotoExportState('photo-1', PhotoExportState.saved);
+
+      expect(
+        session.project?.lastSuccessfulExportEditStateVersion,
+        session.project?.editStateVersion,
+      );
+      expect(
+        PhotoProject.fromJson(
+          session.project!.toJson(),
+        ).lastSuccessfulExportEditStateVersion,
+        session.project?.editStateVersion,
+      );
+    });
+
     test(
       'removes a photo and its layers, then chooses a valid focus',
       () async {

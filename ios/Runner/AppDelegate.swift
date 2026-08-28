@@ -124,6 +124,16 @@ enum IOSPortraitCapabilityPolicy {
       binaryMessenger: registrar.messenger()
     )
     channel.setMethodCallHandler { [weak self] call, result in
+      if call.method == "openPhotoSettings" {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else {
+          result(FlutterError(code: "settingsUnavailable", message: "Settings are unavailable", details: nil))
+          return
+        }
+        UIApplication.shared.open(url) { opened in
+          opened ? result(nil) : result(FlutterError(code: "settingsUnavailable", message: "Settings could not be opened", details: nil))
+        }
+        return
+      }
       guard call.method == "exportPhoto" else {
         result(FlutterMethodNotImplemented)
         return
@@ -887,6 +897,12 @@ enum IOSPortraitCapabilityPolicy {
     }
 
     var assetId: String?
+    DispatchQueue.main.async { [weak self] in
+      self?.photoExportChannel?.invokeMethod(
+        "exportStage",
+        arguments: ["stage": "savingToPhotoLibrary"]
+      )
+    }
     PHPhotoLibrary.shared().performChanges {
       let request = PHAssetCreationRequest.forAsset()
       request.creationDate = ImageExportMetadata.captureDate(from: artifact.metadata)

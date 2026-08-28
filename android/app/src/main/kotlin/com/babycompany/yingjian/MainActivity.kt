@@ -1,10 +1,13 @@
 package com.babycompany.yingjian
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodCall
@@ -16,6 +19,7 @@ class MainActivity : FlutterActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pendingExport: Pair<MethodCall, MethodChannel.Result>? = null
     private var photoPreviewRenderer: GlesPhotoPreviewRenderer? = null
+    private var photoExportChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -51,8 +55,19 @@ class MainActivity : FlutterActivity() {
                     result.notImplemented()
                 }
             }
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PHOTO_EXPORT_CHANNEL)
-            .setMethodCallHandler { call, result ->
+        photoExportChannel =
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PHOTO_EXPORT_CHANNEL)
+        photoExportChannel?.setMethodCallHandler { call, result ->
+                if (call.method == "openPhotoSettings") {
+                    startActivity(
+                        Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:$packageName"),
+                        ),
+                    )
+                    result.success(null)
+                    return@setMethodCallHandler
+                }
                 if (call.method != "exportPhoto") {
                     result.notImplemented()
                     return@setMethodCallHandler
@@ -139,7 +154,14 @@ class MainActivity : FlutterActivity() {
         exportExecutor.execute {
             try {
                 val response = AndroidPhotoExporter(contentResolver, cacheDir)
-                    .export(sourcePath, pipeline)
+                    .export(sourcePath, pipeline) {
+                        mainHandler.post {
+                            photoExportChannel?.invokeMethod(
+                                "exportStage",
+                                mapOf("stage" to "savingToPhotoLibrary"),
+                            )
+                        }
+                    }
                 mainHandler.post {
                     result.success(
                         mapOf(
