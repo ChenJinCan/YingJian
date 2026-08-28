@@ -14,219 +14,67 @@ import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'support/test_services.dart';
 
 void main() {
-  testWidgets(
-    'complete six-photo MVP journey survives partial export failure',
-    (tester) async {
-      var networkClientCreations = 0;
-      await HttpOverrides.runZoned(
-        () async {
-          tester.view.physicalSize = const Size(390, 844);
-          tester.view.devicePixelRatio = 1;
-          addTearDown(tester.view.resetPhysicalSize);
-          addTearDown(tester.view.resetDevicePixelRatio);
+  testWidgets('complete one-photo MVP journey stays focused and offline', (
+    tester,
+  ) async {
+    var networkClientCreations = 0;
+    await HttpOverrides.runZoned(
+      () async {
+        tester.view.physicalSize = const Size(390, 844);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
 
-          final source = File(
-            'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
-            'Icon-App-1024x1024@1x.png',
-          );
-          final originalBytes = source.readAsBytesSync();
-          final photos = List.generate(
-            6,
-            (index) => ProjectPhoto(
-              id: 'photo-${index + 1}',
-              localPath: source.path,
-              originalName: 'photo-${index + 1}.png',
-            ),
-          );
-          final store = MemoryPhotoProjectStore();
-          final exporter = _JourneyExporter(failOncePhotoId: 'photo-4');
-          SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
-          final settings = await AppSettings.load();
-          await tester.pumpWidget(
-            buildTestApp(
-              settings,
-              photoImporter: FakePhotoImporter(photos),
-              photoProjectStore: store,
-              photoExporter: exporter,
-            ),
-          );
+        final source = File(
+          'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+          'Icon-App-1024x1024@1x.png',
+        );
+        final originalBytes = source.readAsBytesSync();
+        final photo = ProjectPhoto(
+          id: 'photo-1',
+          localPath: source.path,
+          originalName: 'portrait.png',
+        );
+        final store = MemoryPhotoProjectStore();
+        final exporter = _JourneyExporter(failOncePhotoId: 'never');
+        SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+        final settings = await AppSettings.load();
+        await tester.pumpWidget(
+          buildTestApp(
+            settings,
+            photoImporter: FakePhotoImporter([photo]),
+            photoProjectStore: store,
+            photoExporter: exporter,
+          ),
+        );
 
-          expect(find.textContaining('登录'), findsNothing);
-          await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-          await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+        await tester.pumpAndSettle();
 
-          expect(store.project?.photos, hasLength(6));
-          expect(
-            store.project?.analysisStates.values,
-            everyElement(PhotoAnalysisState.fallback),
-          );
-          expect(
-            store.project?.flowState,
-            PhotoProjectFlowState.choosingRecommendation,
-          );
-          expect(
-            find.byKey(const ValueKey('editor-recommendation-stage')),
-            findsOneWidget,
-          );
-          await tester.tap(
-            find.byKey(const ValueKey('recommendation-confirm')),
-          );
-          await tester.pumpAndSettle();
-          expect(store.project?.flowState, PhotoProjectFlowState.editing);
-          expect(
-            store.project?.sharedStyle.family,
-            SharedStyleFamily.naturalClean,
-          );
-          expect(store.project?.adaptiveCompensations, hasLength(6));
-          expect(find.text('自然干净'), findsNothing);
+        expect(store.project?.photos, [photo]);
+        expect(store.project?.flowState, PhotoProjectFlowState.editing);
+        expect(
+          find.byKey(const ValueKey('editor-photo-preview')),
+          findsOneWidget,
+        );
+        expect(find.byKey(const ValueKey('editor-scope-menu')), findsNothing);
+        expect(find.byKey(const Key('photo-strip-scroll')), findsNothing);
+        expect(find.textContaining('添加照片'), findsNothing);
 
-          await tester.tap(find.byKey(const ValueKey('editor-manual-entry')));
-          await tester.pumpAndSettle();
-          expect(
-            find.byKey(const ValueKey('editor-tools-dock')),
-            findsOneWidget,
-          );
-          final commonMetaOps = find.byWidgetPredicate((widget) {
-            final key = widget.key;
-            return key is ValueKey<String> &&
-                key.value.startsWith('editor-adjustment-tab-');
-          });
-          expect(commonMetaOps.evaluate().length, lessThanOrEqualTo(5));
-          expect(find.byKey(const ValueKey('editor-scope-menu')), findsNothing);
-          final workspace = find.byKey(const Key('editor-tools-scroll'));
-          final exposureAdjustment = find.byKey(
-            const ValueKey('editor-adjustment-exposure'),
-          );
-          await tester.dragUntilVisible(
-            exposureAdjustment,
-            workspace,
-            const Offset(0, -240),
-          );
-          await Scrollable.ensureVisible(
-            tester.element(exposureAdjustment),
-            alignment: 0.35,
-          );
-          await tester.pumpAndSettle();
-          await tester.drag(
-            find.descendant(
-              of: exposureAdjustment,
-              matching: find.byType(Slider),
-            ),
-            const Offset(70, 0),
-          );
-          await tester.pumpAndSettle();
-          final sharedExposure = store.project!.sharedStyle.recipe.exposure;
-          expect(sharedExposure, isNot(0));
-          expect(
-            find.byKey(const ValueKey('editor-reset-current-adjustment')),
-            findsOneWidget,
-          );
-          await tester.tap(
-            find.byKey(const ValueKey('editor-reset-current-adjustment')),
-          );
-          await tester.pumpAndSettle();
-          expect(store.project!.sharedStyle.recipe.exposure, 0);
-          await tester.tap(find.byKey(const ValueKey('editor-undo')));
-          await tester.pumpAndSettle();
-          expect(store.project!.sharedStyle.recipe.exposure, sharedExposure);
+        await tester.tap(find.byKey(const ValueKey('editor-export')));
+        await tester.pumpAndSettle();
 
-          await tester.tap(find.byKey(const ValueKey('editor-tools-done')));
-          await tester.pumpAndSettle();
-          await tester.tap(find.byKey(const ValueKey('editor-manual-entry')));
-          await tester.pumpAndSettle();
-          await tester.tap(find.byKey(const ValueKey('editor-all-tools')));
-          await tester.pumpAndSettle();
-          expect(find.byType(BottomSheet), findsNothing);
-          expect(
-            find.byKey(const ValueKey('editor-tools-dock')),
-            findsOneWidget,
-          );
-          expect(
-            find.byKey(const ValueKey('editor-meta-op-search')),
-            findsOneWidget,
-          );
-          await tester.enterText(
-            find.byKey(const ValueKey('editor-meta-op-search')),
-            '对比度',
-          );
-          await tester.pumpAndSettle();
-          await tester.tap(
-            find.byKey(const ValueKey('editor-meta-op-result-tone.contrast')),
-          );
-          await tester.pumpAndSettle();
-          await tester.fling(
-            find.byKey(const ValueKey('editor-swipe-photos')),
-            const Offset(-300, 0),
-            1200,
-          );
-          await tester.pumpAndSettle();
-          await tester.tap(
-            find.byKey(const ValueKey('editor-adjustment-tab-contrast')),
-          );
-          await tester.pumpAndSettle();
-          final contrastAdjustment = find.byKey(
-            const ValueKey('editor-adjustment-contrast'),
-          );
-          await tester.ensureVisible(contrastAdjustment);
-          await tester.drag(
-            find.descendant(
-              of: contrastAdjustment,
-              matching: find.byType(Slider),
-            ),
-            const Offset(60, 0),
-          );
-          await tester.pumpAndSettle();
-
-          expect(store.project?.photoOverrides, isEmpty);
-          expect(store.project?.sharedStyle.recipe.exposure, sharedExposure);
-          expect(
-            store.project?.effectiveRecipeFor('photo-1').contrast,
-            store.project?.effectiveRecipeFor('photo-2').contrast,
-          );
-
-          await tester.tap(find.byKey(const ValueKey('editor-tools-done')));
-          await tester.pumpAndSettle();
-          final savePhotos = find.byKey(const ValueKey('editor-batch-export'));
-          await tester.ensureVisible(savePhotos);
-          await tester.tap(savePhotos);
-          await tester.pumpAndSettle();
-          expect(
-            find.byKey(const ValueKey('editor-save-options')),
-            findsOneWidget,
-          );
-          expect(find.text('保存全部 6 张'), findsOneWidget);
-          expect(find.text('仅保存这张'), findsOneWidget);
-          await tester.tap(find.byKey(const ValueKey('save-all')));
-          await tester.tap(find.byKey(const ValueKey('save-confirm')));
-          await tester.pumpAndSettle();
-
-          expect(find.text('已保存 5 张 · 失败 1 张 · 取消 0 张'), findsWidgets);
-          expect(exporter.calls, [
-            'photo-1',
-            'photo-2',
-            'photo-3',
-            'photo-4',
-            'photo-5',
-            'photo-6',
-          ]);
-          await tester.tap(find.byKey(const ValueKey('export-retry-failed')));
-          await tester.pumpAndSettle();
-
-          expect(
-            store.project?.exportStates.values,
-            everyElement(PhotoExportState.saved),
-          );
-          expect(exporter.calls.last, 'photo-4');
-          expect(source.readAsBytesSync(), originalBytes);
-        },
-        createHttpClient: (_) {
-          networkClientCreations += 1;
-          throw StateError('The local MVP journey must remain offline');
-        },
-      );
-      expect(networkClientCreations, 0);
-    },
-  );
+        expect(exporter.calls, ['photo-1']);
+        expect(store.project?.exportStates['photo-1'], PhotoExportState.saved);
+        expect(source.readAsBytesSync(), originalBytes);
+      },
+      createHttpClient: (_) {
+        networkClientCreations += 1;
+        throw StateError('The local MVP journey must remain offline');
+      },
+    );
+    expect(networkClientCreations, 0);
+  });
 
   testWidgets('editing journey remains understandable at maximum text size', (
     tester,
@@ -244,21 +92,19 @@ void main() {
       'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
       'Icon-App-1024x1024@1x.png',
     );
-    final photos = List.generate(
-      6,
-      (index) => ProjectPhoto(
-        id: 'photo-${index + 1}',
+    final photos = [
+      ProjectPhoto(
+        id: 'photo-1',
         localPath: source.path,
-        originalName: 'photo-${index + 1}.png',
+        originalName: 'photo-1.png',
       ),
-    );
+    ];
     final project = PhotoProject(
       id: 'accessible-project',
       createdAt: DateTime.utc(2026, 8, 4),
       updatedAt: DateTime.utc(2026, 8, 4),
       photos: photos,
       flowState: PhotoProjectFlowState.editing,
-      selectedRecommendationId: 'mvp-catalog-v1:clean-balanced',
       sharedStyle: SharedStyle(
         family: SharedStyleFamily.naturalClean,
         recipe: EditRecipe(exposure: 0.1),
@@ -284,7 +130,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(find.text('1/6'), findsOneWidget);
+    expect(find.byKey(const Key('photo-strip-scroll')), findsNothing);
     expect(find.byKey(const ValueKey('editor-open-tools')), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
@@ -416,7 +262,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final savePhotos = find.byKey(const ValueKey('editor-batch-export'));
+    final savePhotos = find.byKey(const ValueKey('editor-export'));
     await tester.ensureVisible(savePhotos);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);

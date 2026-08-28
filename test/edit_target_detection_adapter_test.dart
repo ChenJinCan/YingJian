@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/editor/application/edit_target_detection_adapter.dart';
 import 'package:yingjian/features/editor/domain/edit_target.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
-import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
+import 'package:yingjian/features/photo_analysis/domain/photo_analysis.dart';
 
 void main() {
   test('maps analysis regions to typed stable-target detections', () {

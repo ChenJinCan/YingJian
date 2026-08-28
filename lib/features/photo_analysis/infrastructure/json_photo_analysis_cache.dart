@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:yingjian/features/project/domain/photo_project.dart';
-import 'package:yingjian/features/recommendations/application/photo_analysis_cache.dart';
-import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
+import 'package:yingjian/features/photo_analysis/application/photo_analysis_cache.dart';
+import 'package:yingjian/features/photo_analysis/domain/photo_analysis.dart';
 
 typedef AnalysisDirectoryProvider = Future<Directory> Function();
 

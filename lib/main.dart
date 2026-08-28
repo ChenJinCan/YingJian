@@ -20,10 +20,10 @@ import 'package:yingjian/features/project/infrastructure/app_owned_photo_importe
 import 'package:yingjian/features/project/infrastructure/image_picker_photo_source.dart';
 import 'package:yingjian/features/project/infrastructure/json_photo_project_store.dart';
 import 'package:yingjian/features/project/infrastructure/method_channel_photo_source.dart';
-import 'package:yingjian/features/recommendations/application/photo_analysis_cache.dart';
-import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
-import 'package:yingjian/features/recommendations/infrastructure/json_photo_analysis_cache.dart';
-import 'package:yingjian/features/recommendations/infrastructure/method_channel_photo_analyzer.dart';
+import 'package:yingjian/features/photo_analysis/application/photo_analysis_cache.dart';
+import 'package:yingjian/features/photo_analysis/domain/photo_analysis.dart';
+import 'package:yingjian/features/photo_analysis/infrastructure/json_photo_analysis_cache.dart';
+import 'package:yingjian/features/photo_analysis/infrastructure/method_channel_photo_analyzer.dart';
 import 'package:yingjian/observability/app_observability.dart';
 import 'package:yingjian/observability/firebase_observability_backend.dart';
 import 'package:yingjian/review/review_manager.dart';

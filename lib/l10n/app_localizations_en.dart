@@ -12,7 +12,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get appTitle => 'Yingjian';
 
   @override
-  String get homeTagline => 'Refine one. Unify the whole set.';
+  String get homeTagline => 'One photo. Refined with focus.';
 
   @override
   String get startEditing => 'Start editing';
@@ -25,11 +25,11 @@ class AppLocalizationsEn extends AppLocalizations {
       'Choose a photo and tell us how you want it changed';
 
   @override
-  String get homePrimaryAction => 'Choose photos to start';
+  String get homePrimaryAction => 'Choose a photo to start';
 
   @override
   String get onboardingPromise =>
-      'Choose photos, then describe the feeling you want. Yingjian refines one and keeps the whole set naturally consistent.';
+      'Choose one photo, then describe the feeling you want. Yingjian focuses on refining that photo.';
 
   @override
   String get onboardingContinue => 'Get started';
@@ -42,8 +42,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get recentProjects => 'Recent projects';
 
   @override
-  String get noRecentProjects =>
-      'No projects yet. Choose a few photos to begin.';
+  String get noRecentProjects => 'No projects yet. Choose one photo to begin.';
 
   @override
   String get unfinishedProject => 'Unfinished project';
@@ -88,18 +87,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get photoPreviewArea => 'Photo preview';
 
   @override
-  String get selectPhotosTitle => 'Choose 1–6 photos';
+  String get selectPhotosTitle => 'Choose one photo';
 
   @override
-  String get selectPhotos => 'Choose photos';
-
-  @override
-  String get addPhotos => 'Add more photos';
-
-  @override
-  String photoCount(int count) {
-    return '$count/6';
-  }
+  String get selectPhotos => 'Choose a photo';
 
   @override
   String get photoLoadFailed => 'This photo cannot be opened';
@@ -111,10 +102,6 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get effectPreviewUnavailable =>
       'This effect preview is temporarily unavailable. Reset the adjustment or try again.';
-
-  @override
-  String get recommendationPreviewUnavailable =>
-      'This recommendation preview is temporarily unavailable. Try again or view another direction.';
 
   @override
   String get photoImportCanceled => 'No photos were added';
@@ -162,7 +149,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get photoLimitReached => 'A project can contain up to 6 photos';
+  String get photoLimitReached => 'This project already has a photo';
 
   @override
   String get projectRestoreFailed =>
@@ -435,28 +422,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get lightAndColorTools => 'Light';
 
   @override
-  String get groupStyleIntensity => 'Group look';
-
-  @override
-  String get groupStyleIntensityHint =>
-      'Adjusts the shared look while preserving each photo\'s adaptive correction.';
-
-  @override
-  String get primaryRecommendation => 'Recommended';
-
-  @override
-  String get alternativeRecommendation => 'Alternative';
-
-  @override
   String get localPortraitReady => 'Portrait adjustments available';
 
   @override
   String get portraitToolsUnavailable =>
       'This photo did not pass portrait safety checks. Light and color tools remain available.';
-
-  @override
-  String get switchToCurrentPhotoForPortrait =>
-      'Switch to Current photo to use portrait tools';
 
   @override
   String get resetCurrentAdjustment => 'Reset current adjustment';
@@ -580,103 +550,6 @@ class AppLocalizationsEn extends AppLocalizations {
       'This document cannot be loaded right now';
 
   @override
-  String get analysisPreparing => 'Looking at your photos…';
-
-  @override
-  String get analysisPreparingSubtitle =>
-      'Preparing a look that suits this set';
-
-  @override
-  String preparingPhotos(int current, int total) {
-    return 'Preparing photos $current/$total';
-  }
-
-  @override
-  String get analysisNextStep => 'Next, lighting and people will be analyzed';
-
-  @override
-  String get analysisNonBlockingFailure =>
-      'This photo cannot be processed yet. The others will continue.';
-
-  @override
-  String get chooseOverallFeeling => 'Choose a feeling first';
-
-  @override
-  String get skip => 'Skip';
-
-  @override
-  String get recommendationAppliesToAll =>
-      'This applies to every photo, with individual adaptation';
-
-  @override
-  String get recommendationsTitle => 'Choose a direction you like';
-
-  @override
-  String get recommendationsSubtitle =>
-      'Preview a look first, then keep adjusting whenever you like.';
-
-  @override
-  String get safeFallbackNotice =>
-      'Using restrained safe recipes until pixel analysis passes its quality gate.';
-
-  @override
-  String get localAnalysisNotice => 'Adjustments are ready for this photo.';
-
-  @override
-  String get localEffect => 'On-device effect';
-
-  @override
-  String get useThisLook => 'Use this';
-
-  @override
-  String get recommendationNaturalClean => 'Natural clean';
-
-  @override
-  String get recommendationAtmosphericColor => 'Atmospheric color';
-
-  @override
-  String get recommendationTexturedStyle => 'Textured style';
-
-  @override
-  String get recommendationReasonBalancedFallback =>
-      'Balanced, restrained fallback';
-
-  @override
-  String get recommendationReasonWarmFallback =>
-      'Gentle warmth, safely bounded';
-
-  @override
-  String get recommendationReasonTexturedFallback =>
-      'Subtle texture, no hard sharpening';
-
-  @override
-  String get recommendationReasonProtectsUncertain =>
-      'Conservative for uncertain input';
-
-  @override
-  String get recommendationReasonProtectsTexture =>
-      'Preserves detail and local contrast';
-
-  @override
-  String get recommendationReasonCorrectsExposure =>
-      'Balances detected exposure';
-
-  @override
-  String get recommendationReasonCorrectsWhiteBalance =>
-      'Corrects the detected color cast';
-
-  @override
-  String get editWholeGroup => 'Edit whole group';
-
-  @override
-  String get editCurrentPhoto => 'Current photo only';
-
-  @override
-  String photoPositionAndScope(int current, int total, String scope) {
-    return 'Photo $current of $total · $scope';
-  }
-
-  @override
   String get photoStatusUnprocessed => 'Not processed';
 
   @override
@@ -702,16 +575,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get photoStatusExportCancelled => 'Export cancelled';
-
-  @override
-  String batchExportPhotos(int count) {
-    return 'Export $count photos';
-  }
-
-  @override
-  String exportConfirmationMessage(int count) {
-    return 'Replay every edit from $count read-only originals and save the results to Photos.';
-  }
 
   @override
   String get exportPhotoPlan => 'Photos in this export';
@@ -759,20 +622,6 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get exportColorSpaceNotice =>
       'The first release exports sRGB and never overwrites the original.';
-
-  @override
-  String get syncCurrentAdjustments => 'Sync current adjustments to group';
-
-  @override
-  String get syncGroupConfirmationTitle =>
-      'Sync current color adjustments to the group?';
-
-  @override
-  String get syncGroupConfirmationMessage =>
-      'Exposure, color, and texture will apply to every photo. Composition stays on the current photo. You can undo this action.';
-
-  @override
-  String get syncGroupAction => 'Sync group';
 
   @override
   String get exportingPhotos => 'Exporting one photo at a time…';
@@ -1033,10 +882,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get editResultApplied => 'Change applied';
 
   @override
-  String get editAppliedToGroup => 'Synced to the group';
-
-  @override
-  String get syncAllPhotos => 'Sync to all';
+  String get editApplied => 'Applied';
 
   @override
   String get manualSimpleHint => 'Choose the result you want';
@@ -1067,14 +913,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get choosePersonHint => 'Tap a person in the photo';
-
-  @override
-  String saveAllPhotos(int count) {
-    return 'Save all $count photos';
-  }
-
-  @override
-  String get saveCurrentPhoto => 'Save only this photo';
 
   @override
   String saveSuccess(int count) {

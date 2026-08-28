@@ -49,7 +49,6 @@ void main() {
 
       expect(availability.manualIds, [MetaOpIds.exposure]);
       expect(availability.searchIds, [MetaOpIds.exposure]);
-      expect(availability.recommendationIds, [MetaOpIds.exposure]);
       expect(availability.search(MetaOpCatalog.standard, '皮肤'), isEmpty);
       expect(availability.search(MetaOpCatalog.standard, '亮度'), [
         MetaOpIds.exposure,

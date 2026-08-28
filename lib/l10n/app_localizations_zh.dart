@@ -12,7 +12,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get appTitle => '映见';
 
   @override
-  String get homeTagline => '一张精修，整组好看';
+  String get homeTagline => '一张照片，专注修好';
 
   @override
   String get startEditing => '开始修图';
@@ -27,7 +27,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get homePrimaryAction => '选择照片开始';
 
   @override
-  String get onboardingPromise => '先选照片，再说出你想要的感觉。映见会把一张修好，也让整组自然统一。';
+  String get onboardingPromise => '选一张照片，再说出你想要的感觉。映见专注把这一张修好。';
 
   @override
   String get onboardingContinue => '开始使用';
@@ -39,7 +39,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get recentProjects => '最近项目';
 
   @override
-  String get noRecentProjects => '还没有项目，选几张照片开始吧';
+  String get noRecentProjects => '还没有项目，选一张照片开始吧';
 
   @override
   String get unfinishedProject => '未完成项目';
@@ -58,7 +58,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String lastProjectSummary(int count, String date, String time) {
-    return '$count 张照片 · 最后编辑于 $date $time';
+    return '1 张照片 · 最后编辑于 $date $time';
   }
 
   @override
@@ -77,18 +77,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get photoPreviewArea => '照片预览区域';
 
   @override
-  String get selectPhotosTitle => '选择 1–6 张照片';
+  String get selectPhotosTitle => '选择一张照片';
 
   @override
   String get selectPhotos => '选择照片';
-
-  @override
-  String get addPhotos => '继续添加照片';
-
-  @override
-  String photoCount(int count) {
-    return '$count/6';
-  }
 
   @override
   String get photoLoadFailed => '无法读取这张照片';
@@ -98,9 +90,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get effectPreviewUnavailable => '当前效果预览暂不可用，可重置本次调整或稍后重试。';
-
-  @override
-  String get recommendationPreviewUnavailable => '这套推荐预览暂不可用，可重试或查看其他方向。';
 
   @override
   String get photoImportCanceled => '未添加任何照片';
@@ -148,7 +137,7 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get photoLimitReached => '每个项目最多导入 6 张照片';
+  String get photoLimitReached => '当前项目已有一张照片';
 
   @override
   String get projectRestoreFailed => '无法恢复上次项目';
@@ -410,25 +399,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get lightAndColorTools => '光线';
 
   @override
-  String get groupStyleIntensity => '整组风格';
-
-  @override
-  String get groupStyleIntensityHint => '调整整组共享效果强度，同时保留每张照片的独立补偿。';
-
-  @override
-  String get primaryRecommendation => '主推荐';
-
-  @override
-  String get alternativeRecommendation => '备选';
-
-  @override
   String get localPortraitReady => '可以调整人像';
 
   @override
   String get portraitToolsUnavailable => '当前照片未通过人像安全检测，仍可继续调整光色';
-
-  @override
-  String get switchToCurrentPhotoForPortrait => '切换到“当前照片”后可使用人像工具';
 
   @override
   String get resetCurrentAdjustment => '归零当前调整';
@@ -544,91 +518,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get legalDocumentLoadFailed => '暂时无法加载此文档';
 
   @override
-  String get analysisPreparing => '正在看照片…';
-
-  @override
-  String get analysisPreparingSubtitle => '正在准备适合这组照片的效果';
-
-  @override
-  String preparingPhotos(int current, int total) {
-    return '正在准备照片 $current/$total';
-  }
-
-  @override
-  String get analysisNextStep => '接下来会分析光线和人物';
-
-  @override
-  String get analysisNonBlockingFailure => '这张暂时无法处理，其他照片会继续';
-
-  @override
-  String get chooseOverallFeeling => '先选一种感觉';
-
-  @override
-  String get skip => '跳过';
-
-  @override
-  String get recommendationAppliesToAll => '会应用到全部照片，每张仍会单独适配';
-
-  @override
-  String get recommendationsTitle => '选一个喜欢的方向';
-
-  @override
-  String get recommendationsSubtitle => '先看效果，之后随时可以继续调整。';
-
-  @override
-  String get safeFallbackNotice => '当前使用克制的安全配方；像素级分析能力完成质量验证后再启用。';
-
-  @override
-  String get localAnalysisNotice => '已根据照片内容完成调整。';
-
-  @override
-  String get localEffect => '本地效果';
-
-  @override
-  String get useThisLook => '就用这个';
-
-  @override
-  String get recommendationNaturalClean => '自然干净';
-
-  @override
-  String get recommendationAtmosphericColor => '氛围色彩';
-
-  @override
-  String get recommendationTexturedStyle => '质感风格';
-
-  @override
-  String get recommendationReasonBalancedFallback => '均衡克制的安全回退';
-
-  @override
-  String get recommendationReasonWarmFallback => '安全增加轻微暖意';
-
-  @override
-  String get recommendationReasonTexturedFallback => '克制增强质感，不激进锐化';
-
-  @override
-  String get recommendationReasonProtectsUncertain => '保守保护不确定输入';
-
-  @override
-  String get recommendationReasonProtectsTexture => '保留细节与局部反差';
-
-  @override
-  String get recommendationReasonCorrectsExposure => '平衡检测到的曝光';
-
-  @override
-  String get recommendationReasonCorrectsWhiteBalance => '修正检测到的偏色';
-
-  @override
-  String get editWholeGroup => '编辑整组';
-
-  @override
-  String get editCurrentPhoto => '仅当前照片';
-
-  @override
-  String photoPositionAndScope(int current, int total, String scope) {
-    return '第 $current / $total 张 · $scope';
-  }
-
-  @override
   String get photoStatusUnprocessed => '未处理';
 
   @override
@@ -654,16 +543,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get photoStatusExportCancelled => '已取消导出';
-
-  @override
-  String batchExportPhotos(int count) {
-    return '批量导出 $count 张';
-  }
-
-  @override
-  String exportConfirmationMessage(int count) {
-    return '将从 $count 张只读原图重新执行全部效果并保存到系统相册。';
-  }
 
   @override
   String get exportPhotoPlan => '本次照片';
@@ -709,19 +588,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get exportColorSpaceNotice => '首版统一以 sRGB 输出；原图不会被覆盖。';
-
-  @override
-  String get syncCurrentAdjustments => '同步当前调整到整组';
-
-  @override
-  String get syncGroupConfirmationTitle => '将当前光色调整同步到整组？';
-
-  @override
-  String get syncGroupConfirmationMessage =>
-      '曝光、色彩和质感会应用到全部照片；构图仍只保留在当前照片。这个操作可以撤销。';
-
-  @override
-  String get syncGroupAction => '同步整组';
 
   @override
   String get exportingPhotos => '正在逐张导出…';
@@ -976,10 +842,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get editResultApplied => '已完成这次修改';
 
   @override
-  String get editAppliedToGroup => '已同步整组';
-
-  @override
-  String get syncAllPhotos => '同步到全部';
+  String get editApplied => '已应用';
 
   @override
   String get manualSimpleHint => '选一个你想要的结果';
@@ -1010,14 +873,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get choosePersonHint => '点一下照片里的人';
-
-  @override
-  String saveAllPhotos(int count) {
-    return '保存全部 $count 张';
-  }
-
-  @override
-  String get saveCurrentPhoto => '仅保存这张';
 
   @override
   String saveSuccess(int count) {

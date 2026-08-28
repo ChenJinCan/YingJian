@@ -539,9 +539,8 @@ void main() {
       createdAt: DateTime.utc(2026, 8, 4),
       updatedAt: DateTime.utc(2026, 8, 4, 1),
       photos: const [first],
-      flowState: PhotoProjectFlowState.choosingRecommendation,
+      flowState: PhotoProjectFlowState.editing,
       focusPhotoId: first.id,
-      selectedRecommendationId: 'clean-natural-01',
       sharedStyle: SharedStyle(recipe: EditRecipe(warmth: 0.2)),
       adaptiveCompensations: {
         first.id: AdaptiveCompensation(

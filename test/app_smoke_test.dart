@@ -17,7 +17,7 @@ import 'package:yingjian/features/editor/domain/platform_meta_op_capabilities.da
 import 'package:yingjian/features/editor/domain/semantic_editing_recipe.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
-import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
+import 'package:yingjian/features/photo_analysis/domain/photo_analysis.dart';
 
 import 'support/memory_photo_analysis_cache.dart';
 import 'support/test_services.dart';
@@ -49,7 +49,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
-    expect(find.text('选择 1–6 张照片'), findsOneWidget);
+    expect(find.text('选择一张照片'), findsOneWidget);
   });
 
   testWidgets('follows a persisted English locale', (tester) async {
@@ -58,7 +58,7 @@ void main() {
     await tester.pumpWidget(buildTestApp(settings));
 
     expect(find.text('Yingjian'), findsOneWidget);
-    expect(find.text('Choose photos to start'), findsOneWidget);
+    expect(find.text('One photo. Refined with focus.'), findsOneWidget);
   });
 
   testWidgets('English unfinished-project count uses singular grammar', (
@@ -76,7 +76,7 @@ void main() {
             originalName: 'photo.jpg',
           ),
         ],
-        flowState: PhotoProjectFlowState.analyzing,
+        flowState: PhotoProjectFlowState.editing,
       ),
     );
     SharedPreferences.setMockInitialValues({'app.locale': 'en'});
@@ -104,7 +104,7 @@ void main() {
             originalName: 'photo.jpg',
           ),
         ],
-        flowState: PhotoProjectFlowState.analyzing,
+        flowState: PhotoProjectFlowState.editing,
       ),
     );
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
@@ -139,7 +139,6 @@ void main() {
         ),
       ],
       flowState: PhotoProjectFlowState.editing,
-      selectedRecommendationId: 'clean-natural-01',
       unknownMetaOps: const [
         {
           'id': 'future.generative_relight',
@@ -168,9 +167,7 @@ void main() {
     expect(find.text('需要更新后继续编辑'), findsOneWidget);
     expect(
       tester
-          .widget<FilledButton>(
-            find.byKey(const ValueKey('editor-batch-export')),
-          )
+          .widget<FilledButton>(find.byKey(const ValueKey('editor-export')))
           .onPressed,
       isNull,
     );
@@ -200,7 +197,6 @@ void main() {
           ),
         ],
         flowState: PhotoProjectFlowState.editing,
-        selectedRecommendationId: 'clean-natural-01',
         focusPhotoId: 'photo-1',
       ),
     );
@@ -242,8 +238,6 @@ void main() {
       '皮肤自然一点',
     );
     await tester.tap(find.byKey(const ValueKey('voice-edit-submit')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('voice-edit-apply-preview')));
     await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.byKey(ValueKey('ai-target-${targetIds[0]}')), findsOneWidget);
@@ -311,7 +305,6 @@ void main() {
           ),
         ],
         flowState: PhotoProjectFlowState.editing,
-        selectedRecommendationId: 'clean-natural-01',
         focusPhotoId: 'photo-1',
       ),
     );
@@ -336,8 +329,6 @@ void main() {
     );
     await tester.tap(find.byKey(const ValueKey('voice-edit-submit')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('voice-edit-apply-preview')));
-    await tester.pumpAndSettle();
 
     expect(store.project!.undoHistory, isEmpty);
     expect(store.project!.sharedStyle.recipe.exposure, 0);
@@ -358,7 +349,7 @@ void main() {
           originalName: 'photo.jpg',
         ),
       ],
-      flowState: PhotoProjectFlowState.analyzing,
+      flowState: PhotoProjectFlowState.editing,
     );
     final store = MemoryPhotoProjectStore(project);
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
@@ -366,10 +357,8 @@ void main() {
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
     await tester.pumpAndSettle();
 
-    await tester.ensureVisible(
-      find.byKey(const ValueKey('home-start-editing')),
-    );
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+    await tester.ensureVisible(find.byKey(const ValueKey('home-new-project')));
+    await tester.tap(find.byKey(const ValueKey('home-new-project')));
     await tester.pumpAndSettle();
     expect(find.textContaining('系统相册原图不会被删除'), findsOneWidget);
     expect(store.project, project);
@@ -410,8 +399,6 @@ void main() {
       findsOneWidget,
     );
     expect(find.byKey(const ValueKey('voice-edit-entry')), findsOneWidget);
-    expect(find.text('周末人像.png'), findsOneWidget);
-    expect(find.text('1/6'), findsOneWidget);
     expect(find.text('无法读取这张照片'), findsNothing);
   });
 
@@ -476,7 +463,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.byKey(const ValueKey('editor-tools-dock')), findsNothing);
-      expect(find.byKey(const ValueKey('editor-batch-export')), findsNothing);
+      expect(find.byKey(const ValueKey('editor-export')), findsNothing);
 
       await tester.tap(
         find.byKey(const ValueKey('editor-fullscreen-preview-surface')),
@@ -523,7 +510,6 @@ void main() {
 
     await _openEditorFromHome(tester);
 
-    expect(find.text('可用照片.png'), findsOneWidget);
     expect(find.textContaining('动态照片.png'), findsOneWidget);
     expect(find.textContaining('暂不支持动态图片'), findsOneWidget);
   });
@@ -612,7 +598,7 @@ void main() {
     expect(find.text('正在导入照片…'), findsNothing);
   });
 
-  testWidgets('import applies the safest local look without another decision', (
+  testWidgets('import opens a neutral editor without another decision', (
     tester,
   ) async {
     final photoFile = File(
@@ -641,14 +627,9 @@ void main() {
     await _openEditorFromHome(tester);
     expect(previewRenderer.maxEdges, contains(2048));
     expect(store.project?.flowState, PhotoProjectFlowState.editing);
-    expect(store.project?.selectedRecommendationId, contains('clean-balanced'));
-    expect(store.project?.sharedStyle.family, SharedStyleFamily.naturalClean);
-    expect(
-      store.project?.adaptiveCompensations['photo-1']?.source,
-      AdaptiveCompensationSource.safeFallbackV1,
-    );
+    expect(store.project?.sharedStyle.recipe, EditRecipe.neutral);
+    expect(store.project?.adaptiveCompensations, isEmpty);
     expect(find.byKey(const ValueKey('voice-edit-entry')), findsOneWidget);
-    expect(find.text('自然干净'), findsNothing);
   });
 
   testWidgets('restored project reuses analysis before opening the editor', (
@@ -696,48 +677,6 @@ void main() {
     expect(analyzer.calls, 1);
     expect(store.project?.flowState, PhotoProjectFlowState.editing);
     expect(find.byKey(const ValueKey('voice-edit-entry')), findsOneWidget);
-  });
-
-  testWidgets('a failed recommendation preview stays safe and can retry', (
-    tester,
-  ) async {
-    final photoFile = File(
-      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
-      'Icon-App-1024x1024@1x.png',
-    );
-    final renderer = FakePhotoPreviewRenderer.unsupported();
-    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
-    final settings = await AppSettings.load();
-    await tester.pumpWidget(
-      buildTestApp(
-        settings,
-        photoPreviewRenderer: renderer,
-        photoImporter: FakePhotoImporter([
-          ProjectPhoto(
-            id: 'photo-preview-failure',
-            localPath: photoFile.path,
-            originalName: '推荐预览失败.png',
-          ),
-        ]),
-      ),
-    );
-
-    await _openEditorFromHome(tester);
-
-    expect(find.textContaining('预览'), findsWidgets);
-    expect(find.textContaining('当前效果预览暂不可用'), findsOneWidget);
-    final confirm = find.byKey(const ValueKey('recommendation-confirm'));
-    expect(confirm, findsOneWidget);
-    final createCountBeforeRetry = renderer.creates.length;
-
-    await tester.pump(const Duration(seconds: 4));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(confirm);
-    await tester.tap(confirm);
-    await tester.pumpAndSettle();
-
-    expect(renderer.creates.length, createCountBeforeRetry + 1);
-    expect(confirm, findsOneWidget);
   });
 
   testWidgets('backgrounding analysis discards a late native result', (
@@ -804,14 +743,7 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
 
-    expect(
-      store.project?.flowState,
-      PhotoProjectFlowState.choosingRecommendation,
-    );
-    expect(
-      find.byKey(const ValueKey('recommendation-confirm')),
-      findsOneWidget,
-    );
+    expect(store.project?.flowState, PhotoProjectFlowState.editing);
   });
 
   testWidgets('rapid resume waits for the serialized lifecycle fallback', (
@@ -861,14 +793,11 @@ void main() {
     await tester.pump();
     await store.fallbackSaveStarted.future;
 
-    expect(store.project?.flowState, PhotoProjectFlowState.analyzing);
+    expect(store.project?.flowState, PhotoProjectFlowState.editing);
     store.completeFallbackSave();
     await tester.pumpAndSettle();
 
-    expect(
-      store.project?.flowState,
-      PhotoProjectFlowState.choosingRecommendation,
-    );
+    expect(store.project?.flowState, PhotoProjectFlowState.editing);
     expect(tester.takeException(), isNull);
   });
 
@@ -1020,124 +949,6 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('removing a photo restarts analysis for the remaining group', (
-    tester,
-  ) async {
-    final photoFile = File(
-      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
-      'Icon-App-1024x1024@1x.png',
-    );
-    ProjectPhoto photo(String id) => ProjectPhoto(
-      id: id,
-      localPath: photoFile.path,
-      originalName: '$id.png',
-      contentSha256: id == 'photo-1'
-          ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-          : 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-      pixelWidth: 1024,
-      pixelHeight: 1024,
-      colorSpace: PhotoColorSpace.srgb,
-      inputFormat: PhotoInputFormat.png,
-      supportState: PhotoSupportState.supported,
-    );
-    final store = MemoryPhotoProjectStore();
-    final analyzer = _FirstDeferredPhotoAnalyzer();
-    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
-    final settings = await AppSettings.load();
-    await tester.pumpWidget(
-      buildTestApp(
-        settings,
-        photoProjectStore: store,
-        photoImporter: FakePhotoImporter([photo('photo-1'), photo('photo-2')]),
-        photoAnalyzer: analyzer,
-      ),
-    );
-    await _tapEditorEntryFromHome(tester);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
-    await analyzer.started.future;
-
-    await tester.tap(find.byTooltip('移除照片'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-    await tester.tap(find.text('删除').last);
-    await tester.pump();
-    analyzer.completeFirst();
-    await tester.pumpAndSettle();
-
-    expect(store.project?.photos.map((photo) => photo.id), ['photo-2']);
-    expect(
-      store.project?.flowState,
-      PhotoProjectFlowState.choosingRecommendation,
-    );
-    expect(analyzer.calls, greaterThanOrEqualTo(2));
-    expect(
-      find.byKey(const ValueKey('recommendation-confirm')),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('photo removal drains a claimed analysis state save', (
-    tester,
-  ) async {
-    final photoFile = File(
-      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
-      'Icon-App-1024x1024@1x.png',
-    );
-    ProjectPhoto photo(String id, String hash) => ProjectPhoto(
-      id: id,
-      localPath: photoFile.path,
-      originalName: '$id.png',
-      contentSha256: hash,
-      pixelWidth: 1024,
-      pixelHeight: 1024,
-      colorSpace: PhotoColorSpace.srgb,
-      inputFormat: PhotoInputFormat.png,
-      supportState: PhotoSupportState.supported,
-    );
-    final store = _DeferredAnalysisStateProjectStore();
-    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
-    final settings = await AppSettings.load();
-    await tester.pumpWidget(
-      buildTestApp(
-        settings,
-        photoProjectStore: store,
-        photoImporter: FakePhotoImporter([
-          photo(
-            'photo-1',
-            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-          ),
-          photo(
-            'photo-2',
-            'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-          ),
-        ]),
-        photoAnalyzer: _CountingPhotoAnalyzer(),
-      ),
-    );
-    await _tapEditorEntryFromHome(tester);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
-    await store.analysisSaveStarted.future;
-
-    await tester.tap(find.byTooltip('移除照片'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-    await tester.tap(find.text('删除').last);
-    await tester.pump();
-    expect(store.project?.photos, hasLength(2));
-
-    store.completeAnalysisSave();
-    await tester.pumpAndSettle();
-
-    expect(store.project?.photos.map((photo) => photo.id), ['photo-2']);
-    expect(
-      store.project?.flowState,
-      PhotoProjectFlowState.choosingRecommendation,
-    );
-    expect(tester.takeException(), isNull);
-  });
-
   testWidgets('user adjusts a photo and exports from its original', (
     tester,
   ) async {
@@ -1161,7 +972,6 @@ void main() {
         updatedAt: DateTime.utc(2026, 8, 4),
         photos: [photo],
         flowState: PhotoProjectFlowState.editing,
-        selectedRecommendationId: 'clean-natural-01',
       ),
     );
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
@@ -1177,7 +987,6 @@ void main() {
 
     await _openEditorFromHome(tester);
 
-    expect(find.text('周末人像.png'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
     await tester.pumpAndSettle();
     final exposureAdjustment = find.byKey(
@@ -1207,16 +1016,11 @@ void main() {
     expect(exporter.exportedRecipe, isNull);
     expect(store.project?.undoHistory, hasLength(1));
 
-    final saveButton = find.byKey(const ValueKey('editor-batch-export'));
+    final saveButton = find.byKey(const ValueKey('editor-export'));
     await tester.ensureVisible(saveButton);
     await tester.pumpAndSettle();
     await tester.tap(saveButton);
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('editor-save-options')), findsOneWidget);
-    expect(find.byKey(const ValueKey('save-all')), findsOneWidget);
-    expect(find.byKey(const ValueKey('save-current')), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('save-all')));
-    await tester.tap(find.byKey(const ValueKey('save-confirm')));
     await tester.pumpAndSettle();
 
     expect(exporter.exportedPhoto, photo);
@@ -1358,7 +1162,6 @@ void main() {
           ),
         ],
         flowState: PhotoProjectFlowState.editing,
-        selectedRecommendationId: 'clean-natural-01',
       );
       SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
       final settings = await AppSettings.load();
@@ -1380,7 +1183,6 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.textContaining('当前效果预览暂不可用'), findsOneWidget);
-      expect(find.text('构图预览.png'), findsOneWidget);
       expect(store.project!.effectiveRecipeFor('photo-1').crop.quarterTurns, 0);
       debugDefaultTargetPlatformOverride = null;
     },
@@ -1414,7 +1216,6 @@ void main() {
             ),
           ],
           flowState: PhotoProjectFlowState.editing,
-          selectedRecommendationId: 'clean-natural-01',
           photoOverrides: {
             'photo-1': PhotoOverride(
               recipe: EditRecipe(basicEditingRecipe: look),
@@ -1507,7 +1308,6 @@ void main() {
         ),
       ],
       flowState: PhotoProjectFlowState.editing,
-      selectedRecommendationId: 'clean-natural-01',
       sharedStyle: SharedStyle(
         family: SharedStyleFamily.naturalClean,
         recipe: EditRecipe(clarity: 0.2),
@@ -1560,7 +1360,6 @@ void main() {
         updatedAt: DateTime.utc(2026, 8, 5),
         photos: [photo],
         flowState: PhotoProjectFlowState.editing,
-        selectedRecommendationId: 'clean-natural-01',
         editingScope: ProjectEditingScope.currentPhoto,
         focusPhotoId: photo.id,
       ),
@@ -2278,7 +2077,6 @@ void main() {
         updatedAt: DateTime.utc(2026, 8, 20),
         photos: [photo],
         flowState: PhotoProjectFlowState.editing,
-        selectedRecommendationId: 'clean-natural-01',
         editingScope: ProjectEditingScope.currentPhoto,
         focusPhotoId: photo.id,
       );
@@ -2389,7 +2187,6 @@ void main() {
           updatedAt: DateTime.utc(2026, 8, 5),
           photos: [photo],
           flowState: PhotoProjectFlowState.editing,
-          selectedRecommendationId: 'clean-natural-01',
           editingScope: ProjectEditingScope.currentPhoto,
           focusPhotoId: photo.id,
           analysisStates: {photo.id: PhotoAnalysisState.ready},
@@ -2439,7 +2236,6 @@ void main() {
 
       expect(analyzer.calls, 1);
       expect(store.project?.flowState, PhotoProjectFlowState.editing);
-      expect(find.byKey(const ValueKey('recommendation-use')), findsNothing);
       await _openManualMetaOp(tester, MetaOpIds.skinSmooth);
       await tester.dragUntilVisible(
         find.byKey(
@@ -2483,290 +2279,6 @@ void main() {
     },
   );
 
-  testWidgets(
-    'multi-photo editing routes operations without exposing a scope choice',
-    (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
-      final photoFile = File(
-        'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
-        'Icon-App-1024x1024@1x.png',
-      );
-      final photos = [
-        ProjectPhoto(
-          id: 'photo-1',
-          localPath: photoFile.path,
-          originalName: 'first.png',
-        ),
-        ProjectPhoto(
-          id: 'photo-2',
-          localPath: photoFile.path,
-          originalName: 'second.png',
-        ),
-      ];
-      final store = MemoryPhotoProjectStore(
-        PhotoProject(
-          id: 'project-1',
-          createdAt: DateTime.utc(2026, 8, 4),
-          updatedAt: DateTime.utc(2026, 8, 4),
-          photos: photos,
-          flowState: PhotoProjectFlowState.editing,
-          selectedRecommendationId: 'mvp-catalog-v1:clean-balanced',
-          sharedStyle: SharedStyle(recipe: EditRecipe(exposure: 0.1)),
-          adaptiveCompensations: {
-            'photo-1': AdaptiveCompensation(
-              recipe: EditRecipe.neutral,
-              source: AdaptiveCompensationSource.safeFallbackV1,
-              portraitStrength: 0.35,
-            ),
-            'photo-2': AdaptiveCompensation(
-              recipe: EditRecipe.neutral,
-              source: AdaptiveCompensationSource.safeFallbackV1,
-            ),
-          },
-        ),
-      );
-      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
-      final settings = await AppSettings.load();
-      await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
-
-      await _tapEditorEntryFromHome(tester);
-      await tester.pumpAndSettle();
-
-      expect(find.byKey(const ValueKey('editor-scope-switch')), findsNothing);
-      expect(find.byKey(const ValueKey('editor-scope-group')), findsNothing);
-      expect(
-        find.byKey(const ValueKey('editor-scope-currentPhoto')),
-        findsNothing,
-      );
-      expect(find.text('自动补偿'), findsNWidgets(2));
-      await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
-      await tester.pumpAndSettle();
-      for (final category in <String>[
-        'composition',
-        'color',
-        'filters',
-        'quality',
-        'semantic',
-      ]) {
-        expect(
-          find.byKey(ValueKey('editor-tool-category-$category')),
-          findsNothing,
-        );
-      }
-      expect(find.byKey(const ValueKey('editor-all-tools')), findsOneWidget);
-
-      final exposureAdjustment = find.byKey(
-        const ValueKey('editor-adjustment-exposure'),
-      );
-      await tester.ensureVisible(exposureAdjustment);
-      await tester.drag(
-        find.descendant(of: exposureAdjustment, matching: find.byType(Slider)),
-        const Offset(90, 0),
-      );
-      await tester.pumpAndSettle();
-
-      final sharedExposure = store.project!.sharedStyle.recipe.exposure;
-      expect(sharedExposure, isNot(0.1));
-      expect(
-        store.project!.effectiveRecipeFor('photo-1').exposure,
-        sharedExposure,
-      );
-      expect(
-        store.project!.effectiveRecipeFor('photo-2').exposure,
-        sharedExposure,
-      );
-      expect(store.project!.photoOverrides, isEmpty);
-      expect(
-        find.byKey(const ValueKey('editor-feedback-pill')),
-        findsOneWidget,
-      );
-      expect(find.text('已同步整组'), findsOneWidget);
-      expect(
-        find.byKey(const ValueKey('editor-feedback-undo')),
-        findsOneWidget,
-      );
-
-      await _openManualMetaOp(tester, MetaOpIds.compositionGeometry);
-      final flipHorizontal = find.byKey(
-        const ValueKey('editor-flip-horizontal'),
-      );
-      await tester.dragUntilVisible(
-        flipHorizontal,
-        find.byKey(const Key('photo-workspace-scroll')),
-        const Offset(0, -160),
-      );
-      await tester.tap(flipHorizontal.hitTestable());
-      await tester.pumpAndSettle();
-
-      expect(
-        store.project!
-            .effectiveRecipeFor('photo-1')
-            .basicEditingRecipe
-            .flipHorizontal,
-        isTrue,
-      );
-      expect(
-        store.project!
-            .effectiveRecipeFor('photo-2')
-            .basicEditingRecipe
-            .flipHorizontal,
-        isFalse,
-      );
-      expect(store.project!.photoOverrides.keys, ['photo-1']);
-      expect(store.project!.undoHistory, hasLength(2));
-      debugDefaultTargetPlatformOverride = null;
-    },
-  );
-
-  testWidgets('multi-photo editing has no manual sync confirmation path', (
-    tester,
-  ) async {
-    final photoFile = File(
-      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
-      'Icon-App-1024x1024@1x.png',
-    );
-    final photos = [
-      ProjectPhoto(
-        id: 'photo-1',
-        localPath: photoFile.path,
-        originalName: 'first.png',
-      ),
-      ProjectPhoto(
-        id: 'photo-2',
-        localPath: photoFile.path,
-        originalName: 'second.png',
-      ),
-    ];
-    final store = MemoryPhotoProjectStore(
-      PhotoProject(
-        id: 'project-1',
-        createdAt: DateTime.utc(2026, 8, 4),
-        updatedAt: DateTime.utc(2026, 8, 4),
-        photos: photos,
-        flowState: PhotoProjectFlowState.editing,
-        selectedRecommendationId: 'mvp-catalog-v1:clean-balanced',
-        editingScope: ProjectEditingScope.currentPhoto,
-        focusPhotoId: 'photo-1',
-        sharedStyle: SharedStyle(recipe: EditRecipe(exposure: 0.1)),
-        photoOverrides: {
-          'photo-1': PhotoOverride(recipe: EditRecipe(contrast: 0.2)),
-        },
-      ),
-    );
-    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
-    final settings = await AppSettings.load();
-    await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
-
-    await _openEditorFromHome(tester);
-    expect(find.text('同步当前调整到整组'), findsNothing);
-    expect(find.text('将当前光色调整同步到整组？'), findsNothing);
-    expect(find.text('同步整组'), findsNothing);
-    expect(find.byKey(const ValueKey('editor-scope-switch')), findsNothing);
-    expect(store.project?.sharedStyle.recipe, EditRecipe(exposure: 0.1));
-    expect(
-      store.project?.photoOverrides['photo-1']?.recipe,
-      EditRecipe(contrast: 0.2),
-    );
-    expect(store.project?.undoHistory, isEmpty);
-  });
-
-  testWidgets('restores the saved group photo-strip position', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(390, 844));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    final photoFile = File(
-      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
-      'Icon-App-1024x1024@1x.png',
-    );
-    final photos = List.generate(
-      6,
-      (index) => ProjectPhoto(
-        id: 'photo-${index + 1}',
-        localPath: photoFile.path,
-        originalName: 'photo-${index + 1}.png',
-      ),
-    );
-    final store = MemoryPhotoProjectStore(
-      PhotoProject(
-        id: 'project-1',
-        createdAt: DateTime.utc(2026, 8, 4),
-        updatedAt: DateTime.utc(2026, 8, 4),
-        photos: photos,
-        flowState: PhotoProjectFlowState.editing,
-        selectedRecommendationId: 'mvp-catalog-v1:clean-balanced',
-        editingScope: ProjectEditingScope.currentPhoto,
-        focusPhotoId: 'photo-4',
-        exportStates: const {'photo-6': PhotoExportState.queued},
-        groupScrollOffset: 190,
-      ),
-    );
-    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
-    final settings = await AppSettings.load();
-    await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
-
-    await _openEditorFromHome(tester);
-
-    expect(find.text('4/6'), findsOneWidget);
-    expect(find.byKey(const ValueKey('editor-scope-switch')), findsNothing);
-
-    await tester.drag(
-      find.byKey(const Key('photo-strip-scroll')),
-      const Offset(-100, 0),
-    );
-    await tester.pumpAndSettle();
-    expect(store.project?.groupScrollOffset, greaterThan(190));
-
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pumpAndSettle();
-    await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
-    await _openEditorFromHome(tester);
-
-    expect(find.text('4/6'), findsOneWidget);
-    expect(
-      find.bySemanticsLabel(RegExp(r'^photo-6\.png, 待导出')).hitTestable(),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('photo-strip save failure is visible and keeps safe state', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(390, 844));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    final photoFile = File(
-      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
-      'Icon-App-1024x1024@1x.png',
-    );
-    final project = PhotoProject(
-      id: 'project-1',
-      createdAt: DateTime.utc(2026, 8, 4),
-      updatedAt: DateTime.utc(2026, 8, 4),
-      photos: List.generate(
-        6,
-        (index) => ProjectPhoto(
-          id: 'photo-${index + 1}',
-          localPath: photoFile.path,
-          originalName: 'photo-${index + 1}.png',
-        ),
-      ),
-      flowState: PhotoProjectFlowState.editing,
-      selectedRecommendationId: 'mvp-catalog-v1:clean-balanced',
-    );
-    final store = _FailingSaveProjectStore(project);
-    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
-    final settings = await AppSettings.load();
-    await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
-    await _openEditorFromHome(tester);
-
-    await tester.drag(
-      find.byKey(const Key('photo-strip-scroll')),
-      const Offset(-160, 0),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('无法保存本次调整，请重试'), findsOneWidget);
-    expect(store.project.groupScrollOffset, 0);
-  });
-
   testWidgets('project restore failure has a visible retry state', (
     tester,
   ) async {
@@ -2781,77 +2293,6 @@ void main() {
     expect(find.text('无法恢复上次项目'), findsOneWidget);
     expect(find.text('重试'), findsOneWidget);
     expect(find.semantics.byFlag(SemanticsFlag.isLiveRegion), findsWidgets);
-  });
-
-  testWidgets('batch export keeps successes and retries only failed photos', (
-    tester,
-  ) async {
-    final photoFile = File(
-      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
-      'Icon-App-1024x1024@1x.png',
-    );
-    final photos = [
-      ProjectPhoto(
-        id: 'photo-1',
-        localPath: photoFile.path,
-        originalName: 'first.png',
-      ),
-      ProjectPhoto(
-        id: 'photo-2',
-        localPath: photoFile.path,
-        originalName: 'second.png',
-      ),
-    ];
-    final store = MemoryPhotoProjectStore(
-      PhotoProject(
-        id: 'project-1',
-        createdAt: DateTime.utc(2026, 8, 4),
-        updatedAt: DateTime.utc(2026, 8, 4),
-        photos: photos,
-        flowState: PhotoProjectFlowState.editing,
-        selectedRecommendationId: 'mvp-catalog-v1:clean-balanced',
-      ),
-    );
-    final exporter = _FailOncePhotoExporter('photo-2');
-    final sharer = FakePhotoSharer();
-    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
-    final settings = await AppSettings.load();
-    await tester.pumpWidget(
-      buildTestApp(
-        settings,
-        photoProjectStore: store,
-        photoExporter: exporter,
-        photoSharer: sharer,
-      ),
-    );
-
-    await _openEditorFromHome(tester);
-    final saveButton = find.byKey(const ValueKey('editor-batch-export'));
-    await tester.tap(saveButton);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('save-all')));
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('save-confirm')));
-    await tester.pumpAndSettle();
-
-    expect(find.text('已保存 1 张 · 失败 1 张 · 取消 0 张'), findsWidgets);
-    expect(store.project?.exportStates['photo-1'], PhotoExportState.saved);
-    expect(store.project?.exportStates['photo-2'], PhotoExportState.failed);
-    await tester.tap(find.byKey(const ValueKey('export-retry-failed')));
-    await tester.pumpAndSettle();
-
-    expect(
-      store.project?.exportStates.values,
-      everyElement(PhotoExportState.saved),
-    );
-    expect(exporter.calls, ['photo-1', 'photo-2', 'photo-2']);
-    await tester.ensureVisible(find.text('分享已保存照片'));
-    await tester.tap(find.text('分享已保存照片'));
-    await _pumpUntilText(tester, '已通过系统分享完成操作');
-    expect(sharer.sharedPaths, [
-      '/tmp/Yingjian_photo-1.jpg',
-      '/tmp/Yingjian_photo-2.jpg',
-    ]);
   });
 
   testWidgets('a complete export failure remains retryable', (tester) async {
@@ -2871,7 +2312,6 @@ void main() {
         ),
       ],
       flowState: PhotoProjectFlowState.editing,
-      selectedRecommendationId: 'clean-natural-01',
     );
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
     final settings = await AppSettings.load();
@@ -2883,129 +2323,14 @@ void main() {
       ),
     );
     await _openEditorFromHome(tester);
-    final saveButton = find.byKey(const ValueKey('editor-batch-export'));
+    final saveButton = find.byKey(const ValueKey('editor-export'));
     await tester.ensureVisible(saveButton);
     await tester.tap(saveButton);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('save-all')));
-    await tester.tap(find.byKey(const ValueKey('save-confirm')));
     await tester.pumpAndSettle();
 
     expect(find.text('已保存 0 张 · 失败 1 张 · 取消 0 张'), findsWidgets);
     expect(find.byKey(const ValueKey('export-retry-failed')), findsOneWidget);
     expect(find.semantics.byFlag(SemanticsFlag.isLiveRegion), findsWidgets);
-  });
-
-  testWidgets('input-destructive actions stay disabled during export', (
-    tester,
-  ) async {
-    final semantics = tester.ensureSemantics();
-    final photoFile = File(
-      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
-      'Icon-App-1024x1024@1x.png',
-    );
-    final photos = [
-      ProjectPhoto(
-        id: 'photo-1',
-        localPath: photoFile.path,
-        originalName: 'first.png',
-      ),
-      ProjectPhoto(
-        id: 'photo-2',
-        localPath: photoFile.path,
-        originalName: 'second.png',
-      ),
-    ];
-    final store = MemoryPhotoProjectStore(
-      PhotoProject(
-        id: 'project-1',
-        createdAt: DateTime.utc(2026, 8, 4),
-        updatedAt: DateTime.utc(2026, 8, 4),
-        photos: photos,
-        flowState: PhotoProjectFlowState.editing,
-        selectedRecommendationId: 'clean-natural-01',
-      ),
-    );
-    final exporter = _DeferredPhotoExporter();
-    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
-    final settings = await AppSettings.load();
-    await tester.pumpWidget(
-      buildTestApp(settings, photoProjectStore: store, photoExporter: exporter),
-    );
-    await _openEditorFromHome(tester);
-    final saveButton = find.byKey(const ValueKey('editor-batch-export'));
-    await tester.tap(saveButton);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('save-all')));
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('save-confirm')));
-    await tester.pump();
-    for (
-      var attempt = 0;
-      attempt < 6 &&
-          find.byKey(const ValueKey('save-all')).evaluate().isNotEmpty;
-      attempt += 1
-    ) {
-      await tester.pump(const Duration(milliseconds: 100));
-    }
-    expect(find.byKey(const ValueKey('save-all')), findsNothing);
-    for (
-      var attempt = 0;
-      attempt < 10 &&
-          find
-              .byKey(const ValueKey('editor-saving-progress'))
-              .evaluate()
-              .isEmpty;
-      attempt += 1
-    ) {
-      await tester.pump(const Duration(milliseconds: 100));
-    }
-
-    expect(store.project?.flowState, PhotoProjectFlowState.exporting);
-    expect(
-      find.byKey(const ValueKey('editor-saving-progress')),
-      findsOneWidget,
-    );
-    final exportProgress = find.semantics.byPredicate(
-      (node) =>
-          node.label.contains('正在保存 1/2') && node.flagsCollection.isLiveRegion,
-    );
-    expect(exportProgress, findsOne);
-    expect(
-      exportProgress.evaluate().single.flagsCollection.isLiveRegion,
-      isTrue,
-    );
-    expect(find.text('第 1 张'), findsOneWidget);
-    expect(find.text('导出中'), findsOneWidget);
-    expect(find.text('第 2 张'), findsOneWidget);
-    expect(find.text('待导出'), findsOneWidget);
-
-    expect(
-      tester
-          .widget<IconButton>(
-            find.widgetWithIcon(IconButton, Icons.delete_outline),
-          )
-          .onPressed,
-      isNull,
-    );
-    expect(find.widgetWithIcon(IconButton, Icons.arrow_forward), findsNothing);
-    expect(
-      find.widgetWithIcon(IconButton, Icons.remove_circle_outline),
-      findsNothing,
-    );
-    expect(find.widgetWithText(OutlinedButton, '继续添加照片'), findsNothing);
-
-    await tester.tap(find.byKey(const ValueKey('export-cancel-remaining')));
-    exporter.complete();
-    await tester.pumpAndSettle();
-
-    expect(find.text('已保存 1 张 · 失败 0 张 · 取消 1 张'), findsWidgets);
-    expect(find.semantics.byFlag(SemanticsFlag.isLiveRegion), findsWidgets);
-    expect(store.project?.exportStates['photo-1'], PhotoExportState.saved);
-    expect(store.project?.exportStates['photo-2'], PhotoExportState.cancelled);
-    expect(find.text('first.png'), findsNothing);
-    expect(find.text('second.png'), findsOneWidget);
-    semantics.dispose();
   });
 
   testWidgets('leaving during export drains a late share file', (tester) async {
@@ -3025,7 +2350,6 @@ void main() {
         ),
       ],
       flowState: PhotoProjectFlowState.editing,
-      selectedRecommendationId: 'clean-natural-01',
     );
     final exporter = _DeferredPhotoExporter();
     final sharer = FakePhotoSharer();
@@ -3041,12 +2365,9 @@ void main() {
       ),
     );
     await _openEditorFromHome(tester);
-    final saveButton = find.byKey(const ValueKey('editor-batch-export'));
+    final saveButton = find.byKey(const ValueKey('editor-export'));
     await tester.ensureVisible(saveButton);
     await tester.tap(saveButton);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('save-all')));
-    await tester.tap(find.byKey(const ValueKey('save-confirm')));
     await tester.pump(const Duration(milliseconds: 300));
 
     await tester.tap(find.byType(BackButton));
@@ -3101,7 +2422,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
 
     expect(store.project, isNull);
-    expect(find.text('选择 1–6 张照片'), findsOneWidget);
+    expect(find.text('选择一张照片'), findsOneWidget);
     expect(photoFile.existsSync(), isTrue);
   });
 
@@ -3149,7 +2470,6 @@ void main() {
           ),
         ],
         flowState: PhotoProjectFlowState.editing,
-        selectedRecommendationId: 'clean-natural-01',
         editingScope: ProjectEditingScope.currentPhoto,
         focusPhotoId: 'dynamic-text-photo',
       ),
@@ -3222,11 +2542,6 @@ Future<void> _tapEditorEntryFromHome(WidgetTester tester) async {
 Future<void> _openEditorFromHome(WidgetTester tester) async {
   await _tapEditorEntryFromHome(tester);
   await tester.pumpAndSettle();
-  final recommendation = find.byKey(const ValueKey('recommendation-confirm'));
-  if (recommendation.evaluate().isNotEmpty) {
-    await tester.tap(recommendation);
-    await tester.pumpAndSettle();
-  }
 }
 
 Future<void> _openManualMetaOp(WidgetTester tester, String metaOpId) async {
@@ -3269,7 +2584,6 @@ Future<MemoryPhotoProjectStore> _pumpSinglePhotoExport(
       ),
     ],
     flowState: PhotoProjectFlowState.editing,
-    selectedRecommendationId: 'clean-natural-01',
   );
   SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
   final settings = await AppSettings.load();
@@ -3284,12 +2598,9 @@ Future<MemoryPhotoProjectStore> _pumpSinglePhotoExport(
   );
   await _tapEditorEntryFromHome(tester);
   await tester.pumpAndSettle();
-  final saveButton = find.byKey(const ValueKey('editor-batch-export'));
+  final saveButton = find.byKey(const ValueKey('editor-export'));
   await tester.ensureVisible(saveButton);
   await tester.tap(saveButton);
-  await tester.pumpAndSettle();
-  await tester.tap(find.byKey(const ValueKey('save-all')));
-  await tester.tap(find.byKey(const ValueKey('save-confirm')));
   await tester.pumpAndSettle();
   return store;
 }
@@ -3468,55 +2779,6 @@ final class _DeferredPhotoAnalyzer implements PhotoAnalyzer {
   }
 }
 
-final class _FirstDeferredPhotoAnalyzer implements PhotoAnalyzer {
-  final Completer<void> started = Completer<void>();
-  final Completer<void> _firstRelease = Completer<void>();
-  int calls = 0;
-
-  void completeFirst() => _firstRelease.complete();
-
-  @override
-  PhotoAnalysisEngineIdentity identityFor(ProjectPhoto photo) =>
-      const PhotoAnalysisEngineIdentity(
-        analysisVersion: 'widget-restart-v1',
-        capabilityVersion: 'widget-capability-v1',
-      );
-
-  @override
-  Future<LocalPhotoAnalysis> analyze(ProjectPhoto photo) async {
-    calls += 1;
-    if (calls == 1) {
-      started.complete();
-      await _firstRelease.future;
-    }
-    return LocalPhotoAnalysis(
-      analysisVersion: 'widget-restart-v1',
-      capabilityVersion: 'widget-capability-v1',
-      contentSha256: photo.contentSha256,
-      orientation: photo.orientation,
-      pixelWidth: photo.pixelWidth,
-      pixelHeight: photo.pixelHeight,
-      colorSpace: photo.colorSpace,
-      disposition: PhotoAnalysisDisposition.ready,
-      fallbackReason: AnalysisFallbackReason.none,
-    );
-  }
-}
-
-final class _FailingSaveProjectStore implements PhotoProjectStore {
-  _FailingSaveProjectStore(this.project);
-
-  final PhotoProject project;
-
-  @override
-  Future<PhotoProject?> loadLatest() async => project;
-
-  @override
-  Future<void> save(PhotoProject project) async {
-    throw StateError('fixture save failure');
-  }
-}
-
 final class _ArmableFailProjectStore implements PhotoProjectStore {
   _ArmableFailProjectStore(this.project);
 
@@ -3530,32 +2792,6 @@ final class _ArmableFailProjectStore implements PhotoProjectStore {
   Future<void> save(PhotoProject project) async {
     if (failSaves) throw StateError('fixture save failure');
     this.project = project;
-  }
-}
-
-final class _FailOncePhotoExporter implements PhotoExporter {
-  _FailOncePhotoExporter(this.failPhotoId);
-
-  final String failPhotoId;
-  final List<String> calls = [];
-  bool _failed = false;
-
-  @override
-  Future<ExportedPhoto> export({
-    required ProjectPhoto photo,
-    required EditRecipe recipe,
-  }) async {
-    calls.add(photo.id);
-    if (photo.id == failPhotoId && !_failed) {
-      _failed = true;
-      throw StateError('fixture failure');
-    }
-    return ExportedPhoto(
-      assetId: photo.id,
-      width: 4032,
-      height: 3024,
-      sharePath: '/tmp/Yingjian_${photo.id}.jpg',
-    );
   }
 }
 

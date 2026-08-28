@@ -5,7 +5,7 @@ import 'package:yingjian/app/navigation/app_router.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
 import 'package:yingjian/app/theme/app_theme.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
-import 'package:yingjian/features/recommendations/application/photo_analysis_cache.dart';
+import 'package:yingjian/features/photo_analysis/application/photo_analysis_cache.dart';
 import 'package:yingjian/l10n/l10n.dart';
 import 'package:yingjian/observability/analytics_event.dart';
 import 'package:yingjian/observability/app_observability.dart';

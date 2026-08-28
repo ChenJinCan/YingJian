@@ -31,10 +31,9 @@ import 'package:yingjian/features/editor/presentation/visual_tracks_page.dart';
 import 'package:yingjian/features/editor/presentation/voice_edit_sheet.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
-import 'package:yingjian/features/recommendations/application/local_recommendation_coordinator.dart';
-import 'package:yingjian/features/recommendations/application/photo_analysis_cache.dart';
-import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
-import 'package:yingjian/features/recommendations/domain/recipe_catalog.dart';
+import 'package:yingjian/features/photo_analysis/application/photo_analysis_cache.dart';
+import 'package:yingjian/features/photo_analysis/application/photo_analysis_coordinator.dart';
+import 'package:yingjian/features/photo_analysis/domain/photo_analysis.dart';
 import 'package:yingjian/l10n/l10n.dart';
 
 class EditorPage extends StatefulWidget {
@@ -58,7 +57,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   PhotoSharer? _photoSharer;
   PhotoImporter? _photoImporter;
   final EditorSession _editorSession = EditorSession();
-  ScrollController? _photoStripController;
   int _selectedIndex = 0;
   bool _busy = false;
   bool _exporting = false;
@@ -74,8 +72,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   );
   final Map<String, String> _ownedSharePathsByPhotoId = {};
   final Set<String> _supersededSharePaths = {};
-  bool _preparingRecommendations = false;
-  RecommendationPreparation? _recommendationPreparation;
+  bool _preparingAnalysis = false;
+  final Map<String, LocalPhotoAnalysis> _analysisByPhotoId = {};
   final Map<String, PortraitApplicability> _portraitApplicabilityByPhotoId = {};
   final Map<String, PortraitApplicability> _faceSlimApplicabilityByPhotoId = {};
   final Map<String, PortraitDegradationReason> _faceSlimReasonByPhotoId = {};
@@ -86,9 +84,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   final Map<String, int> _bodyTargetCountByPhotoId = {};
   final Map<String, List<NormalizedTargetRegion>> _bodyTargetRegionsByPhotoId =
       {};
-  int _previewRecommendationIndex = -1;
-  double? _pendingPhotoStripOffset;
-  bool _savingPhotoStripPosition = false;
   PhotoAnalysisCancellationToken? _analysisCancellation;
   Future<void>? _analysisCompletion;
   Future<void> _lifecycleAnalysisUpdates = Future.value();
@@ -99,6 +94,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   Future<void> _recipePersistence = Future.value();
   bool _handledStartWithImport = false;
   bool _manualToolsVisible = false;
+  VisualTrackKind? _visualTrackKind;
   bool _immersivePreview = false;
   MetaOpCapabilitiesProvider? _metaOpCapabilitiesProvider;
   bool _loadedExportPreference = false;
@@ -112,7 +108,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      unawaited(_restartRecommendationsIfNeeded());
+      unawaited(_restartAnalysisIfNeeded());
     } else if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden ||
@@ -147,7 +143,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _restartRecommendationsIfNeeded() async {
+  Future<void> _restartAnalysisIfNeeded() async {
     final previousCompletion = _analysisCompletion;
     if (previousCompletion != null) await previousCompletion;
     await _lifecycleAnalysisUpdates;
@@ -155,10 +151,13 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     if (!mounted ||
         session == null ||
         session.photos.isEmpty ||
-        session.project?.flowState != PhotoProjectFlowState.analyzing) {
+        !(session.project?.analysisStates.values.any(
+              (state) => state != PhotoAnalysisState.ready,
+            ) ??
+            false)) {
       return;
     }
-    await _prepareRecommendations(persistAnalysisStates: true);
+    await _preparePhotoAnalysis(persistAnalysisStates: true);
   }
 
   Future<void> _cancelAndDrainAnalysis() async {
@@ -229,17 +228,13 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   }
 
   Future<void> _restoreProject(PhotoProjectSession session) async {
-    await session.restore();
+    await session.restore(enforceSinglePhoto: true);
     final recoveredSummary = await BoundedBatchPhotoExporter.recoverInterrupted(
       session,
     );
     final project = session.project;
     final analysisRefreshRequired = await _restoreCachedPortraitApplicability(
       session,
-    );
-    _photoStripController?.dispose();
-    _photoStripController = ScrollController(
-      initialScrollOffset: project?.groupScrollOffset ?? 0,
     );
     if (mounted && recoveredSummary != null) {
       setState(() => _exportSummary = recoveredSummary);
@@ -254,21 +249,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         _selectedIndex = focusIndex;
       }
     }
-    if (project != null &&
-        (project.flowState == PhotoProjectFlowState.analyzing ||
-            project.flowState ==
-                PhotoProjectFlowState.choosingRecommendation)) {
-      await _prepareRecommendations(
-        persistAnalysisStates:
-            project.flowState == PhotoProjectFlowState.analyzing,
-      );
-    } else if (project != null &&
-        project.flowState == PhotoProjectFlowState.editing &&
-        analysisRefreshRequired) {
-      await _prepareRecommendations(
-        persistAnalysisStates: false,
-        exposeRecommendations: false,
-      );
+    if (project != null && analysisRefreshRequired) {
+      unawaited(_preparePhotoAnalysis(persistAnalysisStates: true));
     }
   }
 
@@ -365,12 +347,11 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     return refreshRequired;
   }
 
-  Future<void> _prepareRecommendations({
+  Future<void> _preparePhotoAnalysis({
     required bool persistAnalysisStates,
-    bool exposeRecommendations = true,
   }) async {
     final session = _session!;
-    if (_preparingRecommendations || session.photos.isEmpty) return;
+    if (_preparingAnalysis || session.photos.isEmpty) return;
     final cancellation = PhotoAnalysisCancellationToken();
     final completion = Completer<void>();
     _analysisCompletion = completion.future;
@@ -378,19 +359,13 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     final photos = List<ProjectPhoto>.unmodifiable(session.photos);
     _analysisCancellation?.cancel();
     _analysisCancellation = cancellation;
-    if (mounted) setState(() => _preparingRecommendations = true);
+    if (mounted) setState(() => _preparingAnalysis = true);
     try {
-      final preparation =
-          await LocalRecommendationCoordinator(
+      final analyses =
+          await PhotoAnalysisCoordinator(
             analyzer: context.read<PhotoAnalyzer>(),
             cache: context.read<PhotoAnalysisCache>(),
-            recommendationEngine: LocalRecommendationEngine(
-              availableMetaOpIds: _editorSession
-                  .metaOpAvailability()
-                  .recommendationIds
-                  .toSet(),
-            ),
-          ).prepare(
+          ).analyze(
             projectId: projectId,
             photos: photos,
             cancellation: cancellation,
@@ -404,68 +379,63 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                     )) {
                       return;
                     }
-                    await session.setPhotoAnalysisState(photoId, state);
+                    try {
+                      await session.setPhotoAnalysisState(photoId, state);
+                    } on Object {
+                      // Capability analysis is optional and must never make a
+                      // readable or editable project unavailable.
+                    }
                   }
                 : null,
           );
       if (_isCurrentAnalysisRun(cancellation, projectId)) {
-        for (final entry in preparation.analyses.entries) {
+        for (final entry in analyses.entries) {
           final photo = photos.singleWhere((photo) => photo.id == entry.key);
-          await session.reconcileEditTargets(
-            photo.id,
-            detectedEditTargetsFor(photo: photo, analysis: entry.value),
-          );
+          try {
+            await session.reconcileEditTargets(
+              photo.id,
+              detectedEditTargetsFor(photo: photo, analysis: entry.value),
+            );
+          } on Object {
+            // Keep the editor usable when optional capability metadata cannot
+            // be persisted (for example, a read-only future project).
+          }
         }
-      }
-      if (_isCurrentAnalysisRun(cancellation, projectId) &&
-          persistAnalysisStates &&
-          session.project?.flowState == PhotoProjectFlowState.analyzing) {
-        await session.transitionTo(
-          PhotoProjectFlowState.choosingRecommendation,
-        );
       }
       if (_isCurrentAnalysisRun(cancellation, projectId)) {
         setState(() {
-          if (exposeRecommendations) {
-            _recommendationPreparation = preparation;
-          }
+          _analysisByPhotoId.addAll(analyses);
           _portraitApplicabilityByPhotoId.addAll({
-            for (final entry in preparation.analyses.entries)
+            for (final entry in analyses.entries)
               entry.key: entry.value.portrait,
           });
           _faceSlimApplicabilityByPhotoId.addAll({
-            for (final entry in preparation.analyses.entries)
+            for (final entry in analyses.entries)
               entry.key: entry.value.faceSlim,
           });
           _faceSlimReasonByPhotoId.addAll({
-            for (final entry in preparation.analyses.entries)
+            for (final entry in analyses.entries)
               entry.key: entry.value.faceSlimReason,
           });
           _faceSlimTargetCountByPhotoId.addAll({
-            for (final entry in preparation.analyses.entries)
+            for (final entry in analyses.entries)
               entry.key: entry.value.faceSlimTargetCount,
           });
           _faceTargetRegionsByPhotoId.addAll({
-            for (final entry in preparation.analyses.entries)
+            for (final entry in analyses.entries)
               entry.key: entry.value.faceTargetRegions,
           });
           _bodyApplicabilityByPhotoId.addAll({
-            for (final entry in preparation.analyses.entries)
-              entry.key: entry.value.body,
+            for (final entry in analyses.entries) entry.key: entry.value.body,
           });
           _bodyTargetCountByPhotoId.addAll({
-            for (final entry in preparation.analyses.entries)
+            for (final entry in analyses.entries)
               entry.key: entry.value.bodyTargetCount,
           });
           _bodyTargetRegionsByPhotoId.addAll({
-            for (final entry in preparation.analyses.entries)
+            for (final entry in analyses.entries)
               entry.key: entry.value.bodyTargetRegions,
           });
-          if (exposeRecommendations) {
-            _previewRecommendationIndex = preparation.recommendations.isEmpty
-                ? -1
-                : 0;
-          }
         });
       }
     } finally {
@@ -476,7 +446,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       if (identical(_analysisCancellation, cancellation)) {
         _analysisCancellation = null;
       }
-      if (mounted) setState(() => _preparingRecommendations = false);
+      if (mounted) setState(() => _preparingAnalysis = false);
     }
   }
 
@@ -506,73 +476,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         .where((photo) => photo.id == photoId)
         .firstOrNull;
     return expected != null && current == expected;
-  }
-
-  Future<void> _selectRecommendation(LocalRecommendation recommendation) async {
-    if (_exportSummary != null || _exporting || _sharing) return;
-    try {
-      final session = _session!;
-      final project = session.project!;
-      final photoId = project.focusPhotoId ?? project.photos.first.id;
-      final activeTargets =
-          project.targetRegistries[photoId]?.targets.values
-              .where((target) => target.status == EditTargetStatus.active)
-              .map((target) => target.id)
-              .toSet() ??
-          const <String>{};
-      final prepared = session.prepareRecommendationForPreview(
-        sharedStyle: recommendation.sharedStyle,
-        adaptiveCompensations: recommendation.adaptiveCompensations,
-        context: _editorSession.editContext(
-          photoIds: project.photos.map((photo) => photo.id).toSet(),
-          targetIds: activeTargets,
-          applicability: {'photo', if (activeTargets.isNotEmpty) 'face'},
-        ),
-      );
-      if (prepared == null ||
-          !await _renderBeforeAiCommit(
-            photo: project.photos.firstWhere((photo) => photo.id == photoId),
-            preview: prepared,
-          )) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(context.l10n.effectPreviewUnavailable)),
-          );
-        }
-        return;
-      }
-      await _session!.selectRecommendation(
-        recommendationId: recommendation.id,
-        sharedStyle: recommendation.sharedStyle,
-        adaptiveCompensations: recommendation.adaptiveCompensations,
-      );
-      _loadEditableRecipe();
-      if (mounted) setState(() => _recommendationPreparation = null);
-    } on Object {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
-      }
-    }
-  }
-
-  Future<void> _skipRecommendation() async {
-    if (_exportSummary != null || _exporting || _sharing) return;
-    try {
-      await _session!.selectRecommendation(
-        recommendationId: 'skipped',
-        sharedStyle: SharedStyle(recipe: EditRecipe.neutral),
-      );
-      _loadEditableRecipe();
-      if (mounted) setState(() => _recommendationPreparation = null);
-    } on Object {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
-      }
-    }
   }
 
   void _requestRecipePersistence() {
@@ -682,7 +585,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         _loadEditableRecipe();
       }
       if (committedGroupEdit && mounted) {
-        _showEditFeedback(context.l10n.editAppliedToGroup);
+        _showEditFeedback(context.l10n.editApplied);
       }
     }
   }
@@ -713,91 +616,12 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<EditRecipe?> _commitVisualTrackRecipe(EditRecipe desiredRecipe) async {
-    try {
-      final session = _session;
-      final project = session?.project;
-      if (session == null || project == null) return null;
-      final photoId = project.focusPhotoId ?? project.photos.first.id;
-      final activeTargets =
-          project.targetRegistries[photoId]?.targets.values
-              .where((target) => target.status == EditTargetStatus.active)
-              .toList(growable: false) ??
-          const <StableEditTarget>[];
-      await session.commitManualRecipe(
-        desiredRecipe: desiredRecipe,
-        context: _editorSession.editContext(
-          photoIds: project.photos.map((photo) => photo.id).toSet(),
-          targetIds: activeTargets.map((target) => target.id).toSet(),
-          applicability: {
-            'photo',
-            if (activeTargets.any(
-              (target) => target.kind == EditTargetKind.face,
-            ))
-              'face',
-          },
-        ),
-      );
-      _loadEditableRecipe();
-      return _editorSession.recipe;
-    } on Object {
-      return null;
-    }
-  }
-
-  Future<EditRecipe?> _undoVisualTrack() async {
-    await _undoEdit();
-    return _editorSession.recipe;
-  }
-
-  Future<void> _openVisualTracks() async {
-    final session = _session;
-    final project = session?.project;
-    if (session == null || project == null || project.photos.isEmpty) return;
-    final photo = project.photos[_selectedIndex];
-    final activeTargets =
-        (project.targetRegistries[photo.id]?.targets.values ?? const [])
-            .where(
-              (target) =>
-                  target.kind == EditTargetKind.face &&
-                  target.status == EditTargetStatus.active,
-            )
-            .toList(growable: false)
-          ..sort(
-            (left, right) => left.region.left.compareTo(right.region.left),
-          );
-    final editContext = _editorSession.editContext(
-      photoIds: project.photos.map((value) => value.id).toSet(),
-      targetIds: activeTargets.map((target) => target.id).toSet(),
-      applicability: {'photo', if (activeTargets.isNotEmpty) 'face'},
-      resourceIds: project.editingResources.resources.keys.toSet(),
-      resourceByteLengths: {
-        for (final resource in project.editingResources.resources.values)
-          resource.id: resource.byteLength,
-      },
-    );
-    final applied = await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(
-        builder: (_) => VisualTracksPage(
-          photo: photo,
-          initialRecipe: _editorSession.recipe,
-          editorSession: _editorSession,
-          previewRenderer: context.read<PhotoPreviewRenderer>(),
-          faceTargets: activeTargets,
-          editStateFor: (recipe) =>
-              project.renderStateFor(photo.id, recipe: recipe),
-          editContext: editContext,
-          onCommit: _commitVisualTrackRecipe,
-          onUndo: _undoVisualTrack,
-        ),
-      ),
-    );
-    _loadEditableRecipe();
-    if (applied == true && mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('视觉轨道：已应用时代氛围与光照')));
-    }
+  void _openVisualTrack(VisualTrackKind kind) {
+    if (_exportSummary != null || _exporting || _sharing) return;
+    setState(() {
+      _manualToolsVisible = false;
+      _visualTrackKind = kind;
+    });
   }
 
   Future<void> _redoEdit() async {
@@ -902,7 +726,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     final capabilities = availability
         .aiCapabilities(MetaOpCatalog.standard)
         .where((value) => productionIds.contains(value.definition.id));
-    final analysis = _recommendationPreparation?.analyses[photoId];
+    final analysis = _analysisByPhotoId[photoId];
     final outcome = await widget.aiEditPlanner.plan(
       AiEditPlanningRequest(
         intent: intent,
@@ -1037,49 +861,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _selectPhoto(int index) async {
-    final photo = _session!.photos[index];
-    try {
-      await _session!.setFocusPhoto(photo.id);
-      if (mounted) setState(() => _selectedIndex = index);
-      _loadEditableRecipe();
-    } on Object {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
-      }
-    }
-  }
-
-  void _savePhotoStripPosition() {
-    final controller = _photoStripController;
-    if (controller == null || !controller.hasClients) return;
-    _pendingPhotoStripOffset = controller.offset;
-    if (_savingPhotoStripPosition) return;
-    _savingPhotoStripPosition = true;
-    unawaited(_drainPhotoStripPositionSaves());
-  }
-
-  Future<void> _drainPhotoStripPositionSaves() async {
-    while (mounted && _pendingPhotoStripOffset != null) {
-      final offset = _pendingPhotoStripOffset!;
-      _pendingPhotoStripOffset = null;
-      try {
-        await _session!.setGroupScrollOffset(offset);
-      } on Object {
-        _pendingPhotoStripOffset = null;
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(context.l10n.projectSaveFailed)),
-          );
-        }
-        break;
-      }
-    }
-    _savingPhotoStripPosition = false;
-  }
-
   Future<bool> _confirm({
     required String title,
     required String message,
@@ -1102,46 +883,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           ),
         ) ??
         false;
-  }
-
-  Future<void> _removePhoto(ProjectPhoto photo) async {
-    if (_exportSummary != null || _exporting || _sharing) return;
-    final analysisCache = context.read<PhotoAnalysisCache>();
-    final confirmed = await _confirm(
-      title: context.l10n.removePhoto,
-      message: context.l10n.removePhotoConfirmation,
-    );
-    if (!confirmed) {
-      return;
-    }
-    final projectId = _session!.project!.id;
-    try {
-      await _cancelAndDrainAnalysis();
-      await _session!.removePhoto(photo.id);
-      await analysisCache.clearPhoto(projectId: projectId, photoId: photo.id);
-      _portraitApplicabilityByPhotoId.remove(photo.id);
-      _faceSlimApplicabilityByPhotoId.remove(photo.id);
-      _faceSlimReasonByPhotoId.remove(photo.id);
-      _faceSlimTargetCountByPhotoId.remove(photo.id);
-      _bodyApplicabilityByPhotoId.remove(photo.id);
-      _bodyTargetCountByPhotoId.remove(photo.id);
-      final focusPhotoId = _session!.project?.focusPhotoId;
-      if (focusPhotoId != null) {
-        _selectedIndex = _session!.photos.indexWhere(
-          (candidate) => candidate.id == focusPhotoId,
-        );
-      } else {
-        _selectedIndex = 0;
-      }
-      _loadEditableRecipe();
-      unawaited(_restartRecommendationsIfNeeded());
-    } on Object {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
-      }
-    }
   }
 
   Future<void> _deleteProject() async {
@@ -1177,20 +918,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _movePhoto(ProjectPhoto photo, int destination) async {
-    if (_exportSummary != null || _exporting || _sharing) return;
-    try {
-      await _session!.movePhoto(photoId: photo.id, toIndex: destination);
-      _selectedIndex = destination;
-    } on Object {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
-      }
-    }
-  }
-
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -1217,7 +944,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       }
     }
     _editorSession.dispose();
-    _photoStripController?.dispose();
     final cleanupPrerequisites = <Future<void>>[
       if (batchCompletion != null)
         batchCompletion.then<void>((_) {}, onError: (_, _) {}),
@@ -1237,18 +963,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   Future<void> _showSaveOptions() async {
     final project = _session?.project;
     if (project == null || _exporting || _sharing) return;
-    final scope = await showModalBottomSheet<_SaveScope>(
-      context: context,
-      showDragHandle: true,
-      useSafeArea: true,
-      builder: (context) =>
-          _SaveOptionsSheet(photoCount: project.photos.length),
-    );
-    if (scope == null) return;
-    final photoIds = scope == _SaveScope.current
-        ? <String>{project.photos[_selectedIndex].id}
-        : null;
-    await _exportBatch(photoIds: photoIds);
+    await _exportBatch(photoIds: {project.photos.single.id});
   }
 
   Future<void> _exportBatch({
@@ -1328,215 +1043,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       }
     }
   }
-
-  // Detailed format and quality controls stay in the recipe/export contract,
-  // but the beginner save path deliberately uses the safe defaults.
-  /* Future<PhotoExportOptions?> _confirmBatchExport() async {
-    final project = _session?.project;
-    if (project == null) return null;
-    final count = project.photos.length;
-    var selected = _exportOptions;
-    return showDialog<PhotoExportOptions>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text(context.l10n.batchExportPhotos(count)),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(context.l10n.exportConfirmationMessage(count)),
-                const SizedBox(height: 16),
-                Text(
-                  context.l10n.exportPhotoPlan,
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-                const SizedBox(height: 8),
-                Semantics(
-                  key: const ValueKey('export-photo-plan'),
-                  container: true,
-                  explicitChildNodes: true,
-                  child: Column(
-                    children: [
-                      for (
-                        var index = 0;
-                        index < project.photos.length;
-                        index++
-                      )
-                        Builder(
-                          builder: (context) {
-                            final photo = project.photos[index];
-                            final status = _exportPlanStatus(
-                              context,
-                              project,
-                              photo.id,
-                            );
-                            return ListTile(
-                              key: ValueKey('export-preview-photo-${photo.id}'),
-                              dense: true,
-                              contentPadding: EdgeInsets.zero,
-                              leading: Icon(status.$1, size: 20),
-                              title: Text(
-                                photo.originalName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              subtitle: Text(
-                                '${index + 1}/$count · ${status.$2}',
-                              ),
-                            );
-                          },
-                        ),
-                    ],
-                  ),
-                ),
-                Text(
-                  context.l10n.exportProcessingEstimate,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  context.l10n.exportFormat,
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-                const SizedBox(height: 8),
-                SegmentedButton<PhotoExportFormat>(
-                  key: const ValueKey('export-format'),
-                  segments: [
-                    ButtonSegment(
-                      value: PhotoExportFormat.jpeg,
-                      label: Text(context.l10n.exportFormatJpeg),
-                    ),
-                    ButtonSegment(
-                      value: PhotoExportFormat.heif,
-                      label: Text(context.l10n.exportFormatHeif),
-                    ),
-                  ],
-                  selected: {selected.format},
-                  onSelectionChanged: (selection) => setDialogState(
-                    () => selected = PhotoExportOptions(
-                      format: selection.single,
-                      size: selected.size,
-                      longEdgePixels: selected.longEdgePixels,
-                      quality: selected.quality,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                DropdownButtonFormField<int>(
-                  key: const ValueKey('export-size'),
-                  initialValue: selected.size == PhotoExportSize.original
-                      ? 0
-                      : selected.longEdgePixels,
-                  decoration: InputDecoration(
-                    labelText: context.l10n.exportSize,
-                  ),
-                  items: [
-                    DropdownMenuItem(
-                      value: 0,
-                      child: Text(context.l10n.exportSizeOriginal),
-                    ),
-                    const DropdownMenuItem(value: 4096, child: Text('4096 px')),
-                    const DropdownMenuItem(value: 2048, child: Text('2048 px')),
-                    const DropdownMenuItem(value: 1080, child: Text('1080 px')),
-                  ],
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setDialogState(
-                      () => selected = PhotoExportOptions(
-                        format: selected.format,
-                        size: value == 0
-                            ? PhotoExportSize.original
-                            : PhotoExportSize.longEdge,
-                        longEdgePixels: value == 0 ? null : value,
-                        quality: selected.quality,
-                      ),
-                    );
-                  },
-                ),
-                const SizedBox(height: 16),
-                DropdownButtonFormField<PhotoExportQuality>(
-                  key: const ValueKey('export-quality'),
-                  initialValue: selected.quality,
-                  decoration: InputDecoration(
-                    labelText: context.l10n.exportQuality,
-                  ),
-                  items: [
-                    DropdownMenuItem(
-                      value: PhotoExportQuality.high,
-                      child: Text(context.l10n.exportQualityHigh),
-                    ),
-                    DropdownMenuItem(
-                      value: PhotoExportQuality.standard,
-                      child: Text(context.l10n.exportQualityStandard),
-                    ),
-                    DropdownMenuItem(
-                      value: PhotoExportQuality.compact,
-                      child: Text(context.l10n.exportQualityCompact),
-                    ),
-                  ],
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setDialogState(
-                      () => selected = PhotoExportOptions(
-                        format: selected.format,
-                        size: selected.size,
-                        longEdgePixels: selected.longEdgePixels,
-                        quality: value,
-                      ),
-                    );
-                  },
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  context.l10n.exportColorSpaceNotice,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text(context.l10n.cancel),
-            ),
-            FilledButton(
-              key: const ValueKey('export-confirm'),
-              onPressed: () => Navigator.pop(context, selected),
-              child: Text(context.l10n.startExport),
-            ),
-          ],
-        ),
-      ),
-    );
-  } */
-
-  /* (IconData, String) _exportPlanStatus(
-    BuildContext context,
-    PhotoProject project,
-    String photoId,
-  ) {
-    final exportState =
-        project.exportStates[photoId] ?? PhotoExportState.notQueued;
-    switch (exportState) {
-      case PhotoExportState.queued:
-        return (Icons.outbox_outlined, context.l10n.photoStatusQueued);
-      case PhotoExportState.running:
-        return (Icons.sync, context.l10n.photoStatusExporting);
-      case PhotoExportState.saved:
-        return (Icons.check_circle_outline, context.l10n.photoStatusExported);
-      case PhotoExportState.failed:
-        return (Icons.error_outline, context.l10n.photoStatusExportFailed);
-      case PhotoExportState.cancelled:
-        return (Icons.cancel_outlined, context.l10n.photoStatusExportCancelled);
-      case PhotoExportState.notQueued:
-        if (project.analysisStates[photoId] == PhotoAnalysisState.failed) {
-          return (Icons.shield_outlined, context.l10n.exportWithSafeFallback);
-        }
-        return (Icons.check_circle_outline, context.l10n.exportWillExport);
-    }
-  } */
 
   void _cancelBatchExport() => _batchExporter?.cancel();
 
@@ -1689,7 +1195,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
       }
       if (result == PhotoImportResult.imported) {
         _loadEditableRecipe();
-        await _prepareRecommendations(persistAnalysisStates: true);
+        unawaited(_preparePhotoAnalysis(persistAnalysisStates: true));
       }
     } on Object {
       if (mounted) {
@@ -1736,32 +1242,14 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         if (_selectedIndex >= photos.length && photos.isNotEmpty) {
           _selectedIndex = photos.length - 1;
         }
-        final recommendations = _recommendationPreparation?.recommendations;
-        final previewRecommendation =
-            recommendations == null || _previewRecommendationIndex < 0
-            ? null
-            : recommendations[_previewRecommendationIndex
-                  .clamp(0, recommendations.length - 1)
-                  .toInt()];
         final previewRecipe = photos.isEmpty
             ? EditRecipe.neutral
-            : previewRecommendation == null
-            ? session.previewRecipeFor(
+            : session.previewRecipeFor(
                 photos[_selectedIndex].id,
                 _editorSession.recipe,
-              )
-            : session.project!
-                  .copyWith(
-                    sharedStyle: previewRecommendation.sharedStyle,
-                    adaptiveCompensations:
-                        previewRecommendation.adaptiveCompensations,
-                  )
-                  .effectiveRecipeFor(photos[_selectedIndex].id);
+              );
         final editingEnabled =
             session.canEdit && !_sharing && _exportSummary == null;
-        final recommendationFlow =
-            session.flowState == PhotoProjectFlowState.analyzing ||
-            session.flowState == PhotoProjectFlowState.choosingRecommendation;
         final hasPhotosReadyToExport =
             session.project?.exportStates.values.any(
               (state) => state == PhotoExportState.notQueued,
@@ -1805,17 +1293,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           appBar: _immersivePreview
               ? null
               : AppBar(
-                  title:
-                      session.flowState ==
-                          PhotoProjectFlowState.choosingRecommendation
-                      ? Text(context.l10n.chooseOverallFeeling)
-                      : MediaQuery.sizeOf(context).width < 700
-                      ? photos.isEmpty
-                            ? null
-                            : Text(
-                                '${_selectedIndex + 1}/${photos.length}',
-                                style: Theme.of(context).textTheme.labelLarge,
-                              )
+                  title: photos.isEmpty
+                      ? null
                       : Text(
                           context.l10n.appTitle,
                           style: Theme.of(context).textTheme.titleMedium
@@ -1826,42 +1305,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                         ),
                   actions: photos.isEmpty
                       ? null
-                      : session.flowState ==
-                            PhotoProjectFlowState.choosingRecommendation
-                      ? [
-                          IconButton(
-                            tooltip: context.l10n.removePhoto,
-                            onPressed: selectedPhoto == null
-                                ? null
-                                : () => unawaited(_removePhoto(selectedPhoto)),
-                            icon: const Icon(Icons.remove_circle_outline),
-                          ),
-                          IconButton(
-                            tooltip: context.l10n.deleteProject,
-                            onPressed: () => unawaited(_deleteProject()),
-                            icon: const Icon(Icons.delete_outline),
-                          ),
-                          TextButton(
-                            key: const ValueKey('recommendation-skip'),
-                            onPressed: () => unawaited(_skipRecommendation()),
-                            child: Text(context.l10n.skip),
-                          ),
-                        ]
-                      : session.flowState == PhotoProjectFlowState.analyzing
-                      ? [
-                          IconButton(
-                            tooltip: context.l10n.removePhoto,
-                            onPressed: selectedPhoto == null
-                                ? null
-                                : () => unawaited(_removePhoto(selectedPhoto)),
-                            icon: const Icon(Icons.remove_circle_outline),
-                          ),
-                          IconButton(
-                            tooltip: context.l10n.deleteProject,
-                            onPressed: () => unawaited(_deleteProject()),
-                            icon: const Icon(Icons.delete_outline),
-                          ),
-                        ]
                       : [
                           IconButton(
                             key: const ValueKey('editor-undo'),
@@ -1874,11 +1317,9 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 4),
                             child: FilledButton(
-                              key: const ValueKey('editor-batch-export'),
+                              key: const ValueKey('editor-export'),
                               onPressed:
-                                  editingEnabled &&
-                                      !recommendationFlow &&
-                                      hasPhotosReadyToExport
+                                  editingEnabled && hasPhotosReadyToExport
                                   ? () => unawaited(_showSaveOptions())
                                   : null,
                               style: FilledButton.styleFrom(
@@ -1896,12 +1337,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                             ).showMenuTooltip,
                             onSelected: (value) {
                               switch (value) {
-                                case 'addPhoto':
-                                  unawaited(_importPhotos());
-                                case 'removePhoto':
-                                  if (selectedPhoto != null) {
-                                    unawaited(_removePhoto(selectedPhoto));
-                                  }
                                 case 'undo':
                                   unawaited(_undoEdit());
                                 case 'redo':
@@ -1913,25 +1348,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                               }
                             },
                             itemBuilder: (context) => [
-                              PopupMenuItem(
-                                value: 'addPhoto',
-                                enabled:
-                                    !session.project!.isReadOnly &&
-                                    !_exporting &&
-                                    !_sharing &&
-                                    photos.length < PhotoProject.maxPhotoCount,
-                                child: Text(context.l10n.addPhotos),
-                              ),
-                              PopupMenuItem(
-                                value: 'removePhoto',
-                                enabled:
-                                    !session.project!.isReadOnly &&
-                                    !_exporting &&
-                                    !_sharing &&
-                                    selectedPhoto != null,
-                                child: Text(context.l10n.removePhoto),
-                              ),
-                              const PopupMenuDivider(),
                               PopupMenuItem(
                                 value: 'undo',
                                 enabled: editingEnabled && session.canUndo,
@@ -1970,7 +1386,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           bottomNavigationBar:
               _immersivePreview ||
                   _manualToolsVisible ||
-                  recommendationFlow ||
+                  _visualTrackKind != null ||
                   _exporting
               ? null
               : (_exportSummary?.failedCount == 0 &&
@@ -1981,9 +1397,6 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                     session.restoreError != null
               ? null
               : _EditorCommandBar(
-                  recommendationFlow: recommendationFlow,
-                  preparingRecommendations: _preparingRecommendations,
-                  selectedRecommendation: previewRecommendation,
                   editingEnabled: editingEnabled,
                   canUndo: session.canUndo,
                   canRedo: session.canRedo,
@@ -1993,16 +1406,17 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                   exportSummary: _exportSummary,
                   feedback: _editFeedback,
                   onVoiceEdit: () => unawaited(_showVoiceEditSheet()),
-                  onManualEdit: () =>
-                      setState(() => _manualToolsVisible = true),
-                  onVisualTracks: () => unawaited(_openVisualTracks()),
+                  onManualEdit: () => setState(() {
+                    _visualTrackKind = null;
+                    _manualToolsVisible = true;
+                  }),
+                  onAtmosphere: () => _openVisualTrack(VisualTrackKind.era),
+                  onLighting: () => _openVisualTrack(VisualTrackKind.lighting),
                   onUndo: () => unawaited(_undoEdit()),
                   onRedo: () => unawaited(_redoEdit()),
                   onReset: () => unawaited(_resetEdit()),
                   onQuickEdit: (instruction) =>
                       unawaited(_applyQuickInstruction(instruction)),
-                  onRecommendationSelected: (recommendation) =>
-                      unawaited(_selectRecommendation(recommendation)),
                   onCancelExport: _cancelBatchExport,
                   onContinueEditing: () => unawaited(_continueEditing()),
                 ),
@@ -2060,46 +1474,25 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                           ),
                         )
                       : session.restoreError != null
-                      ? _RestoreError(onRetry: session.restore)
+                      ? _RestoreError(
+                          onRetry: () =>
+                              session.restore(enforceSinglePhoto: true),
+                        )
                       : photos.isEmpty
                       ? _EmptyProject(
                           busy: _busy,
                           failures: session.importFailures,
                           onImport: _importPhotos,
                         )
-                      : session.flowState == PhotoProjectFlowState.analyzing
-                      ? _AnalysisStage(
-                          photos: photos,
-                          project: session.project!,
-                          failures: session.importFailures,
-                        )
-                      : session.flowState ==
-                            PhotoProjectFlowState.choosingRecommendation
-                      ? _RecommendationStage(
-                          photos: photos,
-                          recommendations: recommendations ?? const [],
-                          selectedIndex: _previewRecommendationIndex,
-                          previewRenderer: context.read<PhotoPreviewRenderer>(),
-                          onSelected: (index) => setState(
-                            () => _previewRecommendationIndex = index,
-                          ),
-                          onConfirm: (recommendation) =>
-                              unawaited(_selectRecommendation(recommendation)),
-                        )
                       : _PhotoWorkspace(
                           photos: photos,
                           project: session.project!,
                           importFailures: session.importFailures,
                           selectedIndex: _selectedIndex,
-                          busy: _busy,
                           exporting: _exporting,
                           editingEnabled: editingEnabled,
                           previewRecipe: previewRecipe,
                           flowState: session.flowState,
-                          preparingRecommendations: _preparingRecommendations,
-                          recommendations: recommendations ?? const [],
-                          selectedRecommendationIndex:
-                              _previewRecommendationIndex,
                           editorSession: _editorSession,
                           portraitApplicable: portraitApplicable,
                           faceSlimApplicable: faceSlimApplicable,
@@ -2111,17 +1504,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                           bodyTargetRegions: bodyTargetRegions,
                           photoToolsVisible: photoToolsVisible,
                           manualToolsVisible: _manualToolsVisible,
+                          visualTrackKind: _visualTrackKind,
                           feedback: _editFeedback,
-                          photoStripController: _photoStripController ??=
-                              ScrollController(
-                                initialScrollOffset:
-                                    session.project!.groupScrollOffset,
-                              ),
-                          onSelected: (index) => unawaited(_selectPhoto(index)),
-                          onMove: (photo, destination) =>
-                              unawaited(_movePhoto(photo, destination)),
-                          onRemove: (photo) => unawaited(_removePhoto(photo)),
-                          onImport: _importPhotos,
                           exportSummary: _exportSummary,
                           onRetryExport: () =>
                               unawaited(_exportBatch(retryFailuresOnly: true)),
@@ -2139,16 +1523,16 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                                 recipe,
                               ),
                           onUndo: () => unawaited(_undoEdit()),
-                          onOpenTools: () =>
-                              setState(() => _manualToolsVisible = true),
+                          onOpenTools: () => setState(() {
+                            _visualTrackKind = null;
+                            _manualToolsVisible = true;
+                          }),
                           onCloseTools: () =>
                               setState(() => _manualToolsVisible = false),
+                          onCloseVisualTrack: () =>
+                              setState(() => _visualTrackKind = null),
                           onOpenFullscreen: () =>
                               setState(() => _immersivePreview = true),
-                          onPhotoStripScrollEnd: _savePhotoStripPosition,
-                          onRecommendationPreviewed: (index) => setState(
-                            () => _previewRecommendationIndex = index,
-                          ),
                         ),
                 ),
         );
@@ -2259,15 +1643,11 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.project,
     required this.importFailures,
     required this.selectedIndex,
-    required this.busy,
     required this.exporting,
     required this.exportSummary,
     required this.editingEnabled,
     required this.previewRecipe,
     required this.flowState,
-    required this.preparingRecommendations,
-    required this.recommendations,
-    required this.selectedRecommendationIndex,
     required this.editorSession,
     required this.portraitApplicable,
     required this.faceSlimApplicable,
@@ -2279,12 +1659,8 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.bodyTargetRegions,
     required this.photoToolsVisible,
     required this.manualToolsVisible,
+    required this.visualTrackKind,
     required this.feedback,
-    required this.photoStripController,
-    required this.onSelected,
-    required this.onMove,
-    required this.onRemove,
-    required this.onImport,
     required this.onRetryExport,
     required this.sharing,
     required this.onShareExport,
@@ -2294,24 +1670,19 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.onUndo,
     required this.onOpenTools,
     required this.onCloseTools,
+    required this.onCloseVisualTrack,
     required this.onOpenFullscreen,
-    required this.onPhotoStripScrollEnd,
-    required this.onRecommendationPreviewed,
   });
 
   final List<ProjectPhoto> photos;
   final PhotoProject project;
   final List<PhotoImportFailure> importFailures;
   final int selectedIndex;
-  final bool busy;
   final bool exporting;
   final BatchExportSummary? exportSummary;
   final bool editingEnabled;
   final EditRecipe previewRecipe;
   final PhotoProjectFlowState flowState;
-  final bool preparingRecommendations;
-  final List<LocalRecommendation> recommendations;
-  final int selectedRecommendationIndex;
   final EditorSession editorSession;
   final bool portraitApplicable;
   final bool faceSlimApplicable;
@@ -2323,12 +1694,8 @@ class _PhotoWorkspace extends StatelessWidget {
   final List<NormalizedTargetRegion> bodyTargetRegions;
   final bool photoToolsVisible;
   final bool manualToolsVisible;
+  final VisualTrackKind? visualTrackKind;
   final _EditFeedback? feedback;
-  final ScrollController photoStripController;
-  final ValueChanged<int> onSelected;
-  final void Function(ProjectPhoto photo, int destination) onMove;
-  final ValueChanged<ProjectPhoto> onRemove;
-  final VoidCallback onImport;
   final VoidCallback onRetryExport;
   final bool sharing;
   final VoidCallback onShareExport;
@@ -2338,9 +1705,8 @@ class _PhotoWorkspace extends StatelessWidget {
   final VoidCallback onUndo;
   final VoidCallback onOpenTools;
   final VoidCallback onCloseTools;
+  final VoidCallback onCloseVisualTrack;
   final VoidCallback onOpenFullscreen;
-  final VoidCallback onPhotoStripScrollEnd;
-  final ValueChanged<int> onRecommendationPreviewed;
 
   @override
   Widget build(BuildContext context) {
@@ -2367,9 +1733,6 @@ class _PhotoWorkspace extends StatelessWidget {
     final previewRenderer = context.read<PhotoPreviewRenderer>();
     final interactionsBlocked =
         project.isReadOnly || exporting || sharing || exportSummary != null;
-    final recommendationFlow =
-        flowState == PhotoProjectFlowState.analyzing ||
-        flowState == PhotoProjectFlowState.choosingRecommendation;
     final compactHeight = MediaQuery.sizeOf(context).height < 700;
     final simplifiedMobile = MediaQuery.sizeOf(context).width < 700;
     final previewCard = ClipRRect(
@@ -2403,8 +1766,6 @@ class _PhotoWorkspace extends StatelessWidget {
             },
           ),
           renderer: previewRenderer,
-          recommendationMode:
-              flowState == PhotoProjectFlowState.choosingRecommendation,
           onRendered: onRecipeRendered,
           onRenderFailed: onRecipeRenderFailed,
         ),
@@ -2448,7 +1809,7 @@ class _PhotoWorkspace extends StatelessWidget {
           ),
         Expanded(
           flex: exportSummary == null
-              ? recommendationFlow || compactHeight
+              ? compactHeight
                     ? 4
                     : 6
               : 4,
@@ -2464,26 +1825,11 @@ class _PhotoWorkspace extends StatelessWidget {
                         children: [
                           Semantics(
                             key: const ValueKey('editor-preview-fullscreen'),
-                            button: !recommendationFlow,
+                            button: true,
                             child: GestureDetector(
-                              key: const ValueKey('editor-swipe-photos'),
+                              key: const ValueKey('editor-photo-preview'),
                               behavior: HitTestBehavior.opaque,
-                              onTap: recommendationFlow
-                                  ? null
-                                  : onOpenFullscreen,
-                              onHorizontalDragEnd: photos.length <= 1
-                                  ? null
-                                  : (details) {
-                                      final velocity =
-                                          details.primaryVelocity ?? 0;
-                                      if (velocity < -250 &&
-                                          selectedIndex < photos.length - 1) {
-                                        onSelected(selectedIndex + 1);
-                                      } else if (velocity > 250 &&
-                                          selectedIndex > 0) {
-                                        onSelected(selectedIndex - 1);
-                                      }
-                                    },
+                              onTap: onOpenFullscreen,
                               child: SizedBox.expand(child: previewCard),
                             ),
                           ),
@@ -2499,7 +1845,7 @@ class _PhotoWorkspace extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
             child: _ResultFeedbackPill(feedback: feedback!, onUndo: onUndo),
           ),
-        if (manualToolsVisible && !recommendationFlow && exportSummary == null)
+        if (manualToolsVisible && exportSummary == null)
           _EditorToolsDock(
             photos: photos,
             project: project,
@@ -2521,150 +1867,20 @@ class _PhotoWorkspace extends StatelessWidget {
             onRecipeCommitted: onRecipeCommitted,
             onClose: onCloseTools,
           ),
-        if (!simplifiedMobile)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    selected.originalName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelLarge,
-                  ),
-                ),
-                Text(context.l10n.photoCount(photos.length)),
-                IconButton(
-                  tooltip: context.l10n.movePhotoEarlier,
-                  onPressed: selectedIndex == 0 || interactionsBlocked
-                      ? null
-                      : () => onMove(selected, selectedIndex - 1),
-                  icon: const Icon(Icons.arrow_back),
-                ),
-                IconButton(
-                  tooltip: context.l10n.movePhotoLater,
-                  onPressed:
-                      selectedIndex == photos.length - 1 || interactionsBlocked
-                      ? null
-                      : () => onMove(selected, selectedIndex + 1),
-                  icon: const Icon(Icons.arrow_forward),
-                ),
-                if (interactionsBlocked)
-                  OutlinedButton.icon(
-                    onPressed: null,
-                    icon: const Icon(Icons.add_photo_alternate_outlined),
-                    label: Text(context.l10n.addPhotos),
-                  )
-                else
-                  IconButton(
-                    tooltip: context.l10n.addPhotos,
-                    onPressed:
-                        busy || photos.length >= PhotoProject.maxPhotoCount
-                        ? null
-                        : onImport,
-                    icon: const Icon(Icons.add_photo_alternate_outlined),
-                  ),
-                IconButton(
-                  tooltip: context.l10n.removePhoto,
-                  onPressed: interactionsBlocked
-                      ? null
-                      : () => onRemove(selected),
-                  icon: const Icon(Icons.remove_circle_outline),
-                ),
-              ],
-            ),
+        if (visualTrackKind != null && exportSummary == null)
+          VisualTracksDock(
+            key: ValueKey('visual-tracks-dock-${visualTrackKind!.name}'),
+            initialKind: visualTrackKind!,
+            editorSession: editorSession,
+            faceTargets: stableFaceTargets,
+            editingEnabled: editingEnabled && !interactionsBlocked,
+            onRecipeCommitted: onRecipeCommitted,
+            onClose: onCloseVisualTrack,
           ),
-        if (!simplifiedMobile && photos.length > 1)
-          NotificationListener<ScrollEndNotification>(
-            key: const Key('photo-strip-scroll'),
-            onNotification: (notification) {
-              if (notification.metrics.axis == Axis.horizontal) {
-                onPhotoStripScrollEnd();
-              }
-              return false;
-            },
-            child: SizedBox(
-              height: MediaQuery.textScalerOf(context).scale(1) > 1.3
-                  ? 116
-                  : 88,
-              child: ListView.separated(
-                controller: photoStripController,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                scrollDirection: Axis.horizontal,
-                itemCount: photos.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 8),
-                itemBuilder: (context, index) {
-                  final photo = photos[index];
-                  final status = _photoStatus(context, project, photo.id);
-                  return Semantics(
-                    selected: index == selectedIndex,
-                    button: true,
-                    label: '${photo.originalName}, ${status.$2}',
-                    child: InkWell(
-                      key: ValueKey('editor-photo-${photo.id}'),
-                      onTap: () => onSelected(index),
-                      borderRadius: BorderRadius.circular(12),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: SizedBox(
-                          width: 88,
-                          child: Column(
-                            children: [
-                              Container(
-                                width: 58,
-                                height: 58,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: index == selectedIndex
-                                        ? Theme.of(context).colorScheme.primary
-                                        : Colors.transparent,
-                                    width: 3,
-                                  ),
-                                ),
-                                clipBehavior: Clip.antiAlias,
-                                child: Image.file(
-                                  File(photo.localPath),
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, _, _) =>
-                                      const Icon(Icons.broken_image_outlined),
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(status.$1, size: 12),
-                                  const SizedBox(width: 3),
-                                  Flexible(
-                                    child: Text(
-                                      status.$2,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.labelSmall,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-        if ((!simplifiedMobile && !manualToolsVisible) ||
-            recommendationFlow ||
-            exportSummary != null)
+        if ((!simplifiedMobile && !manualToolsVisible) || exportSummary != null)
           Expanded(
             flex: exportSummary == null
-                ? recommendationFlow || compactHeight
+                ? compactHeight
                       ? 6
                       : 4
                 : 6,
@@ -2678,17 +1894,9 @@ class _PhotoWorkspace extends StatelessWidget {
                 key: const Key('photo-workspace-scroll'),
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 112),
                 children: [
-                  Text(
-                    '${selectedIndex + 1}/${photos.length}',
-                    style: Theme.of(context).textTheme.labelLarge,
-                  ),
                   if (importFailures.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     _ImportFailures(failures: importFailures),
-                  ],
-                  if (exportSummary == null && recommendationFlow) ...[
-                    const SizedBox(height: 12),
-                    const _PreparationStatusCard(),
                   ],
                   if (exportSummary != null) ...[
                     const SizedBox(height: 12),
@@ -2698,17 +1906,6 @@ class _PhotoWorkspace extends StatelessWidget {
                       sharing: sharing,
                       onRetry: onRetryExport,
                       onShare: onShareExport,
-                    ),
-                  ],
-                  if (!interactionsBlocked) ...[
-                    const SizedBox(height: 12),
-                    OutlinedButton.icon(
-                      onPressed:
-                          busy || photos.length >= PhotoProject.maxPhotoCount
-                          ? null
-                          : onImport,
-                      icon: const Icon(Icons.add_photo_alternate_outlined),
-                      label: Text(context.l10n.addPhotos),
                     ),
                   ],
                 ],
@@ -3141,8 +2338,6 @@ String _metaOpLabel(BuildContext context, String id) => switch (id) {
   _ => id,
 };
 
-enum _SaveScope { all, current }
-
 class _EditFeedback {
   const _EditFeedback({required this.message});
 
@@ -3197,109 +2392,6 @@ class _ResultFeedbackPill extends StatelessWidget {
       ),
     );
   }
-}
-
-class _SaveOptionsSheet extends StatefulWidget {
-  const _SaveOptionsSheet({required this.photoCount});
-
-  final int photoCount;
-
-  @override
-  State<_SaveOptionsSheet> createState() => _SaveOptionsSheetState();
-}
-
-class _SaveOptionsSheetState extends State<_SaveOptionsSheet> {
-  _SaveScope _selection = _SaveScope.all;
-
-  @override
-  Widget build(BuildContext context) => SafeArea(
-    top: false,
-    child: SingleChildScrollView(
-      key: const ValueKey('editor-save-options'),
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            context.l10n.savePhotos,
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: 18),
-          _SaveScopeChoice(
-            key: const ValueKey('save-all'),
-            selected: _selection == _SaveScope.all,
-            label: context.l10n.saveAllPhotos(widget.photoCount),
-            onTap: () => setState(() => _selection = _SaveScope.all),
-          ),
-          const SizedBox(height: 10),
-          _SaveScopeChoice(
-            key: const ValueKey('save-current'),
-            selected: _selection == _SaveScope.current,
-            label: context.l10n.saveCurrentPhoto,
-            onTap: () => setState(() => _selection = _SaveScope.current),
-          ),
-          const SizedBox(height: 18),
-          FilledButton(
-            key: const ValueKey('save-confirm'),
-            onPressed: () => Navigator.pop(context, _selection),
-            child: Text(context.l10n.saveToAlbum),
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
-class _SaveScopeChoice extends StatelessWidget {
-  const _SaveScopeChoice({
-    required this.selected,
-    required this.label,
-    required this.onTap,
-    super.key,
-  });
-
-  final bool selected;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => InkWell(
-    onTap: onTap,
-    borderRadius: BorderRadius.circular(16),
-    child: AnimatedContainer(
-      duration: const Duration(milliseconds: 140),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 17),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: selected
-              ? Theme.of(context).colorScheme.primary
-              : Theme.of(context).colorScheme.outlineVariant,
-          width: selected ? 2 : 1,
-        ),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: Theme.of(
-                context,
-              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-            ),
-          ),
-          Icon(
-            selected ? Icons.radio_button_checked : Icons.radio_button_off,
-            color: selected
-                ? Theme.of(context).colorScheme.primary
-                : Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-        ],
-      ),
-    ),
-  );
 }
 
 class _SaveSuccessView extends StatelessWidget {
@@ -3368,9 +2460,6 @@ class _SaveSuccessView extends StatelessWidget {
 
 class _EditorCommandBar extends StatelessWidget {
   const _EditorCommandBar({
-    required this.recommendationFlow,
-    required this.preparingRecommendations,
-    required this.selectedRecommendation,
     required this.editingEnabled,
     required this.canUndo,
     required this.canRedo,
@@ -3381,19 +2470,16 @@ class _EditorCommandBar extends StatelessWidget {
     required this.feedback,
     required this.onVoiceEdit,
     required this.onManualEdit,
-    required this.onVisualTracks,
+    required this.onAtmosphere,
+    required this.onLighting,
     required this.onUndo,
     required this.onRedo,
     required this.onReset,
     required this.onQuickEdit,
-    required this.onRecommendationSelected,
     required this.onCancelExport,
     required this.onContinueEditing,
   });
 
-  final bool recommendationFlow;
-  final bool preparingRecommendations;
-  final LocalRecommendation? selectedRecommendation;
   final bool editingEnabled;
   final bool canUndo;
   final bool canRedo;
@@ -3404,12 +2490,12 @@ class _EditorCommandBar extends StatelessWidget {
   final _EditFeedback? feedback;
   final VoidCallback onVoiceEdit;
   final VoidCallback onManualEdit;
-  final VoidCallback onVisualTracks;
+  final VoidCallback onAtmosphere;
+  final VoidCallback onLighting;
   final VoidCallback onUndo;
   final VoidCallback onRedo;
   final VoidCallback onReset;
   final ValueChanged<String> onQuickEdit;
-  final ValueChanged<LocalRecommendation> onRecommendationSelected;
   final VoidCallback onCancelExport;
   final VoidCallback onContinueEditing;
 
@@ -3431,7 +2517,7 @@ class _EditorCommandBar extends StatelessWidget {
             ),
             child: Padding(
               padding: const EdgeInsets.only(top: 10),
-              child: recommendationFlow || interactionsBlocked
+              child: interactionsBlocked
                   ? SizedBox(
                       width: double.infinity,
                       child: _statusAction(context),
@@ -3522,17 +2608,13 @@ class _EditorCommandBar extends StatelessWidget {
                                 key: const ValueKey('editor-visual-tracks'),
                                 label: '氛围',
                                 emphasized: true,
-                                onPressed: editingEnabled
-                                    ? onVisualTracks
-                                    : null,
+                                onPressed: editingEnabled ? onAtmosphere : null,
                               ),
                               const SizedBox(width: 8),
                               _QuickEditChip(
                                 key: const ValueKey('editor-lighting-track'),
                                 label: context.l10n.lightingTrack,
-                                onPressed: editingEnabled
-                                    ? onVisualTracks
-                                    : null,
+                                onPressed: editingEnabled ? onLighting : null,
                               ),
                             ],
                           ),
@@ -3588,28 +2670,6 @@ class _EditorCommandBar extends StatelessWidget {
   }
 
   Widget _statusAction(BuildContext context) {
-    if (recommendationFlow) {
-      return Semantics(
-        key: const ValueKey('editor-preparing-status'),
-        liveRegion: true,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const SizedBox.square(
-              dimension: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            const SizedBox(width: 12),
-            Flexible(
-              child: Text(
-                context.l10n.analysisPreparing,
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
     if (exporting) {
       return Semantics(
         container: true,
@@ -3775,265 +2835,6 @@ class _ExportSummaryCard extends StatelessWidget {
     return (Icons.auto_fix_high, context.l10n.photoStatusAutoCompensated);
   }
   return (Icons.hourglass_empty, context.l10n.photoStatusUnprocessed);
-}
-
-class _AnalysisStage extends StatelessWidget {
-  const _AnalysisStage({
-    required this.photos,
-    required this.project,
-    required this.failures,
-  });
-
-  final List<ProjectPhoto> photos;
-  final PhotoProject project;
-  final List<PhotoImportFailure> failures;
-
-  @override
-  Widget build(BuildContext context) {
-    final completed = project.analysisStates.values
-        .where(
-          (state) =>
-              state != PhotoAnalysisState.pending &&
-              state != PhotoAnalysisState.running,
-        )
-        .length;
-    final current = min(photos.length, max(1, completed + 1));
-    return Padding(
-      key: const ValueKey('editor-analysis-stage'),
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            height: 86,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: photos.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 10),
-              itemBuilder: (context, index) => ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: SizedBox(
-                  width: 70,
-                  child: Image.file(
-                    File(photos[index].localPath),
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, _, _) => const ColoredBox(
-                      color: Color(0xFF151719),
-                      child: Icon(Icons.photo_outlined),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const Spacer(),
-          const Center(child: CircularProgressIndicator(strokeWidth: 2.5)),
-          const SizedBox(height: 24),
-          Text(
-            context.l10n.preparingPhotos(current, photos.length),
-            textAlign: TextAlign.center,
-            style: Theme.of(
-              context,
-            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 12),
-          LinearProgressIndicator(
-            value: photos.isEmpty ? 0 : completed / photos.length,
-            minHeight: 4,
-            borderRadius: BorderRadius.circular(99),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            context.l10n.analysisNextStep,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-          if (failures.isNotEmpty) ...[
-            const SizedBox(height: 18),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerLow,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Text(context.l10n.analysisNonBlockingFailure),
-              ),
-            ),
-          ],
-          const Spacer(),
-        ],
-      ),
-    );
-  }
-}
-
-class _RecommendationStage extends StatelessWidget {
-  const _RecommendationStage({
-    required this.photos,
-    required this.recommendations,
-    required this.selectedIndex,
-    required this.previewRenderer,
-    required this.onSelected,
-    required this.onConfirm,
-  });
-
-  final List<ProjectPhoto> photos;
-  final List<LocalRecommendation> recommendations;
-  final int selectedIndex;
-  final PhotoPreviewRenderer previewRenderer;
-  final ValueChanged<int> onSelected;
-  final ValueChanged<LocalRecommendation> onConfirm;
-
-  @override
-  Widget build(BuildContext context) {
-    if (recommendations.isEmpty || photos.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    final safeIndex = selectedIndex
-        .clamp(0, recommendations.length - 1)
-        .toInt();
-    final selected = recommendations[safeIndex];
-    final sourcePath = photos.first.localPath;
-    return Padding(
-      key: const ValueKey('editor-recommendation-stage'),
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(22),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  NativePhotoPreview(
-                    sourcePath: sourcePath,
-                    recipe: selected.sharedStyle.recipe,
-                    renderer: previewRenderer,
-                    maxEdge: 1024,
-                    errorBuilder: (context) => ColoredBox(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.surfaceContainerHighest,
-                      child: Icon(
-                        Icons.photo_outlined,
-                        size: 44,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                  const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Colors.transparent, Color(0xB30B0D0E)],
-                        stops: [0.58, 1],
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    left: 18,
-                    bottom: 16,
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.check_circle,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          _RecommendationPanel._recommendationLabel(
-                            context,
-                            selected.family,
-                          ),
-                          style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(fontWeight: FontWeight.w700),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 94,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: recommendations.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 10),
-              itemBuilder: (context, index) {
-                final recommendation = recommendations[index];
-                final active = index == safeIndex;
-                return InkWell(
-                  key: ValueKey('recommendation-${recommendation.family.name}'),
-                  onTap: () => onSelected(index),
-                  borderRadius: BorderRadius.circular(14),
-                  child: Container(
-                    width: 120,
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surfaceContainerLow,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: active
-                            ? Theme.of(context).colorScheme.primary
-                            : Theme.of(context).colorScheme.outlineVariant,
-                        width: active ? 2 : 1,
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          _RecommendationPanel._recommendationIcon(
-                            recommendation.family,
-                          ),
-                          size: 20,
-                          color: active
-                              ? Theme.of(context).colorScheme.primary
-                              : Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _RecommendationPanel._recommendationLabel(
-                            context,
-                            recommendation.family,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            context.l10n.recommendationAppliesToAll,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 12),
-          FilledButton(
-            key: const ValueKey('recommendation-confirm'),
-            onPressed: () => onConfirm(selected),
-            child: Text(context.l10n.useThisLook),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _SavingProgressView extends StatelessWidget {
@@ -4224,297 +3025,6 @@ class _PartialSaveView extends StatelessWidget {
   }
 }
 
-class _PreparationStatusCard extends StatelessWidget {
-  const _PreparationStatusCard();
-
-  @override
-  Widget build(BuildContext context) => Semantics(
-    key: const ValueKey('editor-preparation-details'),
-    liveRegion: true,
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-      child: Column(
-        children: [
-          Text(
-            context.l10n.analysisPreparing,
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            context.l10n.analysisPreparingSubtitle,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
-// Kept as a non-default diagnostic surface for wide layouts and focused tests.
-// ignore: unused_element
-class _RecommendationPanel extends StatelessWidget {
-  const _RecommendationPanel({
-    required this.preparing,
-    required this.recommendations,
-    required this.sourcePath,
-    required this.previewRecipes,
-    required this.previewRenderer,
-    required this.selectedIndex,
-    required this.onPreviewed,
-  });
-
-  final bool preparing;
-  final List<LocalRecommendation> recommendations;
-  final String sourcePath;
-  final List<EditRecipe> previewRecipes;
-  final PhotoPreviewRenderer previewRenderer;
-  final int selectedIndex;
-  final ValueChanged<int> onPreviewed;
-
-  @override
-  Widget build(BuildContext context) {
-    if (preparing || recommendations.isEmpty) {
-      return Semantics(
-        liveRegion: true,
-        child: Card(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Row(
-              children: [
-                const SizedBox.square(
-                  dimension: 22,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                const SizedBox(width: 14),
-                Expanded(child: Text(context.l10n.analysisPreparing)),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-    final safeIndex = selectedIndex
-        .clamp(0, recommendations.length - 1)
-        .toInt();
-    final selected = recommendations[safeIndex];
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              context.l10n.recommendationsTitle,
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 6),
-            Text(context.l10n.recommendationsSubtitle),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 224,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    for (var index = 0; index < recommendations.length; index++)
-                      Padding(
-                        padding: EdgeInsets.only(
-                          right: index == recommendations.length - 1 ? 0 : 10,
-                        ),
-                        child: Builder(
-                          builder: (context) {
-                            final recommendation = recommendations[index];
-                            final isSelected = index == safeIndex;
-                            return Semantics(
-                              selected: isSelected,
-                              button: true,
-                              child: InkWell(
-                                key: ValueKey(
-                                  'recommendation-${recommendation.family.name}',
-                                ),
-                                onTap: () => onPreviewed(index),
-                                borderRadius: BorderRadius.circular(16),
-                                child: AnimatedContainer(
-                                  duration:
-                                      MediaQuery.disableAnimationsOf(context)
-                                      ? Duration.zero
-                                      : const Duration(milliseconds: 160),
-                                  width: 156,
-                                  padding: const EdgeInsets.all(10),
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(16),
-                                    color: isSelected
-                                        ? Theme.of(
-                                            context,
-                                          ).colorScheme.primaryContainer
-                                        : Theme.of(
-                                            context,
-                                          ).colorScheme.surfaceContainerHigh,
-                                    border: Border.all(
-                                      color: isSelected
-                                          ? Theme.of(
-                                              context,
-                                            ).colorScheme.primary
-                                          : Colors.transparent,
-                                      width: 2,
-                                    ),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      ClipRRect(
-                                        borderRadius: BorderRadius.circular(10),
-                                        child: SizedBox(
-                                          key: ValueKey(
-                                            'recommendation-preview-'
-                                            '${recommendation.family.name}',
-                                          ),
-                                          width: double.infinity,
-                                          height: 82,
-                                          child: ExcludeSemantics(
-                                            child: NativePhotoPreview(
-                                              sourcePath: sourcePath,
-                                              recipe: previewRecipes[index],
-                                              renderer: previewRenderer,
-                                              maxEdge: 384,
-                                              errorBuilder: (context) =>
-                                                  ColoredBox(
-                                                    color: Theme.of(context)
-                                                        .colorScheme
-                                                        .surfaceContainerHighest,
-                                                    child: Center(
-                                                      child: Icon(
-                                                        _recommendationIcon(
-                                                          recommendation.family,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                      Text(
-                                        _recommendationLabel(
-                                          context,
-                                          recommendation.family,
-                                        ),
-                                        style: Theme.of(
-                                          context,
-                                        ).textTheme.titleSmall,
-                                      ),
-                                      Text(
-                                        index == 0
-                                            ? context.l10n.primaryRecommendation
-                                            : context
-                                                  .l10n
-                                                  .alternativeRecommendation,
-                                        style: Theme.of(
-                                          context,
-                                        ).textTheme.labelSmall,
-                                      ),
-                                      Text(
-                                        _recommendationReason(
-                                          context,
-                                          recommendation.reason,
-                                        ),
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(
-                                          context,
-                                        ).textTheme.bodySmall,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.shield_outlined, size: 18),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    _usesSafeFallback(selected.reason)
-                        ? context.l10n.safeFallbackNotice
-                        : context.l10n.localAnalysisNotice,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  static IconData _recommendationIcon(SharedStyleFamily family) =>
-      switch (family) {
-        SharedStyleFamily.naturalClean => Icons.wb_sunny_outlined,
-        SharedStyleFamily.atmosphericColor => Icons.palette_outlined,
-        SharedStyleFamily.texturedStyle => Icons.grain,
-        SharedStyleFamily.manual => Icons.tune,
-      };
-
-  static String _recommendationLabel(
-    BuildContext context,
-    SharedStyleFamily family,
-  ) => switch (family) {
-    SharedStyleFamily.naturalClean => context.l10n.recommendationNaturalClean,
-    SharedStyleFamily.atmosphericColor =>
-      context.l10n.recommendationAtmosphericColor,
-    SharedStyleFamily.texturedStyle => context.l10n.recommendationTexturedStyle,
-    SharedStyleFamily.manual => context.l10n.recommendationNaturalClean,
-  };
-
-  static bool _usesSafeFallback(RecommendationReason reason) =>
-      switch (reason) {
-        RecommendationReason.balancedLocalFallback ||
-        RecommendationReason.warmLocalFallback ||
-        RecommendationReason.texturedLocalFallback ||
-        RecommendationReason.protectsUncertainInput => true,
-        _ => false,
-      };
-
-  static String _recommendationReason(
-    BuildContext context,
-    RecommendationReason reason,
-  ) => switch (reason) {
-    RecommendationReason.balancedLocalFallback =>
-      context.l10n.recommendationReasonBalancedFallback,
-    RecommendationReason.warmLocalFallback =>
-      context.l10n.recommendationReasonWarmFallback,
-    RecommendationReason.texturedLocalFallback =>
-      context.l10n.recommendationReasonTexturedFallback,
-    RecommendationReason.protectsUncertainInput =>
-      context.l10n.recommendationReasonProtectsUncertain,
-    RecommendationReason.protectsTexture =>
-      context.l10n.recommendationReasonProtectsTexture,
-    RecommendationReason.correctsExposure =>
-      context.l10n.recommendationReasonCorrectsExposure,
-    RecommendationReason.correctsWhiteBalance =>
-      context.l10n.recommendationReasonCorrectsWhiteBalance,
-  };
-}
-
 class _ImportFailures extends StatelessWidget {
   const _ImportFailures({required this.failures});
 
@@ -4625,7 +3135,6 @@ class _FullscreenPhotoPreview extends StatelessWidget {
             editState: editState,
             editContext: editContext,
             renderer: renderer,
-            recommendationMode: false,
             immersive: true,
             onExitImmersive: onClose,
           ),
@@ -4700,7 +3209,6 @@ class _BeforeAfterPreview extends StatefulWidget {
     required this.sourcePath,
     required this.recipe,
     required this.renderer,
-    required this.recommendationMode,
     this.sourceId,
     this.editState,
     this.editContext = EditContext.ios,
@@ -4714,7 +3222,6 @@ class _BeforeAfterPreview extends StatefulWidget {
   final String sourcePath;
   final EditRecipe recipe;
   final PhotoPreviewRenderer renderer;
-  final bool recommendationMode;
   final String? sourceId;
   final EditState? editState;
   final EditContext editContext;
@@ -4774,9 +3281,7 @@ class _BeforeAfterPreviewState extends State<_BeforeAfterPreview> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        widget.recommendationMode
-                            ? context.l10n.recommendationPreviewUnavailable
-                            : !widget.recipe.crop.isOriginal
+                        !widget.recipe.crop.isOriginal
                             ? context.l10n.compositionPreviewUnavailable
                             : !widget.recipe.isLegacyColorOnly
                             ? context.l10n.effectPreviewUnavailable
@@ -6555,9 +5060,7 @@ class _PortraitToolStatus extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final message = !photoToolsVisible
-        ? context.l10n.switchToCurrentPhotoForPortrait
-        : available
+    final message = available
         ? context.l10n.localPortraitReady
         : context.l10n.portraitToolsUnavailable;
     return Semantics(

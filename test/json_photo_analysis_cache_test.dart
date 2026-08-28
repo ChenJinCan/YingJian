@@ -2,8 +2,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
-import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
-import 'package:yingjian/features/recommendations/infrastructure/json_photo_analysis_cache.dart';
+import 'package:yingjian/features/photo_analysis/domain/photo_analysis.dart';
+import 'package:yingjian/features/photo_analysis/infrastructure/json_photo_analysis_cache.dart';
 
 void main() {
   test(

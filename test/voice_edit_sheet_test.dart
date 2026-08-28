@@ -26,9 +26,6 @@ void main() {
       '照片亮一点',
     );
     await tester.tap(find.byKey(const ValueKey('voice-edit-submit')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('voice-confirmation')), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('voice-edit-apply-preview')));
     await tester.pump();
 
     expect(applied, '照片亮一点');

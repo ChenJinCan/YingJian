@@ -12,6 +12,63 @@ import 'package:yingjian/l10n/app_localizations.dart';
 import 'support/test_services.dart';
 
 void main() {
+  testWidgets('production visual tracks stay in the shared editor dock', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final editorSession = EditorSession();
+    var commitCount = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        locale: const Locale('zh'),
+        theme: ThemeData.dark(useMaterial3: true),
+        home: Scaffold(
+          body: Column(
+            children: [
+              const Expanded(
+                child: ColoredBox(
+                  key: ValueKey('editor-photo-remains-visible'),
+                  color: Colors.black,
+                ),
+              ),
+              VisualTracksDock(
+                initialKind: VisualTrackKind.era,
+                editorSession: editorSession,
+                faceTargets: const [],
+                editingEnabled: true,
+                onRecipeCommitted: () => commitCount += 1,
+                onClose: () {},
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('visual-tracks-dock')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('editor-photo-remains-visible')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('visual-tracks-page')), findsNothing);
+
+    await tester.drag(
+      find.byKey(const ValueKey('era-arc-track')),
+      const Offset(90, 0),
+    );
+    await tester.pumpAndSettle();
+
+    expect(editorSession.recipe, isNot(EditRecipe.neutral));
+    expect(commitCount, 1);
+  });
+
   testWidgets(
     'redesigned visual track journey previews, commits, and selects a person',
     (tester) async {

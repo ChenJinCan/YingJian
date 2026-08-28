@@ -5,7 +5,7 @@ import 'package:yingjian/app/theme/app_theme.dart';
 import 'package:yingjian/features/editor/application/speech_transcriber.dart';
 import 'package:yingjian/l10n/l10n.dart';
 
-enum _VoiceStage { compose, confirmation, clarification }
+enum _VoiceStage { compose, clarification }
 
 class VoiceEditSheet extends StatefulWidget {
   const VoiceEditSheet({
@@ -27,7 +27,6 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
   bool _listening = false;
   bool _applying = false;
   String? _error;
-  List<String> _summary = const [];
 
   @override
   void dispose() {
@@ -76,11 +75,7 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
       });
       return;
     }
-    setState(() {
-      _summary = _summarize(intent);
-      _stage = _VoiceStage.confirmation;
-      _error = null;
-    });
+    unawaited(_apply());
   }
 
   bool _needsBrightnessClarification(String intent) {
@@ -101,33 +96,6 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
     return brightness && !scoped;
   }
 
-  List<String> _summarize(String intent) {
-    final lower = intent.toLowerCase();
-    final changes = <String>[];
-    if (lower.contains('亮') || lower.contains('brighter')) {
-      if (['人物', '人像', '脸', 'person', 'face'].any(lower.contains)) {
-        changes.add(_zh ? '人像提亮 +12' : 'Portrait brightness +12');
-      } else {
-        changes.add(_zh ? '整体提亮 +12' : 'Photo brightness +12');
-      }
-    }
-    if ((lower.contains('背景') &&
-            (lower.contains('不要太艳') || lower.contains('柔和'))) ||
-        lower.contains('soft background')) {
-      changes.add(_zh ? '背景饱和 -8' : 'Background saturation -8');
-    }
-    if (lower.contains('暖')) {
-      changes.add(_zh ? '色温 +12' : 'Warmth +12');
-    }
-    if (lower.contains('冷')) {
-      changes.add(_zh ? '色温 -12' : 'Warmth -12');
-    }
-    if (changes.isEmpty) {
-      changes.add(_zh ? '转换为安全参数配方' : 'Convert to a safe parameter recipe');
-    }
-    return changes;
-  }
-
   bool get _zh => Localizations.localeOf(context).languageCode == 'zh';
 
   void _resolveClarification({required bool portraitOnly}) {
@@ -135,14 +103,8 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
     _controller.text = portraitOnly
         ? '$base，${_zh ? '只调整人物' : 'only adjust the person'}'
         : '$base，${_zh ? '调整整张照片' : 'adjust the whole photo'}';
-    setState(() {
-      _summary = [
-        portraitOnly
-            ? (_zh ? '人像提亮 +12' : 'Portrait brightness +12')
-            : (_zh ? '整体提亮 +12' : 'Photo brightness +12'),
-      ];
-      _stage = _VoiceStage.confirmation;
-    });
+    setState(() => _stage = _VoiceStage.compose);
+    unawaited(_apply());
   }
 
   Future<void> _apply() async {
@@ -167,7 +129,6 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
   void _restart() {
     setState(() {
       _stage = _VoiceStage.compose;
-      _summary = const [];
       _error = null;
     });
   }
@@ -183,7 +144,7 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
         ),
         child: ConstrainedBox(
           constraints: BoxConstraints(
-            maxHeight: MediaQuery.sizeOf(context).height * 0.72,
+            maxHeight: MediaQuery.sizeOf(context).height * 0.4,
           ),
           child: Material(
             color: AppTheme.canvas,
@@ -193,7 +154,6 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
                 duration: const Duration(milliseconds: 220),
                 child: switch (_stage) {
                   _VoiceStage.compose => _buildCompose(context),
-                  _VoiceStage.confirmation => _buildConfirmation(context),
                   _VoiceStage.clarification => _buildClarification(context),
                 },
               ),
@@ -287,77 +247,26 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(54),
               ),
-              icon: const Icon(Icons.arrow_forward_rounded),
-              label: Text(_zh ? '确认意图' : 'Review intent'),
+              icon: const Icon(Icons.auto_fix_high_rounded),
+              label: Text(_zh ? '应用调整' : 'Apply adjustment'),
             ),
           ),
         ],
       ),
-    ],
-  );
-
-  Widget _buildConfirmation(BuildContext context) => Column(
-    key: const ValueKey('voice-confirmation'),
-    mainAxisSize: MainAxisSize.min,
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      _handle(context),
-      const SizedBox(height: 26),
-      Text(
-        '“${_controller.text.trim()}”',
-        key: const ValueKey('voice-intent-quote'),
-        textAlign: TextAlign.center,
-        style: Theme.of(context).textTheme.titleMedium,
-      ),
-      const SizedBox(height: 18),
-      Wrap(
-        alignment: WrapAlignment.center,
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (var index = 0; index < _summary.length; index++)
-            InputChip(
-              key: ValueKey('voice-summary-$index'),
-              label: Text(_summary[index]),
-              onDeleted: () => setState(
-                () => _summary = [
-                  for (var i = 0; i < _summary.length; i++)
-                    if (i != index) _summary[i],
-                ],
-              ),
-            ),
-        ],
-      ),
-      const SizedBox(height: 26),
-      FilledButton(
-        key: const ValueKey('voice-edit-apply-preview'),
-        onPressed: _applying || _summary.isEmpty ? null : _apply,
-        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-        child: _applying
-            ? const SizedBox.square(
-                dimension: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : Text(_zh ? '应用预览' : 'Apply preview'),
-      ),
-      TextButton(
-        key: const ValueKey('voice-edit-restart'),
-        onPressed: _applying ? null : _restart,
-        child: Text(_zh ? '重新说' : 'Start over'),
-      ),
-      const SizedBox(height: 14),
+      const SizedBox(height: 12),
       Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(
-            Icons.lock_outline_rounded,
-            size: 15,
-            color: AppTheme.muted,
-          ),
+          const Icon(Icons.undo_rounded, size: 15, color: AppTheme.muted),
           const SizedBox(width: 6),
-          Text(
-            _zh ? '本次调整在本机完成' : 'This adjustment stays on device',
-            style: Theme.of(context).textTheme.labelSmall,
+          Flexible(
+            child: Text(
+              _zh
+                  ? '应用前会先验证预览，应用后可随时撤销'
+                  : 'Preview is validated first; applied edits remain undoable',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
           ),
         ],
       ),

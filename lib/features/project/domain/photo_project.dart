@@ -142,15 +142,7 @@ class ProjectPhoto {
   }
 }
 
-enum PhotoProjectFlowState {
-  empty,
-  importing,
-  analyzing,
-  choosingRecommendation,
-  editing,
-  exporting,
-  exported,
-}
+enum PhotoProjectFlowState { empty, importing, editing, exporting, exported }
 
 enum PhotoAnalysisState { pending, running, ready, fallback, failed }
 
@@ -303,7 +295,7 @@ class ProjectEditOperation {
               ProjectEditOperationKind.values,
               'edit operation kind',
             ),
-      source: json['source'] == null
+      source: json['source'] == null || json['source'] == 'recommendation'
           ? EditSource.migration
           : PhotoProject._enumValue(
               json['source'],
@@ -410,12 +402,7 @@ extension PhotoProjectFlowStateTransitions on PhotoProjectFlowState {
     if (next == this) return true;
     return switch (this) {
       PhotoProjectFlowState.empty => next == PhotoProjectFlowState.importing,
-      PhotoProjectFlowState.importing =>
-        next == PhotoProjectFlowState.analyzing,
-      PhotoProjectFlowState.analyzing =>
-        next == PhotoProjectFlowState.choosingRecommendation,
-      PhotoProjectFlowState.choosingRecommendation =>
-        next == PhotoProjectFlowState.editing,
+      PhotoProjectFlowState.importing => next == PhotoProjectFlowState.editing,
       PhotoProjectFlowState.editing => next == PhotoProjectFlowState.exporting,
       PhotoProjectFlowState.exporting =>
         next == PhotoProjectFlowState.exported ||
@@ -863,7 +850,6 @@ class PhotoProject {
     List<String> recentTransactionIds = const [],
     this.flowState = PhotoProjectFlowState.editing,
     this.focusPhotoId,
-    this.selectedRecommendationId,
     this.groupScrollOffset = 0,
   }) : photos = List.unmodifiable(photos),
        sharedStyle =
@@ -1079,6 +1065,9 @@ class PhotoProject {
     }
   }
 
+  /// New projects are single-photo only. The higher persisted limit remains
+  /// solely so older multi-photo snapshots can be decoded and migrated.
+  static const maxSelectablePhotoCount = 1;
   static const maxPhotoCount = 6;
   static const maxEditHistoryCount = 100;
   // V9 separates the shareable filter/HSL look from per-photo basic geometry,
@@ -1110,7 +1099,6 @@ class PhotoProject {
   final List<String> recentTransactionIds;
   final PhotoProjectFlowState flowState;
   final String? focusPhotoId;
-  final String? selectedRecommendationId;
   final double groupScrollOffset;
 
   /// Compatibility view for the current editor while it migrates from one
@@ -1181,18 +1169,6 @@ class PhotoProject {
     if (requiresUpdate && nextState != flowState) return false;
     if (!flowState.canTransitionTo(nextState)) return false;
     if (flowState == nextState) return true;
-    if (flowState == PhotoProjectFlowState.analyzing &&
-        nextState == PhotoProjectFlowState.choosingRecommendation) {
-      return analysisStates.values.every(
-        (state) =>
-            state != PhotoAnalysisState.pending &&
-            state != PhotoAnalysisState.running,
-      );
-    }
-    if (flowState == PhotoProjectFlowState.choosingRecommendation &&
-        nextState == PhotoProjectFlowState.editing) {
-      return selectedRecommendationId != null;
-    }
     if (flowState == PhotoProjectFlowState.editing &&
         nextState == PhotoProjectFlowState.exporting) {
       return exportStates.values.any(
@@ -1222,7 +1198,7 @@ class PhotoProject {
     String photoId,
     PhotoAnalysisState nextState,
   ) {
-    return flowState == PhotoProjectFlowState.analyzing &&
+    return flowState == PhotoProjectFlowState.editing &&
         analysisStates[photoId]?.canTransitionTo(nextState) == true;
   }
 
@@ -1373,7 +1349,7 @@ class PhotoProject {
       createdAt: createdAt,
       updatedAt: updatedAt,
       photos: photos,
-      flowState: PhotoProjectFlowState.analyzing,
+      flowState: PhotoProjectFlowState.editing,
       focusPhotoId: focusPhotoId,
       sharedStyle: SharedStyle(recipe: EditRecipe.neutral),
     );
@@ -1557,7 +1533,6 @@ class PhotoProject {
     List<String>? recentTransactionIds,
     PhotoProjectFlowState? flowState,
     Object? focusPhotoId = _notProvided,
-    Object? selectedRecommendationId = _notProvided,
     double? groupScrollOffset,
   }) {
     return PhotoProject(
@@ -1596,9 +1571,6 @@ class PhotoProject {
       focusPhotoId: focusPhotoId == _notProvided
           ? this.focusPhotoId
           : focusPhotoId as String?,
-      selectedRecommendationId: selectedRecommendationId == _notProvided
-          ? this.selectedRecommendationId
-          : selectedRecommendationId as String?,
       groupScrollOffset: groupScrollOffset ?? this.groupScrollOffset,
     );
   }
@@ -1648,9 +1620,6 @@ class PhotoProject {
     if (focusPhotoId != null) {
       value['focusPhotoId'] = focusPhotoId!;
     }
-    if (selectedRecommendationId != null) {
-      value['selectedRecommendationId'] = selectedRecommendationId!;
-    }
     if (historyBaseSnapshot != null) {
       value['historyBaseSnapshot'] = historyBaseSnapshot!.toJson();
     }
@@ -1679,9 +1648,15 @@ class PhotoProject {
       );
     }
     final flowStateName = json['flowState']! as String;
-    final flowState = PhotoProjectFlowState.values
-        .where((value) => value.name == flowStateName)
-        .firstOrNull;
+    final flowState = switch (flowStateName) {
+      // Projects written before the direct-to-editor flow are migrated while
+      // decoding. The obsolete intermediate states never enter runtime.
+      'analyzing' || 'choosingRecommendation' => PhotoProjectFlowState.editing,
+      _ =>
+        PhotoProjectFlowState.values
+            .where((value) => value.name == flowStateName)
+            .firstOrNull,
+    };
     if (flowState == null) {
       throw FormatException('Unsupported project flow state $flowStateName');
     }
@@ -1694,7 +1669,6 @@ class PhotoProject {
           .toList(),
       flowState: flowState,
       focusPhotoId: json['focusPhotoId'] as String?,
-      selectedRecommendationId: json['selectedRecommendationId'] as String?,
       sharedStyle: SharedStyle.fromJson(
         json['sharedStyle']! as Map<String, Object?>,
       ),
@@ -1876,7 +1850,6 @@ class PhotoProject {
         listEquals(other.recentTransactionIds, recentTransactionIds) &&
         other.flowState == flowState &&
         other.focusPhotoId == focusPhotoId &&
-        other.selectedRecommendationId == selectedRecommendationId &&
         other.groupScrollOffset == groupScrollOffset &&
         listEquals(other.photos, photos);
   }
@@ -1904,7 +1877,6 @@ class PhotoProject {
     Object.hashAll(recentTransactionIds),
     flowState,
     focusPhotoId,
-    selectedRecommendationId,
     groupScrollOffset,
     Object.hashAll(photos),
   ]);

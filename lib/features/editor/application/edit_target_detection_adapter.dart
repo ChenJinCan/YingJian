@@ -1,6 +1,6 @@
 import 'package:yingjian/features/editor/domain/edit_target.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
-import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
+import 'package:yingjian/features/photo_analysis/domain/photo_analysis.dart';
 
 List<DetectedEditTarget> detectedEditTargetsFor({
   required ProjectPhoto photo,

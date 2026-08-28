@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
-import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
+import 'package:yingjian/features/photo_analysis/domain/photo_analysis.dart';
 
 final class MethodChannelPhotoAnalyzer implements PhotoAnalyzer {
   const MethodChannelPhotoAnalyzer({

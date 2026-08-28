@@ -1,8 +1,6 @@
-import 'package:flutter/foundation.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
-import 'package:yingjian/features/recommendations/application/photo_analysis_cache.dart';
-import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
-import 'package:yingjian/features/recommendations/domain/recipe_catalog.dart';
+import 'package:yingjian/features/photo_analysis/application/photo_analysis_cache.dart';
+import 'package:yingjian/features/photo_analysis/domain/photo_analysis.dart';
 
 typedef AnalysisStateCallback =
     Future<void> Function(String photoId, PhotoAnalysisState state);
@@ -24,33 +22,15 @@ final class PhotoAnalysisCancellationToken {
   void finishCommit() => _commitInProgress = false;
 }
 
-@immutable
-class RecommendationPreparation {
-  const RecommendationPreparation({
-    required this.analyses,
-    required this.recommendations,
-  });
-
-  final Map<String, LocalPhotoAnalysis> analyses;
-  final List<LocalRecommendation> recommendations;
-
-  int get fallbackCount =>
-      analyses.values.where((analysis) => analysis.usesSafeFallback).length;
-}
-
-final class LocalRecommendationCoordinator {
-  LocalRecommendationCoordinator({
-    required this.analyzer,
-    this.cache = const NoopPhotoAnalysisCache(),
-    LocalRecommendationEngine? recommendationEngine,
-  }) : recommendationEngine =
-           recommendationEngine ?? LocalRecommendationEngine();
+/// Performs optional local capability analysis without producing a user-facing
+/// stage or blocking access to the editor.
+final class PhotoAnalysisCoordinator {
+  const PhotoAnalysisCoordinator({required this.analyzer, required this.cache});
 
   final PhotoAnalyzer analyzer;
   final PhotoAnalysisCache cache;
-  final LocalRecommendationEngine recommendationEngine;
 
-  Future<RecommendationPreparation> prepare({
+  Future<Map<String, LocalPhotoAnalysis>> analyze({
     required String projectId,
     required List<ProjectPhoto> photos,
     AnalysisStateCallback? onStateChanged,
@@ -137,13 +117,7 @@ final class LocalRecommendationCoordinator {
         await onStateChanged?.call(photo.id, PhotoAnalysisState.fallback);
       }
     }
-    return RecommendationPreparation(
-      analyses: Map.unmodifiable(analyses),
-      recommendations: recommendationEngine.recommend(
-        photos: photos,
-        analyses: analyses,
-      ),
-    );
+    return Map.unmodifiable(analyses);
   }
 
   Future<LocalPhotoAnalysis?> _readCache({
@@ -174,7 +148,6 @@ final class LocalRecommendationCoordinator {
         analysis: analysis,
       );
     } on Object {
-      // A cache failure cannot block deterministic local recommendations.
       return null;
     }
   }
@@ -187,7 +160,6 @@ final class LocalRecommendationCoordinator {
     try {
       return await cache.commit(write, canCommit: canCommit);
     } on Object {
-      // A cache failure cannot block deterministic local recommendations.
       return false;
     }
   }
@@ -197,7 +169,7 @@ final class LocalRecommendationCoordinator {
     try {
       await cache.discard(write);
     } on Object {
-      // Staged writes are never visible, so cleanup can be retried later.
+      // Staged writes are never visible, so cleanup remains best effort.
     }
   }
 

@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
-import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
+import 'package:yingjian/features/photo_analysis/domain/photo_analysis.dart';
 
 @immutable
 class PhotoAnalysisCacheWrite {

@@ -4,7 +4,7 @@ import 'package:yingjian/features/editor/domain/meta_op_availability.dart';
 
 enum EditScope { group, currentPhoto }
 
-enum EditSource { manual, ai, recommendation, migration, targetRebind }
+enum EditSource { manual, ai, migration, targetRebind }
 
 @immutable
 final class OpAddress {

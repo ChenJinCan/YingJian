@@ -18,6 +18,235 @@ enum VisualTrackKind { era, lighting }
 
 enum _VisualTrackStage { landing, editing, selectingTarget }
 
+/// The production editor surface for atmosphere and lighting. It keeps the
+/// photo in the parent editor visible and only replaces the shared bottom dock.
+class VisualTracksDock extends StatefulWidget {
+  const VisualTracksDock({
+    required this.initialKind,
+    required this.editorSession,
+    required this.faceTargets,
+    required this.editingEnabled,
+    required this.onRecipeCommitted,
+    required this.onClose,
+    super.key,
+  });
+
+  final VisualTrackKind initialKind;
+  final EditorSession editorSession;
+  final List<StableEditTarget> faceTargets;
+  final bool editingEnabled;
+  final VoidCallback onRecipeCommitted;
+  final VoidCallback onClose;
+
+  @override
+  State<VisualTracksDock> createState() => _VisualTracksDockState();
+}
+
+class _VisualTracksDockState extends State<VisualTracksDock> {
+  late VisualTrackKind _kind;
+  late EditRecipe _baseline;
+  late EditRecipe _draft;
+  StableEditTarget? _target;
+  double _eraPosition = 0;
+  double _azimuth = 0;
+  int _intensity = 0;
+  bool _adjusting = false;
+  bool _applied = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _kind = widget.initialKind;
+    _baseline = widget.editorSession.recipe;
+    _draft = _baseline;
+    if (widget.faceTargets.length == 1) _target = widget.faceTargets.single;
+    _restoreLightingValues();
+    widget.editorSession.addListener(_syncFromSession);
+  }
+
+  @override
+  void dispose() {
+    widget.editorSession.removeListener(_syncFromSession);
+    if (_adjusting) widget.editorSession.load(_baseline);
+    super.dispose();
+  }
+
+  void _syncFromSession() {
+    if (!mounted || _adjusting || widget.editorSession.recipe == _draft) return;
+    setState(() {
+      _baseline = widget.editorSession.recipe;
+      _draft = _baseline;
+      _eraPosition = 0;
+      _restoreLightingValues();
+    });
+  }
+
+  void _restoreLightingValues() {
+    final value = _target == null
+        ? null
+        : _draft.directionalLightingRecipe.adjustments[_target!.id];
+    _azimuth = value?.azimuth ?? 0;
+    _intensity = value?.intensity ?? 0;
+  }
+
+  void _begin() {
+    if (_adjusting || !widget.editingEnabled) return;
+    _adjusting = true;
+    _applied = false;
+    widget.editorSession.beginAdjustment();
+  }
+
+  void _previewEra(double value) {
+    _begin();
+    final next = VisualTrackResolver.era(_baseline, value);
+    widget.editorSession.preview(next);
+    setState(() {
+      _eraPosition = value;
+      _draft = next;
+    });
+  }
+
+  void _previewLighting({double? azimuth, int? intensity}) {
+    final target = _target;
+    if (target == null) return;
+    _begin();
+    final nextAzimuth = azimuth ?? _azimuth;
+    var nextIntensity = intensity ?? _intensity;
+    if (azimuth != null && nextIntensity == 0) nextIntensity = 25;
+    final next = VisualTrackResolver.lighting(
+      _baseline,
+      target: target,
+      azimuth: nextAzimuth,
+      intensity: nextIntensity,
+    );
+    widget.editorSession.preview(next);
+    setState(() {
+      _azimuth = nextAzimuth;
+      _intensity = nextIntensity;
+      _draft = next;
+    });
+  }
+
+  void _end() {
+    if (!_adjusting) return;
+    _adjusting = false;
+    widget.editorSession.commitAdjustment();
+    if (_draft == _baseline) {
+      setState(() {});
+      return;
+    }
+    _baseline = _draft;
+    widget.onRecipeCommitted();
+    setState(() => _applied = true);
+  }
+
+  void _selectKind(VisualTrackKind value) {
+    if (_adjusting || value == _kind) return;
+    setState(() {
+      _kind = value;
+      _applied = false;
+    });
+  }
+
+  void _selectTarget(StableEditTarget value) {
+    if (_adjusting) return;
+    setState(() {
+      _target = value;
+      _applied = false;
+      _restoreLightingValues();
+    });
+  }
+
+  void _close() {
+    if (_adjusting) widget.editorSession.load(_baseline);
+    widget.onClose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final zh = Localizations.localeOf(context).languageCode == 'zh';
+    return Material(
+      key: const ValueKey('visual-tracks-dock'),
+      color: Theme.of(context).colorScheme.surface,
+      child: SafeArea(
+        top: false,
+        minimum: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _kind == VisualTrackKind.era
+                            ? context.l10n.eraAtmosphereTrack
+                            : context.l10n.lightingTrack,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                      Text(
+                        _adjusting
+                            ? (zh
+                                  ? '正在预览，松手后应用'
+                                  : 'Previewing; release to apply')
+                            : _applied
+                            ? (zh
+                                  ? '已提交调整；预览失败会自动恢复'
+                                  : 'Adjustment submitted; preview failure restores it')
+                            : (zh
+                                  ? '照片保持可见，调整会形成一次可撤销编辑'
+                                  : 'The photo stays visible; edits remain undoable'),
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  key: const ValueKey('visual-tracks-close'),
+                  tooltip: zh ? '完成调整' : 'Done',
+                  onPressed: _close,
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            _TrackTabs(kind: _kind, onChanged: _selectKind),
+            const SizedBox(height: 12),
+            if (_kind == VisualTrackKind.era)
+              _EraControls(
+                value: _eraPosition,
+                enabled: widget.editingEnabled,
+                onChanged: _previewEra,
+                onChangeEnd: (_) => _end(),
+              )
+            else
+              _LightingControls(
+                targets: widget.faceTargets,
+                selected: _target,
+                azimuth: _azimuth,
+                intensity: _intensity,
+                enabled: widget.editingEnabled,
+                onTarget: _selectTarget,
+                onAzimuth: (value) => _previewLighting(azimuth: value),
+                onAzimuthEnd: (_) => _end(),
+                onIntensity: (value) =>
+                    _previewLighting(intensity: value.round()),
+                onIntensityEnd: (_) => _end(),
+                onReset: () {
+                  _previewLighting(intensity: 0);
+                  _end();
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class VisualTracksPage extends StatefulWidget {
   const VisualTracksPage({
     required this.photo,
@@ -753,11 +982,40 @@ class _LightingControls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (targets.isEmpty || selected == null) {
+    if (targets.isEmpty) {
       return Padding(
         key: const ValueKey('lighting-track-unavailable'),
         padding: const EdgeInsets.symmetric(vertical: 22),
         child: Text(context.l10n.lightingNeedsPerson),
+      );
+    }
+    if (selected == null) {
+      return Column(
+        key: const ValueKey('lighting-target-required'),
+        children: [
+          Text(
+            Localizations.localeOf(context).languageCode == 'zh'
+                ? '先选择要调整光照的人物'
+                : 'Choose the person to relight',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            key: const ValueKey('lighting-target-selector'),
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.center,
+            children: [
+              for (var index = 0; index < targets.length; index++)
+                ActionChip(
+                  key: ValueKey('lighting-target-$index'),
+                  avatar: const Icon(Icons.person_outline_rounded, size: 18),
+                  label: Text('人物 ${index + 1}'),
+                  onPressed: enabled ? () => onTarget(targets[index]) : null,
+                ),
+            ],
+          ),
+        ],
       );
     }
     return Column(
@@ -1070,7 +1328,7 @@ class _StatusPill extends StatelessWidget {
   );
 }
 
-class _ArcTrack extends StatelessWidget {
+class _ArcTrack extends StatefulWidget {
   const _ArcTrack({
     required this.value,
     required this.enabled,
@@ -1084,27 +1342,39 @@ class _ArcTrack extends StatelessWidget {
   final ValueChanged<double> onChanged;
   final ValueChanged<double> onChangeEnd;
 
+  @override
+  State<_ArcTrack> createState() => _ArcTrackState();
+}
+
+class _ArcTrackState extends State<_ArcTrack> {
+  late double _dragValue = widget.value;
+
   double _valueFor(Offset local, Size size) =>
       ((local.dx / size.width) * 2 - 1).clamp(-1.0, 1.0);
+
+  void _updateDragValue(double next) {
+    _dragValue = next;
+    widget.onChanged(next);
+  }
 
   @override
   Widget build(BuildContext context) => Semantics(
     slider: true,
-    value: '${(value * 100).round()}',
-    increasedValue: '${((value + .25).clamp(-1, 1) * 100).round()}',
-    decreasedValue: '${((value - .25).clamp(-1, 1) * 100).round()}',
-    onIncrease: enabled
+    value: '${(widget.value * 100).round()}',
+    increasedValue: '${((widget.value + .25).clamp(-1, 1) * 100).round()}',
+    decreasedValue: '${((widget.value - .25).clamp(-1, 1) * 100).round()}',
+    onIncrease: widget.enabled
         ? () {
-            final next = (value + .25).clamp(-1.0, 1.0);
-            onChanged(next);
-            onChangeEnd(next);
+            final next = (widget.value + .25).clamp(-1.0, 1.0);
+            widget.onChanged(next);
+            widget.onChangeEnd(next);
           }
         : null,
-    onDecrease: enabled
+    onDecrease: widget.enabled
         ? () {
-            final next = (value - .25).clamp(-1.0, 1.0);
-            onChanged(next);
-            onChangeEnd(next);
+            final next = (widget.value - .25).clamp(-1.0, 1.0);
+            widget.onChanged(next);
+            widget.onChangeEnd(next);
           }
         : null,
     child: SizedBox(
@@ -1113,28 +1383,30 @@ class _ArcTrack extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, constraints) => GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onHorizontalDragStart: enabled
-              ? (details) => onChanged(
+          onHorizontalDragStart: widget.enabled
+              ? (details) => _updateDragValue(
                   _valueFor(details.localPosition, constraints.biggest),
                 )
               : null,
-          onHorizontalDragUpdate: enabled
-              ? (details) => onChanged(
+          onHorizontalDragUpdate: widget.enabled
+              ? (details) => _updateDragValue(
                   _valueFor(details.localPosition, constraints.biggest),
                 )
               : null,
-          onHorizontalDragEnd: enabled ? (_) => onChangeEnd(value) : null,
-          onTapUp: enabled
+          onHorizontalDragEnd: widget.enabled
+              ? (_) => widget.onChangeEnd(_dragValue)
+              : null,
+          onTapUp: widget.enabled
               ? (details) {
                   final next = _valueFor(
                     details.localPosition,
                     constraints.biggest,
                   );
-                  onChanged(next);
-                  onChangeEnd(next);
+                  widget.onChanged(next);
+                  widget.onChangeEnd(next);
                 }
               : null,
-          child: CustomPaint(painter: _ArcTrackPainter(value: value)),
+          child: CustomPaint(painter: _ArcTrackPainter(value: widget.value)),
         ),
       ),
     ),

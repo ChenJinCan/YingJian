@@ -1,7 +1,7 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
-import 'package:yingjian/features/recommendations/infrastructure/method_channel_photo_analyzer.dart';
+import 'package:yingjian/features/photo_analysis/infrastructure/method_channel_photo_analyzer.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

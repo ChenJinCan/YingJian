@@ -83,55 +83,6 @@ class _HomePageState extends State<HomePage> {
     await _openEditor(startWithImport: true);
   }
 
-  void _showCameraBoundary() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('首版先从相册选择照片；拍摄入口将在相机画质合同完成后开放。')),
-    );
-  }
-
-  void _showMenu(PhotoProject? project) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.add_photo_alternate_outlined),
-                title: Text(context.l10n.homePrimaryAction),
-                onTap: () {
-                  Navigator.of(sheetContext).pop();
-                  _startNew(project);
-                },
-              ),
-              if (project != null)
-                ListTile(
-                  leading: const Icon(Icons.history_rounded),
-                  title: Text(context.l10n.continueLastEditing),
-                  onTap: () {
-                    Navigator.of(sheetContext).pop();
-                    _openEditor();
-                  },
-                ),
-              ListTile(
-                leading: const Icon(Icons.settings_outlined),
-                title: Text(context.l10n.settings),
-                onTap: () {
-                  Navigator.of(sheetContext).pop();
-                  Navigator.of(context).pushNamed(AppRoutes.settings);
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -147,7 +98,6 @@ class _HomePageState extends State<HomePage> {
             child: Column(
               children: [
                 _HomeHeader(
-                  onMenu: () => _showMenu(project),
                   onSettings: () =>
                       Navigator.of(context).pushNamed(AppRoutes.settings),
                 ),
@@ -162,25 +112,39 @@ class _HomePageState extends State<HomePage> {
                         const SizedBox(height: 16),
                         FilledButton.icon(
                           key: const ValueKey('home-start-editing'),
-                          onPressed: () => _startNew(project),
+                          onPressed: project == null
+                              ? () => _startNew(null)
+                              : () => _openEditor(),
                           style: FilledButton.styleFrom(
                             minimumSize: const Size.fromHeight(54),
                           ),
-                          icon: const Icon(Icons.photo_library_outlined),
-                          label: Text(context.l10n.homePrimaryAction),
-                        ),
-                        const SizedBox(height: 10),
-                        OutlinedButton.icon(
-                          key: const ValueKey('home-camera'),
-                          onPressed: _showCameraBoundary,
-                          style: OutlinedButton.styleFrom(
-                            minimumSize: const Size.fromHeight(48),
-                            foregroundColor: AppTheme.gold,
-                            side: const BorderSide(color: AppTheme.gold),
+                          icon: Icon(
+                            project == null
+                                ? Icons.photo_library_outlined
+                                : Icons.auto_fix_high_rounded,
                           ),
-                          icon: const Icon(Icons.photo_camera_outlined),
-                          label: const Text('拍一张'),
+                          label: Text(
+                            project == null
+                                ? context.l10n.homePrimaryAction
+                                : context.l10n.continueLastEditing,
+                          ),
                         ),
+                        if (project != null) ...[
+                          const SizedBox(height: 10),
+                          OutlinedButton.icon(
+                            key: const ValueKey('home-new-project'),
+                            onPressed: () => _startNew(project),
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: const Size.fromHeight(48),
+                              foregroundColor: AppTheme.gold,
+                              side: const BorderSide(color: AppTheme.gold),
+                            ),
+                            icon: const Icon(
+                              Icons.add_photo_alternate_outlined,
+                            ),
+                            label: Text(context.l10n.homePrimaryAction),
+                          ),
+                        ],
                         const SizedBox(height: 24),
                         Text(
                           context.l10n.recentProjects,
@@ -203,38 +167,6 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                 ),
-                NavigationBar(
-                  key: const ValueKey('home-navigation'),
-                  selectedIndex: 0,
-                  onDestinationSelected: (index) {
-                    switch (index) {
-                      case 1:
-                        _startNew(project);
-                      case 2:
-                        _openEditor(startWithImport: project == null);
-                      case 3:
-                        Navigator.of(context).pushNamed(AppRoutes.settings);
-                    }
-                  },
-                  destinations: const [
-                    NavigationDestination(
-                      icon: Icon(Icons.home_rounded),
-                      label: '首页',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(Icons.photo_library_outlined),
-                      label: '照片',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(Icons.auto_fix_high_outlined),
-                      label: '编辑',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(Icons.person_outline_rounded),
-                      label: '我的',
-                    ),
-                  ],
-                ),
               ],
             ),
           );
@@ -245,9 +177,8 @@ class _HomePageState extends State<HomePage> {
 }
 
 class _HomeHeader extends StatelessWidget {
-  const _HomeHeader({required this.onMenu, required this.onSettings});
+  const _HomeHeader({required this.onSettings});
 
-  final VoidCallback onMenu;
   final VoidCallback onSettings;
 
   @override
@@ -255,12 +186,7 @@ class _HomeHeader extends StatelessWidget {
     padding: const EdgeInsets.fromLTRB(8, 2, 8, 2),
     child: Row(
       children: [
-        IconButton(
-          key: const ValueKey('home-menu'),
-          tooltip: '菜单',
-          onPressed: onMenu,
-          icon: const Icon(Icons.menu_rounded),
-        ),
+        const SizedBox(width: 48),
         Expanded(
           child: Text(
             context.l10n.appTitle,

@@ -176,7 +176,6 @@ PhotoProject _project(List<ProjectPhoto> photos) => PhotoProject(
   updatedAt: DateTime.utc(2026, 8, 4),
   photos: photos,
   flowState: PhotoProjectFlowState.editing,
-  selectedRecommendationId: 'mvp-catalog-v1:clean-balanced',
 );
 
 final class _RecordingExporter implements PhotoExporter {

@@ -175,3 +175,54 @@ A lightweight, semi-transparent dock that houses 3-4 primary category icons. Use
 ### Modals & Overlays
 
 Avoid traditional full-screen modals. Use "Bottom Sheets" that only slide up to 40% of the screen height, ensuring the photo remains visible and the user never feels like they have "left" the editing context.
+
+## Unified Interaction Contract
+
+The production experience uses one task path and one editor shell:
+
+> Select photos → see the first result → describe or refine in the shared dock → apply → export
+
+### Home
+
+- Home only starts a new edit, resumes the current draft, and opens Settings.
+- Do not use a tab bar for commands or destinations that do not preserve navigation state.
+- Do not expose unavailable camera or AI actions as tappable controls.
+- Settings has one visible entry. A current draft makes “Continue editing” the primary action; starting over is secondary and explicitly confirms replacement.
+
+### Editor Shell
+
+- The top bar owns Back, Undo/Redo, and Export for the current photo.
+- The photo remains in the same canvas while command, manual, atmosphere, and lighting controls change below it.
+- Atmosphere and lighting are dock states, never separate editor routes.
+- Only one editing dock is visible at a time. Closing a tool returns to the command dock without moving or recreating the photo canvas.
+
+The shared dock has four observable states:
+
+1. `command`: text/voice entry, contextual quick actions, and manual refinement.
+2. `adjusting`: one active manual, atmosphere, or lighting control.
+3. `previewing`: a temporary result awaiting a safe render or user decision.
+4. `exporting`: progress, cancellation, partial failure, and final result.
+
+Photo capability analysis runs in the background after import. It may enable
+applicable tools, but it must not change the recipe, create a decision gate, or
+block the command dock.
+
+The MVP is single-photo only. The picker requests exactly one photo, and the
+editor does not expose add-photo, ordering, thumbnail-strip, group scope, photo
+count, or batch-export controls. Export always targets the current photo.
+
+### State Language
+
+- **Preview** is temporary and must be rendered successfully before it can be applied.
+- **Apply** creates one serializable, undoable edit transaction.
+- **Undo** reverses the latest applied transaction.
+- Draft persistence is automatic and is not presented as a tool-level Save action.
+- **Export** is the only action that creates the final image file.
+
+### Voice and Text
+
+- Voice and typed commands share the same text field and planning path.
+- A supported, unambiguous request applies after preview validation without a second confirmation screen.
+- Ask at most one clarification when multiple materially different targets are valid.
+- Never show editable-looking summary chips unless changing a chip changes the actual operation draft.
+- Failure leaves the previous image state intact and keeps the command editable.

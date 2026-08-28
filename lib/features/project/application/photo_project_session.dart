@@ -212,12 +212,55 @@ class PhotoProjectSession extends ChangeNotifier {
         : current.effectiveRecipeFor(photoId);
   }
 
-  Future<void> restore() async {
+  Future<void> restore({bool enforceSinglePhoto = false}) async {
     _isRestoring = true;
     _restoreError = null;
     notifyListeners();
     try {
       _project = await _store.loadLatest();
+      final restored = _project;
+      if (enforceSinglePhoto &&
+          restored != null &&
+          restored.photos.length > 1) {
+        final focus = restored.photos
+            .where((photo) => photo.id == restored.focusPhotoId)
+            .firstOrNull;
+        final selected = focus ?? restored.photos.first;
+        final selectedRegistry = restored.targetRegistries[selected.id];
+        final migrated = PhotoProject(
+          id: restored.id,
+          createdAt: restored.createdAt,
+          updatedAt: _now(),
+          photos: [selected],
+          recipe: restored.effectiveRecipeFor(selected.id),
+          targetRegistries: selectedRegistry == null
+              ? const {}
+              : {selected.id: selectedRegistry},
+          analysisStates: {
+            selected.id:
+                restored.analysisStates[selected.id] ??
+                PhotoAnalysisState.pending,
+          },
+          flowState: PhotoProjectFlowState.editing,
+          focusPhotoId: selected.id,
+          editingScope: ProjectEditingScope.currentPhoto,
+        );
+        await _store.save(migrated);
+        _project = migrated;
+        final lifecycleStore = _store;
+        if (lifecycleStore is PhotoProjectLifecycleStore) {
+          for (final photo in restored.photos.where(
+            (photo) => photo.id != selected.id,
+          )) {
+            try {
+              await lifecycleStore.deletePhotoCopy(photo);
+            } on Object {
+              // The migrated project is already safe; orphan cleanup remains
+              // best-effort and never touches the system-library original.
+            }
+          }
+        }
+      }
     } on Object catch (error) {
       _restoreError = error;
     } finally {
@@ -233,7 +276,7 @@ class PhotoProjectSession extends ChangeNotifier {
     if (_project?.canMutateInputs == false) {
       throw StateError('Project inputs cannot change while exporting');
     }
-    final remaining = PhotoProject.maxPhotoCount - photos.length;
+    final remaining = PhotoProject.maxSelectablePhotoCount - photos.length;
     if (remaining == 0) {
       return PhotoImportResult.limitReached;
     }
@@ -271,7 +314,7 @@ class PhotoProjectSession extends ChangeNotifier {
             createdAt: timestamp,
             updatedAt: timestamp,
             photos: imported,
-            flowState: PhotoProjectFlowState.analyzing,
+            flowState: PhotoProjectFlowState.editing,
           )
         : existing.replacePhotosAndInvalidateDerivedState(
             photos: [...existing.photos, ...imported],
@@ -312,64 +355,6 @@ class PhotoProjectSession extends ChangeNotifier {
     if (current.flowState == nextState) return;
     final next = current.copyWith(updatedAt: _now(), flowState: nextState);
     await _saveAndPublish(next);
-  }
-
-  Future<void> selectRecommendation({
-    required String recommendationId,
-    required SharedStyle sharedStyle,
-    Map<String, AdaptiveCompensation> adaptiveCompensations = const {},
-  }) async {
-    final current = _project;
-    if (current == null) {
-      throw StateError(
-        'A project is required before selecting a recommendation',
-      );
-    }
-    if (current.flowState != PhotoProjectFlowState.choosingRecommendation) {
-      throw StateError('Recommendations can only be selected while choosing');
-    }
-    if (recommendationId.trim().isEmpty) {
-      throw ArgumentError.value(
-        recommendationId,
-        'recommendationId',
-        'Recommendation id must not be empty',
-      );
-    }
-    final transition = _legacyAdapter.tryEncodeTransition(
-      before: current.sharedStyle.recipe,
-      after: sharedStyle.recipe,
-      photoId: current.photos.first.id,
-    );
-    if (transition == null) {
-      throw StateError('Recommendation has no admitted MetaOp transition');
-    }
-    if (transition.changes.isEmpty) {
-      await _saveAndPublish(
-        current.copyWith(
-          updatedAt: _now(),
-          flowState: PhotoProjectFlowState.editing,
-          selectedRecommendationId: recommendationId,
-          adaptiveCompensations: adaptiveCompensations,
-          editingScope: ProjectEditingScope.currentPhoto,
-          focusPhotoId: current.focusPhotoId ?? current.photos.first.id,
-        ),
-      );
-      return;
-    }
-    final result = await commitMetaOps(
-      changes: transition.changes,
-      source: EditSource.recommendation,
-      context: EditContext(
-        platform: EditContext.ios.platform,
-        photoIds: current.photos.map((photo) => photo.id).toSet(),
-      ),
-      recommendationId: recommendationId,
-      recommendationStyle: sharedStyle,
-      recommendationCompensations: adaptiveCompensations,
-    );
-    if (result is RejectedEdit) {
-      throw StateError('Recommendation rejected: ${result.reason.name}');
-    }
   }
 
   Future<void> setEditingScope(
@@ -552,39 +537,6 @@ class PhotoProjectSession extends ChangeNotifier {
       recipe: projectedProject.effectiveRecipeFor(focusPhotoId),
       state: result.state,
       context: effectiveContext,
-      sourceId: focusPhotoId,
-    );
-  }
-
-  PreparedMetaOpPreview? prepareRecommendationForPreview({
-    required SharedStyle sharedStyle,
-    required Map<String, AdaptiveCompensation> adaptiveCompensations,
-    required EditContext context,
-  }) {
-    final current = _project;
-    if (current == null) return null;
-    final transition = _legacyAdapter.tryEncodeTransition(
-      before: current.sharedStyle.recipe,
-      after: sharedStyle.recipe,
-      photoId: current.photos.first.id,
-    );
-    if (transition == null || transition.changes.isEmpty) return null;
-    final prepared = prepareMetaOpsForPreview(
-      changes: transition.changes,
-      source: EditSource.recommendation,
-      context: context,
-    );
-    if (prepared == null) return null;
-    final focusPhotoId = current.focusPhotoId ?? current.photos.first.id;
-    final projected = current.copyWith(
-      sharedStyle: sharedStyle,
-      adaptiveCompensations: adaptiveCompensations,
-      editState: prepared.state,
-    );
-    return PreparedMetaOpPreview(
-      recipe: projected.effectiveRecipeFor(focusPhotoId),
-      state: prepared.state,
-      context: prepared.context,
       sourceId: focusPhotoId,
     );
   }
@@ -820,9 +772,6 @@ class PhotoProjectSession extends ChangeNotifier {
     required EditContext context,
     Iterable<ImportedEditingResource> editingResources = const [],
     String? transactionId,
-    String? recommendationId,
-    SharedStyle? recommendationStyle,
-    Map<String, AdaptiveCompensation>? recommendationCompensations,
     ProjectEditOperationKind operationKind =
         ProjectEditOperationKind.scopedEdit,
     EditRecipe? beforePhotoOverrideRecipe,
@@ -832,11 +781,7 @@ class PhotoProjectSession extends ChangeNotifier {
     if (current == null) {
       throw StateError('A project is required before committing an edit');
     }
-    final selectingRecommendation =
-        source == EditSource.recommendation &&
-        current.flowState == PhotoProjectFlowState.choosingRecommendation;
-    if (current.flowState != PhotoProjectFlowState.editing &&
-        !selectingRecommendation) {
+    if (current.flowState != PhotoProjectFlowState.editing) {
       throw StateError('Edits can only be committed while editing');
     }
     if (changes.isEmpty) {
@@ -969,28 +914,6 @@ class PhotoProjectSession extends ChangeNotifier {
     next = next.copyWith(
       editingResources: registry,
       editState: result.state,
-      flowState: selectingRecommendation
-          ? PhotoProjectFlowState.editing
-          : next.flowState,
-      selectedRecommendationId: selectingRecommendation
-          ? recommendationId
-          : next.selectedRecommendationId,
-      sharedStyle: selectingRecommendation
-          ? SharedStyle(
-              recipe: next.sharedStyle.recipe,
-              family: recommendationStyle?.family ?? current.sharedStyle.family,
-              intensity: recommendationStyle?.intensity ?? 1,
-            )
-          : next.sharedStyle,
-      adaptiveCompensations: selectingRecommendation
-          ? recommendationCompensations ?? const {}
-          : next.adaptiveCompensations,
-      editingScope: selectingRecommendation
-          ? ProjectEditingScope.currentPhoto
-          : next.editingScope,
-      focusPhotoId: selectingRecommendation
-          ? current.focusPhotoId ?? current.photos.first.id
-          : next.focusPhotoId,
       recentTransactionIds: [
         ...current.recentTransactionIds,
         resolvedTransactionId,

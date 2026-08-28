@@ -9,7 +9,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
-import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/content_sha256.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/editing_core.dart';
@@ -23,7 +22,7 @@ import 'package:yingjian/features/project/application/photo_project_session.dart
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/project/infrastructure/app_owned_photo_importer.dart';
 import 'package:yingjian/features/project/infrastructure/json_photo_project_store.dart';
-import 'package:yingjian/features/recommendations/domain/photo_analysis.dart';
+import 'package:yingjian/features/photo_analysis/domain/photo_analysis.dart';
 
 import '../test/support/test_services.dart';
 
@@ -169,21 +168,6 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-start-editing')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('editor-recommendation-stage')),
-      findsOneWidget,
-    );
-    await tester.tap(find.byKey(const ValueKey('recommendation-confirm')));
-    await tester.pump();
-    for (
-      var attempt = 0;
-      attempt < 100 &&
-          (await store.loadLatest())?.flowState !=
-              PhotoProjectFlowState.editing;
-      attempt += 1
-    ) {
-      await tester.pump(const Duration(milliseconds: 50));
-    }
     final importedProject = await store.loadLatest();
     final importedPhoto = importedProject!.photos.single;
     expect(analyzer.photoIds, ['ios-runtime-photo']);
@@ -212,10 +196,6 @@ void main() {
       (snapshotPhotos.single! as Map<String, Object?>)['localPath'],
       'media/ios-runtime-photo.png',
     );
-    expect(
-      find.byKey(const ValueKey('editor-recommendation-stage')),
-      findsNothing,
-    );
     expect(find.byKey(const ValueKey('editor-preview-stage')), findsOneWidget);
     expect(
       find.byKey(const ValueKey('editor-bottom-command-bar')),
@@ -229,7 +209,7 @@ void main() {
     ) {
       await tester.pump(const Duration(milliseconds: 50));
     }
-    expect(previewRenderer.textureSmoothingStrengths, contains(0.5));
+    expect(previewRenderer.textureSmoothingStrengths, contains(0.0));
     expect(previewRenderer.maxEdges, contains(2048));
     expect(
       (await store.loadLatest())?.flowState,
@@ -240,18 +220,18 @@ void main() {
           ?.effectiveRecipeFor(importedPhoto.id)
           .portraitRecipe
           .textureSmoothing,
-      50,
+      0,
     );
     expect(
       (await store.loadLatest())
           ?.effectiveRecipeFor(importedPhoto.id)
           .portraitRecipe
           .blemishReduction,
-      20,
+      0,
     );
-    expect(previewRenderer.textureSmoothingStrengths.last, 0.5);
+    expect(previewRenderer.textureSmoothingStrengths.last, 0.0);
     expect(
-      find.byKey(const ValueKey('editor-batch-export')).hitTestable(),
+      find.byKey(const ValueKey('editor-export')).hitTestable(),
       findsOneWidget,
     );
 
@@ -268,9 +248,6 @@ void main() {
       '照片亮一点',
     );
     await tester.tap(find.byKey(const ValueKey('voice-edit-submit')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('voice-confirmation')), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('voice-edit-apply-preview')));
     await tester.pumpAndSettle();
     expect(
       (await store.loadLatest())!.effectiveRecipeFor(importedPhoto.id).exposure,
@@ -291,8 +268,6 @@ void main() {
       '皮肤自然一点',
     );
     await tester.tap(find.byKey(const ValueKey('voice-edit-submit')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('voice-edit-apply-preview')));
     await tester.pump(const Duration(milliseconds: 300));
     final aiTargetChoices = find.byWidgetPredicate((widget) {
       final key = widget.key;
@@ -713,7 +688,11 @@ void main() {
     await tester.ensureVisible(blueSaturation);
     await tester.pumpAndSettle();
     expect(blueSaturation.hitTestable(), findsOneWidget);
-    await tester.drag(blueSaturation, const Offset(70, 0));
+    final blueSaturationSlider = tester.widget<Slider>(blueSaturation);
+    blueSaturationSlider.onChangeStart!(blueSaturationSlider.value);
+    blueSaturationSlider.onChanged!(0.5);
+    await tester.pump();
+    blueSaturationSlider.onChangeEnd!(0.5);
     await tester.pumpAndSettle();
     final basicEditing = (await store.loadLatest())!
         .effectiveRecipeFor(importedPhoto.id)
@@ -772,14 +751,8 @@ void main() {
     await tester.ensureVisible(visualTracksEntry);
     await tester.tap(visualTracksEntry);
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('visual-tracks-page')), findsOneWidget);
-    expect(find.byKey(const ValueKey('visual-tracks-preview')), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('visual-tracks-open-era')),
-      findsOneWidget,
-    );
-    await tester.tap(find.byKey(const ValueKey('visual-tracks-open-era')));
-    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('visual-tracks-dock')), findsOneWidget);
+    expect(find.byKey(const ValueKey('editor-preview-stage')), findsOneWidget);
     final eraBefore = (await store.loadLatest())!.effectiveRecipeFor(
       importedPhoto.id,
     );
@@ -793,11 +766,9 @@ void main() {
     );
     expect(eraAfter, isNot(eraBefore));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('visual-tracks-continue')));
-    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('visual-track-lighting-tab')));
     await tester.pumpAndSettle();
-    final target = find.byKey(const ValueKey('lighting-overlay-target-0'));
+    final target = find.byKey(const ValueKey('lighting-target-0'));
     if (target.evaluate().isNotEmpty) {
       await tester.tap(target);
       await tester.pumpAndSettle();
@@ -815,17 +786,17 @@ void main() {
           .adjustments,
       isNotEmpty,
     );
-    await tester.binding.handlePopRoute();
+    await tester.tap(find.byKey(const ValueKey('visual-tracks-close')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
-    final saveButton = find.byKey(const ValueKey('editor-batch-export'));
+    expect(
+      find.byKey(const ValueKey('editor-bottom-command-bar')),
+      findsOneWidget,
+    );
+    final saveButton = find.byKey(const ValueKey('editor-export'));
     await tester.ensureVisible(saveButton);
     await tester.tap(saveButton);
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('editor-save-options')), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('save-current')));
-    await tester.tap(find.byKey(const ValueKey('save-confirm')));
-    await tester.pump();
     // Vision/Core Image cold starts on the iOS simulator can take several
     // minutes once portrait, semantic masks, filters, geometry, and targeted
     // directional lighting are combined. Wait for the real terminal result or
@@ -920,203 +891,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(restoredPreviewRenderer.disposeCount, 0);
   });
-
-  testWidgets(
-    'iOS runtime completes the production six-photo journey and retries only failures',
-    (tester) async {
-      final fixtureDirectory = await Directory.systemTemp.createTemp(
-        'yingjian-ios-six-photo-mvp-',
-      );
-      addTearDown(() => fixtureDirectory.delete(recursive: true));
-      final sourceBytes = await _createPngFixtureBytes();
-      final photos = <ProjectPhoto>[];
-      final originalBytes = <String, List<int>>{};
-      for (var index = 0; index < 6; index += 1) {
-        final id = 'ios-runtime-photo-${index + 1}';
-        final source = File('${fixtureDirectory.path}/$id.png');
-        await source.writeAsBytes(sourceBytes, flush: true);
-        originalBytes[source.path] = await source.readAsBytes();
-        photos.add(
-          ProjectPhoto(id: id, localPath: source.path, originalName: '$id.png'),
-        );
-      }
-      final store = MemoryPhotoProjectStore();
-      final exporter = _FailOnceRecordingExporter(
-        failOncePhotoId: 'ios-runtime-photo-4',
-      );
-      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
-      final settings = await AppSettings.load();
-
-      await tester.pumpWidget(
-        buildTestApp(
-          settings,
-          photoImporter: FakePhotoImporter(photos),
-          photoProjectStore: store,
-          photoExporter: exporter,
-          metaOpCapabilities: iosMetaOpCapabilities,
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-      await tester.pumpAndSettle();
-
-      expect(store.project?.photos, hasLength(6));
-      expect(
-        store.project?.analysisStates.values,
-        everyElement(PhotoAnalysisState.fallback),
-      );
-      expect(
-        store.project?.flowState,
-        PhotoProjectFlowState.choosingRecommendation,
-      );
-      await tester.tap(find.byKey(const ValueKey('recommendation-confirm')));
-      await tester.pumpAndSettle();
-      expect(store.project?.flowState, PhotoProjectFlowState.editing);
-      expect(store.project?.sharedStyle.family, SharedStyleFamily.naturalClean);
-      expect(store.project?.adaptiveCompensations, hasLength(6));
-
-      expect(find.byKey(const ValueKey('editor-scope-switch')), findsNothing);
-
-      await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
-      await tester.pumpAndSettle();
-      var workspace = find.byKey(const ValueKey('editor-tools-scroll'));
-
-      await _openManualMetaOp(tester, MetaOpIds.filter);
-      final groupCinematic = find.byKey(
-        const ValueKey('editor-filter-cinematic'),
-      );
-      await tester.ensureVisible(groupCinematic);
-      await tester.tap(groupCinematic);
-      await tester.pumpAndSettle();
-      expect(
-        store.project!.sharedStyle.recipe.basicEditingRecipe.filter,
-        PhotoFilter.cinematic,
-      );
-      expect(
-        store.project!.photos.map(
-          (photo) => store.project!
-              .effectiveRecipeFor(photo.id)
-              .basicEditingRecipe
-              .filter,
-        ),
-        everyElement(PhotoFilter.cinematic),
-      );
-      await _openManualMetaOp(tester, MetaOpIds.exposure);
-
-      final exposureSlider = find.byKey(
-        const ValueKey('editor-adjustment-exposure'),
-      );
-      await tester.dragUntilVisible(
-        exposureSlider,
-        workspace,
-        const Offset(0, -260),
-      );
-      await Scrollable.ensureVisible(
-        tester.element(exposureSlider),
-        alignment: 0.5,
-      );
-      await tester.pumpAndSettle();
-      expect(exposureSlider.hitTestable(), findsOneWidget);
-      final exposureControl = find.descendant(
-        of: exposureSlider,
-        matching: find.byType(Slider),
-      );
-      final exposureBefore = store.project!.sharedStyle.recipe.exposure;
-      await tester.drag(exposureControl, const Offset(70, 0));
-      await tester.pumpAndSettle();
-      final sharedExposure = store.project!.sharedStyle.recipe.exposure;
-      expect(sharedExposure, isNot(exposureBefore));
-
-      expect(find.byKey(const ValueKey('editor-scope-menu')), findsNothing);
-      await tester.fling(
-        find.byKey(const ValueKey('editor-swipe-photos')),
-        const Offset(-500, 0),
-        1200,
-      );
-      await tester.pumpAndSettle();
-      workspace = find.byKey(const ValueKey('editor-tools-scroll'));
-      for (final category in <String>[
-        'composition',
-        'color',
-        'filters',
-        'quality',
-        'semantic',
-      ]) {
-        expect(
-          find.byKey(ValueKey('editor-tool-category-$category')),
-          findsNothing,
-        );
-      }
-      final contrastTab = find.byKey(
-        const ValueKey('editor-adjustment-tab-contrast'),
-      );
-      await tester.ensureVisible(contrastTab);
-      await tester.pumpAndSettle();
-      await tester.tap(contrastTab);
-      await tester.pumpAndSettle();
-      final contrastSlider = find.byKey(
-        const ValueKey('editor-adjustment-contrast'),
-      );
-      await tester.ensureVisible(contrastSlider);
-      await tester.pumpAndSettle();
-      expect(contrastSlider.hitTestable(), findsOneWidget);
-      await tester.drag(contrastSlider, const Offset(60, 0));
-      await tester.pumpAndSettle();
-
-      expect(store.project?.photoOverrides, isEmpty);
-      expect(store.project?.sharedStyle.recipe.exposure, sharedExposure);
-      expect(
-        store.project?.effectiveRecipeFor('ios-runtime-photo-1').contrast,
-        store.project?.effectiveRecipeFor('ios-runtime-photo-2').contrast,
-      );
-
-      await tester.tap(find.byKey(const ValueKey('editor-tools-done')));
-      await tester.pumpAndSettle();
-      final exportButton = find.byKey(const ValueKey('editor-batch-export'));
-      await tester.ensureVisible(exportButton);
-      await tester.tap(exportButton);
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('save-all')));
-      await tester.tap(find.byKey(const ValueKey('save-confirm')));
-      await tester.pumpAndSettle();
-
-      expect(exporter.photoIds, [
-        'ios-runtime-photo-1',
-        'ios-runtime-photo-2',
-        'ios-runtime-photo-3',
-        'ios-runtime-photo-4',
-        'ios-runtime-photo-5',
-        'ios-runtime-photo-6',
-      ]);
-      expect(
-        store.project?.exportStates['ios-runtime-photo-4'],
-        PhotoExportState.failed,
-      );
-      expect(find.byKey(const ValueKey('export-retry-failed')), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('export-retry-failed')));
-      await tester.pumpAndSettle();
-
-      expect(
-        store.project?.exportStates.values,
-        everyElement(PhotoExportState.saved),
-      );
-      expect(exporter.photoIds.last, 'ios-runtime-photo-4');
-      expect(exporter.photoIds, hasLength(7));
-      expect(
-        exporter.recipes.map((recipe) => recipe.basicEditingRecipe.filter),
-        everyElement(PhotoFilter.cinematic),
-      );
-      for (final photo in photos) {
-        expect(
-          await File(photo.localPath).readAsBytes(),
-          originalBytes[photo.localPath],
-        );
-      }
-      await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pumpAndSettle();
-    },
-  );
 }
 
 Future<List<int>> _createPngFixtureBytes() async {
@@ -1344,28 +1118,5 @@ final class _ApplicablePortraitAnalyzer implements PhotoAnalyzer {
       ],
       scene: SceneKind.people,
     );
-  }
-}
-
-final class _FailOnceRecordingExporter implements PhotoExporter {
-  _FailOnceRecordingExporter({required this.failOncePhotoId});
-
-  final String failOncePhotoId;
-  final List<String> photoIds = [];
-  final List<EditRecipe> recipes = [];
-  bool _failed = false;
-
-  @override
-  Future<ExportedPhoto> export({
-    required ProjectPhoto photo,
-    required EditRecipe recipe,
-  }) async {
-    photoIds.add(photo.id);
-    recipes.add(recipe);
-    if (photo.id == failOncePhotoId && !_failed) {
-      _failed = true;
-      throw StateError('injected iOS runtime export failure');
-    }
-    return ExportedPhoto(assetId: 'export-${photo.id}', width: 2, height: 2);
   }
 }

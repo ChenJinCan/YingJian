@@ -120,7 +120,6 @@ final class MetaOpAvailability {
   const MetaOpAvailability._({
     required this.manualIds,
     required this.searchIds,
-    required this.recommendationIds,
     required this.aiProposalIds,
     required this.aiProductionIds,
     required this.ignoredRemoteIds,
@@ -172,7 +171,6 @@ final class MetaOpAvailability {
     return MetaOpAvailability._(
       manualIds: List.unmodifiable(manual),
       searchIds: List.unmodifiable(manual),
-      recommendationIds: List.unmodifiable(manual),
       aiProposalIds: List.unmodifiable(aiProposal),
       aiProductionIds: List.unmodifiable(aiProduction),
       ignoredRemoteIds: Set.unmodifiable(
@@ -183,7 +181,6 @@ final class MetaOpAvailability {
 
   final List<String> manualIds;
   final List<String> searchIds;
-  final List<String> recommendationIds;
   final List<String> aiProposalIds;
   final List<String> aiProductionIds;
   final Set<String> ignoredRemoteIds;
