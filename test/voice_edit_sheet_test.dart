@@ -54,6 +54,50 @@ void main() {
     expect(field.controller?.text, '照片亮一点');
   });
 
+  testWidgets('apply waits for the Chinese IME to commit its composition', (
+    tester,
+  ) async {
+    String? applied;
+    await tester.pumpWidget(
+      _TestHost(
+        child: VoiceEditSheet(
+          transcriber: _FakeSpeechTranscriber(),
+          onSubmit: (intent) {
+            applied = intent;
+            return true;
+          },
+        ),
+      ),
+    );
+
+    final field = find.byKey(const ValueKey('voice-edit-text-field'));
+    await tester.tap(field);
+    await tester.showKeyboard(field);
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: '白yid',
+        selection: TextSelection.collapsed(offset: 4),
+        composing: TextRange(start: 1, end: 4),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const ValueKey('voice-edit-submit')));
+    tester.widget<TextField>(field).controller!.value = const TextEditingValue(
+      text: '白一点',
+      selection: TextSelection.collapsed(offset: 3),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('voice-clarification')), findsOneWidget);
+    tester
+        .widget<FilledButton>(find.byKey(const ValueKey('voice-clarify-photo')))
+        .onPressed!();
+    await tester.pumpAndSettle();
+
+    expect(applied, '白一点，调整整张照片');
+  });
+
   testWidgets('the compact sheet keeps one clear text and voice entry', (
     tester,
   ) async {

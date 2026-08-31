@@ -22,6 +22,41 @@ abstract interface class PhotoExportStageAware {
   ValueListenable<PhotoExportStage> get stage;
 }
 
+abstract interface class PhotoResultPreparer {
+  PhotoPreparation prepareCanonical({
+    required ProjectPhoto photo,
+    required EditRecipe recipe,
+    required EditState editState,
+    required EditContext editContext,
+    required PhotoExportOptions options,
+  });
+}
+
+abstract interface class PhotoPreparation {
+  String get requestId;
+  Future<PreparedPhoto> get result;
+  Future<void> cancel();
+}
+
+@immutable
+final class PreparedPhoto {
+  const PreparedPhoto({
+    required this.requestId,
+    required this.localPath,
+    required this.width,
+    required this.height,
+  });
+
+  final String requestId;
+  final String localPath;
+  final int width;
+  final int height;
+}
+
+final class PhotoPreparationCanceled implements Exception {
+  const PhotoPreparationCanceled();
+}
+
 abstract interface class ConfigurablePhotoExporter implements PhotoExporter {
   Future<ExportedPhoto> exportWithOptions({
     required ProjectPhoto photo,

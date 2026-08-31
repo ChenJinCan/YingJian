@@ -26,6 +26,8 @@ final class AppNavigatorObserver extends NavigatorObserver {
     final screen = switch (routeName) {
       AppRoutes.home => 'home',
       AppRoutes.editor => 'editor',
+      AppRoutes.applyStyleWorkspace => 'apply_style_workspace',
+      AppRoutes.motionStyleWorkspace => 'motion_style_workspace',
       AppRoutes.settings => 'settings',
       AppRoutes.privacy => 'privacy_policy',
       AppRoutes.terms => 'terms_of_use',

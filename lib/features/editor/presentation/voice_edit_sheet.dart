@@ -23,6 +23,7 @@ class VoiceEditSheet extends StatefulWidget {
 
 class _VoiceEditSheetState extends State<VoiceEditSheet> {
   final TextEditingController _controller = TextEditingController();
+  final FocusNode _textFocusNode = FocusNode();
   _VoiceStage _stage = _VoiceStage.compose;
   bool _listening = false;
   bool _applying = false;
@@ -31,6 +32,7 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
   @override
   void dispose() {
     if (_listening) unawaited(widget.transcriber.stop());
+    _textFocusNode.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -61,8 +63,14 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
     }
   }
 
-  void _prepare() {
+  Future<void> _prepare() async {
     if (_applying || _listening) return;
+    final composing = _controller.value.composing;
+    if (composing.isValid && !composing.isCollapsed) {
+      _textFocusNode.unfocus();
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+    }
     final intent = _controller.text.trim();
     if (intent.isEmpty) {
       setState(() => _error = context.l10n.voiceEditUnsupported);
@@ -80,7 +88,11 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
 
   bool _needsBrightnessClarification(String intent) {
     final lower = intent.toLowerCase();
-    final brightness = lower.contains('亮') || lower.contains('brighter');
+    final brightness =
+        lower.contains('亮') ||
+        lower.contains('白') ||
+        lower.contains('brighter') ||
+        lower.contains('whiter');
     final scoped = [
       '人物',
       '人像',
@@ -194,10 +206,11 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
       TextField(
         key: const ValueKey('voice-edit-text-field'),
         controller: _controller,
+        focusNode: _textFocusNode,
         minLines: 2,
         maxLines: 4,
         textInputAction: TextInputAction.done,
-        onSubmitted: (_) => _prepare(),
+        onSubmitted: (_) => unawaited(_prepare()),
         decoration: InputDecoration(
           hintText: context.l10n.voiceEditHint,
           prefixIcon: const Icon(Icons.keyboard_alt_outlined),
@@ -243,7 +256,9 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
           Expanded(
             child: FilledButton.icon(
               key: const ValueKey('voice-edit-submit'),
-              onPressed: _applying || _listening ? null : _prepare,
+              onPressed: _applying || _listening
+                  ? null
+                  : () => unawaited(_prepare()),
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(54),
               ),
@@ -282,8 +297,8 @@ class _VoiceEditSheetState extends State<VoiceEditSheet> {
       const SizedBox(height: 30),
       Text(
         _zh
-            ? '你想让人物更亮，\n还是整张照片更亮？'
-            : 'Should the person be brighter,\nor the whole photo?',
+            ? '你想调整人物，\n还是整张照片？'
+            : 'Should this adjust the person,\nor the whole photo?',
         textAlign: TextAlign.center,
         style: Theme.of(context).textTheme.headlineSmall?.copyWith(
           fontWeight: FontWeight.w800,

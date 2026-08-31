@@ -48,7 +48,12 @@ abstract interface class ReleasablePhotoSource implements PhotoSource {
   Future<void> releasePhotos(List<SelectedPhoto> photos);
 }
 
-final class AppOwnedPhotoImporter implements EditingResourceImporter {
+abstract interface class CancelablePhotoSource implements PhotoSource {
+  Future<void> cancelPick();
+}
+
+final class AppOwnedPhotoImporter
+    implements EditingResourceImporter, CancelablePhotoImporter {
   static const maxFileBytes = 100 * 1024 * 1024;
   static const maxPixelCount = 48 * 1000 * 1000;
   static const maxEdge = 12000;
@@ -82,12 +87,26 @@ final class AppOwnedPhotoImporter implements EditingResourceImporter {
   final HeifSupportProvider _supportsHeif;
   final PhotoInspectionProvider _inspectPhoto;
   final String Function() _createId;
+  final Set<_PhotoImportOperation> _activeImports = {};
+
+  @override
+  Future<void> cancelImport() async {
+    for (final operation in _activeImports.toList(growable: false)) {
+      operation.isCanceled = true;
+    }
+    final source = _source;
+    if (source is CancelablePhotoSource) await source.cancelPick();
+  }
 
   @override
   Future<PhotoImportBatch> importPhotos({required int limit}) async {
-    final selected = await _source.pickPhotos(limit: limit);
-    PhotoImportBatch? completedBatch;
+    final operation = _PhotoImportOperation();
+    _activeImports.add(operation);
+    var selected = const <SelectedPhoto>[];
+    var completedBatch = const PhotoImportBatch();
     try {
+      selected = await _source.pickPhotos(limit: limit);
+      _checkCanceled(operation);
       if (selected.length > limit) {
         throw StateError('Photo source returned more than the requested limit');
       }
@@ -96,26 +115,38 @@ final class AppOwnedPhotoImporter implements EditingResourceImporter {
       }
 
       final directory = await _mediaDirectory();
+      _checkCanceled(operation);
       await directory.create(recursive: true);
+      _checkCanceled(operation);
+      await _cleanupAbandonedImports(directory);
+      _checkCanceled(operation);
       final imported = <ProjectPhoto>[];
       final failures = <PhotoImportFailure>[];
       for (final photo in selected) {
+        _checkCanceled(operation);
         File? destination;
         try {
           await _validateInput(photo, supportsHeif: _supportsHeif);
+          _checkCanceled(operation);
           final id = _createId();
           destination = File('${directory.path}/$id.importing');
+          operation.ownedPaths.add(destination.path);
           await File(photo.path).copy(destination.path);
+          _checkCanceled(operation);
           await _validateInput(
             SelectedPhoto(path: destination.path, name: photo.name),
             supportsHeif: _supportsHeif,
           );
+          _checkCanceled(operation);
           final inspection = await _inspectPhoto(destination.path);
+          _checkCanceled(operation);
           _validateInspection(inspection);
           final finalCopy = File(
             '${directory.path}/$id${_extensionFor(inspection.inputFormat)}',
           );
+          operation.ownedPaths.add(finalCopy.path);
           await destination.rename(finalCopy.path);
+          _checkCanceled(operation);
           destination = finalCopy;
           imported.add(
             ProjectPhoto(
@@ -157,21 +188,29 @@ final class AppOwnedPhotoImporter implements EditingResourceImporter {
         }
       }
       completedBatch = PhotoImportBatch(photos: imported, failures: failures);
-      return completedBatch;
+    } on _PhotoImportCanceled {
+      await _deleteOwnedCopies(operation);
+      completedBatch = const PhotoImportBatch();
     } finally {
       final source = _source;
       if (selected.isNotEmpty && source is ReleasablePhotoSource) {
         try {
           await source.releasePhotos(selected);
         } catch (_) {
-          for (final photo
-              in completedBatch?.photos ?? const <ProjectPhoto>[]) {
+          for (final photo in completedBatch.photos) {
             await _deleteIfExists(File(photo.localPath));
           }
+          _activeImports.remove(operation);
           rethrow;
         }
       }
+      _activeImports.remove(operation);
     }
+    if (operation.isCanceled) {
+      await _deleteOwnedCopies(operation);
+      return const PhotoImportBatch();
+    }
+    return completedBatch;
   }
 
   @override
@@ -273,6 +312,43 @@ final class AppOwnedPhotoImporter implements EditingResourceImporter {
     } on FileSystemException {
       // The import failure remains item-scoped even if best-effort cleanup fails.
     }
+  }
+
+  static void _checkCanceled(_PhotoImportOperation operation) {
+    if (operation.isCanceled) throw const _PhotoImportCanceled();
+  }
+
+  static Future<void> _deleteOwnedCopies(
+    _PhotoImportOperation operation,
+  ) async {
+    for (final path in operation.ownedPaths) {
+      await _deleteIfExists(File(path));
+    }
+  }
+
+  Future<void> _cleanupAbandonedImports(Directory directory) async {
+    try {
+      await for (final entity in directory.list(followLinks: false)) {
+        if (entity is! File || !entity.path.endsWith('.importing')) continue;
+        if (_isActiveImportPath(entity.path)) continue;
+        try {
+          if (!await entity.exists() || _isActiveImportPath(entity.path)) {
+            continue;
+          }
+          await entity.delete();
+        } on FileSystemException {
+          // A later import can retry cleanup without blocking this selection.
+        }
+      }
+    } on FileSystemException {
+      // Importing the selected photo remains useful if stale cleanup is denied.
+    }
+  }
+
+  bool _isActiveImportPath(String path) {
+    return _activeImports.any(
+      (operation) => operation.ownedPaths.contains(path),
+    );
   }
 
   static void _validateInspection(PhotoContentInspection inspection) {
@@ -609,6 +685,15 @@ final class AppOwnedPhotoImporter implements EditingResourceImporter {
       ),
     );
   }
+}
+
+final class _PhotoImportOperation {
+  bool isCanceled = false;
+  final Set<String> ownedPaths = {};
+}
+
+final class _PhotoImportCanceled implements Exception {
+  const _PhotoImportCanceled();
 }
 
 final class _PhotoValidationException implements Exception {

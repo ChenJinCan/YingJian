@@ -2277,11 +2277,7 @@ class _EditorToolsDockState extends State<_EditorToolsDock> {
 
   void _freezeManualOrder() {
     _frozenManualMetaOpIds = widget.editorSession.orderedManualMetaOpIds(
-      applicability: {
-        'photo',
-        if (widget.photoToolsVisible && widget.portraitApplicable) 'face',
-        if (widget.photoToolsVisible && widget.bodyApplicable) 'body',
-      },
+      applicability: const {'photo', 'face', 'body'},
     );
   }
 
@@ -2365,14 +2361,7 @@ class _EditorToolsDockState extends State<_EditorToolsDock> {
               child: _showAllTools
                   ? _InlineMetaOpBrowser(
                       editorSession: widget.editorSession,
-                      applicability: {
-                        'photo',
-                        if (widget.photoToolsVisible &&
-                            widget.portraitApplicable)
-                          'face',
-                        if (widget.photoToolsVisible && widget.bodyApplicable)
-                          'body',
-                      },
+                      applicability: const {'photo', 'face', 'body'},
                       onSelected: (selected) => setState(() {
                         _selectedMetaOpId = selected;
                         _showAllTools = false;
@@ -3700,34 +3689,6 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
         oldWidget.initialMetaOpId != widget.initialMetaOpId) {
       _selected = _initialSelection();
       _selectedStableFaceTargetId = _preferredStableFaceTargetId();
-      return;
-    }
-    if ((!oldWidget.portraitAvailable || !oldWidget.photoToolsVisible) &&
-        widget.portraitAvailable &&
-        widget.photoToolsVisible) {
-      _selected = _AdjustmentParameter.naturalBeautification;
-    } else if ((oldWidget.portraitAvailable || oldWidget.photoToolsVisible) &&
-        (!widget.portraitAvailable || !widget.photoToolsVisible) &&
-        (_selected == _AdjustmentParameter.naturalBeautification ||
-            _selected == _AdjustmentParameter.textureSmoothing ||
-            _selected == _AdjustmentParameter.skinToneLighting ||
-            _selected == _AdjustmentParameter.blemishReduction ||
-            _selected == _AdjustmentParameter.faceSlim)) {
-      _selected = widget.photoToolsVisible && widget.bodyAvailable
-          ? _AdjustmentParameter.bodySlim
-          : _AdjustmentParameter.exposure;
-    }
-    if ((!oldWidget.bodyAvailable || !oldWidget.photoToolsVisible) &&
-        widget.bodyAvailable &&
-        widget.photoToolsVisible &&
-        !widget.portraitAvailable) {
-      _selected = _AdjustmentParameter.bodySlim;
-    } else if ((oldWidget.bodyAvailable || oldWidget.photoToolsVisible) &&
-        (!widget.bodyAvailable || !widget.photoToolsVisible) &&
-        _selected == _AdjustmentParameter.bodySlim) {
-      _selected = widget.photoToolsVisible && widget.portraitAvailable
-          ? _AdjustmentParameter.naturalBeautification
-          : _AdjustmentParameter.exposure;
     }
   }
 
@@ -3737,15 +3698,9 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
     final selected =
         parameters.contains(_selected) ||
             (widget.photoToolsVisible && _isQualityDetail(_selected)) ||
-            (widget.photoToolsVisible &&
-                widget.portraitAvailable &&
-                _isNaturalDetail(_selected)) ||
-            (widget.photoToolsVisible &&
-                widget.faceSlimAvailable &&
-                _isFaceGeometry(_selected)) ||
-            (widget.photoToolsVisible &&
-                widget.bodyAvailable &&
-                _isBodyGeometry(_selected))
+            (widget.photoToolsVisible && _isNaturalDetail(_selected)) ||
+            (widget.photoToolsVisible && _isFaceGeometry(_selected)) ||
+            (widget.photoToolsVisible && _isBodyGeometry(_selected))
         ? _selected
         : parameters.first;
     var effectiveRecipe = widget.editorSession.recipe;
@@ -3765,6 +3720,7 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
     final selectedValue = _value(effectiveRecipe, selected);
     final selectedIsPortrait = _isPortrait(selected);
     final selectedIsQuality = _isQuality(selected);
+    final selectedAvailable = _isSelectedToolAvailable(selected);
     final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.3;
     final portraitReady =
         widget.photoToolsVisible &&
@@ -3820,24 +3776,6 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
           _PortraitToolStatus(
             photoToolsVisible: widget.photoToolsVisible,
             available: false,
-          ),
-        ],
-        if (widget.scope == _AdjustmentToolScope.portrait &&
-            widget.photoToolsVisible &&
-            widget.portraitAvailable &&
-            !widget.faceSlimAvailable) ...[
-          const SizedBox(height: 6),
-          Text(
-            widget.faceSlimReason == PortraitDegradationReason.backgroundRisk
-                ? context.l10n.faceSlimBackgroundProtected
-                : widget.faceSlimReason ==
-                      PortraitDegradationReason.multipleFaces
-                ? context.l10n.faceSlimMultipleFaces
-                : context.l10n.faceSlimUnavailable,
-            key: const ValueKey('editor-face-slim-unavailable'),
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
           ),
         ],
         const SizedBox(height: 8),
@@ -3981,7 +3919,18 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
           ),
         ],
         const SizedBox(height: 8),
-        if (selected == _AdjustmentParameter.qualityImprovement)
+        if (!selectedAvailable)
+          _SelectedToolUnavailable(
+            key: ValueKey(
+              _isFaceGeometry(selected)
+                  ? 'editor-face-slim-unavailable'
+                  : _isBodyGeometry(selected)
+                  ? 'editor-body-tools-unavailable'
+                  : 'editor-portrait-tools-unavailable',
+            ),
+            message: _selectedToolUnavailableMessage(context, selected),
+          )
+        else if (selected == _AdjustmentParameter.qualityImprovement)
           Row(
             children: [
               Expanded(
@@ -4220,6 +4169,31 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
     required double selectedValue,
   }) {
     final colors = Theme.of(context).colorScheme;
+    if (!_isSelectedToolAvailable(selected)) {
+      return Column(
+        key: const ValueKey('editor-adjustment-section'),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            selectedLabel,
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          _SelectedToolUnavailable(
+            key: ValueKey(
+              _isFaceGeometry(selected)
+                  ? 'editor-face-slim-unavailable'
+                  : _isBodyGeometry(selected)
+                  ? 'editor-body-tools-unavailable'
+                  : 'editor-portrait-tools-unavailable',
+            ),
+            message: _selectedToolUnavailableMessage(context, selected),
+          ),
+        ],
+      );
+    }
     if (_isNaturalDetail(selected) && _currentStableFaceTarget() == null) {
       return Column(
         key: const ValueKey('editor-adjustment-section'),
@@ -4560,11 +4534,9 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
             ? _AdjustmentParameter.noiseReduction
             : _AdjustmentParameter.qualityImprovement,
       _AdjustmentToolScope.portrait =>
-        widget.photoToolsVisible && widget.portraitAvailable
-            ? widget.compact
-                  ? _AdjustmentParameter.textureSmoothing
-                  : _AdjustmentParameter.naturalBeautification
-            : _AdjustmentParameter.bodySlim,
+        widget.compact
+            ? _AdjustmentParameter.textureSmoothing
+            : _AdjustmentParameter.naturalBeautification,
     };
   }
 
@@ -4592,20 +4564,39 @@ class _AdjustmentToolStripState extends State<_AdjustmentToolStrip> {
           ? _qualityDetailParameters
           : const [_AdjustmentParameter.qualityImprovement],
     _AdjustmentToolScope.portrait => [
-      if (widget.compact &&
-          widget.photoToolsVisible &&
-          widget.portraitAvailable)
+      if (widget.compact && widget.photoToolsVisible)
         ..._naturalDetailParameters,
-      if (!widget.compact &&
-          widget.photoToolsVisible &&
-          widget.portraitAvailable)
+      if (!widget.compact && widget.photoToolsVisible)
         _AdjustmentParameter.naturalBeautification,
-      if (widget.photoToolsVisible && widget.faceSlimAvailable)
-        _AdjustmentParameter.faceSlim,
-      if (widget.photoToolsVisible && widget.bodyAvailable)
-        _AdjustmentParameter.bodySlim,
+      if (widget.photoToolsVisible) _AdjustmentParameter.faceSlim,
+      if (widget.photoToolsVisible) _AdjustmentParameter.bodySlim,
     ],
   };
+
+  bool _isSelectedToolAvailable(_AdjustmentParameter parameter) {
+    if (_isNaturalDetail(parameter) ||
+        parameter == _AdjustmentParameter.naturalBeautification) {
+      return widget.portraitAvailable;
+    }
+    if (_isFaceGeometry(parameter)) return widget.faceSlimAvailable;
+    if (_isBodyGeometry(parameter)) return widget.bodyAvailable;
+    return true;
+  }
+
+  String _selectedToolUnavailableMessage(
+    BuildContext context,
+    _AdjustmentParameter parameter,
+  ) {
+    if (_isFaceGeometry(parameter)) {
+      return widget.faceSlimReason == PortraitDegradationReason.backgroundRisk
+          ? context.l10n.faceSlimBackgroundProtected
+          : widget.faceSlimReason == PortraitDegradationReason.multipleFaces
+          ? context.l10n.faceSlimMultipleFaces
+          : context.l10n.faceSlimUnavailable;
+    }
+    if (_isBodyGeometry(parameter)) return context.l10n.bodyToolsUnavailable;
+    return context.l10n.portraitToolsUnavailable;
+  }
 
   List<_AdjustmentParameter> _commonParameters() {
     final applicability = <String>{
@@ -5342,6 +5333,44 @@ class _PortraitToolStatus extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SelectedToolUnavailable extends StatelessWidget {
+  const _SelectedToolUnavailable({super.key, required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    liveRegion: true,
+    container: true,
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.info_outline,
+            size: 18,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _AdjustmentToolButton extends StatelessWidget {

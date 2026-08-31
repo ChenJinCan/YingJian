@@ -3,7 +3,8 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:yingjian/features/project/infrastructure/app_owned_photo_importer.dart';
 
-final class MethodChannelPhotoSource implements ReleasablePhotoSource {
+final class MethodChannelPhotoSource
+    implements ReleasablePhotoSource, CancelablePhotoSource {
   const MethodChannelPhotoSource({
     this.channel = const MethodChannel('yingjian/photo_picker'),
     this.selectionTimeout = const Duration(seconds: 105),
@@ -28,6 +29,9 @@ final class MethodChannelPhotoSource implements ReleasablePhotoSource {
         )
         .toList(growable: false);
   }
+
+  @override
+  Future<void> cancelPick() => channel.invokeMethod<void>('cancelPhotos');
 
   @override
   Future<void> releasePhotos(List<SelectedPhoto> photos) {

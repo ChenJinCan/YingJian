@@ -509,12 +509,13 @@ struct IOSBodyReshapeTargetContext {
 /// A missing mask is an intentional safe no-op for ineligible or failed analysis.
 struct IOSPortraitRetouchContext {
   let effectiveMask: CIImage?
+  let faceTargets: [IOSFaceSlimTargetContext]
   let faceSlimTargets: [IOSFaceSlimTargetContext]
   let bodyReshapeTargets: [IOSBodyReshapeTargetContext]
   let semanticSubjectMask: CIImage?
 
   var faceSlimGeometry: IOSFaceSlimGeometry? { faceSlimTargets.first?.geometry }
-  var faceMask: CIImage? { faceSlimTargets.first?.mask }
+  var faceMask: CIImage? { faceTargets.first?.mask }
   var bodySlimGeometry: IOSBodySlimGeometry? { bodyReshapeTargets.first?.geometry }
   var personMask: CIImage? { bodyReshapeTargets.first?.personMask }
   var combinedPersonMask: CIImage? {
@@ -533,6 +534,7 @@ struct IOSPortraitRetouchContext {
     effectiveMask: CIImage?,
     faceSlimGeometry: IOSFaceSlimGeometry? = nil,
     faceMask: CIImage? = nil,
+    faceTargets: [IOSFaceSlimTargetContext]? = nil,
     faceSlimTargets: [IOSFaceSlimTargetContext]? = nil,
     bodyReshapeTargets: [IOSBodyReshapeTargetContext]? = nil,
     semanticSubjectMask: CIImage? = nil,
@@ -540,15 +542,18 @@ struct IOSPortraitRetouchContext {
     personMask: CIImage? = nil
   ) {
     self.effectiveMask = effectiveMask
+    let resolvedFaceSlimTargets: [IOSFaceSlimTargetContext]
     if let faceSlimTargets {
-      self.faceSlimTargets = faceSlimTargets
+      resolvedFaceSlimTargets = faceSlimTargets
     } else if let faceSlimGeometry, let faceMask {
-      self.faceSlimTargets = [
+      resolvedFaceSlimTargets = [
         IOSFaceSlimTargetContext(geometry: faceSlimGeometry, mask: faceMask)
       ]
     } else {
-      self.faceSlimTargets = []
+      resolvedFaceSlimTargets = []
     }
+    self.faceSlimTargets = resolvedFaceSlimTargets
+    self.faceTargets = faceTargets ?? resolvedFaceSlimTargets
     if let bodyReshapeTargets {
       self.bodyReshapeTargets = bodyReshapeTargets
     } else if let bodySlimGeometry, let personMask {
@@ -563,6 +568,7 @@ struct IOSPortraitRetouchContext {
 
   static let unavailable = IOSPortraitRetouchContext(
     effectiveMask: nil,
+    faceTargets: [],
     faceSlimTargets: [],
     bodyReshapeTargets: [],
     semanticSubjectMask: nil
@@ -1144,6 +1150,7 @@ enum IOSPortraitRetoucher {
     }
 
     var effectiveMask: CIImage?
+    var faceTargets: [IOSFaceSlimTargetContext] = []
     var faceSlimTargets: [IOSFaceSlimTargetContext] = []
 
     let request = VNDetectFaceLandmarksRequest()
@@ -1190,25 +1197,26 @@ enum IOSPortraitRetoucher {
       for face in eligible.prefix(IOSMultiFaceNonGeometricSafetyPolicy.maximumFaceCount) {
         guard
           let singleFaceMasks = try? masks(observations: [face], extent: proxyExtent),
-          let proxyGeometry = faceSlimGeometry(face: face, size: proxyExtent.size),
-          IOSReshapeBackgroundSafetyPolicy.isEligible(
-            source: CIImage(cgImage: proxyImage),
-            subjectMask: singleFaceMasks.candidate,
-            influenceRect: proxyGeometry.influenceRect
-          )
+          let proxyGeometry = faceSlimGeometry(face: face, size: proxyExtent.size)
         else {
           continue
         }
-        faceSlimTargets.append(
-          IOSFaceSlimTargetContext(
-            geometry: proxyGeometry.scaled(x: scaleX, y: scaleY),
-            mask: singleFaceMasks.candidate
-              .transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
-              .cropped(to: extent),
-            features: faceFeatureGeometry(face: face, size: proxyExtent.size)
-              .scaled(x: scaleX, y: scaleY)
-          )
+        let target = IOSFaceSlimTargetContext(
+          geometry: proxyGeometry.scaled(x: scaleX, y: scaleY),
+          mask: singleFaceMasks.candidate
+            .transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
+            .cropped(to: extent),
+          features: faceFeatureGeometry(face: face, size: proxyExtent.size)
+            .scaled(x: scaleX, y: scaleY)
         )
+        faceTargets.append(target)
+        if IOSReshapeBackgroundSafetyPolicy.isEligible(
+          source: CIImage(cgImage: proxyImage),
+          subjectMask: singleFaceMasks.candidate,
+          influenceRect: proxyGeometry.influenceRect
+        ) {
+          faceSlimTargets.append(target)
+        }
       }
     }
 
@@ -1218,7 +1226,7 @@ enum IOSPortraitRetoucher {
       targetExtent: extent
     )
 #if targetEnvironment(simulator)
-    let semanticSubjectMask = bodies.first?.personMask ?? faceSlimTargets.first?.mask
+    let semanticSubjectMask = bodies.first?.personMask ?? faceTargets.first?.mask
 #else
     let semanticSubjectMask = preparePersonSegmentationMask(
       proxyImage: proxyImage,
@@ -1228,6 +1236,7 @@ enum IOSPortraitRetoucher {
 #endif
     return IOSPortraitRetouchContext(
       effectiveMask: effectiveMask,
+      faceTargets: faceTargets,
       faceSlimTargets: faceSlimTargets,
       bodyReshapeTargets: bodies,
       semanticSubjectMask: semanticSubjectMask

@@ -16,6 +16,7 @@ final class JsonPhotoProjectStore implements PhotoProjectCatalogStore {
 
   final ProjectDirectoryProvider _directory;
   String? _activeProjectId;
+  String? _projectBeforeNewId;
   bool _startingNewProject = false;
 
   @override
@@ -67,19 +68,41 @@ final class JsonPhotoProjectStore implements PhotoProjectCatalogStore {
   }
 
   @override
+  Future<PhotoProject?> loadProject(String projectId) async {
+    final root = await _directory();
+    final file = _projectFile(root, projectId);
+    if (await file.exists()) return _readProject(root, file);
+    final legacy = _legacyProjectFile(root);
+    if (!await legacy.exists()) return null;
+    final project = await _readProject(root, legacy);
+    return project.id == projectId ? project : null;
+  }
+
+  @override
   Future<void> activateProject(String projectId) async {
-    final exists = (await loadProjects()).any(
-      (project) => project.id == projectId,
-    );
-    if (!exists) throw StateError('Photo project does not exist');
+    if (await loadProject(projectId) == null) {
+      throw StateError('Photo project does not exist');
+    }
     _activeProjectId = projectId;
+    _projectBeforeNewId = null;
     _startingNewProject = false;
   }
 
   @override
   Future<void> startNewProject() async {
+    if (_startingNewProject) return;
+    final previous = await loadLatest();
+    _projectBeforeNewId = previous?.id;
     _activeProjectId = null;
     _startingNewProject = true;
+  }
+
+  @override
+  Future<void> cancelNewProject() async {
+    if (!_startingNewProject && _projectBeforeNewId == null) return;
+    _activeProjectId = _projectBeforeNewId;
+    _projectBeforeNewId = null;
+    _startingNewProject = false;
   }
 
   Future<PhotoProject> _readProject(Directory root, File file) async {
@@ -128,6 +151,7 @@ final class JsonPhotoProjectStore implements PhotoProjectCatalogStore {
 
   @override
   Future<void> save(PhotoProject project) async {
+    final completingNewProject = _startingNewProject;
     if (project.requiresUpdate) {
       throw StateError(
         'A project with unknown meta operations is read-only until update',
@@ -193,6 +217,7 @@ final class JsonPhotoProjectStore implements PhotoProjectCatalogStore {
       await legacy.delete();
     }
     _activeProjectId = project.id;
+    if (!completingNewProject) _projectBeforeNewId = null;
     _startingNewProject = false;
   }
 

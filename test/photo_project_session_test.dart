@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yingjian/features/creation/domain/creation_intent.dart';
 import 'package:yingjian/features/editor/application/ai_edit_planner.dart';
 import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
@@ -229,21 +230,24 @@ void main() {
       expect(store.savedProject, session.project);
     });
 
-    test('single-photo app restore keeps the focused legacy photo', () async {
-      final saved = _twoPhotoProject().copyWith(focusPhotoId: 'photo-2');
-      final store = _MemoryPhotoProjectStore()..savedProject = saved;
-      final session = PhotoProjectSession(
-        importer: _FakePhotoImporter(const []),
-        store: store,
-      );
+    test(
+      'single-photo restore preserves a legacy multi-photo project',
+      () async {
+        final saved = _twoPhotoProject().copyWith(focusPhotoId: 'photo-2');
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
 
-      await session.restore(enforceSinglePhoto: true);
+        await session.restore(enforceSinglePhoto: true);
 
-      expect(session.photos.single.id, 'photo-2');
-      expect(session.project?.editingScope, ProjectEditingScope.currentPhoto);
-      expect(store.savedProject?.photos.single.id, 'photo-2');
-      expect(store.deletedPhotoIds, ['photo-1']);
-    });
+        expect(session.project, isNull);
+        expect(session.restoreError, isA<StateError>());
+        expect(store.savedProject, saved);
+        expect(store.deletedPhotoIds, isEmpty);
+      },
+    );
 
     test('persists an explicit current-photo editing scope', () async {
       final saved = _twoPhotoProject().copyWith(
@@ -2464,6 +2468,117 @@ void main() {
       expect(session.project, saved);
       expect(store.deletedProjectIds, isEmpty);
     });
+
+    test(
+      'applies a creation style as one shared look while preserving photo layers',
+      () async {
+        final crop = CropGeometry(
+          left: 0.1,
+          top: 0.05,
+          right: 0.9,
+          bottom: 0.95,
+        );
+        final photoOverride = PhotoOverride(
+          overridesBasicLook: false,
+          overridesCrop: true,
+          recipe: EditRecipe(
+            crop: crop,
+            portraitRecipe: PortraitRetouchRecipe(textureSmoothing: 24),
+            qualityEnhancementRecipe: QualityEnhancementRecipe.safeAutomatic,
+            semanticEditingRecipe: SemanticEditingRecipe(localExposure: 18),
+            basicEditingRecipe: BasicEditingRecipe(
+              flipHorizontal: true,
+              perspectiveHorizontal: 4,
+            ),
+          ),
+        );
+        final oldShared = EditRecipe(
+          highlights: 0.2,
+          tint: 0.15,
+          clarity: 0.1,
+          basicEditingRecipe: BasicEditingRecipe(
+            filter: PhotoFilter.cinematic,
+            filterStrength: 60,
+            hsl: {HslChannel.blue: HslAdjustment(saturation: -12)},
+          ),
+        );
+        final saved = PhotoProject(
+          id: 'style-layer-project',
+          createdAt: DateTime.utc(2026, 8, 30),
+          updatedAt: DateTime.utc(2026, 8, 31),
+          photos: const [
+            ProjectPhoto(
+              id: 'photo-1',
+              localPath: '/app/media/photo-1.jpg',
+              originalName: 'first.jpg',
+            ),
+          ],
+          creationIntent: CreationIntent.apply,
+          focusPhotoId: 'photo-1',
+          sharedStyle: SharedStyle(recipe: oldShared, intensity: 0.5),
+          adaptiveCompensations: {
+            'photo-1': AdaptiveCompensation(
+              recipe: EditRecipe(exposure: 0.05),
+              source: AdaptiveCompensationSource.localAnalysisV1,
+            ),
+          },
+          photoOverrides: {'photo-1': photoOverride},
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        final style = EditRecipe(
+          exposure: 0.2,
+          warmth: 0.04,
+          basicEditingRecipe: BasicEditingRecipe(
+            filter: PhotoFilter.portrait,
+            filterStrength: 40,
+          ),
+        );
+        final projected = session.projectCreationStyle(style);
+
+        final commit = await session.applyCreationStyle(
+          styleId: 'soft-light',
+          styleName: '柔光',
+          recipe: style,
+          context: const EditContext(
+            platform: EditPlatform.ios,
+            photoIds: {'photo-1'},
+            applicability: {'photo'},
+          ),
+        );
+
+        expect(commit.result, isA<AcceptedEdit>());
+        expect(commit.appliedToGroup, isTrue);
+        final accepted = commit.result as AcceptedEdit;
+        expect(
+          accepted.summary.changedAddresses,
+          everyElement(
+            isA<OpAddress>().having(
+              (address) => address.scope,
+              'scope',
+              EditScope.group,
+            ),
+          ),
+        );
+        expect(session.project!.undoHistory, hasLength(1));
+        expect(session.project!.photoOverrides['photo-1'], photoOverride);
+        final shared = session.project!.sharedStyle.recipe;
+        expect(shared.exposure, 0.2);
+        expect(shared.highlights, 0);
+        expect(shared.tint, 0);
+        expect(shared.clarity, 0);
+        expect(shared.basicEditingRecipe.filter, PhotoFilter.portrait);
+        expect(shared.basicEditingRecipe.filterStrength, 40);
+        expect(shared.basicEditingRecipe.hsl, isEmpty);
+        expect(session.effectiveRecipeFor('photo-1'), projected);
+        expect(session.effectiveRecipeFor('photo-1').crop, crop);
+        expect(session.project!.currentStaticStyleResult!.recipe, projected);
+      },
+    );
   });
 }
 

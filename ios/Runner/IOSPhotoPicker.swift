@@ -102,6 +102,22 @@ final class IOSPhotoPickerLoadDeadline {
     return true
   }
 
+  func cancel() {
+    lock.lock()
+    guard !didFinish else {
+      lock.unlock()
+      return
+    }
+    didFinish = true
+    let workItem = workItem
+    let progresses = progresses
+    self.workItem = nil
+    self.progresses.removeAll()
+    lock.unlock()
+    workItem?.cancel()
+    progresses.forEach { $0.cancel() }
+  }
+
   private func fire() {
     lock.lock()
     guard !didFinish else {
@@ -125,6 +141,7 @@ final class IOSPhotoPicker: NSObject, PHPickerViewControllerDelegate {
   private var requestDirectory: URL?
   private var requestID: UUID?
   private var loadDeadline: IOSPhotoPickerLoadDeadline?
+  private weak var presentedPicker: PHPickerViewController?
 
   func pickPhotos(
     limit: Int,
@@ -145,12 +162,24 @@ final class IOSPhotoPicker: NSObject, PHPickerViewControllerDelegate {
     configuration.preferredAssetRepresentationMode = .current
     let picker = PHPickerViewController(configuration: configuration)
     picker.delegate = self
+    presentedPicker = picker
     self.completion = completion
     requestID = UUID()
     requestDirectory = FileManager.default.temporaryDirectory
       .appendingPathComponent("yingjian-photo-picker", isDirectory: true)
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
     presenter.present(picker, animated: true)
+  }
+
+  func cancel() {
+    guard let requestID else { return }
+    presentedPicker?.dismiss(animated: true)
+    loadDeadline?.cancel()
+    loadDeadline = nil
+    if let requestDirectory {
+      try? FileManager.default.removeItem(at: requestDirectory)
+    }
+    finish([], requestID: requestID)
   }
 
   func discard(paths: [String]) throws {
@@ -326,6 +355,7 @@ final class IOSPhotoPicker: NSObject, PHPickerViewControllerDelegate {
     self.completion = nil
     requestID = nil
     requestDirectory = nil
+    presentedPicker = nil
     completion?(value)
   }
 }

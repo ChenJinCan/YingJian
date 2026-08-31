@@ -95,6 +95,26 @@ class RunnerTests: XCTestCase {
     XCTAssertFalse(deadline.complete())
   }
 
+  func testPhotoPickerDeadlineCancelsPendingProviderOnUserCancellation() {
+    let timedOut = expectation(description: "photo picker deadline")
+    timedOut.isInverted = true
+    let progress = Progress(totalUnitCount: 1)
+    let deadline = IOSPhotoPickerLoadDeadline(
+      timeout: 0.01,
+      queue: .main
+    ) {
+      timedOut.fulfill()
+    }
+
+    deadline.track(progress)
+    deadline.start()
+    deadline.cancel()
+    wait(for: [timedOut], timeout: 0.05)
+
+    XCTAssertTrue(progress.isCancelled)
+    XCTAssertFalse(deadline.complete())
+  }
+
   func testImagePipelineV2NeutralIsOpaqueAndPixelStable() throws {
     let pipeline = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV2()))
     let extent = CGRect(x: 0, y: 0, width: 8, height: 4)
@@ -1235,6 +1255,55 @@ class RunnerTests: XCTestCase {
     XCTAssertNil(IOSImagePipeline(arguments: pipelineV12(adjustments: [fractionalIntensity])))
   }
 
+  func testDirectionalLightingDoesNotRequireFaceSlimEligibility() throws {
+    let extent = CGRect(x: 0, y: 0, width: 100, height: 100)
+    let source = CIImage(
+      color: CIColor(red: 0.2, green: 0.2, blue: 0.2)
+    ).cropped(to: extent)
+    let faceRect = CGRect(x: 10, y: 20, width: 30, height: 50)
+    let target = IOSFaceSlimTargetContext(
+      geometry: IOSFaceSlimGeometry(
+        centerX: faceRect.midX,
+        halfWidth: faceRect.width / 2,
+        lowerY: faceRect.minY,
+        upperY: faceRect.maxY
+      ),
+      mask: CIImage(color: .white).cropped(to: faceRect),
+      features: IOSFaceFeatureGeometry(
+        faceBounds: faceRect,
+        leftEye: CGPoint(x: 18, y: 58),
+        rightEye: CGPoint(x: 32, y: 58),
+        nose: CGPoint(x: 25, y: 45),
+        mouth: CGPoint(x: 25, y: 32)
+      )
+    )
+    let context = IOSPortraitRetouchContext(
+      effectiveMask: target.mask,
+      faceTargets: [target],
+      faceSlimTargets: []
+    )
+    let pipeline = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV12(
+      adjustments: [[
+        "targetId": "target-v1-1234abcd",
+        "region": ["left": 0.1, "top": 0.3, "right": 0.4, "bottom": 0.8],
+        "azimuth": -45.0,
+        "intensity": 60,
+      ]]
+    )))
+
+    let output = pipeline.applying(
+      to: source,
+      extent: extent,
+      portraitContext: context
+    )
+
+    XCTAssertTrue(context.faceSlimTargets.isEmpty)
+    XCTAssertGreaterThan(
+      meanAbsoluteDifference(try rgbaBytes(source), try rgbaBytes(output)),
+      0.1
+    )
+  }
+
   func testPhotoExportOptionsValidateFormatSizeAndQuality() {
     let original = IOSPhotoExportOptions(arguments: [
       "format": "jpeg", "size": "original", "quality": "high", "colorSpace": "srgb",
@@ -2154,7 +2223,7 @@ class RunnerTests: XCTestCase {
 
     XCTAssertEqual(
       result["capabilityVersion"] as? String,
-      "ios-core-image-vision-v14-target-regions"
+      "ios-core-image-vision-v15-independent-face-targets"
     )
     XCTAssertEqual(result["portrait"] as? String, "applicable")
     XCTAssertEqual(result["portraitReason"] as? String, "none")
@@ -2225,7 +2294,7 @@ class RunnerTests: XCTestCase {
 
     XCTAssertEqual(
       result["capabilityVersion"] as? String,
-      "ios-core-image-vision-v14-target-regions"
+      "ios-core-image-vision-v15-independent-face-targets"
     )
     XCTAssertEqual(result["body"] as? String, "applicable")
     let bodyRegions = try XCTUnwrap(

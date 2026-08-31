@@ -1,30 +1,50 @@
 # 隐私与商店合规清单
 
-最近一次只读回读：2026-08-04 12:45（Asia/Shanghai）。详细证据与未完成项见
-[`store-state-snapshot-2026-08-04.md`](store-state-snapshot-2026-08-04.md)。商店状态会变化，任何构建、上传或提交前必须重新读取，不能把本快照当作新候选基线。
+> 状态：长期检查合同，不记录远程商店当前状态。历史回读见 [`docs/archive/legal/`](../archive/legal/)；任何构建、上传或提交都必须重新取得 30 分钟内的商店基线。
 
-## 已在应用内完成
+## 受保护范围
 
-- 中英文隐私政策与使用条款可从设置页访问。
-- 匿名诊断默认关闭，并在开关说明中列出用途。
-- Firebase 自定义遥测使用事件与参数白名单。
-- 评分入口不把用户导向自建好评筛选页面。
+以下字段不能由普通文案、截图、版本说明或构建请求顺带修改：
 
-## 上线前阻断项
+- 隐私政策、Terms、EULA 与支持联系方式；
+- Apple App Privacy、Google Play Data Safety 与内容分级；
+- 订阅、价格、地区、年龄分级和审核访问资料；
+- 审核提交、Managed publishing，以及 Apple 自动或手动公开方式。
 
-- [x] 已部署长期可访问的公开隐私政策、支持页与使用条款：
-  - `https://everyday-apps-websites.baby-animals-ai-cjc.workers.dev/privacy`
-  - `https://everyday-apps-websites.baby-animals-ai-cjc.workers.dev/support`
-  - `https://everyday-apps-websites.baby-animals-ai-cjc.workers.dev/terms`
-- [x] 已在 `release/legal-policy.yaml` 填入公开 URL 和支持联系方式 `865525900@qq.com`。
-- [x] 已对照 Firebase Analytics、Crashlytics、Performance 与应用行为完成并发布 Apple App Privacy：仅声明大致位置、设备 ID、产品交互、崩溃、性能及其他诊断数据；均不关联身份、不用于跟踪。
-- [x] 已对照 Firebase Analytics、Crashlytics、Performance 与应用行为完成 Google Play Data Safety；Publishing overview 将其列为尚未提交审核的变更。
-- [x] 已完成 Google Play IARC 内容分级问卷；相关变更尚未提交审核。
-- [x] 已回读唯一启用的 Apple 商店 locale `Chinese (Simplified)`，隐私政策 URL 与公开页面一致。
-- [x] 已确认 Apple 使用标准 EULA；若改用自定义 EULA，必须单独获批并保存地区快照。
-- [x] 已创建 App Store 草稿，Apple ID 为 `6797692747`，并作为 `IOS_APP_STORE_ID` 默认值配置永久评分入口；构建时仍可通过同名 `--dart-define` 覆盖。
-- [ ] App Store 1.0 仍缺年龄分级、类别、截图、描述、关键词、Support URL、版权、审核联系信息和候选构建；当前发布控制为审核通过后自动发布，提交前必须取得明确授权并重新确认。
-- [ ] Google Play 初始设置为 10/11，默认商店列表仍未完成；`Send app for review` 当前不可用。
-- [ ] Firebase iOS 应用设置中的 App Store ID 与 Team ID 尚未填写；不影响本地 SDK 身份检查，但应在正式 Apple 候选前确认是否需要补齐。
+修改任一字段前，必须取得该字段和平台的明确授权。授权一个字段不扩展到其他字段，也不等于授权提交审核或公开发布。
 
-发布预检会运行 `scripts/check_legal_setup.rb`。字段未配置或商店声明未验证时必须保持失败，不能把应用内 Markdown 当作公开隐私政策 URL。
+## 每次变更前
+
+1. 通过已认证商店会话读取当前平台、应用、locale 和字段值，并记录时间与来源；旧截图、日期快照和仓库文档不能充当当前基线。
+2. 冻结本次允许修改的字段白名单、目标 locale、预期值和终止阶段。
+3. 核对应用实际行为、SDK、隐私清单、诊断开关、图片上传、AI 风格定义和生成任务的数据流。
+4. 对将离开设备的数据说明内容、目的、处理方、保留期、删除能力和是否关联身份；不能以“AI 功能”概括。
+5. 确认审核批准后的公开方式；若批准会自动对用户开放，必须在提交前单独取得授权。
+
+## 应用行为合同
+
+- 默认本地处理；浏览、切换或预览风格不得自动上传图片。
+- 文字或语音定义风格不自动授权上传源照片或参考图。
+- “生成”只有在用户确认上传范围、预计消耗、等待、取消和失败规则后才能创建任务。
+- 图片、人脸特征、完整提示词、签名 URL、供应商凭据和媒体内容不得进入普通日志、Analytics 或 Crashlytics。
+- Analytics、Crashlytics 和 Performance 默认关闭；用户关闭匿名诊断后必须立即停止。
+- 用户删除创作或生成结果时，按已声明的数据生命周期清理本地和约定的远端数据。
+
+## 商店资料门
+
+- 每个启用 locale 的隐私政策、支持、描述、截图、订阅和审核信息必须完整回读；一个 locale 正确不代表矩阵完成。
+- App Privacy 和 Data Safety 必须与当前二进制、SDK、诊断默认值、风格参考上传和生成供应商实际一致。
+- 年龄分级、社交与生成式 AI 声明、出口合规和审核访问必须按当前功能重新回答，不沿用旧版本推断。
+- 公开 URL 必须长期可访问，并通过内容、TLS、隐私边界和非敏感真实 canary 检查。
+- 标准 EULA 与自定义 EULA 的选择、地区覆盖和文本变更必须分别核验。
+
+## 变更后回读
+
+1. 逐平台、逐 locale、逐字段读取远程值并与白名单比较。
+2. 确认没有附带修改价格、地区、发布方式、订阅、法律文本或审核状态。
+3. 保存不含凭据和个人数据的日期化证据；动态状态只写入证据，不回填成本长期规范。
+4. 分别报告“资料已保存”“已提交审核”“审核中”“已批准”和“公开可用”，不得合并为“已发布”。
+
+## 本地门禁
+
+发布预检必须继续运行 `scripts/check_legal_setup.rb` 和发布合同检查。字段未配置、公开 URL 不可验证、声明与应用行为不一致或远程基线过期时必须保持失败，不能用应用内 Markdown、历史快照或上传成功绕过。

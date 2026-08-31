@@ -134,6 +134,222 @@ abstract class AppLocalizations {
   /// **'选择照片开始'**
   String get homePrimaryAction;
 
+  /// No description provided for @homeChooseResult.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择想得到的结果'**
+  String get homeChooseResult;
+
+  /// No description provided for @imageApplication.
+  ///
+  /// In zh, this message translates to:
+  /// **'图片应用'**
+  String get imageApplication;
+
+  /// No description provided for @imageApplicationSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'换一种完整风格'**
+  String get imageApplicationSubtitle;
+
+  /// No description provided for @motionCreation.
+  ///
+  /// In zh, this message translates to:
+  /// **'动起来'**
+  String get motionCreation;
+
+  /// No description provided for @motionCreationSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'生成自然动态作品'**
+  String get motionCreationSubtitle;
+
+  /// No description provided for @preparingImage.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在准备图片…'**
+  String get preparingImage;
+
+  /// No description provided for @recentCreations.
+  ///
+  /// In zh, this message translates to:
+  /// **'最近创作'**
+  String get recentCreations;
+
+  /// No description provided for @continueCreation.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续创作'**
+  String get continueCreation;
+
+  /// No description provided for @currentStyle.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前风格'**
+  String get currentStyle;
+
+  /// No description provided for @aiDefineStyle.
+  ///
+  /// In zh, this message translates to:
+  /// **'AI 定风格'**
+  String get aiDefineStyle;
+
+  /// No description provided for @describeStyleTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'描述你的风格'**
+  String get describeStyleTitle;
+
+  /// No description provided for @describeStyleHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'例如：雨后的电影感，人物保持自然'**
+  String get describeStyleHint;
+
+  /// No description provided for @defineStyle.
+  ///
+  /// In zh, this message translates to:
+  /// **'定义风格'**
+  String get defineStyle;
+
+  /// No description provided for @styleNotUnderstood.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂时没理解。试试“电影感”“暖一点”或“清冷一点”。'**
+  String get styleNotUnderstood;
+
+  /// No description provided for @styleAiCustom.
+  ///
+  /// In zh, this message translates to:
+  /// **'AI 风格'**
+  String get styleAiCustom;
+
+  /// No description provided for @styleSavedCustom.
+  ///
+  /// In zh, this message translates to:
+  /// **'已保存风格'**
+  String get styleSavedCustom;
+
+  /// No description provided for @styleNatural.
+  ///
+  /// In zh, this message translates to:
+  /// **'自然'**
+  String get styleNatural;
+
+  /// No description provided for @styleSoftLight.
+  ///
+  /// In zh, this message translates to:
+  /// **'柔光'**
+  String get styleSoftLight;
+
+  /// No description provided for @styleNight.
+  ///
+  /// In zh, this message translates to:
+  /// **'夜色'**
+  String get styleNight;
+
+  /// No description provided for @styleCool.
+  ///
+  /// In zh, this message translates to:
+  /// **'清冷'**
+  String get styleCool;
+
+  /// No description provided for @styleWarmSun.
+  ///
+  /// In zh, this message translates to:
+  /// **'暖阳'**
+  String get styleWarmSun;
+
+  /// No description provided for @styleMono.
+  ///
+  /// In zh, this message translates to:
+  /// **'黑白'**
+  String get styleMono;
+
+  /// No description provided for @styleBreeze.
+  ///
+  /// In zh, this message translates to:
+  /// **'微风'**
+  String get styleBreeze;
+
+  /// No description provided for @styleBreathe.
+  ///
+  /// In zh, this message translates to:
+  /// **'呼吸'**
+  String get styleBreathe;
+
+  /// No description provided for @stylePushIn.
+  ///
+  /// In zh, this message translates to:
+  /// **'推进'**
+  String get stylePushIn;
+
+  /// No description provided for @styleFlowingLight.
+  ///
+  /// In zh, this message translates to:
+  /// **'流光'**
+  String get styleFlowingLight;
+
+  /// No description provided for @styleCinema.
+  ///
+  /// In zh, this message translates to:
+  /// **'电影'**
+  String get styleCinema;
+
+  /// No description provided for @applyStyle.
+  ///
+  /// In zh, this message translates to:
+  /// **'应用风格'**
+  String get applyStyle;
+
+  /// No description provided for @applyingStyle.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在应用…'**
+  String get applyingStyle;
+
+  /// No description provided for @styleApplied.
+  ///
+  /// In zh, this message translates to:
+  /// **'风格已应用'**
+  String get styleApplied;
+
+  /// No description provided for @changeStyle.
+  ///
+  /// In zh, this message translates to:
+  /// **'换个风格'**
+  String get changeStyle;
+
+  /// No description provided for @generateMotion.
+  ///
+  /// In zh, this message translates to:
+  /// **'生成动态'**
+  String get generateMotion;
+
+  /// No description provided for @motionConfirmationTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'生成动态作品'**
+  String get motionConfirmationTitle;
+
+  /// No description provided for @motionConfirmationBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'确认后才会上传这张图片并创建动态任务。当前工程切片尚未接入生成服务，不会上传或消耗权益。'**
+  String get motionConfirmationBody;
+
+  /// No description provided for @motionUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'动态生成服务尚未接入'**
+  String get motionUnavailable;
+
+  /// No description provided for @gotIt.
+  ///
+  /// In zh, this message translates to:
+  /// **'知道了'**
+  String get gotIt;
+
   /// No description provided for @onboardingPromise.
   ///
   /// In zh, this message translates to:
@@ -290,6 +506,30 @@ abstract class AppLocalizations {
   /// **'照片预览区域'**
   String get photoPreviewArea;
 
+  /// No description provided for @preparingStylePreview.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在准备风格预览'**
+  String get preparingStylePreview;
+
+  /// No description provided for @stylePreviewReady.
+  ///
+  /// In zh, this message translates to:
+  /// **'风格预览已就绪'**
+  String get stylePreviewReady;
+
+  /// No description provided for @stylePreviewFailedShowingOriginal.
+  ///
+  /// In zh, this message translates to:
+  /// **'风格预览失败，已保留当前画面'**
+  String get stylePreviewFailedShowingOriginal;
+
+  /// No description provided for @restorePreviousResult.
+  ///
+  /// In zh, this message translates to:
+  /// **'返回上次成片'**
+  String get restorePreviousResult;
+
   /// No description provided for @selectPhotosTitle.
   ///
   /// In zh, this message translates to:
@@ -317,7 +557,7 @@ abstract class AppLocalizations {
   /// No description provided for @effectPreviewUnavailable.
   ///
   /// In zh, this message translates to:
-  /// **'当前效果预览暂不可用，可重置本次调整或稍后重试。'**
+  /// **'当前效果预览暂不可用，请重试。'**
   String get effectPreviewUnavailable;
 
   /// No description provided for @photoImportCanceled.
@@ -617,7 +857,7 @@ abstract class AppLocalizations {
   /// No description provided for @faceSlimBackgroundProtected.
   ///
   /// In zh, this message translates to:
-  /// **'为保护背景线条，这张照片暂不提供瘦脸'**
+  /// **'当前画面的背景线条与面部区域重叠，瘦脸暂不生效'**
   String get faceSlimBackgroundProtected;
 
   /// No description provided for @faceSlimMultipleFaces.
@@ -629,7 +869,7 @@ abstract class AppLocalizations {
   /// No description provided for @faceSlimUnavailable.
   ///
   /// In zh, this message translates to:
-  /// **'这张照片暂不满足安全瘦脸条件'**
+  /// **'暂未识别到可调整的面部，瘦脸不会生效'**
   String get faceSlimUnavailable;
 
   /// No description provided for @faceSlimTargetHint.
@@ -649,6 +889,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'瘦身'**
   String get bodySlim;
+
+  /// No description provided for @bodyToolsUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂未识别到可调整的人物，身形调整不会生效'**
+  String get bodyToolsUnavailable;
 
   /// No description provided for @headSize.
   ///
@@ -935,7 +1181,7 @@ abstract class AppLocalizations {
   /// No description provided for @portraitToolsUnavailable.
   ///
   /// In zh, this message translates to:
-  /// **'当前照片未通过人像安全检测，仍可继续调整光色'**
+  /// **'暂未识别到可调整的人像，人像效果不会生效'**
   String get portraitToolsUnavailable;
 
   /// No description provided for @resetCurrentAdjustment.
@@ -1334,6 +1580,18 @@ abstract class AppLocalizations {
   /// **'分享已保存照片'**
   String get shareSavedPhotos;
 
+  /// No description provided for @shareResult.
+  ///
+  /// In zh, this message translates to:
+  /// **'分享成片'**
+  String get shareResult;
+
+  /// No description provided for @preparingShare.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在准备分享…'**
+  String get preparingShare;
+
   /// No description provided for @sharingPhotos.
   ///
   /// In zh, this message translates to:
@@ -1357,6 +1615,18 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'暂时无法分享，成片仍已保存到系统相册'**
   String get photoShareFailed;
+
+  /// No description provided for @photoResultShareCanceled.
+  ///
+  /// In zh, this message translates to:
+  /// **'已取消分享'**
+  String get photoResultShareCanceled;
+
+  /// No description provided for @photoResultShareFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂时无法分享，请重试'**
+  String get photoResultShareFailed;
 
   /// No description provided for @continueEditing.
   ///
@@ -1811,7 +2081,7 @@ abstract class AppLocalizations {
   /// No description provided for @voiceEditUnsupported.
   ///
   /// In zh, this message translates to:
-  /// **'暂时无法安全理解这条指令，请换一种说法或手动调整。'**
+  /// **'还没理解这条调整。可以换种说法，或直接手动调整。'**
   String get voiceEditUnsupported;
 
   /// No description provided for @voiceEditFailed.
@@ -2009,7 +2279,7 @@ abstract class AppLocalizations {
   /// No description provided for @lightingNeedsPerson.
   ///
   /// In zh, this message translates to:
-  /// **'这张照片没有可安全重布光的人物'**
+  /// **'暂未识别到可调整光照的人物，其他光色工具仍可使用'**
   String get lightingNeedsPerson;
 
   /// No description provided for @personNumber.

@@ -1,5 +1,6 @@
-import 'dart:io';
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yingjian/features/editor/domain/editing_resource.dart';
@@ -48,6 +49,111 @@ void main() {
         _jpeg(width: 4000, height: 3000),
       );
       expect(await sourceFile.readAsBytes(), _jpeg(width: 4000, height: 3000));
+    },
+  );
+
+  test(
+    'canceling during inspection removes this import and returns an empty batch',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'yingjian-photo-import-cancel-inspection-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final firstSource = File('${directory.path}/first.jpg');
+      final secondSource = File('${directory.path}/second.jpg');
+      await firstSource.writeAsBytes(_jpeg(width: 1200, height: 900));
+      await secondSource.writeAsBytes(_jpeg(width: 1200, height: 900));
+      final mediaDirectory = Directory('${directory.path}/app-media');
+      final source = _CancelablePhotoSource([
+        SelectedPhoto(path: firstSource.path, name: 'first.jpg'),
+        SelectedPhoto(path: secondSource.path, name: 'second.jpg'),
+      ]);
+      final secondInspectionStarted = Completer<void>();
+      final finishSecondInspection = Completer<void>();
+      var inspectionCount = 0;
+      var nextId = 0;
+      final importer = AppOwnedPhotoImporter(
+        source: source,
+        mediaDirectory: () async => mediaDirectory,
+        inspectPhoto: (path) async {
+          inspectionCount += 1;
+          if (inspectionCount == 2) {
+            secondInspectionStarted.complete();
+            await finishSecondInspection.future;
+          }
+          return _inspectJpeg(path);
+        },
+        createId: () => 'photo-${++nextId}',
+      );
+
+      final importing = importer.importPhotos(limit: 6);
+      await secondInspectionStarted.future;
+      expect(File('${mediaDirectory.path}/photo-1.jpg').existsSync(), isTrue);
+      expect(
+        File('${mediaDirectory.path}/photo-2.importing').existsSync(),
+        isTrue,
+      );
+
+      await importer.cancelImport();
+      finishSecondInspection.complete();
+      final batch = await importing;
+
+      expect(source.cancelCount, 1);
+      expect(batch.photos, isEmpty);
+      expect(batch.failures, isEmpty);
+      expect(await mediaDirectory.list().toList(), isEmpty);
+      expect(await firstSource.exists(), isTrue);
+      expect(await secondSource.exists(), isTrue);
+    },
+  );
+
+  test(
+    'cleans abandoned importing files without deleting an active import',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'yingjian-photo-import-abandoned-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final firstSource = File('${directory.path}/first.jpg');
+      final secondSource = File('${directory.path}/second.jpg');
+      await firstSource.writeAsBytes(_jpeg(width: 1200, height: 900));
+      await secondSource.writeAsBytes(_jpeg(width: 1200, height: 900));
+      final mediaDirectory = Directory('${directory.path}/app-media');
+      await mediaDirectory.create(recursive: true);
+      final firstInspectionStarted = Completer<void>();
+      final finishFirstInspection = Completer<void>();
+      var nextId = 0;
+      final importer = AppOwnedPhotoImporter(
+        source: _SequencedPhotoSource([
+          [SelectedPhoto(path: firstSource.path, name: 'first.jpg')],
+          [SelectedPhoto(path: secondSource.path, name: 'second.jpg')],
+        ]),
+        mediaDirectory: () async => mediaDirectory,
+        inspectPhoto: (path) async {
+          if (path.endsWith('/photo-1.importing')) {
+            firstInspectionStarted.complete();
+            await finishFirstInspection.future;
+          }
+          return _inspectJpeg(path);
+        },
+        createId: () => 'photo-${++nextId}',
+      );
+
+      final firstImport = importer.importPhotos(limit: 1);
+      await firstInspectionStarted.future;
+      final activeCopy = File('${mediaDirectory.path}/photo-1.importing');
+      final abandonedCopy = File('${mediaDirectory.path}/crashed.importing');
+      await abandonedCopy.writeAsBytes(const [1, 2, 3]);
+
+      final secondBatch = await importer.importPhotos(limit: 1);
+
+      expect(secondBatch.photos.single.id, 'photo-2');
+      expect(await abandonedCopy.exists(), isFalse);
+      expect(await activeCopy.exists(), isTrue);
+
+      finishFirstInspection.complete();
+      final firstBatch = await firstImport;
+      expect(firstBatch.photos.single.id, 'photo-1');
     },
   );
 
@@ -498,6 +604,33 @@ final class _FakePhotoSource implements PhotoSource {
 
   @override
   Future<List<SelectedPhoto>> pickPhotos({required int limit}) async => photos;
+}
+
+final class _CancelablePhotoSource implements CancelablePhotoSource {
+  _CancelablePhotoSource(this.photos);
+
+  final List<SelectedPhoto> photos;
+  int cancelCount = 0;
+
+  @override
+  Future<void> cancelPick() async {
+    cancelCount += 1;
+  }
+
+  @override
+  Future<List<SelectedPhoto>> pickPhotos({required int limit}) async => photos;
+}
+
+final class _SequencedPhotoSource implements PhotoSource {
+  _SequencedPhotoSource(this.selections);
+
+  final List<List<SelectedPhoto>> selections;
+  var _nextSelection = 0;
+
+  @override
+  Future<List<SelectedPhoto>> pickPhotos({required int limit}) async {
+    return selections[_nextSelection++];
+  }
 }
 
 final class _ReleasablePhotoSource implements ReleasablePhotoSource {

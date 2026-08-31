@@ -27,6 +27,115 @@ class AppLocalizationsZh extends AppLocalizations {
   String get homePrimaryAction => '选择照片开始';
 
   @override
+  String get homeChooseResult => '选择想得到的结果';
+
+  @override
+  String get imageApplication => '图片应用';
+
+  @override
+  String get imageApplicationSubtitle => '换一种完整风格';
+
+  @override
+  String get motionCreation => '动起来';
+
+  @override
+  String get motionCreationSubtitle => '生成自然动态作品';
+
+  @override
+  String get preparingImage => '正在准备图片…';
+
+  @override
+  String get recentCreations => '最近创作';
+
+  @override
+  String get continueCreation => '继续创作';
+
+  @override
+  String get currentStyle => '当前风格';
+
+  @override
+  String get aiDefineStyle => 'AI 定风格';
+
+  @override
+  String get describeStyleTitle => '描述你的风格';
+
+  @override
+  String get describeStyleHint => '例如：雨后的电影感，人物保持自然';
+
+  @override
+  String get defineStyle => '定义风格';
+
+  @override
+  String get styleNotUnderstood => '暂时没理解。试试“电影感”“暖一点”或“清冷一点”。';
+
+  @override
+  String get styleAiCustom => 'AI 风格';
+
+  @override
+  String get styleSavedCustom => '已保存风格';
+
+  @override
+  String get styleNatural => '自然';
+
+  @override
+  String get styleSoftLight => '柔光';
+
+  @override
+  String get styleNight => '夜色';
+
+  @override
+  String get styleCool => '清冷';
+
+  @override
+  String get styleWarmSun => '暖阳';
+
+  @override
+  String get styleMono => '黑白';
+
+  @override
+  String get styleBreeze => '微风';
+
+  @override
+  String get styleBreathe => '呼吸';
+
+  @override
+  String get stylePushIn => '推进';
+
+  @override
+  String get styleFlowingLight => '流光';
+
+  @override
+  String get styleCinema => '电影';
+
+  @override
+  String get applyStyle => '应用风格';
+
+  @override
+  String get applyingStyle => '正在应用…';
+
+  @override
+  String get styleApplied => '风格已应用';
+
+  @override
+  String get changeStyle => '换个风格';
+
+  @override
+  String get generateMotion => '生成动态';
+
+  @override
+  String get motionConfirmationTitle => '生成动态作品';
+
+  @override
+  String get motionConfirmationBody =>
+      '确认后才会上传这张图片并创建动态任务。当前工程切片尚未接入生成服务，不会上传或消耗权益。';
+
+  @override
+  String get motionUnavailable => '动态生成服务尚未接入';
+
+  @override
+  String get gotIt => '知道了';
+
+  @override
   String get onboardingPromise => '选一张照片，再说出你想要的感觉。映见专注把这一张修好。';
 
   @override
@@ -109,6 +218,18 @@ class AppLocalizationsZh extends AppLocalizations {
   String get photoPreviewArea => '照片预览区域';
 
   @override
+  String get preparingStylePreview => '正在准备风格预览';
+
+  @override
+  String get stylePreviewReady => '风格预览已就绪';
+
+  @override
+  String get stylePreviewFailedShowingOriginal => '风格预览失败，已保留当前画面';
+
+  @override
+  String get restorePreviousResult => '返回上次成片';
+
+  @override
   String get selectPhotosTitle => '选择一张照片';
 
   @override
@@ -121,7 +242,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get compositionPreviewUnavailable => '构图预览暂不可用，可恢复原始构图或稍后重试。';
 
   @override
-  String get effectPreviewUnavailable => '当前效果预览暂不可用，可重置本次调整或稍后重试。';
+  String get effectPreviewUnavailable => '当前效果预览暂不可用，请重试。';
 
   @override
   String get photoImportCanceled => '未添加任何照片';
@@ -283,13 +404,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get faceSlim => '瘦脸';
 
   @override
-  String get faceSlimBackgroundProtected => '为保护背景线条，这张照片暂不提供瘦脸';
+  String get faceSlimBackgroundProtected => '当前画面的背景线条与面部区域重叠，瘦脸暂不生效';
 
   @override
   String get faceSlimMultipleFaces => '检测到多个人脸，请选择要调整的人物';
 
   @override
-  String get faceSlimUnavailable => '这张照片暂不满足安全瘦脸条件';
+  String get faceSlimUnavailable => '暂未识别到可调整的面部，瘦脸不会生效';
 
   @override
   String get faceSlimTargetHint => '选择要调整的人脸（按画面从左到右）';
@@ -301,6 +422,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get bodySlim => '瘦身';
+
+  @override
+  String get bodyToolsUnavailable => '暂未识别到可调整的人物，身形调整不会生效';
 
   @override
   String get headSize => '小头';
@@ -446,7 +570,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get localPortraitReady => '可以调整人像';
 
   @override
-  String get portraitToolsUnavailable => '当前照片未通过人像安全检测，仍可继续调整光色';
+  String get portraitToolsUnavailable => '暂未识别到可调整的人像，人像效果不会生效';
 
   @override
   String get resetCurrentAdjustment => '归零当前调整';
@@ -651,6 +775,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get shareSavedPhotos => '分享已保存照片';
 
   @override
+  String get shareResult => '分享成片';
+
+  @override
+  String get preparingShare => '正在准备分享…';
+
+  @override
   String get sharingPhotos => '正在打开系统分享…';
 
   @override
@@ -661,6 +791,12 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get photoShareFailed => '暂时无法分享，成片仍已保存到系统相册';
+
+  @override
+  String get photoResultShareCanceled => '已取消分享';
+
+  @override
+  String get photoResultShareFailed => '暂时无法分享，请重试';
 
   @override
   String get continueEditing => '继续编辑';
@@ -896,7 +1032,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get voiceEditApply => '应用修改';
 
   @override
-  String get voiceEditUnsupported => '暂时无法安全理解这条指令，请换一种说法或手动调整。';
+  String get voiceEditUnsupported => '还没理解这条调整。可以换种说法，或直接手动调整。';
 
   @override
   String get voiceEditFailed => '暂时无法使用语音，可以直接输入文字。';
@@ -1000,7 +1136,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get nearFuture => '近未来';
 
   @override
-  String get lightingNeedsPerson => '这张照片没有可安全重布光的人物';
+  String get lightingNeedsPerson => '暂未识别到可调整光照的人物，其他光色工具仍可使用';
 
   @override
   String personNumber(int number) {

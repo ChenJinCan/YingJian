@@ -65,8 +65,15 @@ final class BoundedBatchPhotoExporter {
   ) async {
     final project = session.project;
     if (project == null) return null;
-    if (project.flowState == PhotoProjectFlowState.exporting) {
-      for (final photo in project.photos) {
+    if (project.flowState == PhotoProjectFlowState.editing &&
+        project.exportStates.values.any(
+          (state) => state == PhotoExportState.queued,
+        )) {
+      await session.transitionTo(PhotoProjectFlowState.exporting);
+    }
+    final active = session.project!;
+    if (active.flowState == PhotoProjectFlowState.exporting) {
+      for (final photo in active.photos) {
         final state = session.project!.exportStates[photo.id]!;
         if (state == PhotoExportState.queued ||
             state == PhotoExportState.running) {

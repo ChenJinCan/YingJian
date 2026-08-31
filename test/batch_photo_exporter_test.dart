@@ -147,6 +147,38 @@ void main() {
   });
 
   test(
+    'restart closes a queue persisted before the exporting transition',
+    () async {
+      final photos = _photos(2);
+      final store = MemoryPhotoProjectStore(
+        _project(photos).copyWith(
+          exportStates: const {
+            'photo-1': PhotoExportState.queued,
+            'photo-2': PhotoExportState.notQueued,
+          },
+        ),
+      );
+      final session = PhotoProjectSession(
+        importer: FakePhotoImporter(),
+        store: store,
+        now: () => DateTime.utc(2026, 8, 4),
+      );
+      await session.restore();
+
+      final summary = await BoundedBatchPhotoExporter.recoverInterrupted(
+        session,
+      );
+
+      expect(summary?.cancelledCount, 1);
+      expect(session.project?.flowState, PhotoProjectFlowState.exported);
+      expect(session.project?.exportStates, {
+        'photo-1': PhotoExportState.cancelled,
+        'photo-2': PhotoExportState.notQueued,
+      });
+    },
+  );
+
+  test(
     'restart marks interrupted work cancelled without replaying it',
     () async {
       final photos = _photos(3);

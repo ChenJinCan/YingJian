@@ -118,8 +118,40 @@ void main() {
       await store.save(second);
 
       expect(await store.loadProjects(), [second, first]);
+      expect(await store.loadProject('project-1'), first);
+      expect(await store.loadProject('missing-project'), isNull);
       await store.activateProject('project-1');
       expect(await store.loadLatest(), first);
+    },
+  );
+
+  test(
+    'canceling a new project restores the previous active snapshot',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'yingjian-project-cancel-new-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final store = JsonPhotoProjectStore(directory: () async => directory);
+      final previous = PhotoProject(
+        id: 'previous-project',
+        createdAt: DateTime.utc(2026, 8, 30),
+        updatedAt: DateTime.utc(2026, 8, 30),
+        photos: const [
+          ProjectPhoto(
+            id: 'previous-photo',
+            localPath: '/app/media/previous.jpg',
+            originalName: 'previous.jpg',
+          ),
+        ],
+      );
+      await store.save(previous);
+
+      await store.startNewProject();
+      expect(await store.loadLatest(), isNull);
+      await store.cancelNewProject();
+
+      expect(await store.loadLatest(), previous);
     },
   );
 

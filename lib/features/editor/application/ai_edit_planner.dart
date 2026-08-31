@@ -330,7 +330,16 @@ final class LocalAiEditPlanner implements AiEditPlanner {
     }
 
     if (!portraitBrightness &&
-        _containsAny(intent, const ['亮一点', '更亮', '提亮', 'brighter'])) {
+        _containsAny(intent, const [
+          '亮一点',
+          '更亮',
+          '提亮',
+          '白一点',
+          '更白',
+          '变白',
+          'brighter',
+          'whiter',
+        ])) {
       changeBy(MetaOpIds.exposure, 0.12);
     } else if (_containsAny(intent, const ['暗一点', '更暗', '压暗', 'darker'])) {
       changeBy(MetaOpIds.exposure, -0.12);

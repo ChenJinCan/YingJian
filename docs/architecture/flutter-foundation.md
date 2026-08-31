@@ -2,64 +2,92 @@
 
 ## 目标
 
-基础骨架服务于 MVP 的三个稳定需求：快速迭代 UI、可预测的非破坏编辑状态，以及未来替换本地算法、商业 SDK 或云端模型时不污染页面代码。
+基础骨架只服务两个从首页开始的任务心智：
 
-共同基线来源和采用/拒绝决定见
-[`cross-app-foundation-audit.md`](cross-app-foundation-audit.md)。
+```text
+首页
+  ├─ 图片应用 → 选图片 → 定风格 → applyStyleReady → 应用风格
+  └─ 动起来   → 选图片 → 定风格 → motionStyleReady → 让图片动起来
+```
+
+“图片应用”和“动起来”是首页两个同级大入口，用户在选图和定风格之前先确定任务。presentation 用 `creationIntent=apply|motion` 保持该选择，并分别进入 `applyStyleReady` 或 `motionStyleReady`；每条流程只显示与当前任务一致的一个主 CTA，任何页面都不得同时展示“应用风格”和“让图片动起来”。
+
+“应用风格”把风格编译为不可见、确定性、可撤销的静态编辑配方；“让图片动起来”从来源图片和已确定风格创建独立派生媒体。两条任务流共享来源与分支无关的风格定义，但不共享就绪状态、执行器或失败语义。生成不要求先应用，也不要求先创建静态提交。
+
+详细合同见[静态风格执行](style-execution.md)、[派生媒体生成](generation-pipeline.md)和 [ADR 0004](../adr/0004-style-first-creation.md)。
 
 ## 依赖方向
 
 ```text
 app（组装、主题、路由）
-  └─ feature/presentation（页面与交互）
-       └─ feature/application（用例与会话状态）
-            └─ feature/domain（配方、值对象、不变量）
+  └─ feature/presentation（首页任务入口、creationIntent、分支就绪状态）
+       └─ feature/application（会话与用例编排）
+            └─ feature/domain（来源身份、风格、编辑状态、生成任务）
 
-照片选择/项目存储 adapter ──> application 中真实存在的 seam
-未来原生像素处理/云端 adapter ──> application 中真实存在的 seam
+静态应用：StyleDefinition → EditingCore → RenderPlan
+                                ├─ PhotoPreviewRenderer Adapter
+                                └─ PhotoExporter Adapter
+
+派生生成：SourcePhoto + StyleDefinition
+             → GenerationSourceSnapshot → GenerationCoordinator
+                                          ├─ GenerationProvider Adapter
+                                          └─ GeneratedMediaStore Adapter
 ```
-
-启动阶段由 `StartupCoordinator` 区分首屏必需准备与可延迟任务；主题和语言由根部 Provider 注入的 `AppSettings` 管理，并通过 SharedPreferences 恢复。
 
 - `domain` 不依赖 Flutter UI、插件或供应商 SDK。
 - `application` 可以使用 Flutter 的基础状态原语，但不导入 Widget。
-- `presentation` 只通过 application Module 的 Interface 操作业务状态。
-- `app` 只负责组装，不承载修图业务规则。
-- iOS/Android 高清导出通过 `PhotoExporter` Adapter 接入；生产实现走 MethodChannel，测试使用内存 Fake。Flutter 只传原图路径和配方系数，不跨通道传输完整图片字节。
+- `presentation` 只表达首页任务选择、图片、风格和当前分支状态，不暴露元操作目录、供应商任务或原生渲染细节。
+- `creationIntent` 只在 presentation 会话中选择 `apply` 或 `motion` 的导航与 CTA，不是 `StyleDefinition`、`EditRecipe`、`RenderPlan` 或供应商 payload 的字段。
+- `applyStyleReady` 只允许进入静态应用；`motionStyleReady` 只允许进入动态生成。二者不是带不同按钮的同一页面状态。
+- `app` 只负责组装，不承载修图或生成规则。
+- 页面不直接调用图像 SDK、生成供应商或持久化实现。
+- Flutter 与原生静态图像边界只传文件引用、版本化计划、区域和状态，不传完整图片字节。
+- 上传、轮询、取消和派生媒体下载只属于生成管线，不得进入静态 `EditRecipe` 或 `RenderPlan`。
 
-## 当前深 Module
+启动阶段由 `StartupCoordinator` 区分首屏必需准备与可延迟任务；主题和语言由根部 Provider 注入的 `AppSettings` 管理，并通过 SharedPreferences 恢复。生成供应商初始化不是首页或“图片应用”入口的前置条件，供应商不可用也不能阻断静态风格应用。
 
-`EditorSession` 是非破坏编辑会话 Module。调用方只需要理解：
+## 核心 Module
 
-- 当前 `recipe`；
-- 一次性 `apply`；
-- 手势期间 `beginAdjustment`、`preview`、`commitAdjustment`；
-- `undo` 与 `reset`。
+### 来源与项目
 
-它内部隐藏历史栈和手势合并规则。一次滑块拖动无论产生多少预览值，都只形成一个撤销步骤。测试与页面通过同一个 Interface 验证行为。
+`PhotoProjectSession` 管理应用自有、只读的来源图片及其当前编辑状态。系统相册临时路径先由 `AppOwnedPhotoImporter` 转为应用自有副本；项目只保存相对媒体引用和内容身份，页面不依赖图片选择插件、文件复制或 JSON 格式。
 
-`PhotoProjectSession` 是照片项目 Module。它只接收已经复制到应用目录的 `ProjectPhoto`，执行 1–6 张数量约束，并在向 UI 发布新状态前保存照片与编辑配方快照。系统相册临时路径由 `AppOwnedPhotoImporter` 转为应用自有副本；`JsonPhotoProjectStore` 使用相对媒体路径保存最新项目，避免 iOS 数据容器 UUID 变化后绝对路径失效，并兼容迁移旧快照。页面不依赖 `image_picker`、文件复制或 JSON 格式。
+默认交互一次围绕一张当前图片完成。多个草稿可以独立存在，但批量范围、整组同步和传统工具分类不进入主流程。
 
-`PhotoAnalyzer` 是确定性端侧分析 seam。iOS 使用 Core Image 缩略像素统计和 Vision 有限人物场景，Android 使用有界 sRGB Bitmap 缩略图、同阈值像素统计和系统 `FaceDetector`；两端只返回曝光、白平衡、清晰度、人物适用性、稳定降级原因和场景等有限枚举，不把像素、人脸框或供应商对象传入 Flutter。iOS 复用生产人像安全策略，将无人脸、多人、低置信度、人脸过小、landmark 缺失和候选尚未冻结分别映射为稳定原因；Vision 不可用时保留基础像素分析并关闭人像能力。Android 在人像处理尚未实现时明确返回 `capabilityUnavailable`。引擎能力版本参与项目缓存身份，解码、能力或结果验证失败时稳定退回 metadata-safe 配方。
+### 静态风格执行
 
-版本化 `ImagePipeline` 只追加新参数语义，不重解释已发布版本；未知版本、越界字段和不完整目标参数必须被拒绝或安全迁移。`PhotoPreviewRenderer` 是原生预览 seam：iOS 使用 Core Image/Metal 与 Flutter Texture，Android Adapter 作为延期平台能力保留；Flutter 矩阵只允许作为明确声明的兼容降级。`PhotoExporter` 从原图重放同一配方，iOS 的文件渲染与 PhotoKit 保存共享生产实现，测试不得用独立算法替代最终产物。具体当前管线版本由源码、迁移测试和候选产物共同证明，不在架构文档缓存。原始项目文件始终只读，48 MP、格式、色彩和物理设备预算由质量基线关闭。详细决定见 [`ADR 0002`](../adr/0002-native-preview-pipeline.md)。
+静态风格执行是一个深 Module。调用方只需要提交当前来源身份和 `StyleDefinition`，并接收预览、提交结果或结构化拒绝原因。Module 内部隐藏参数、元操作、能力校验、事务、历史和 `RenderPlan` 编译。
+
+同一来源、风格版本、引擎能力和编辑基线必须生成稳定结果。“图片应用”流程中浏览或切换风格只更新临时预览；进入 `applyStyleReady` 并明确选择“应用风格”后，才原子替换既有风格层并形成一个可撤销步骤。具体合同见[静态风格执行](style-execution.md)和 [ADR 0003](../adr/0003-editing-core-and-render-plan.md)。
+
+### 静态预览与导出
+
+版本化 `ImagePipeline` 不重解释已发布语义。`PhotoPreviewRenderer` 从应用自有来源创建原生纹理预览，`PhotoExporter` 从只读原图重放同一 `RenderPlan`；未知版本、越界字段、不完整目标和不支持的非中性能力必须严格拒绝。具体决定见 [ADR 0002](../adr/0002-native-preview-pipeline.md)。
+
+### 派生媒体生成
+
+`GenerationCoordinator` 管理独立异步任务，公开创建、观察、取消、重试和删除派生产物的最小 Interface。供应商协议、轮询、幂等、超时、成本保护、恢复和产物校验都留在 Module 内部。
+
+“动起来”流程在首页先确定 `creationIntent=motion`，再选图和定风格；进入 `motionStyleReady` 后只显示“让图片动起来”。生成输入绑定不可变的 `GenerationSourceSnapshot`，由 `SourcePhoto` 与已经确定的 `StyleDefinition` 创建，可包含专供生成的冻结参考渲染，但不依赖 `StyleCommit`。后续换图或改风格不会篡改既有生成结果，只会使其相对当前选择变为过期。生成失败、取消或供应商不可用不得改变静态编辑状态，也不得阻断静态应用与导出。具体合同见[派生媒体生成](generation-pipeline.md)。
 
 ## 暂不引入
 
-- 不因只有两个页面就引入 go_router。
-- 不因只有一个编辑会话就引入 Riverpod、Bloc 或 Redux。
-- 不创建没有第二个 Adapter 的 repository/port。
-- 不为尚未接入的遥测供应商创建空 bootstrap/error-reporter 转发层。
+- 不恢复“分类 → 工具 → 参数”的传统编辑主界面。
+- 不在定好风格后同时展示“应用风格”和“让图片动起来”，也不使用一个共享 `styleReady` 承担两条任务流。
+- 不让页面或 AI 直接拼装任意 shader、脚本、`RenderPlan` 或供应商 payload。
+- 不把生成进度、提示词、远程任务 ID、视频 URL 或帧状态加入静态 `EditRecipe`。
+- 不因潜在多供应商提前暴露供应商选择；差异只存在于生成 Adapter 内。
+- 不把生成供应商初始化加入首屏关键路径。
 - 不创建通用 `utils`、`managers` 或 `services` 垃圾目录。
-
-当深链路、跨页面共享状态或真正的本地/云端双实现出现时，再按实际 seam 引入新的依赖和 Adapter。项目恢复已经出现真实 seam，因此只为该能力加入照片选择和应用支持目录 Adapter。
 
 ## 新功能落位
 
-- 用户可见页面：`lib/features/<feature>/presentation/`
-- 用例、会话和任务编排：`lib/features/<feature>/application/`
-- 配方、值对象和纯规则：`lib/features/<feature>/domain/`
-- 跨 Feature 的应用组装：`lib/app/`
-- 原生桥接：平台目录及对应 Feature 的 Adapter 目录，禁止直接散落在页面中。
+- 风格定义、验证与替换规则：`lib/features/editor/domain/`。
+- 风格应用、预览和提交编排：`lib/features/editor/application/`。
+- 首页任务入口、`creationIntent`、分支图片与风格选择界面：对应 Feature 的 `presentation/`。
+- 生成请求、任务和派生产物领域模型：`lib/features/generation/domain/`。
+- 生成编排和供应商 seam：`lib/features/generation/application/`。
+- 供应商、下载与媒体存储 Adapter：`lib/features/generation/infrastructure/` 或平台目录。
+- 跨 Feature 组装：`lib/app/`。
 
-测试文件镜像公开行为，不镜像内部目录数量。优先测试 Module Interface 和用户可见交互。
+测试通过 Module Interface 验证公开结果，不镜像内部目录或供应商协议。新增用户可见页面或路由时，仍必须同步扩展生产导航的 `integration_test`。

@@ -91,6 +91,31 @@ void main() {
     },
   );
 
+  test('whole-photo whitening maps to a bounded exposure adjustment', () async {
+    final availability = MetaOpAvailability.resolve(
+      catalog: MetaOpCatalog.standard,
+      capabilities: iosMetaOpCapabilities,
+      policy: standardMetaOpProductPolicy,
+      applicability: const {'photo'},
+    );
+
+    final outcome = await const LocalAiEditPlanner().plan(
+      AiEditPlanningRequest(
+        intent: '白一点，调整整张照片',
+        baseStateVersion: 42,
+        currentState: EditState.empty,
+        capabilities: availability.aiCapabilities(MetaOpCatalog.standard),
+        photoAnalysis: const AiPhotoAnalysis(scene: 'people'),
+      ),
+    );
+
+    expect(outcome, isA<AiEditProposal>());
+    final proposal = outcome as AiEditProposal;
+    expect(proposal.changes, hasLength(1));
+    expect(proposal.changes.single.address.metaOpId, MetaOpIds.exposure);
+    expect(proposal.changes.single.value, closeTo(0.12, 1e-12));
+  });
+
   test(
     'multi-face portrait intent asks once then resolves one atomic proposal',
     () async {

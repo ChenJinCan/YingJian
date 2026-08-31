@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:yingjian/app/navigation/app_router.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_sharer.dart';
@@ -31,8 +32,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('映见'), findsOneWidget);
-    expect(find.text('让变美更容易'), findsOneWidget);
-    expect(find.text('选择照片开始'), findsOneWidget);
+    expect(find.text('选择想得到的结果'), findsOneWidget);
+    expect(find.text('图片应用'), findsOneWidget);
+    expect(find.text('动起来'), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-apply-style')), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-motion')), findsOneWidget);
     expect(
       find.byKey(const ValueKey('home-full-screen-background')),
       findsOneWidget,
@@ -57,7 +61,9 @@ void main() {
     await tester.pumpWidget(buildTestApp(settings));
 
     expect(find.text('Yingjian'), findsOneWidget);
-    expect(find.text('One photo. Refined with focus.'), findsOneWidget);
+    expect(find.text('Choose the result you want'), findsOneWidget);
+    expect(find.text('Apply a look'), findsOneWidget);
+    expect(find.text('Bring it to life'), findsOneWidget);
   });
 
   testWidgets('English draft metadata only presents the last edit time', (
@@ -113,7 +119,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('未完成项目'), findsNothing);
-    expect(find.text('选择新照片'), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-apply-style')), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-motion')), findsOneWidget);
     expect(find.byKey(const ValueKey('home-resume-project')), findsOneWidget);
     expect(find.textContaining('1 张照片'), findsNothing);
     expect(find.textContaining('14:30'), findsOneWidget);
@@ -153,6 +160,11 @@ void main() {
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
     final settings = await AppSettings.load();
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
+    await tester.pumpAndSettle();
+    await tester.drag(
+      find.byKey(const ValueKey('home-scroll')),
+      const Offset(0, -420),
+    );
     await tester.pumpAndSettle();
 
     expect(
@@ -199,6 +211,11 @@ void main() {
 
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
     await tester.pumpAndSettle();
+    await tester.drag(
+      find.byKey(const ValueKey('home-scroll')),
+      const Offset(0, -420),
+    );
+    await tester.pumpAndSettle();
 
     expect(
       find.byKey(const ValueKey('home-featured-draft-project-2')),
@@ -206,7 +223,7 @@ void main() {
     );
     expect(find.byKey(const ValueKey('home-draft-project-2')), findsNothing);
     expect(find.byKey(const ValueKey('home-draft-project-1')), findsOneWidget);
-    expect(find.text('其他草稿'), findsOneWidget);
+    expect(find.text('最近创作'), findsOneWidget);
 
     final firstDraft = find.byKey(const ValueKey('home-draft-project-1'));
     await tester.drag(find.byType(ListView), const Offset(0, -320));
@@ -214,7 +231,11 @@ void main() {
     await tester.tap(firstDraft);
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('photo-preview-photo-1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('apply-style-workspace')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('style-workspace-source-photo')),
+      findsOneWidget,
+    );
     expect(store.project?.id, first.id);
     expect(
       store.projects.map((project) => project.id),
@@ -248,6 +269,11 @@ void main() {
       SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
       final settings = await AppSettings.load();
       await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
+      await tester.pumpAndSettle();
+      await tester.drag(
+        find.byKey(const ValueKey('home-scroll')),
+        const Offset(0, -520),
+      );
       await tester.pumpAndSettle();
 
       await tester.ensureVisible(
@@ -310,8 +336,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('home-resume-project')));
-    await tester.pumpAndSettle();
+    await _openLegacyEditorRoute(tester);
 
     expect(
       find.byKey(const ValueKey('project-requires-update')),
@@ -390,7 +415,7 @@ void main() {
       ),
     );
 
-    await _openEditorFromHome(tester);
+    await _openLegacyEditorRoute(tester);
     final targetIds = store.project!.targetRegistries['photo-1']!.targets.keys
         .toList(growable: false);
     await tester.tap(find.byKey(const ValueKey('voice-edit-entry')));
@@ -512,7 +537,7 @@ void main() {
       ),
     );
 
-    await _tapEditorEntryFromHome(tester);
+    await _pushLegacyEditorRoute(tester);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('voice-edit-entry')));
     await tester.pumpAndSettle();
@@ -564,13 +589,21 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.ensureVisible(find.byKey(const ValueKey('home-new-project')));
-    await tester.tap(find.byKey(const ValueKey('home-new-project')));
+    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('photo-preview-photo-2')), findsOneWidget);
+    expect(find.byKey(const ValueKey('apply-style-workspace')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('style-workspace-source-photo')),
+      findsOneWidget,
+    );
     expect(store.projects.map((draft) => draft.id), contains(project.id));
 
     await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    await tester.drag(
+      find.byKey(const ValueKey('home-scroll')),
+      const Offset(0, -420),
+    );
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('home-draft-project-1')), findsOneWidget);
     expect(store.projects, hasLength(2));
@@ -598,7 +631,7 @@ void main() {
       ),
     );
 
-    await _openEditorFromHome(tester);
+    await _openLegacyEditorRoute(tester);
 
     expect(find.byKey(const ValueKey('photo-preview-photo-1')), findsOneWidget);
     expect(find.byKey(const ValueKey('editor-preview-stage')), findsOneWidget);
@@ -650,7 +683,7 @@ void main() {
         ]),
       ),
     );
-    await _openEditorFromHome(tester);
+    await _openLegacyEditorRoute(tester);
 
     expect(find.byKey(const ValueKey('voice-edit-entry')), findsOneWidget);
     expect(find.byKey(const ValueKey('editor-manual-entry')), findsOneWidget);
@@ -698,7 +731,7 @@ void main() {
         ),
       );
 
-      await _openEditorFromHome(tester);
+      await _openLegacyEditorRoute(tester);
       expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
       expect(
         find.byKey(const ValueKey('editor-bottom-command-bar')),
@@ -797,9 +830,11 @@ void main() {
       ),
     );
 
-    await _openEditorFromHome(tester);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
+    expect(find.byKey(const ValueKey('apply-style-workspace')), findsOneWidget);
     expect(find.textContaining('动态照片.png'), findsNothing);
   });
 
@@ -818,7 +853,9 @@ void main() {
       ),
     );
 
-    await _openEditorFromHome(tester);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('home-page')), findsOneWidget);
     expect(find.byKey(const ValueKey('editor-page')), findsNothing);
@@ -837,12 +874,15 @@ void main() {
       buildTestApp(settings, photoImporter: FakePhotoImporter()),
     );
 
-    await _openEditorFromHome(tester);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('home-page')), findsOneWidget);
     expect(find.byKey(const ValueKey('editor-page')), findsNothing);
     expect(find.text('未添加任何照片'), findsNothing);
-    expect(find.byKey(const ValueKey('home-start-editing')), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-apply-style')), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-motion')), findsOneWidget);
   });
 
   testWidgets('import progress is announced while local copying is active', (
@@ -853,13 +893,14 @@ void main() {
     final settings = await AppSettings.load();
     await tester.pumpWidget(buildTestApp(settings, photoImporter: importer));
 
-    await _tapEditorEntryFromHome(tester);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
     final progress = find.semantics.byPredicate(
       (node) =>
-          node.label.contains('正在准备照片') && node.flagsCollection.isLiveRegion,
+          node.label.contains('正在准备图片') && node.flagsCollection.isLiveRegion,
     );
     expect(progress, findsOne);
     expect(progress.evaluate().single.flagsCollection.isLiveRegion, isTrue);
@@ -884,8 +925,8 @@ void main() {
       buildTestApp(settings, photoImporter: importer, photoProjectStore: store),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.pump(const Duration(milliseconds: 220));
     await tester.tap(find.byKey(const ValueKey('home-cancel-import')));
     await tester.pump();
     importer.complete(
@@ -920,14 +961,16 @@ void main() {
       ),
     );
 
-    await _openEditorFromHome(tester);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('home-page')), findsOneWidget);
     expect(find.text('照片导入失败，请重试'), findsOneWidget);
     final retry = find.byKey(const ValueKey('home-import-retry'));
     expect(retry, findsOneWidget);
-    expect(tester.widget<FilledButton>(retry).onPressed, isNotNull);
-    expect(find.text('正在准备照片…'), findsNothing);
+    expect(tester.widget<TextButton>(retry).onPressed, isNotNull);
+    expect(find.text('正在准备图片…'), findsNothing);
   });
 
   testWidgets('import opens a neutral editor without another decision', (
@@ -956,7 +999,7 @@ void main() {
       ),
     );
 
-    await _openEditorFromHome(tester);
+    await _openLegacyEditorRoute(tester);
     expect(previewRenderer.maxEdges, contains(2048));
     expect(store.project?.flowState, PhotoProjectFlowState.editing);
     expect(store.project?.sharedStyle.recipe, EditRecipe.neutral);
@@ -998,13 +1041,13 @@ void main() {
     );
 
     await tester.pumpWidget(app());
-    await _openEditorFromHome(tester);
+    await _openLegacyEditorRoute(tester);
     expect(analyzer.calls, 1);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
     await tester.pumpWidget(app());
-    await _openEditorFromHome(tester);
+    await _openLegacyEditorRoute(tester);
 
     expect(analyzer.calls, 1);
     expect(store.project?.flowState, PhotoProjectFlowState.editing);
@@ -1049,7 +1092,7 @@ void main() {
         photoAnalysisCache: cache,
       ),
     );
-    await _tapEditorEntryFromHome(tester);
+    await _pushLegacyEditorRoute(tester);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     await analyzer.started.future;
@@ -1114,7 +1157,7 @@ void main() {
         photoAnalyzer: analyzer,
       ),
     );
-    await _tapEditorEntryFromHome(tester);
+    await _pushLegacyEditorRoute(tester);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     await analyzer.started.future;
@@ -1162,7 +1205,7 @@ void main() {
         photoAnalyzer: analyzer,
       ),
     );
-    await _tapEditorEntryFromHome(tester);
+    await _pushLegacyEditorRoute(tester);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     await analyzer.started.future;
@@ -1207,7 +1250,7 @@ void main() {
         photoAnalysisCache: cache,
       ),
     );
-    await _tapEditorEntryFromHome(tester);
+    await _pushLegacyEditorRoute(tester);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     await analyzer.started.future;
@@ -1262,7 +1305,7 @@ void main() {
         photoAnalyzer: _CountingPhotoAnalyzer(),
       ),
     );
-    await _tapEditorEntryFromHome(tester);
+    await _pushLegacyEditorRoute(tester);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     await store.analysisSaveStarted.future;
@@ -1317,7 +1360,7 @@ void main() {
       ),
     );
 
-    await _openEditorFromHome(tester);
+    await _openLegacyEditorRoute(tester);
 
     await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
     await tester.pumpAndSettle();
@@ -1392,14 +1435,22 @@ void main() {
   testWidgets('saved export replaces editing inputs until finishing', (
     tester,
   ) async {
-    await _pumpSinglePhotoExport(tester, FakePhotoSharer());
+    final store = await _pumpSinglePhotoExport(tester, FakePhotoSharer());
 
     expect(find.byKey(const Key('photo-workspace-scroll')), findsNothing);
     expect(find.byKey(const ValueKey('editor-save-success')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('save-finish')));
     await tester.pumpAndSettle();
+    unawaited(
+      AppRouter.navigatorKey.currentState!.pushReplacementNamed(AppRoutes.home),
+    );
+    await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('home-resume-project')), findsOneWidget);
-    expect(find.text('已导出'), findsOneWidget);
+    final status = find.byKey(
+      ValueKey('home-draft-status-${store.project!.id}'),
+    );
+    expect(status, findsOneWidget);
+    expect(tester.widget<Text>(status).data, '已导出');
   });
 
   testWidgets('an exported draft reopens for editing and can export again', (
@@ -1433,7 +1484,7 @@ void main() {
       ),
     );
 
-    await _openEditorFromHome(tester);
+    await _openLegacyEditorRoute(tester);
     expect(find.byKey(const ValueKey('editor-save-success')), findsNothing);
     expect(find.byKey(const ValueKey('editor-bottom-command-bar')), findsOne);
     await tester.tap(find.byKey(const ValueKey('editor-export')));
@@ -1547,7 +1598,7 @@ void main() {
           photoPreviewRenderer: FakePhotoPreviewRenderer.unsupported(),
         ),
       );
-      await _tapEditorEntryFromHome(tester);
+      await _pushLegacyEditorRoute(tester);
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
       await _openManualMetaOp(tester, MetaOpIds.compositionGeometry);
@@ -1608,7 +1659,7 @@ void main() {
           metaOpCapabilities: iosMetaOpCapabilities,
         ),
       );
-      await _tapEditorEntryFromHome(tester);
+      await _pushLegacyEditorRoute(tester);
       await tester.pumpAndSettle();
 
       await _openManualMetaOp(tester, MetaOpIds.compositionGeometry);
@@ -1697,7 +1748,7 @@ void main() {
       ),
     );
 
-    await _openEditorFromHome(tester);
+    await _openLegacyEditorRoute(tester);
 
     expect(find.textContaining('当前效果预览暂不可用'), findsOneWidget);
     expect(find.textContaining('构图预览暂不可用'), findsNothing);
@@ -1815,7 +1866,7 @@ void main() {
       ),
     );
 
-    await _openEditorFromHome(tester);
+    await _openLegacyEditorRoute(tester);
     await _openManualMetaOp(tester, MetaOpIds.skinSmooth);
     await tester.ensureVisible(
       find.byKey(const ValueKey('editor-adjustment-tab-naturalBeautification')),
@@ -2510,7 +2561,7 @@ void main() {
           photoPreviewRenderer: FakePhotoPreviewRenderer.supported(),
         ),
       );
-      await _openEditorFromHome(tester);
+      await _openLegacyEditorRoute(tester);
       await _openManualMetaOp(tester, MetaOpIds.semanticAdjustments);
       store.failSaves = true;
       expect(
@@ -2609,7 +2660,7 @@ void main() {
         portrait: PortraitApplicability.applicable,
         faceSlim: PortraitApplicability.unsafe,
         faceSlimReason: PortraitDegradationReason.backgroundRisk,
-        body: PortraitApplicability.applicable,
+        body: PortraitApplicability.unavailable,
         capabilityVersion: 'widget-capability-v2',
       );
       SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
@@ -2625,11 +2676,16 @@ void main() {
           photoPreviewRenderer: FakePhotoPreviewRenderer.supported(),
         ),
       );
-      await _tapEditorEntryFromHome(tester);
+      await _pushLegacyEditorRoute(tester);
       await tester.pumpAndSettle();
 
       expect(analyzer.calls, 1);
       expect(store.project?.flowState, PhotoProjectFlowState.editing);
+      await _openManualMetaOp(tester, MetaOpIds.bodyGeometry);
+      expect(
+        find.byKey(const ValueKey('editor-body-tools-unavailable')),
+        findsOneWidget,
+      );
       await _openManualMetaOp(tester, MetaOpIds.skinSmooth);
       await tester.dragUntilVisible(
         find.byKey(
@@ -2647,19 +2703,45 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.byKey(const ValueKey('editor-adjustment-tab-faceSlim')),
+        find
+            .byKey(const ValueKey('editor-adjustment-tab-faceSlim'))
+            .hitTestable(),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('editor-face-slim-unavailable')),
         findsNothing,
       );
+      await tester.tap(
+        find
+            .byKey(const ValueKey('editor-adjustment-tab-faceSlim'))
+            .hitTestable(),
+      );
+      await tester.pumpAndSettle();
       expect(
         find.byKey(const ValueKey('editor-face-slim-unavailable')),
         findsOneWidget,
       );
-      expect(find.text('为保护背景线条，这张照片暂不提供瘦脸'), findsOneWidget);
+      expect(find.text('当前画面的背景线条与面部区域重叠，瘦脸暂不生效'), findsOneWidget);
       expect(
         find
             .byKey(const ValueKey('editor-adjustment-tab-bodySlim'))
             .hitTestable(),
         findsOneWidget,
+      );
+      await tester.tap(
+        find
+            .byKey(const ValueKey('editor-adjustment-tab-bodySlim'))
+            .hitTestable(),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('editor-body-tools-unavailable')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('editor-adjustment-bodySlim')),
+        findsNothing,
       );
       expect(
         await cache.read(
@@ -2714,7 +2796,7 @@ void main() {
       SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
       final settings = await AppSettings.load();
       await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
-      await _openEditorFromHome(tester);
+      await _openLegacyEditorRoute(tester);
       await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
       await tester.pumpAndSettle();
 
@@ -2783,7 +2865,7 @@ void main() {
       SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
       final settings = await AppSettings.load();
       await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
-      await _openEditorFromHome(tester);
+      await _openLegacyEditorRoute(tester);
       await tester.tap(find.byKey(const ValueKey('editor-open-tools')));
       await tester.pumpAndSettle();
 
@@ -2876,7 +2958,7 @@ void main() {
         photoExporter: _AlwaysFailPhotoExporter(),
       ),
     );
-    await _openEditorFromHome(tester);
+    await _openLegacyEditorRoute(tester);
     final saveButton = find.byKey(const ValueKey('editor-export'));
     await tester.ensureVisible(saveButton);
     await tester.tap(saveButton);
@@ -2918,7 +3000,7 @@ void main() {
           photoExporter: exporter,
         ),
       );
-      await _openEditorFromHome(tester);
+      await _openLegacyEditorRoute(tester);
       await tester.tap(find.byKey(const ValueKey('editor-export')));
       await tester.pumpAndSettle();
       expect(find.text('映见需要添加照片权限，才能把成片保存到系统相册。'), findsOne);
@@ -2977,7 +3059,7 @@ void main() {
         photoSharer: sharer,
       ),
     );
-    await _openEditorFromHome(tester);
+    await _openLegacyEditorRoute(tester);
     final saveButton = find.byKey(const ValueKey('editor-export'));
     await tester.ensureVisible(saveButton);
     await tester.tap(saveButton);
@@ -3046,7 +3128,7 @@ void main() {
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
     final settings = await AppSettings.load();
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
-    await _openEditorFromHome(tester);
+    await _openLegacyEditorRoute(tester);
 
     await tester.tap(find.byTooltip('删除项目'));
     await tester.pumpAndSettle();
@@ -3073,7 +3155,8 @@ void main() {
     await tester.pumpWidget(buildTestApp(settings));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('home-start-editing')), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-apply-style')), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-motion')), findsOneWidget);
     expect(find.byKey(const ValueKey('home-journey-guide')), findsNothing);
     expect(tester.takeException(), isNull);
   });
@@ -3112,7 +3195,7 @@ void main() {
     final settings = await AppSettings.load();
 
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
-    await _openEditorFromHome(tester);
+    await _openLegacyEditorRoute(tester);
 
     expect(
       find.byKey(const ValueKey('editor-bottom-command-bar')),
@@ -3164,18 +3247,19 @@ void main() {
   });
 }
 
-Future<void> _tapEditorEntryFromHome(WidgetTester tester) async {
+Future<void> _pushLegacyEditorRoute(WidgetTester tester) async {
   await tester.pumpAndSettle();
   final resume = find.byKey(const ValueKey('home-resume-project'));
-  if (resume.evaluate().isNotEmpty) {
-    await tester.tap(resume);
-  } else {
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-  }
+  unawaited(
+    AppRouter.navigatorKey.currentState!.pushNamed(
+      AppRoutes.editor,
+      arguments: resume.evaluate().isEmpty,
+    ),
+  );
 }
 
-Future<void> _openEditorFromHome(WidgetTester tester) async {
-  await _tapEditorEntryFromHome(tester);
+Future<void> _openLegacyEditorRoute(WidgetTester tester) async {
+  await _pushLegacyEditorRoute(tester);
   await tester.pumpAndSettle();
 }
 
@@ -3231,7 +3315,7 @@ Future<MemoryPhotoProjectStore> _pumpSinglePhotoExport(
       photoSharer: sharer,
     ),
   );
-  await _tapEditorEntryFromHome(tester);
+  await _pushLegacyEditorRoute(tester);
   await tester.pumpAndSettle();
   final saveButton = find.byKey(const ValueKey('editor-export'));
   await tester.ensureVisible(saveButton);

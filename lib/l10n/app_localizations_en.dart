@@ -28,6 +28,117 @@ class AppLocalizationsEn extends AppLocalizations {
   String get homePrimaryAction => 'Choose a photo to start';
 
   @override
+  String get homeChooseResult => 'Choose the result you want';
+
+  @override
+  String get imageApplication => 'Apply a look';
+
+  @override
+  String get imageApplicationSubtitle => 'Give the photo one complete style';
+
+  @override
+  String get motionCreation => 'Bring it to life';
+
+  @override
+  String get motionCreationSubtitle => 'Create a natural moving image';
+
+  @override
+  String get preparingImage => 'Preparing image…';
+
+  @override
+  String get recentCreations => 'Recent creations';
+
+  @override
+  String get continueCreation => 'Continue';
+
+  @override
+  String get currentStyle => 'Current style';
+
+  @override
+  String get aiDefineStyle => 'Define with AI';
+
+  @override
+  String get describeStyleTitle => 'Describe your style';
+
+  @override
+  String get describeStyleHint =>
+      'For example: cinematic after rain, keep the person natural';
+
+  @override
+  String get defineStyle => 'Define style';
+
+  @override
+  String get styleNotUnderstood =>
+      'That was not clear yet. Try “cinematic”, “warmer”, or “cooler”.';
+
+  @override
+  String get styleAiCustom => 'AI Style';
+
+  @override
+  String get styleSavedCustom => 'Saved style';
+
+  @override
+  String get styleNatural => 'Natural';
+
+  @override
+  String get styleSoftLight => 'Soft light';
+
+  @override
+  String get styleNight => 'Night';
+
+  @override
+  String get styleCool => 'Cool';
+
+  @override
+  String get styleWarmSun => 'Warm sun';
+
+  @override
+  String get styleMono => 'Mono';
+
+  @override
+  String get styleBreeze => 'Breeze';
+
+  @override
+  String get styleBreathe => 'Breathe';
+
+  @override
+  String get stylePushIn => 'Push in';
+
+  @override
+  String get styleFlowingLight => 'Flowing light';
+
+  @override
+  String get styleCinema => 'Cinema';
+
+  @override
+  String get applyStyle => 'Apply style';
+
+  @override
+  String get applyingStyle => 'Applying…';
+
+  @override
+  String get styleApplied => 'Style applied';
+
+  @override
+  String get changeStyle => 'Change style';
+
+  @override
+  String get generateMotion => 'Generate motion';
+
+  @override
+  String get motionConfirmationTitle => 'Create a moving image';
+
+  @override
+  String get motionConfirmationBody =>
+      'Your image is uploaded and a motion task is created only after confirmation. The generation service is not connected in this engineering slice, so nothing will be uploaded or charged.';
+
+  @override
+  String get motionUnavailable => 'Motion generation is not connected yet';
+
+  @override
+  String get gotIt => 'Got it';
+
+  @override
   String get onboardingPromise =>
       'Choose one photo, then describe the feeling you want. Yingjian focuses on refining that photo.';
 
@@ -120,6 +231,19 @@ class AppLocalizationsEn extends AppLocalizations {
   String get photoPreviewArea => 'Photo preview';
 
   @override
+  String get preparingStylePreview => 'Preparing style preview';
+
+  @override
+  String get stylePreviewReady => 'Style preview ready';
+
+  @override
+  String get stylePreviewFailedShowingOriginal =>
+      'Style preview failed. The current image remains visible.';
+
+  @override
+  String get restorePreviousResult => 'Return to last result';
+
+  @override
   String get selectPhotosTitle => 'Choose one photo';
 
   @override
@@ -134,7 +258,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get effectPreviewUnavailable =>
-      'This effect preview is temporarily unavailable. Reset the adjustment or try again.';
+      'This effect preview is temporarily unavailable. Try again.';
 
   @override
   String get photoImportCanceled => 'No photos were added';
@@ -302,7 +426,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get faceSlimBackgroundProtected =>
-      'Face slimming is unavailable for this photo to protect background lines';
+      'Background lines overlap the face area, so face slimming will not take effect yet';
 
   @override
   String get faceSlimMultipleFaces =>
@@ -310,7 +434,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get faceSlimUnavailable =>
-      'This photo does not currently meet safe face-slimming conditions';
+      'No adjustable face was detected, so face slimming will not take effect';
 
   @override
   String get faceSlimTargetHint => 'Choose a face to adjust (left to right)';
@@ -322,6 +446,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get bodySlim => 'Body slim';
+
+  @override
+  String get bodyToolsUnavailable =>
+      'No adjustable person was detected, so body adjustments will not take effect';
 
   @override
   String get headSize => 'Smaller head';
@@ -472,7 +600,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get portraitToolsUnavailable =>
-      'This photo did not pass portrait safety checks. Light and color tools remain available.';
+      'No adjustable portrait was detected, so portrait effects will not take effect';
 
   @override
   String get resetCurrentAdjustment => 'Reset current adjustment';
@@ -687,6 +815,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get shareSavedPhotos => 'Share saved photos';
 
   @override
+  String get shareResult => 'Share result';
+
+  @override
+  String get preparingShare => 'Preparing to share…';
+
+  @override
   String get sharingPhotos => 'Opening system share…';
 
   @override
@@ -699,6 +833,12 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get photoShareFailed =>
       'Sharing is unavailable. The final photo is still saved in Photos.';
+
+  @override
+  String get photoResultShareCanceled => 'Sharing canceled';
+
+  @override
+  String get photoResultShareFailed => 'Sharing is unavailable. Try again.';
 
   @override
   String get continueEditing => 'Continue editing';
@@ -939,7 +1079,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get voiceEditUnsupported =>
-      'This instruction cannot be interpreted safely yet. Try different wording or adjust it manually.';
+      'That adjustment was not understood. Try different wording or adjust it manually.';
 
   @override
   String get voiceEditFailed =>
@@ -1045,7 +1185,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get lightingNeedsPerson =>
-      'No person in this photo can be relit safely';
+      'No lighting target was detected. Other light and color tools remain available';
 
   @override
   String personNumber(int number) {

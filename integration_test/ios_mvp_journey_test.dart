@@ -8,9 +8,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:yingjian/app/navigation/app_router.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
+import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/content_sha256.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/editing_core.dart';
@@ -20,6 +22,7 @@ import 'package:yingjian/features/editor/domain/platform_meta_op_capabilities.da
 import 'package:yingjian/features/editor/domain/semantic_editing_recipe.dart';
 import 'package:yingjian/features/editor/infrastructure/method_channel_photo_exporter.dart';
 import 'package:yingjian/features/editor/infrastructure/method_channel_photo_preview_renderer.dart';
+import 'package:yingjian/features/editor/infrastructure/method_channel_photo_sharer.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/project/infrastructure/app_owned_photo_importer.dart';
@@ -57,7 +60,8 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('onboarding-continue')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('home-start-editing')), findsOneWidget);
+      expect(find.byKey(const ValueKey('home-apply-style')), findsOneWidget);
+      expect(find.byKey(const ValueKey('home-motion')), findsOneWidget);
       expect(
         find.byKey(const ValueKey('home-full-screen-background')),
         findsOneWidget,
@@ -125,6 +129,283 @@ void main() {
     },
   );
 
+  testWidgets(
+    'home applies a style and saves its static result through production routing',
+    (tester) async {
+      final fixtureDirectory = await Directory.systemTemp.createTemp(
+        'yingjian-apply-style-route-',
+      );
+      addTearDown(() => fixtureDirectory.delete(recursive: true));
+      final source = File('${fixtureDirectory.path}/portrait.png');
+      await source.writeAsBytes(await _createPngFixtureBytes(), flush: true);
+      final projectRoot = Directory('${fixtureDirectory.path}/project');
+      final store = JsonPhotoProjectStore(directory: () async => projectRoot);
+      final importer = AppOwnedPhotoImporter(
+        source: _SelectedPhotoSource([
+          SelectedPhoto(path: source.path, name: 'portrait.png'),
+        ]),
+        mediaDirectory: () async => Directory('${projectRoot.path}/media'),
+        createId: () => 'apply-route-photo',
+      );
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+      final previewRenderer = FakePhotoPreviewRenderer.supported();
+      final exporter = _IntegrationPreparingPhotoExporter();
+      final sharer = FakePhotoSharer();
+
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoImporter: importer,
+          photoProjectStore: store,
+          photoExporter: exporter,
+          photoSharer: sharer,
+          photoPreviewRenderer: previewRenderer,
+          metaOpCapabilities: iosMetaOpCapabilities,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('home-apply-style')), findsOneWidget);
+      expect(find.byKey(const ValueKey('home-motion')), findsOneWidget);
+      expect(find.byKey(const ValueKey('home-start-editing')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('apply-style-workspace')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('style-workspace-source-photo')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('apply-style-primary-action')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('motion-style-primary-action')),
+        findsNothing,
+      );
+      expect(find.byKey(const ValueKey('editor-page')), findsNothing);
+      final beforeSelection = (await store.loadLatest())!;
+      final beforeRecipe = beforeSelection.effectiveRecipeFor(
+        'apply-route-photo',
+      );
+      final beforeVersion = beforeSelection.editStateVersion;
+      final beforeUndoCount = beforeSelection.undoHistory.length;
+
+      await tester.tap(find.byKey(const ValueKey('style-option-soft-light')));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<Text>(find.byKey(const ValueKey('current-style-name')))
+            .data,
+        '柔光',
+      );
+      expect(previewRenderer.updates, isNotEmpty);
+      final afterSelection = (await store.loadLatest())!;
+      expect(
+        afterSelection.effectiveRecipeFor('apply-route-photo'),
+        beforeRecipe,
+      );
+      expect(afterSelection.editStateVersion, beforeVersion);
+      expect(afterSelection.undoHistory, hasLength(beforeUndoCount));
+      expect(afterSelection.creationStyleId, 'soft-light');
+      await tester.tap(
+        find.byKey(const ValueKey('apply-style-primary-action')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('风格已应用'), findsOneWidget);
+      final persisted = await store.loadLatest();
+      final expected = EditRecipe(
+        exposure: 0.03,
+        basicEditingRecipe: BasicEditingRecipe(
+          filter: PhotoFilter.portrait,
+          filterStrength: 38,
+        ),
+      );
+      expect(persisted!.effectiveRecipeFor('apply-route-photo'), expected);
+      expect(persisted.editStateVersion, beforeVersion + 1);
+      expect(persisted.undoHistory, hasLength(beforeUndoCount + 1));
+      expect(persisted.currentStaticStyleResult, isNotNull);
+      expect(
+        find.byKey(const ValueKey('style-static-result-controls')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('style-result-save')), findsOneWidget);
+      expect(find.byKey(const ValueKey('style-options')), findsNothing);
+      expect(find.byKey(const ValueKey('editor-page')), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('style-result-share')));
+      await tester.pumpAndSettle();
+      expect(exporter.exportedPhoto, isNull);
+      expect(exporter.preparedPhotoIds, ['apply-route-photo']);
+      expect(sharer.sharedPaths, ['/tmp/Yingjian_route-prepare-1.jpg']);
+      expect(
+        (await store.loadLatest())!.flowState,
+        PhotoProjectFlowState.editing,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('style-result-save')));
+      await tester.pumpAndSettle();
+      final saved = (await store.loadLatest())!;
+      expect(exporter.exportedPhoto?.id, 'apply-route-photo');
+      expect(exporter.exportedRecipe, expected);
+      expect(saved.flowState, PhotoProjectFlowState.exported);
+      expect(saved.exportStates['apply-route-photo'], PhotoExportState.saved);
+      expect(
+        saved.lastSuccessfulExportEditStateVersion,
+        saved.editStateVersion,
+      );
+      expect(find.text('已保存到系统相册'), findsOneWidget);
+      expect(find.byKey(const ValueKey('style-result-share')), findsOneWidget);
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('home-apply-style')), findsOneWidget);
+      expect(find.byKey(const ValueKey('home-motion')), findsOneWidget);
+      final resume = find.byKey(const ValueKey('home-resume-project'));
+      await tester.ensureVisible(resume);
+      await tester.pumpAndSettle();
+      await tester.tap(resume);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<Text>(find.byKey(const ValueKey('current-style-name')))
+            .data,
+        '柔光',
+      );
+      expect(find.text('已保存到系统相册'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('style-result-share')));
+      await tester.pumpAndSettle();
+      expect(exporter.preparedPhotoIds, [
+        'apply-route-photo',
+        'apply-route-photo',
+      ]);
+    },
+  );
+
+  testWidgets('iOS runtime prepares and discards a render-only share result', (
+    tester,
+  ) async {
+    final directory = await Directory.systemTemp.createTemp(
+      'yingjian-render-only-share-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final source = File('${directory.path}/source.png');
+    await source.writeAsBytes(await _createPngFixtureBytes(), flush: true);
+    final exporter = MethodChannelPhotoExporter();
+    final preparation = exporter.prepareCanonical(
+      photo: ProjectPhoto(
+        id: 'render-only-share-photo',
+        localPath: source.path,
+        originalName: 'source.png',
+      ),
+      recipe: EditRecipe.neutral,
+      editState: EditState.empty,
+      editContext: EditContext.ios,
+      options: PhotoExportOptions.defaults,
+    );
+
+    final prepared = await preparation.result.timeout(
+      const Duration(seconds: 30),
+    );
+
+    final resultFile = File(prepared.localPath);
+    expect(await resultFile.exists(), isTrue);
+    expect(resultFile.uri.pathSegments.last, startsWith('Yingjian_'));
+    expect(resultFile.path.toLowerCase(), endsWith('.jpg'));
+    expect(prepared.width, greaterThan(0));
+    expect(prepared.height, greaterThan(0));
+
+    await const MethodChannelPhotoSharer().discard(
+      localPaths: [prepared.localPath],
+    );
+    expect(await resultFile.exists(), isFalse);
+  });
+
+  testWidgets(
+    'home chooses motion before picking and keeps an independent primary action',
+    (tester) async {
+      final source = File(
+        'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+        'Icon-App-1024x1024@1x.png',
+      );
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+      final store = MemoryPhotoProjectStore();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoImporter: FakePhotoImporter([
+            ProjectPhoto(
+              id: 'motion-route-photo',
+              localPath: source.path,
+              originalName: 'motion.png',
+            ),
+          ]),
+          photoProjectStore: store,
+          metaOpCapabilities: iosMetaOpCapabilities,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('home-motion')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('motion-style-workspace')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('motion-style-primary-action')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('apply-style-primary-action')),
+        findsNothing,
+      );
+      final beforeSelection = store.project!;
+      final beforeRecipe = beforeSelection.effectiveRecipeFor(
+        'motion-route-photo',
+      );
+      final beforeVersion = beforeSelection.editStateVersion;
+      final beforeUndoCount = beforeSelection.undoHistory.length;
+
+      await tester.tap(find.byKey(const ValueKey('style-option-breeze')));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<Text>(find.byKey(const ValueKey('current-style-name')))
+            .data,
+        '微风',
+      );
+      expect(
+        store.project!.effectiveRecipeFor('motion-route-photo'),
+        beforeRecipe,
+      );
+      expect(store.project!.editStateVersion, beforeVersion);
+      expect(store.project!.undoHistory, hasLength(beforeUndoCount));
+      expect(store.project!.creationStyleId, 'breeze');
+      await tester.tap(
+        find.byKey(const ValueKey('motion-style-primary-action')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('motion-confirmation-sheet')),
+        findsOneWidget,
+      );
+      expect(
+        store.project!.effectiveRecipeFor('motion-route-photo'),
+        beforeRecipe,
+      );
+      expect(store.project!.editStateVersion, beforeVersion);
+      expect(store.project!.undoHistory, hasLength(beforeUndoCount));
+    },
+  );
+
   testWidgets('home keeps and opens multiple independent one-photo drafts', (
     tester,
   ) async {
@@ -173,10 +454,14 @@ void main() {
     );
     expect(find.byKey(const ValueKey('home-draft-draft-2')), findsNothing);
     expect(find.byKey(const ValueKey('home-draft-draft-1')), findsOneWidget);
-    await tester.ensureVisible(find.byKey(const ValueKey('home-new-project')));
-    await tester.tap(find.byKey(const ValueKey('home-new-project')));
+    await tester.ensureVisible(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('photo-preview-photo-3')), findsOneWidget);
+    expect(find.byKey(const ValueKey('apply-style-workspace')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('style-workspace-source-photo')),
+      findsOneWidget,
+    );
 
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
@@ -186,7 +471,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(firstDraft);
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('photo-preview-photo-1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('apply-style-workspace')), findsOneWidget);
   });
 
   testWidgets(
@@ -199,7 +484,7 @@ void main() {
         buildTestApp(settings, photoImporter: FakePhotoImporter()),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+      await tester.tap(find.byKey(const ValueKey('home-apply-style')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('home-page')), findsOneWidget);
       expect(find.byKey(const ValueKey('editor-page')), findsNothing);
@@ -219,7 +504,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+      await tester.tap(find.byKey(const ValueKey('home-apply-style')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('home-import-retry')), findsOneWidget);
       expect(find.textContaining('bad.gif'), findsOneWidget);
@@ -245,22 +530,25 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+      await tester.tap(find.byKey(const ValueKey('home-apply-style')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('home-import-retry')), findsOneWidget);
       expect(find.text('照片导入失败，请重试'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('home-import-retry')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
       expect(
-        find.byKey(const ValueKey('photo-preview-retry-photo')),
+        find.byKey(const ValueKey('apply-style-workspace')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('style-workspace-source-photo')),
         findsOneWidget,
       );
       expect(retrying.calls, 2);
     },
   );
 
-  testWidgets('iOS runtime completes the production one-photo MVP journey', (
+  testWidgets('iOS runtime preserves the legacy editor native export path', (
     tester,
   ) async {
     final fixtureDirectory = await Directory.systemTemp.createTemp(
@@ -302,7 +590,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('home-start-editing')));
+    await _openLegacyEditor(tester, startWithImport: true);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
     final importedProject = await store.loadLatest();
@@ -1024,7 +1312,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-resume-project')));
+    await _openLegacyEditor(tester);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('editor-page')), findsOneWidget);
     expect(find.byKey(const ValueKey('editor-save-success')), findsNothing);
@@ -1033,6 +1321,19 @@ void main() {
     await tester.pumpAndSettle();
     expect(restoredPreviewRenderer.disposeCount, greaterThan(0));
   });
+}
+
+Future<void> _openLegacyEditor(
+  WidgetTester tester, {
+  bool startWithImport = false,
+}) async {
+  unawaited(
+    AppRouter.navigatorKey.currentState!.pushNamed(
+      AppRoutes.editor,
+      arguments: startWithImport,
+    ),
+  );
+  await tester.pumpAndSettle();
 }
 
 Future<List<int>> _createPngFixtureBytes() async {
@@ -1172,6 +1473,61 @@ final class _TimeoutThenSuccessImporter implements PhotoImporter {
     if (calls == 1) throw TimeoutException('fixture timeout');
     return PhotoImportBatch(photos: [photo]);
   }
+}
+
+final class _IntegrationPreparingPhotoExporter
+    implements PhotoExporter, PhotoResultPreparer {
+  ProjectPhoto? exportedPhoto;
+  EditRecipe? exportedRecipe;
+  final List<String> preparedPhotoIds = [];
+
+  @override
+  Future<ExportedPhoto> export({
+    required ProjectPhoto photo,
+    required EditRecipe recipe,
+  }) async {
+    exportedPhoto = photo;
+    exportedRecipe = recipe;
+    return const ExportedPhoto(
+      assetId: 'route-saved-asset',
+      width: 4032,
+      height: 3024,
+      sharePath: '/tmp/Yingjian_route-saved.jpg',
+    );
+  }
+
+  @override
+  PhotoPreparation prepareCanonical({
+    required ProjectPhoto photo,
+    required EditRecipe recipe,
+    required EditState editState,
+    required EditContext editContext,
+    required PhotoExportOptions options,
+  }) {
+    preparedPhotoIds.add(photo.id);
+    final index = preparedPhotoIds.length;
+    final prepared = PreparedPhoto(
+      requestId: 'route-prepare-$index',
+      localPath: '/tmp/Yingjian_route-prepare-$index.jpg',
+      width: 4032,
+      height: 3024,
+    );
+    return _IntegrationPhotoPreparation(prepared);
+  }
+}
+
+final class _IntegrationPhotoPreparation implements PhotoPreparation {
+  _IntegrationPhotoPreparation(PreparedPhoto prepared)
+    : requestId = prepared.requestId,
+      result = Future.value(prepared);
+
+  @override
+  final String requestId;
+  @override
+  final Future<PreparedPhoto> result;
+
+  @override
+  Future<void> cancel() async {}
 }
 
 final class _NativeExportProbe

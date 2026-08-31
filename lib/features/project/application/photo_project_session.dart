@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:yingjian/features/creation/domain/creation_intent.dart';
 import 'package:yingjian/features/editor/application/ai_edit_planner.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/edit_target.dart';
@@ -14,6 +15,10 @@ import 'package:yingjian/features/project/domain/photo_project.dart';
 
 abstract interface class PhotoImporter {
   Future<PhotoImportBatch> importPhotos({required int limit});
+}
+
+abstract interface class CancelablePhotoImporter implements PhotoImporter {
+  Future<void> cancelImport();
 }
 
 @immutable
@@ -96,9 +101,13 @@ abstract interface class PhotoProjectCatalogStore
     implements PhotoProjectLifecycleStore {
   Future<List<PhotoProject>> loadProjects();
 
+  Future<PhotoProject?> loadProject(String projectId);
+
   Future<void> activateProject(String projectId);
 
   Future<void> startNewProject();
+
+  Future<void> cancelNewProject();
 }
 
 enum PhotoImportResult { imported, canceled, rejected, limitReached }
@@ -107,12 +116,14 @@ enum PhotoImportResult { imported, canceled, rejected, limitReached }
 final class PreparedMetaOpPreview {
   const PreparedMetaOpPreview({
     required this.recipe,
+    required this.scopedRecipe,
     required this.state,
     required this.context,
     required this.sourceId,
   });
 
   final EditRecipe recipe;
+  final EditRecipe scopedRecipe;
   final EditState state;
   final EditContext context;
   final String sourceId;
@@ -130,6 +141,8 @@ class PhotoProjectSession extends ChangeNotifier {
   factory PhotoProjectSession({
     required PhotoImporter importer,
     required PhotoProjectStore store,
+    CreationIntent creationIntent = CreationIntent.apply,
+    String? projectId,
     DateTime Function()? now,
     String Function()? createId,
   }) {
@@ -137,15 +150,26 @@ class PhotoProjectSession extends ChangeNotifier {
     return PhotoProjectSession._(
       importer,
       store,
+      creationIntent,
+      projectId,
       () => clock().toUtc(),
       createId ?? _defaultId,
     );
   }
 
-  PhotoProjectSession._(this._importer, this._store, this._now, this._createId);
+  PhotoProjectSession._(
+    this._importer,
+    this._store,
+    this._creationIntent,
+    this._projectId,
+    this._now,
+    this._createId,
+  );
 
   final PhotoImporter _importer;
   final PhotoProjectStore _store;
+  final CreationIntent _creationIntent;
+  final String? _projectId;
   final DateTime Function() _now;
   final String Function() _createId;
 
@@ -156,7 +180,18 @@ class PhotoProjectSession extends ChangeNotifier {
   Object? _restoreError;
   bool _isRestoring = false;
   bool _isImporting = false;
+  bool _disposed = false;
   List<PhotoImportFailure> _importFailures = const [];
+
+  void _notifyIfActive() {
+    if (!_disposed) super.notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
 
   PhotoProject? get project => _project;
   List<ProjectPhoto> get photos => _project?.photos ?? const [];
@@ -213,6 +248,23 @@ class PhotoProjectSession extends ChangeNotifier {
     return _requirePhoto(photoId).effectiveRecipeFor(photoId);
   }
 
+  EditRecipe projectCreationStyle(EditRecipe style) {
+    final current = _project;
+    if (current == null) {
+      throw StateError('A project is required before projecting a style');
+    }
+    if (current.creationIntent != CreationIntent.apply ||
+        current.photos.length != 1) {
+      throw StateError('A creation style requires one image-application photo');
+    }
+    final photoId = current.focusPhotoId ?? current.photos.single.id;
+    final sharedRecipe = _replaceStyleOwned(
+      current.sharedStyle.recipe,
+      style,
+    );
+    return current.effectiveRecipeFor(photoId, sharedRecipe: sharedRecipe);
+  }
+
   EditRecipe previewRecipeFor(String photoId, EditRecipe editableRecipe) {
     final current = _requirePhoto(photoId);
     final focusedPhotoId = current.focusPhotoId ?? current.photos.first.id;
@@ -224,61 +276,31 @@ class PhotoProjectSession extends ChangeNotifier {
   Future<void> restore({bool enforceSinglePhoto = false}) async {
     _isRestoring = true;
     _restoreError = null;
-    notifyListeners();
+    _notifyIfActive();
     try {
-      _project = await _store.loadLatest();
+      final store = _store;
+      _project = _projectId != null && store is PhotoProjectCatalogStore
+          ? await store.loadProject(_projectId)
+          : await store.loadLatest();
       final restored = _project;
       if (enforceSinglePhoto &&
           restored != null &&
           restored.photos.length > 1) {
-        final focus = restored.photos
-            .where((photo) => photo.id == restored.focusPhotoId)
-            .firstOrNull;
-        final selected = focus ?? restored.photos.first;
-        final selectedRegistry = restored.targetRegistries[selected.id];
-        final migrated = PhotoProject(
-          id: restored.id,
-          createdAt: restored.createdAt,
-          updatedAt: _now(),
-          photos: [selected],
-          recipe: restored.effectiveRecipeFor(selected.id),
-          targetRegistries: selectedRegistry == null
-              ? const {}
-              : {selected.id: selectedRegistry},
-          analysisStates: {
-            selected.id:
-                restored.analysisStates[selected.id] ??
-                PhotoAnalysisState.pending,
-          },
-          flowState: PhotoProjectFlowState.editing,
-          focusPhotoId: selected.id,
-          editingScope: ProjectEditingScope.currentPhoto,
+        _project = null;
+        throw StateError(
+          'A legacy multi-photo project cannot be opened in a single-photo '
+          'workspace without an explicit non-destructive migration',
         );
-        await _store.save(migrated);
-        _project = migrated;
-        final lifecycleStore = _store;
-        if (lifecycleStore is PhotoProjectLifecycleStore) {
-          for (final photo in restored.photos.where(
-            (photo) => photo.id != selected.id,
-          )) {
-            try {
-              await lifecycleStore.deletePhotoCopy(photo);
-            } on Object {
-              // The migrated project is already safe; orphan cleanup remains
-              // best-effort and never touches the system-library original.
-            }
-          }
-        }
       }
     } on Object catch (error) {
       _restoreError = error;
     } finally {
       _isRestoring = false;
-      notifyListeners();
+      _notifyIfActive();
     }
   }
 
-  Future<PhotoImportResult> importPhotos() async {
+  Future<PhotoImportResult> importPhotos({bool Function()? isCanceled}) async {
     if (_isImporting) {
       throw StateError('A photo import is already active');
     }
@@ -291,22 +313,30 @@ class PhotoProjectSession extends ChangeNotifier {
     }
 
     _isImporting = true;
-    notifyListeners();
+    _notifyIfActive();
     try {
-      return await _performImport(remaining);
+      return await _performImport(remaining, isCanceled: isCanceled);
     } finally {
       _isImporting = false;
-      notifyListeners();
+      _notifyIfActive();
     }
   }
 
-  Future<PhotoImportResult> _performImport(int remaining) async {
+  Future<PhotoImportResult> _performImport(
+    int remaining, {
+    bool Function()? isCanceled,
+  }) async {
     final batch = await _importer.importPhotos(limit: remaining);
     _importFailures = List.unmodifiable(batch.failures);
     final imported = batch.photos;
+    if (isCanceled?.call() == true) {
+      await _discardImportedPhotos(imported);
+      _importFailures = const [];
+      return PhotoImportResult.canceled;
+    }
     if (imported.isEmpty) {
       if (_importFailures.isNotEmpty) {
-        notifyListeners();
+        _notifyIfActive();
         return PhotoImportResult.rejected;
       }
       return PhotoImportResult.canceled;
@@ -323,6 +353,7 @@ class PhotoProjectSession extends ChangeNotifier {
             createdAt: timestamp,
             updatedAt: timestamp,
             photos: imported,
+            creationIntent: _creationIntent,
             flowState: PhotoProjectFlowState.editing,
           )
         : existing.replacePhotosAndInvalidateDerivedState(
@@ -333,21 +364,24 @@ class PhotoProjectSession extends ChangeNotifier {
     try {
       await _store.save(next);
     } on Object catch (error, stackTrace) {
-      final lifecycleStore = _store;
-      if (lifecycleStore is PhotoProjectLifecycleStore) {
-        for (final photo in imported) {
-          try {
-            await lifecycleStore.deletePhotoCopy(photo);
-          } on Object {
-            // Preserve the save failure; cleanup remains best-effort.
-          }
-        }
-      }
+      await _discardImportedPhotos(imported);
       Error.throwWithStackTrace(error, stackTrace);
     }
     _project = next;
-    notifyListeners();
+    _notifyIfActive();
     return PhotoImportResult.imported;
+  }
+
+  Future<void> _discardImportedPhotos(List<ProjectPhoto> photos) async {
+    final lifecycleStore = _store;
+    if (lifecycleStore is! PhotoProjectLifecycleStore) return;
+    for (final photo in photos) {
+      try {
+        await lifecycleStore.deletePhotoCopy(photo);
+      } on Object {
+        // Preserve the import outcome; orphan cleanup remains best-effort.
+      }
+    }
   }
 
   Future<void> transitionTo(PhotoProjectFlowState nextState) async {
@@ -364,6 +398,123 @@ class PhotoProjectSession extends ChangeNotifier {
     if (current.flowState == nextState) return;
     final next = current.copyWith(updatedAt: _now(), flowState: nextState);
     await _saveAndPublish(next);
+  }
+
+  Future<void> selectCreationStyle({
+    required String styleId,
+    required EditRecipe recipe,
+    String? styleName,
+  }) async {
+    final current = _project;
+    if (current == null) {
+      throw StateError('A project is required before selecting a style');
+    }
+    if (current.flowState != PhotoProjectFlowState.editing) {
+      throw StateError('A style can only be selected while editing');
+    }
+    if (current.creationStyleId == styleId &&
+        current.creationStyleName == styleName &&
+        current.creationStyleRecipe == recipe &&
+        !current.creationResultActive) {
+      return;
+    }
+    await _saveAndPublish(
+      current.copyWith(
+        updatedAt: _now(),
+        creationStyleId: styleId,
+        creationStyleName: styleName,
+        creationStyleRecipe: recipe,
+        creationResultActive: false,
+      ),
+    );
+  }
+
+  Future<void> resumeCreationStyleSelection() async {
+    final current = _project;
+    if (current == null) {
+      throw StateError('A project is required before resuming style selection');
+    }
+    if (current.creationIntent != CreationIntent.apply ||
+        (current.flowState != PhotoProjectFlowState.editing &&
+            current.flowState != PhotoProjectFlowState.exported)) {
+      throw StateError('Static style selection is unavailable in this state');
+    }
+    if (current.flowState == PhotoProjectFlowState.editing &&
+        !current.creationResultActive) {
+      return;
+    }
+    await _saveAndPublish(
+      current.copyWith(
+        updatedAt: _now(),
+        flowState: PhotoProjectFlowState.editing,
+        creationResultActive: false,
+      ),
+    );
+  }
+
+  Future<void> restorePreviousCreationResult() async {
+    final current = _project;
+    if (current == null || current.flowState != PhotoProjectFlowState.editing) {
+      throw StateError('An editing project is required to restore a result');
+    }
+    final result = current.recoverableStaticStyleResult;
+    if (result == null) {
+      throw StateError('No recoverable static result is available');
+    }
+    final wasSaved =
+        current.exportStates[result.sourcePhotoId] == PhotoExportState.saved &&
+        current.lastSuccessfulExportEditStateVersion ==
+            current.editStateVersion;
+    await _saveAndPublish(
+      current.copyWith(
+        updatedAt: _now(),
+        creationStyleId: result.styleId,
+        creationStyleName: result.styleName,
+        creationStyleRecipe: result.recipe,
+        creationResultActive: true,
+        flowState: wasSaved
+            ? PhotoProjectFlowState.exported
+            : PhotoProjectFlowState.editing,
+      ),
+    );
+  }
+
+  PhotoProject _withStaticStyleResult(
+    PhotoProject project, {
+    required String styleId,
+    required String? styleName,
+    required EditRecipe recipe,
+  }) {
+    if (project.creationIntent != CreationIntent.apply ||
+        project.photos.length != 1 ||
+        project.flowState != PhotoProjectFlowState.editing) {
+      throw StateError('A static style result requires one editing photo');
+    }
+    final photoId = project.focusPhotoId ?? project.photos.single.id;
+    if (project.effectiveRecipeFor(photoId) != recipe) {
+      throw StateError('A static style result must match the rendered recipe');
+    }
+    final resultWasAlreadySaved =
+        project.exportStates[photoId] == PhotoExportState.saved &&
+        project.lastSuccessfulExportEditStateVersion ==
+            project.editStateVersion;
+    return project.copyWith(
+      updatedAt: _now(),
+      flowState: resultWasAlreadySaved
+          ? PhotoProjectFlowState.exported
+          : PhotoProjectFlowState.editing,
+      creationStyleId: styleId,
+      creationStyleName: styleName,
+      creationStyleRecipe: recipe,
+      creationResultActive: true,
+      creationResult: StaticStyleResultIdentity(
+        sourcePhotoId: photoId,
+        editStateVersion: project.editStateVersion,
+        styleId: styleId,
+        styleName: styleName,
+        recipe: recipe,
+      ),
+    );
   }
 
   Future<void> setEditingScope(
@@ -544,6 +695,7 @@ class PhotoProjectSession extends ChangeNotifier {
           );
     return PreparedMetaOpPreview(
       recipe: projectedProject.effectiveRecipeFor(focusPhotoId),
+      scopedRecipe: recipe,
       state: result.state,
       context: effectiveContext,
       sourceId: focusPhotoId,
@@ -554,6 +706,96 @@ class PhotoProjectSession extends ChangeNotifier {
     required EditRecipe desiredRecipe,
     required EditContext context,
     EditingResourceImporter? resourceImporter,
+  }) => _commitManualRecipe(
+    desiredRecipe: desiredRecipe,
+    context: context,
+    resourceImporter: resourceImporter,
+  );
+
+  Future<ManualEditCommit> applyCreationStyle({
+    required String styleId,
+    required EditRecipe recipe,
+    required EditContext context,
+    String? styleName,
+  }) async {
+    final current = _project;
+    if (current == null) {
+      throw StateError('A project is required before applying a style');
+    }
+    if (current.creationIntent != CreationIntent.apply) {
+      throw StateError('Only an image-application project can apply a style');
+    }
+    if (current.photos.length != 1 ||
+        current.flowState != PhotoProjectFlowState.editing) {
+      throw StateError('A creation style requires one editing photo');
+    }
+    final photoId = current.focusPhotoId ?? current.photos.single.id;
+    final beforeShared = current.sharedStyle.recipe;
+    final afterShared = _replaceStyleOwned(beforeShared, recipe);
+    final transition = _legacyAdapter.tryEncodeTransition(
+      before: beforeShared,
+      after: afterShared,
+      photoId: photoId,
+    );
+    if (transition == null ||
+        transition.changes.any(
+          (change) => change.address.scope != EditScope.group,
+        )) {
+      throw StateError('Style projection has no admitted group transition');
+    }
+    if (transition.changes.isEmpty) {
+      await _saveAndPublish(
+        _withStaticStyleResult(
+          current,
+          styleId: styleId,
+          styleName: styleName,
+          recipe: current.effectiveRecipeFor(photoId),
+        ),
+      );
+      return const ManualEditCommit(
+        result: RejectedEdit(reason: EditRejection.emptyTransaction),
+        appliedToGroup: false,
+      );
+    }
+    final result = await commitMetaOps(
+      changes: transition.changes,
+      source: EditSource.manual,
+      context: context,
+      creationResultStyleId: styleId,
+      creationResultStyleName: styleName,
+    );
+    if (result is RejectedEdit) {
+      throw StateError('Style meta op rejected: ${result.reason.name}');
+    }
+    return ManualEditCommit(result: result, appliedToGroup: true);
+  }
+
+  EditRecipe _replaceStyleOwned(EditRecipe base, EditRecipe style) {
+    final baseBasic = base.basicEditingRecipe;
+    final styleBasic = style.basicEditingRecipe;
+    return base.copyWith(
+      exposure: style.exposure,
+      highlights: style.highlights,
+      shadows: style.shadows,
+      contrast: style.contrast,
+      warmth: style.warmth,
+      tint: style.tint,
+      saturation: style.saturation,
+      clarity: style.clarity,
+      basicEditingRecipe: baseBasic.copyWith(
+        filter: styleBasic.filter,
+        filterStrength: styleBasic.filterStrength,
+        hsl: styleBasic.hsl,
+      ),
+    );
+  }
+
+  Future<ManualEditCommit> _commitManualRecipe({
+    required EditRecipe desiredRecipe,
+    required EditContext context,
+    EditingResourceImporter? resourceImporter,
+    String? creationResultStyleId,
+    String? creationResultStyleName,
   }) async {
     final current = _project;
     if (current == null) {
@@ -671,6 +913,16 @@ class PhotoProjectSession extends ChangeNotifier {
         if (desiredRecipe != beforeRecipe) {
           throw StateError('Manual edit has no admitted MetaOp transition');
         }
+        if (creationResultStyleId != null) {
+          await _saveAndPublish(
+            _withStaticStyleResult(
+              current,
+              styleId: creationResultStyleId,
+              styleName: creationResultStyleName,
+              recipe: desiredRecipe,
+            ),
+          );
+        }
         return const ManualEditCommit(
           result: RejectedEdit(reason: EditRejection.emptyTransaction),
           appliedToGroup: false,
@@ -709,6 +961,8 @@ class PhotoProjectSession extends ChangeNotifier {
         source: EditSource.manual,
         context: context,
         editingResources: pendingResources,
+        creationResultStyleId: creationResultStyleId,
+        creationResultStyleName: creationResultStyleName,
       );
       if (result is RejectedEdit) {
         throw StateError('Meta op rejected: ${result.reason.name}');
@@ -785,6 +1039,8 @@ class PhotoProjectSession extends ChangeNotifier {
         ProjectEditOperationKind.scopedEdit,
     EditRecipe? beforePhotoOverrideRecipe,
     double? afterSharedIntensity,
+    String? creationResultStyleId,
+    String? creationResultStyleName,
   }) async {
     final current = _project;
     if (current == null) {
@@ -929,6 +1185,15 @@ class PhotoProjectSession extends ChangeNotifier {
       ],
     );
     next = _finalizeNewOperation(current, next, operation);
+    if (creationResultStyleId != null) {
+      final resultPhotoId = next.focusPhotoId ?? next.photos.first.id;
+      next = _withStaticStyleResult(
+        next,
+        styleId: creationResultStyleId,
+        styleName: creationResultStyleName,
+        recipe: next.effectiveRecipeFor(resultPhotoId),
+      );
+    }
     await _saveAndPublish(next);
     return result;
   }
@@ -1306,7 +1571,7 @@ class PhotoProjectSession extends ChangeNotifier {
     if (current.photos.length == 1) {
       await lifecycleStore.deleteProject(current);
       _project = null;
-      notifyListeners();
+      _notifyIfActive();
       return;
     }
 
@@ -1337,7 +1602,7 @@ class PhotoProjectSession extends ChangeNotifier {
     }
     await lifecycleStore.deleteProject(current);
     _project = null;
-    notifyListeners();
+    _notifyIfActive();
   }
 
   PhotoProject _applyOperation(
@@ -1478,7 +1743,7 @@ class PhotoProjectSession extends ChangeNotifier {
     final synchronized = _synchronizeEditingResources(next);
     await _store.save(synchronized);
     _project = synchronized;
-    notifyListeners();
+    _notifyIfActive();
   }
 
   PhotoProject _synchronizeEditingResources(PhotoProject project) {

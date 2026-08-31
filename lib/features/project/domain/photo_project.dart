@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:yingjian/features/creation/domain/creation_intent.dart';
 import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/directional_lighting_recipe.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
@@ -825,12 +826,98 @@ final class ProjectEditCheckpoint {
 }
 
 @immutable
+final class StaticStyleResultIdentity {
+  StaticStyleResultIdentity({
+    required this.sourcePhotoId,
+    required this.editStateVersion,
+    required this.styleId,
+    required this.recipe,
+    this.styleName,
+  }) {
+    if (sourcePhotoId.isEmpty || sourcePhotoId.length > 160) {
+      throw ArgumentError.value(
+        sourcePhotoId,
+        'sourcePhotoId',
+        'A static style result requires a bounded source photo id',
+      );
+    }
+    if (editStateVersion < 0) {
+      throw RangeError.value(editStateVersion, 'editStateVersion');
+    }
+    if (styleId.isEmpty ||
+        styleId.length > 64 ||
+        !RegExp(r'^[a-z0-9-]+$').hasMatch(styleId)) {
+      throw ArgumentError.value(
+        styleId,
+        'styleId',
+        'Static style ids must be lowercase stable identifiers',
+      );
+    }
+    if (styleName case final name?
+        when name.trim().isEmpty ||
+            name != name.trim() ||
+            name.length > 120 ||
+            RegExp(r'[\x00-\x1F\x7F]').hasMatch(name)) {
+      throw ArgumentError.value(
+        name,
+        'styleName',
+        'Static style names must be trimmed printable text up to 120 chars',
+      );
+    }
+  }
+
+  final String sourcePhotoId;
+  final int editStateVersion;
+  final String styleId;
+  final String? styleName;
+  final EditRecipe recipe;
+
+  Map<String, Object> toJson() => {
+    'sourcePhotoId': sourcePhotoId,
+    'editStateVersion': editStateVersion,
+    'styleId': styleId,
+    'styleName': ?styleName,
+    'recipe': recipe.toJson(),
+  };
+
+  factory StaticStyleResultIdentity.fromJson(Map<String, Object?> json) =>
+      StaticStyleResultIdentity(
+        sourcePhotoId: json['sourcePhotoId']! as String,
+        editStateVersion: (json['editStateVersion']! as num).toInt(),
+        styleId: json['styleId']! as String,
+        styleName: json['styleName'] as String?,
+        recipe: EditRecipe.fromJson(
+          Map<String, Object?>.from(json['recipe']! as Map),
+        ),
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is StaticStyleResultIdentity &&
+      other.sourcePhotoId == sourcePhotoId &&
+      other.editStateVersion == editStateVersion &&
+      other.styleId == styleId &&
+      other.styleName == styleName &&
+      other.recipe == recipe;
+
+  @override
+  int get hashCode =>
+      Object.hash(sourcePhotoId, editStateVersion, styleId, styleName, recipe);
+}
+
+@immutable
 class PhotoProject {
   PhotoProject({
     required this.id,
     required this.createdAt,
     required this.updatedAt,
     required List<ProjectPhoto> photos,
+    this.creationIntent = CreationIntent.apply,
+    this.creationStyleId,
+    this.creationStyleName,
+    this.creationStyleRecipe,
+    this.creationResult,
+    bool? creationResultActive,
     EditRecipe? recipe,
     SharedStyle? sharedStyle,
     Map<String, AdaptiveCompensation> adaptiveCompensations = const {},
@@ -852,7 +939,8 @@ class PhotoProject {
     this.focusPhotoId,
     this.groupScrollOffset = 0,
     this.lastSuccessfulExportEditStateVersion,
-  }) : photos = List.unmodifiable(photos),
+  }) : creationResultActive = creationResultActive ?? (creationResult != null),
+       photos = List.unmodifiable(photos),
        sharedStyle =
            sharedStyle ?? SharedStyle(recipe: recipe ?? EditRecipe.neutral),
        adaptiveCompensations = Map.unmodifiable(adaptiveCompensations),
@@ -894,6 +982,48 @@ class PhotoProject {
                : ProjectEditingScope.group) {
     if (photos.isEmpty || photos.length > maxPhotoCount) {
       throw RangeError.range(photos.length, 1, maxPhotoCount, 'photos.length');
+    }
+    if (creationStyleId case final styleId?
+        when styleId.isEmpty ||
+            styleId.length > 64 ||
+            !RegExp(r'^[a-z0-9-]+$').hasMatch(styleId)) {
+      throw ArgumentError.value(
+        styleId,
+        'creationStyleId',
+        'Creation style ids must be lowercase stable identifiers',
+      );
+    }
+    if (creationStyleName case final styleName?
+        when styleName.trim().isEmpty ||
+            styleName != styleName.trim() ||
+            styleName.length > 120 ||
+            RegExp(r'[\x00-\x1F\x7F]').hasMatch(styleName)) {
+      throw ArgumentError.value(
+        styleName,
+        'creationStyleName',
+        'Creation style names must be trimmed printable text up to 120 chars',
+      );
+    }
+    if (creationResult case final result?) {
+      if (!photos.any((photo) => photo.id == result.sourcePhotoId)) {
+        throw ArgumentError.value(
+          result.sourcePhotoId,
+          'creationResult.sourcePhotoId',
+          'The static result source must belong to the project',
+        );
+      }
+      if (result.editStateVersion > this.editState.version) {
+        throw ArgumentError.value(
+          result.editStateVersion,
+          'creationResult.editStateVersion',
+          'A static result cannot reference a future edit state',
+        );
+      }
+    }
+    if (this.creationResultActive && creationResult == null) {
+      throw ArgumentError(
+        'An active static result requires a persisted result identity',
+      );
     }
     if (flowState == PhotoProjectFlowState.empty) {
       throw ArgumentError.value(
@@ -1075,13 +1205,19 @@ class PhotoProject {
   // so flips and perspective never freeze later group-style edits. V8's
   // broader overridesBasicEditing flag is accepted as a conservative look
   // override during migration.
-  static const schemaVersion = 14;
+  static const schemaVersion = 17;
   static const checkpointInterval = 20;
 
   final String id;
   final DateTime createdAt;
   final DateTime updatedAt;
   final List<ProjectPhoto> photos;
+  final CreationIntent creationIntent;
+  final String? creationStyleId;
+  final String? creationStyleName;
+  final EditRecipe? creationStyleRecipe;
+  final StaticStyleResultIdentity? creationResult;
+  final bool creationResultActive;
   final SharedStyle sharedStyle;
   final Map<String, AdaptiveCompensation> adaptiveCompensations;
   final Map<String, PhotoOverride> photoOverrides;
@@ -1119,6 +1255,33 @@ class PhotoProject {
   bool get isReadOnly => requiresUpdate;
   bool get canExport => !requiresUpdate;
   int get editStateVersion => editState.version;
+
+  StaticStyleResultIdentity? get recoverableStaticStyleResult {
+    final result = creationResult;
+    if (creationIntent != CreationIntent.apply ||
+        result == null ||
+        requiresUpdate) {
+      return null;
+    }
+    if (result.editStateVersion != editStateVersion ||
+        !photos.any((photo) => photo.id == result.sourcePhotoId) ||
+        effectiveRecipeFor(result.sourcePhotoId) != result.recipe) {
+      return null;
+    }
+    return result;
+  }
+
+  StaticStyleResultIdentity? get currentStaticStyleResult {
+    final result = recoverableStaticStyleResult;
+    if (!creationResultActive ||
+        result == null ||
+        result.styleId != creationStyleId ||
+        result.styleName != creationStyleName ||
+        result.recipe != creationStyleRecipe) {
+      return null;
+    }
+    return result;
+  }
 
   bool get hasConsistentEditState {
     final derived = deriveEditState(
@@ -1351,6 +1514,10 @@ class PhotoProject {
       createdAt: createdAt,
       updatedAt: updatedAt,
       photos: photos,
+      creationIntent: creationIntent,
+      creationStyleId: creationStyleId,
+      creationStyleName: creationStyleName,
+      creationStyleRecipe: creationStyleRecipe,
       flowState: PhotoProjectFlowState.editing,
       focusPhotoId: focusPhotoId,
       sharedStyle: SharedStyle(recipe: EditRecipe.neutral),
@@ -1516,6 +1683,12 @@ class PhotoProject {
   PhotoProject copyWith({
     DateTime? updatedAt,
     List<ProjectPhoto>? photos,
+    CreationIntent? creationIntent,
+    Object? creationStyleId = _notProvided,
+    Object? creationStyleName = _notProvided,
+    Object? creationStyleRecipe = _notProvided,
+    Object? creationResult = _notProvided,
+    bool? creationResultActive,
     EditRecipe? recipe,
     SharedStyle? sharedStyle,
     Map<String, AdaptiveCompensation>? adaptiveCompensations,
@@ -1543,6 +1716,20 @@ class PhotoProject {
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       photos: photos ?? this.photos,
+      creationIntent: creationIntent ?? this.creationIntent,
+      creationStyleId: creationStyleId == _notProvided
+          ? this.creationStyleId
+          : creationStyleId as String?,
+      creationStyleName: creationStyleName == _notProvided
+          ? this.creationStyleName
+          : creationStyleName as String?,
+      creationStyleRecipe: creationStyleRecipe == _notProvided
+          ? this.creationStyleRecipe
+          : creationStyleRecipe as EditRecipe?,
+      creationResult: creationResult == _notProvided
+          ? this.creationResult
+          : creationResult as StaticStyleResultIdentity?,
+      creationResultActive: creationResultActive ?? this.creationResultActive,
       sharedStyle:
           sharedStyle ??
           (recipe == null
@@ -1589,6 +1776,12 @@ class PhotoProject {
       'createdAt': createdAt.toUtc().toIso8601String(),
       'updatedAt': updatedAt.toUtc().toIso8601String(),
       'photos': photos.map((photo) => photo.toJson()).toList(),
+      'creationIntent': creationIntent.name,
+      'creationStyleId': ?creationStyleId,
+      'creationStyleName': ?creationStyleName,
+      'creationStyleRecipe': ?creationStyleRecipe?.toJson(),
+      'creationResult': ?creationResult?.toJson(),
+      'creationResultActive': creationResultActive,
       'flowState': flowState.name,
       'sharedStyle': sharedStyle.toJson(),
       'adaptiveCompensations': adaptiveCompensations.map(
@@ -1676,6 +1869,33 @@ class PhotoProject {
       photos: photoValues
           .map((value) => ProjectPhoto.fromJson(value! as Map<String, Object?>))
           .toList(),
+      creationIntent: storedVersion < 15
+          ? CreationIntent.apply
+          : _enumValue(
+              json['creationIntent'],
+              CreationIntent.values,
+              'creation intent',
+            ),
+      creationStyleId: storedVersion < 15
+          ? null
+          : json['creationStyleId'] as String?,
+      creationStyleName: storedVersion < 15
+          ? null
+          : json['creationStyleName'] as String?,
+      creationStyleRecipe:
+          storedVersion < 15 || json['creationStyleRecipe'] == null
+          ? null
+          : EditRecipe.fromJson(
+              Map<String, Object?>.from(json['creationStyleRecipe']! as Map),
+            ),
+      creationResult: storedVersion < 16 || json['creationResult'] == null
+          ? null
+          : StaticStyleResultIdentity.fromJson(
+              Map<String, Object?>.from(json['creationResult']! as Map),
+            ),
+      creationResultActive: storedVersion < 17
+          ? storedVersion >= 16 && json['creationResult'] != null
+          : json['creationResultActive']! as bool,
       flowState: flowState,
       focusPhotoId: json['focusPhotoId'] as String?,
       sharedStyle: SharedStyle.fromJson(
@@ -1752,20 +1972,70 @@ class PhotoProject {
           ? 0
           : (json['groupScrollOffset'] as num?)?.toDouble() ?? 0,
     );
-    if (storedVersion < 12) {
-      return _migrateLegacyHistory(project);
-    }
-    if (storedVersion >= 13 && !project.hasConsistentEditState) {
+    final migrated = storedVersion < 12
+        ? _migrateLegacyHistory(project)
+        : project;
+    if (storedVersion >= 13 && !migrated.hasConsistentEditState) {
       throw const FormatException(
         'Photo project edit state does not match its render projection',
       );
     }
-    if (!project.hasValidHistoryReplay) {
+    if (storedVersion >= 12 && !migrated.hasValidHistoryReplay) {
       throw const FormatException(
         'Photo project history does not reproduce the current edit state',
       );
     }
-    return project;
+    return storedVersion < 17
+        ? _migrateLegacyStaticStyleResult(
+            migrated,
+            allowMissingSuccessfulExportVersion: storedVersion < 14,
+          )
+        : migrated;
+  }
+
+  static PhotoProject _migrateLegacyStaticStyleResult(
+    PhotoProject project, {
+    required bool allowMissingSuccessfulExportVersion,
+  }) {
+    if (project.creationIntent != CreationIntent.apply ||
+        project.photos.length != 1 ||
+        project.flowState != PhotoProjectFlowState.exported ||
+        project.requiresUpdate) {
+      return project;
+    }
+    final photo = project.photos.single;
+    final successfulVersion = project.lastSuccessfulExportEditStateVersion;
+    final hasTrustedExportVersion =
+        successfulVersion == project.editStateVersion ||
+        (allowMissingSuccessfulExportVersion && successfulVersion == null);
+    if (project.exportStates[photo.id] != PhotoExportState.saved ||
+        !hasTrustedExportVersion) {
+      return project;
+    }
+    final effectiveRecipe = project.effectiveRecipeFor(photo.id);
+    final selectedRecipe = project.creationStyleRecipe;
+    if (selectedRecipe != null && selectedRecipe != effectiveRecipe) {
+      return project;
+    }
+    final styleId = project.creationStyleId ?? 'saved-custom';
+    final styleName = project.creationStyleName;
+    final recipe = selectedRecipe ?? effectiveRecipe;
+    return project.copyWith(
+      creationStyleId: styleId,
+      creationStyleName: styleName,
+      creationStyleRecipe: recipe,
+      creationResultActive: true,
+      lastSuccessfulExportEditStateVersion:
+          project.lastSuccessfulExportEditStateVersion ??
+          project.editStateVersion,
+      creationResult: StaticStyleResultIdentity(
+        sourcePhotoId: photo.id,
+        editStateVersion: project.editStateVersion,
+        styleId: styleId,
+        styleName: styleName,
+        recipe: recipe,
+      ),
+    );
   }
 
   static PhotoProject _migrateLegacyHistory(PhotoProject project) {
@@ -1844,6 +2114,12 @@ class PhotoProject {
         other.id == id &&
         other.createdAt == createdAt &&
         other.updatedAt == updatedAt &&
+        other.creationIntent == creationIntent &&
+        other.creationStyleId == creationStyleId &&
+        other.creationStyleName == creationStyleName &&
+        other.creationStyleRecipe == creationStyleRecipe &&
+        other.creationResult == creationResult &&
+        other.creationResultActive == creationResultActive &&
         other.sharedStyle == sharedStyle &&
         mapEquals(other.adaptiveCompensations, adaptiveCompensations) &&
         mapEquals(other.photoOverrides, photoOverrides) &&
@@ -1873,6 +2149,12 @@ class PhotoProject {
     id,
     createdAt,
     updatedAt,
+    creationIntent,
+    creationStyleId,
+    creationStyleName,
+    creationStyleRecipe,
+    creationResult,
+    creationResultActive,
     sharedStyle,
     Object.hashAllUnordered(adaptiveCompensations.entries),
     Object.hashAllUnordered(photoOverrides.entries),

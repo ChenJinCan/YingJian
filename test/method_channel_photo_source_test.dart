@@ -62,6 +62,20 @@ void main() {
     });
   });
 
+  test('cancels the active native picker request', () async {
+    MethodCall? captured;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          captured = call;
+          return null;
+        });
+
+    await const MethodChannelPhotoSource(channel: channel).cancelPick();
+
+    expect(captured?.method, 'cancelPhotos');
+    expect(captured?.arguments, isNull);
+  });
+
   test('bounds a photo picker call that never returns', () async {
     final pending = Completer<Object?>();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

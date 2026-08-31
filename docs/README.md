@@ -1,48 +1,46 @@
 # 映见文档路由
 
-先根据任务类型读取最少必要文档。规范、状态和历史证据不得互相替代。
+按任务读取最少必要文档。当前合同、实现证据与历史材料不得互相替代。所有活跃文档必须把“图片应用”和“动起来”作为选图前的两个首页大入口，并让每条下游路径只保留当前任务主操作；偏离该结构时，先修正文档边界再据此实施。
 
 ## 所有开发任务
 
-1. [`AGENTS.md`](../AGENTS.md)：工作规则、架构边界和强制门禁。
-2. [`CONTEXT.md`](../CONTEXT.md)：唯一领域术语源。
-3. [功能优先工作流](agents/development-validation-workflow.md)：实现、Simulator 和真机的统一时序。
+1. [AGENTS.md](../AGENTS.md)：产品北极星、工作规则、架构边界和强制门禁。
+2. [CONTEXT.md](../CONTEXT.md)：唯一领域语言源。
+3. [README.md](../README.md)：面向用户的核心体验与产品原则。
+4. [开发验证工作流](agents/development-validation-workflow.md)：实现、Simulator、候选冻结与真机验收的统一时序。
 
-## 产品与功能
+## 产品与体验
 
-- 稳定产品策略：[产品上下文](product/product-context.md)
-- MVP 范围与验收：[MVP Spec](product/mvp-spec.md)
-- MVP 页面、流程与交互合同：[MVP 交互设计 PRD](product/mvp-interaction-prd.md)
-- 当前候选与开放门禁：[状态快照](product/mvp-session-handoff-2026-08-10.md)
-- 自然人像独特合同：[自然人像纵切](product/natural-portrait-retouch-vertical-slice-spec.md)
-- 几何塑形独特合同：[塑形纵切](product/portrait-reshape-vertical-slice-spec.md)
-- 画质改善独特合同：[画质纵切](product/quality-enhancement-vertical-slice-spec.md)
+- [产品上下文](product/product-context.md)：稳定北极星、目标用户、价值和长期边界。
+- [MVP Spec](product/mvp-spec.md)：唯一可执行的首阶段范围、主旅程和可观察验收。
+- [风格系统](product/style-system.md)：风格定义、风格来源、AI 协作，以及图片应用与动起来的独立任务语义。
+- [界面设计合同](../DESIGN.md)：两个首页任务入口、图片主体、极简层级、风格选择和分支内单主操作的呈现规则。
+- [竞品基线](product/competitor-baseline.md)：当前比较对象与需要验证的差异，不构成产品主路径。
 
-只在对应功能发生变化时读取纵切 Spec；总体范围冲突时以 MVP Spec 为准，并同步修正纵切文档。
+产品范围冲突时，以产品上下文确定方向，以 MVP Spec 确定当前交付范围，以 CONTEXT.md 统一命名；三者必须同步修正，不得用历史文档补齐冲突。
 
 ## 架构与质量
 
-- Flutter 与原生边界：[Flutter 工程基座](architecture/flutter-foundation.md)
-- 已采用的开源图像参数：[MVP 开源算法标定](architecture/mvp-open-source-calibrations.md)
-- 不可逆架构决策：[`adr/`](adr/)
-- 图像合同、阈值和最终验收：[MVP 质量基线](quality/mvp-quality-baseline.md)
-- 设备、盲评、竞品与可用性执行格式：[`quality/`](quality/)
+- [Flutter 工程基座](architecture/flutter-foundation.md)：分层、依赖方向、平台边界与应用组装。
+- [静态风格执行](architecture/style-execution.md)：风格定义如何形成确定性应用结果。
+- [派生媒体生成管线](architecture/generation-pipeline.md)：静态与动态生成任务、隐私、幂等和结果生命周期。
+- [Style-first creation ADR](adr/0004-style-first-creation.md)：从工具编辑转向风格优先的架构决定。
+- [现有编辑核心 ADR](adr/0003-editing-core-and-render-plan.md)：仅保留仍有效的内部执行约束；其产品入口部分已被新 ADR 取代。
+- [MVP 质量基线](quality/mvp-quality-baseline.md)：主旅程、静态应用、动态作品、设备与人工验收门。
+- [样片清单](../quality/corpus-manifest.yaml)：被忽略本地样片的结构化校验入口。
 
-脚本、配置、fixture 和结构化 `.quality/` 报告是当前执行证据；文档不复制每轮日志。
-
-## 竞品与研究
-
-- 当前比较角色与任务：[竞品基线](product/competitor-baseline.md)
-- 官方来源证据：[竞品深度研究](product/competitor-deep-research.md)
-- Android 包静态线索：[APK 静态分析](product/competitor-apk-static-analysis.md)
-- 端侧人像技术依据：[`research/`](research/)
-
-日期化研究是历史证据。涉及版本、价格、商店、隐私政策或可用性时必须重新核验，不能把快照当作当前事实。
+代码、测试、fixture、最终产物和结构化质量报告是执行证据；文档不复制每轮日志，也不能替代当前构建验证。
 
 ## 发布与运营
 
-- 候选构建与交付：[发布合同](release-contract.md)
-- 商店隐私与法律：[法律检查表](legal/store-privacy-checklist.md)
-- 遥测与供应商边界：[`operations/`](operations/)
+- [发布合同](release-contract.md)：候选身份、本地构建、签名、上传与商店状态边界。
+- [商店隐私与法律检查表](legal/store-privacy-checklist.md)：隐私、Terms、EULA、订阅与受保护元数据。
+- [遥测与供应商边界](operations/)：事件白名单、诊断同意和供应商隔离。
 
-发布、上传、审核和公开发布分别需要对应授权。
+发布、上传、测试组分发、审核和公开发布是不同状态，并分别需要对应授权。
+
+## 历史材料
+
+[docs/archive/](archive/) 保存已经被当前方向取代但仍有追溯价值的旧交互方案、日期状态、能力纵切、竞品研究和质量流程。其范围、版本、测试数量、待办和相对链接均不是当前事实；旧交互 PRD 与日期化状态快照不得作为活跃入口或验收合同。
+
+需要历史依据时先读 [历史文档索引](archive/README.md) 的替代关系，再回到当前产品、架构和质量合同重新核验。

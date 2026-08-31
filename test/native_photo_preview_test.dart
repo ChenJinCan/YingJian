@@ -212,6 +212,155 @@ void main() {
     expect(renderer.createCount, 2);
     expect(find.byType(Texture), findsOneWidget);
   });
+
+  testWidgets('an update failure can preserve the last successful frame', (
+    tester,
+  ) async {
+    final renderer = _FailFirstUpdatePreviewRenderer();
+    var recipe = EditRecipe.neutral;
+    final failed = <EditRecipe>[];
+    late StateSetter rebuild;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setState) {
+            rebuild = setState;
+            return NativePhotoPreview(
+              sourcePath: '/tmp/Yingjian_preview_fixture.jpg',
+              recipe: recipe,
+              renderer: renderer,
+              preserveLastFrameOnUpdateFailure: true,
+              onRenderFailed: failed.add,
+              errorBuilder: (_) => const Text('preview unavailable'),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final requested = EditRecipe(clarity: 0.1);
+    rebuild(() => recipe = requested);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(Texture), findsOneWidget);
+    expect(find.text('preview unavailable'), findsNothing);
+    expect(failed, [requested]);
+  });
+
+  testWidgets('retry keeps the last frame when the update fails again', (
+    tester,
+  ) async {
+    final renderer = _AlwaysFailUpdatePreviewRenderer();
+    var recipe = EditRecipe.neutral;
+    var retryToken = 0;
+    final failed = <EditRecipe>[];
+    late StateSetter rebuild;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setState) {
+            rebuild = setState;
+            return NativePhotoPreview(
+              sourcePath: '/tmp/Yingjian_preview_fixture.jpg',
+              recipe: recipe,
+              renderer: renderer,
+              retryToken: retryToken,
+              preserveLastFrameOnUpdateFailure: true,
+              onRenderFailed: failed.add,
+              errorBuilder: (_) => const Text('preview unavailable'),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final requested = EditRecipe(clarity: 0.1);
+    rebuild(() => recipe = requested);
+    await tester.pumpAndSettle();
+    rebuild(() => retryToken += 1);
+    await tester.pumpAndSettle();
+
+    expect(renderer.createCount, 1);
+    expect(renderer.updateCount, 2);
+    expect(find.byType(Texture), findsOneWidget);
+    expect(find.text('preview unavailable'), findsNothing);
+    expect(failed, [requested, requested]);
+  });
+
+  testWidgets('a late initial failure retries the latest recipe', (
+    tester,
+  ) async {
+    final renderer = _DelayedFailFirstCreatePreviewRenderer();
+    var recipe = EditRecipe.neutral;
+    final rendered = <EditRecipe>[];
+    final failed = <EditRecipe>[];
+    late StateSetter rebuild;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setState) {
+            rebuild = setState;
+            return NativePhotoPreview(
+              sourcePath: '/tmp/Yingjian_preview_fixture.jpg',
+              recipe: recipe,
+              renderer: renderer,
+              onRendered: rendered.add,
+              onRenderFailed: failed.add,
+              errorBuilder: (_) => const Text('preview unavailable'),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final latest = EditRecipe(exposure: 0.12);
+    rebuild(() => recipe = latest);
+    await tester.pump();
+    renderer.failFirstCreate();
+    await tester.pumpAndSettle();
+
+    expect(renderer.createCount, 2);
+    expect(rendered, [latest]);
+    expect(failed, isEmpty);
+  });
+
+  testWidgets('a replaced handle cannot publish a late update', (tester) async {
+    final renderer = _DelayedFirstUpdatePreviewRenderer();
+    var recipe = EditRecipe.neutral;
+    final rendered = <EditRecipe>[];
+    late StateSetter rebuild;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setState) {
+            rebuild = setState;
+            return NativePhotoPreview(
+              sourcePath: '/tmp/Yingjian_preview_fixture.jpg',
+              recipe: recipe,
+              renderer: renderer,
+              onRendered: rendered.add,
+              errorBuilder: (_) => const Text('preview unavailable'),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final updated = EditRecipe(exposure: 0.12);
+    rebuild(() => recipe = updated);
+    await tester.pump();
+    tester.binding.handleMemoryPressure();
+    await tester.pumpAndSettle();
+    expect(rendered, [EditRecipe.neutral, updated]);
+
+    renderer.completeFirstUpdate();
+    await tester.pumpAndSettle();
+    expect(rendered, [EditRecipe.neutral, updated]);
+  });
 }
 
 Widget _previewApp(PhotoPreviewRenderer renderer) => MaterialApp(
@@ -327,4 +476,59 @@ final class _FailFirstUpdatePreviewRenderer extends _RecordingPreviewRenderer {
       throw StateError('fixture update failure');
     }
   }
+}
+
+final class _AlwaysFailUpdatePreviewRenderer extends _RecordingPreviewRenderer {
+  @override
+  Future<void> update({
+    required PhotoPreviewHandle handle,
+    required ImagePipeline pipeline,
+  }) async {
+    updateCount += 1;
+    throw StateError('fixture update failure');
+  }
+}
+
+final class _DelayedFailFirstCreatePreviewRenderer
+    extends _RecordingPreviewRenderer {
+  final Completer<PhotoPreviewHandle> _firstCreate = Completer();
+
+  @override
+  Future<PhotoPreviewHandle> create({
+    required String sourcePath,
+    required ImagePipeline pipeline,
+    int maxEdge = 2048,
+  }) {
+    createCount += 1;
+    if (createCount == 1) return _firstCreate.future;
+    return Future.value(
+      PhotoPreviewHandle(
+        textureId: createCount,
+        width: 1200,
+        height: 800,
+        backend: 'recording-native',
+      ),
+    );
+  }
+
+  void failFirstCreate() {
+    _firstCreate.completeError(StateError('fixture create failure'));
+  }
+}
+
+final class _DelayedFirstUpdatePreviewRenderer
+    extends _RecordingPreviewRenderer {
+  final Completer<void> _firstUpdate = Completer();
+
+  @override
+  Future<void> update({
+    required PhotoPreviewHandle handle,
+    required ImagePipeline pipeline,
+  }) {
+    updateCount += 1;
+    if (updateCount == 1) return _firstUpdate.future;
+    return Future.value();
+  }
+
+  void completeFirstUpdate() => _firstUpdate.complete();
 }

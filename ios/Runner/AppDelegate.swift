@@ -10,6 +10,30 @@ private enum PhotoInputInspectionError: Error {
   case unreadable
 }
 
+private enum IOSPhotoPreparationError: Error {
+  case cancelled
+}
+
+private final class IOSPhotoPreparationToken {
+  private let lock = NSLock()
+  private var cancelled = false
+
+  func cancel() {
+    lock.lock()
+    cancelled = true
+    lock.unlock()
+  }
+
+  func checkCancellation() throws {
+    lock.lock()
+    let isCancelled = cancelled
+    lock.unlock()
+    if isCancelled {
+      throw IOSPhotoPreparationError.cancelled
+    }
+  }
+}
+
 /// Reports whether the deterministic local portrait implementation can be used
 /// for this input. Quality acceptance remains a separate release gate.
 struct IOSPortraitCapabilityStatus: Equatable {
@@ -80,6 +104,11 @@ enum IOSPortraitCapabilityPolicy {
   private var speechTranscriptionChannel: FlutterMethodChannel?
   private var photoPreviewRenderer: IOSPhotoPreviewRenderer?
   private let photoExportContext = CIContext(options: [.cacheIntermediates: false])
+  private let photoPreparationQueue = DispatchQueue(
+    label: "com.babycompany.yingjian.photo-preparation",
+    qos: .userInitiated
+  )
+  private var photoPreparationTokens: [String: IOSPhotoPreparationToken] = [:]
   private var photoShareInProgress = false
   private let photoPicker = IOSPhotoPicker()
   private let speechTranscriber = IOSSpeechTranscriber()
@@ -132,6 +161,14 @@ enum IOSPortraitCapabilityPolicy {
         UIApplication.shared.open(url) { opened in
           opened ? result(nil) : result(FlutterError(code: "settingsUnavailable", message: "Settings could not be opened", details: nil))
         }
+        return
+      }
+      if call.method == "prepareSharePhoto" {
+        self?.prepareSharePhoto(arguments: call.arguments, result: result)
+        return
+      }
+      if call.method == "cancelPhotoPreparation" {
+        self?.cancelPhotoPreparation(arguments: call.arguments, result: result)
         return
       }
       guard call.method == "exportPhoto" else {
@@ -222,6 +259,9 @@ enum IOSPortraitCapabilityPolicy {
           presenter: presenter,
           completion: result
         )
+      case "cancelPhotos":
+        self?.photoPicker.cancel()
+        result(nil)
       case "discardPhotos":
         guard
           let values = call.arguments as? [String: Any],
@@ -752,7 +792,7 @@ enum IOSPortraitCapabilityPolicy {
         "bottom": Double(1 - (rect.minY / imageExtent.height)),
       ]
     }
-    let faceTargetRegions = reshapeContext.faceSlimTargets.compactMap {
+    let faceTargetRegions = reshapeContext.faceTargets.compactMap {
       normalizedTargetRegion($0.features.faceBounds)
     }
     let bodyTargetRegions = reshapeContext.bodyReshapeTargets.compactMap { target in
@@ -766,7 +806,7 @@ enum IOSPortraitCapabilityPolicy {
     }
     return [
       "analysisVersion": "local-pixels-v1",
-      "capabilityVersion": "ios-core-image-vision-v14-target-regions",
+      "capabilityVersion": "ios-core-image-vision-v15-independent-face-targets",
       "confidence": "medium",
       "exposure": exposure,
       "whiteBalance": whiteBalance,
@@ -841,6 +881,103 @@ enum IOSPortraitCapabilityPolicy {
     portraitMaskSpikeChannel = channel
   }
 #endif
+
+  private func prepareSharePhoto(arguments: Any?, result: @escaping FlutterResult) {
+    guard
+      let values = arguments as? [String: Any],
+      let requestId = values["requestId"] as? String,
+      (1...120).contains(requestId.count),
+      requestId.range(of: "^[A-Za-z0-9-]+$", options: .regularExpression) != nil,
+      let sourcePath = values["sourcePath"] as? String,
+      let pipeline = IOSImagePipeline(arguments: values["pipeline"]),
+      let options = IOSPhotoExportOptions(arguments: values["options"]),
+      options.format == "jpeg",
+      photoPreparationTokens[requestId] == nil
+    else {
+      result(FlutterError(code: "invalidArguments", message: "Invalid photo preparation request", details: nil))
+      return
+    }
+
+    let token = IOSPhotoPreparationToken()
+    photoPreparationTokens[requestId] = token
+    photoPreparationQueue.async { [weak self] in
+      guard let self else { return }
+      let temporaryURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("Yingjian_\(UUID().uuidString).jpg")
+      do {
+        let artifact = try IOSPhotoFileRenderer(context: self.photoExportContext).render(
+          sourcePath: sourcePath,
+          pipeline: pipeline,
+          destinationURL: temporaryURL,
+          options: options,
+          cancellationCheck: token.checkCancellation
+        )
+        DispatchQueue.main.async { [weak self] in
+          guard let self else { return }
+          do {
+            try token.checkCancellation()
+          } catch {
+            try? FileManager.default.removeItem(at: temporaryURL)
+            if self.photoPreparationTokens[requestId] === token {
+              self.photoPreparationTokens.removeValue(forKey: requestId)
+            }
+            result(FlutterError(code: "prepareCancelled", message: "Photo preparation was cancelled", details: nil))
+            return
+          }
+          if self.photoPreparationTokens[requestId] === token {
+            self.photoPreparationTokens.removeValue(forKey: requestId)
+          }
+          result([
+            "requestId": requestId,
+            "sharePath": temporaryURL.path,
+            "width": artifact.width,
+            "height": artifact.height,
+          ])
+        }
+      } catch IOSPhotoPreparationError.cancelled {
+        try? FileManager.default.removeItem(at: temporaryURL)
+        DispatchQueue.main.async { [weak self] in
+          guard let self else { return }
+          if self.photoPreparationTokens[requestId] === token {
+            self.photoPreparationTokens.removeValue(forKey: requestId)
+          }
+          result(FlutterError(code: "prepareCancelled", message: "Photo preparation was cancelled", details: nil))
+        }
+      } catch IOSPhotoFileRenderError.decodeFailed {
+        try? FileManager.default.removeItem(at: temporaryURL)
+        DispatchQueue.main.async { [weak self] in
+          guard let self else { return }
+          if self.photoPreparationTokens[requestId] === token {
+            self.photoPreparationTokens.removeValue(forKey: requestId)
+          }
+          result(FlutterError(code: "decodeFailed", message: "Photo could not be decoded", details: nil))
+        }
+      } catch {
+        try? FileManager.default.removeItem(at: temporaryURL)
+        DispatchQueue.main.async { [weak self] in
+          guard let self else { return }
+          if self.photoPreparationTokens[requestId] === token {
+            self.photoPreparationTokens.removeValue(forKey: requestId)
+          }
+          result(FlutterError(code: "renderFailed", message: "Photo could not be rendered", details: nil))
+        }
+      }
+    }
+  }
+
+  private func cancelPhotoPreparation(arguments: Any?, result: @escaping FlutterResult) {
+    guard
+      let values = arguments as? [String: Any],
+      let requestId = values["requestId"] as? String,
+      (1...120).contains(requestId.count),
+      requestId.range(of: "^[A-Za-z0-9-]+$", options: .regularExpression) != nil
+    else {
+      result(FlutterError(code: "invalidArguments", message: "Invalid cancellation request", details: nil))
+      return
+    }
+    photoPreparationTokens[requestId]?.cancel()
+    result(nil)
+  }
 
   private func exportPhoto(arguments: Any?, result: @escaping FlutterResult) {
     guard
@@ -1113,12 +1250,10 @@ private final class IOSPhotoPreviewRenderer {
       return
     }
 
-    renderQueue.async { [weak self, weak session] in
-      guard let self, let session else { return }
+    renderQueue.async {
       do {
         try session.render(pipeline: pipeline)
-        DispatchQueue.main.async { [weak self, weak session] in
-          guard let self, let session else { return }
+        DispatchQueue.main.async {
           guard self.sessions[textureId] === session else {
             result(FlutterError(
               code: "previewNotFound",

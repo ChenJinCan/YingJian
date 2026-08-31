@@ -18,6 +18,8 @@ class NativePhotoPreview extends StatefulWidget {
     required this.errorBuilder,
     this.onRendered,
     this.onRenderFailed,
+    this.allowLegacyColorFallback = true,
+    this.preserveLastFrameOnUpdateFailure = false,
     this.retryToken = 0,
     this.maxEdge = 2048,
     this.sourceId,
@@ -32,6 +34,8 @@ class NativePhotoPreview extends StatefulWidget {
   final WidgetBuilder errorBuilder;
   final ValueChanged<EditRecipe>? onRendered;
   final ValueChanged<EditRecipe>? onRenderFailed;
+  final bool allowLegacyColorFallback;
+  final bool preserveLastFrameOnUpdateFailure;
   final int retryToken;
   final int maxEdge;
   final String? sourceId;
@@ -110,12 +114,22 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
   @override
   void didUpdateWidget(covariant NativePhotoPreview oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.retryToken != widget.retryToken ||
-        oldWidget.sourcePath != widget.sourcePath ||
+    if (oldWidget.sourcePath != widget.sourcePath ||
         oldWidget.sourceId != widget.sourceId ||
         oldWidget.maxEdge != widget.maxEdge ||
         !identical(oldWidget.renderer, widget.renderer)) {
       unawaited(_replacePreview());
+      return;
+    }
+    if (oldWidget.retryToken != widget.retryToken) {
+      if (widget.preserveLastFrameOnUpdateFailure &&
+          _handle != null &&
+          !_useFallback) {
+        _pendingRecipe = widget.recipe;
+        unawaited(_drainUpdates());
+      } else {
+        unawaited(_replacePreview());
+      }
       return;
     }
     if (!oldWidget.recipe.crop.hasSameOutputDimensions(widget.recipe.crop)) {
@@ -152,6 +166,8 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
     if (_suspended) return;
     final generation = ++_generation;
     final initialRecipe = widget.recipe;
+    final onRendered = widget.onRendered;
+    final onRenderFailed = widget.onRenderFailed;
     try {
       final handle = await widget.renderer.create(
         sourcePath: widget.sourcePath,
@@ -163,15 +179,20 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
         return;
       }
       setState(() => _handle = handle);
-      widget.onRendered?.call(initialRecipe);
+      onRendered?.call(initialRecipe);
       if (widget.recipe != initialRecipe) {
         _pendingRecipe = widget.recipe;
         unawaited(_drainUpdates());
       }
     } on Object {
       if (mounted && generation == _generation) {
+        if (widget.recipe != initialRecipe) {
+          _pendingRecipe = null;
+          unawaited(_create());
+          return;
+        }
         setState(() => _useFallback = true);
-        widget.onRenderFailed?.call(initialRecipe);
+        onRenderFailed?.call(initialRecipe);
       }
     }
   }
@@ -186,6 +207,7 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
     }
     _updateInFlight = true;
     EditRecipe? failedRecipe;
+    ValueChanged<EditRecipe>? failedCallback;
     try {
       while (mounted &&
           identical(_handle, handle) &&
@@ -194,19 +216,30 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
           !_useFallback) {
         final recipe = _pendingRecipe!;
         failedRecipe = recipe;
+        final onRendered = widget.onRendered;
+        failedCallback = widget.onRenderFailed;
         _pendingRecipe = null;
         await widget.renderer.update(
           handle: handle,
           pipeline: _pipeline(recipe),
         );
-        widget.onRendered?.call(recipe);
+        if (!mounted ||
+            !identical(_handle, handle) ||
+            _suspended ||
+            _useFallback) {
+          return;
+        }
+        onRendered?.call(recipe);
         failedRecipe = null;
+        failedCallback = null;
       }
     } on Object {
       if (mounted && identical(_handle, handle)) {
-        setState(() => _useFallback = true);
+        if (!widget.preserveLastFrameOnUpdateFailure) {
+          setState(() => _useFallback = true);
+        }
         if (failedRecipe case final recipe?) {
-          widget.onRenderFailed?.call(recipe);
+          failedCallback?.call(recipe);
         }
       }
     } finally {
@@ -282,7 +315,8 @@ class _NativePhotoPreviewState extends State<NativePhotoPreview>
   Widget build(BuildContext context) {
     final handle = _handle;
     if (_useFallback) {
-      if (!widget.recipe.isLegacyColorOnly) {
+      if (!widget.allowLegacyColorFallback ||
+          !widget.recipe.isLegacyColorOnly) {
         return widget.errorBuilder(context);
       }
       final matrix = PhotoColorTransform.fromRecipe(

@@ -1,0 +1,1 @@
+enum CreationIntent { apply, motion }

@@ -33,7 +33,8 @@ void main() {
             captured = call;
             return <String, Object>{
               'analysisVersion': 'local-pixels-v1',
-              'capabilityVersion': 'ios-core-image-vision-v14-target-regions',
+              'capabilityVersion':
+                  'ios-core-image-vision-v15-independent-face-targets',
               'confidence': 'medium',
               'exposure': 'underexposed',
               'whiteBalance': 'coolCast',
@@ -42,10 +43,9 @@ void main() {
               'portraitReason': 'none',
               'faceSlim': 'unsafe',
               'faceSlimReason': 'backgroundRisk',
-              'faceSlimTargetCount': 2,
+              'faceSlimTargetCount': 0,
               'faceTargetRegions': [
                 {'left': 0.1, 'top': 0.2, 'right': 0.3, 'bottom': 0.5},
-                {'left': 0.6, 'top': 0.2, 'right': 0.8, 'bottom': 0.5},
               ],
               'body': 'applicable',
               'bodyTargetCount': 2,
@@ -68,7 +68,7 @@ void main() {
       expect(result.usesSafeFallback, isFalse);
       expect(
         result.capabilityVersion,
-        'ios-core-image-vision-v14-target-regions',
+        'ios-core-image-vision-v15-independent-face-targets',
       );
       expect(result.exposure.name, 'underexposed');
       expect(result.whiteBalance.name, 'coolCast');
@@ -77,9 +77,9 @@ void main() {
       expect(result.portraitReason.name, 'none');
       expect(result.faceSlim.name, 'unsafe');
       expect(result.faceSlimReason.name, 'backgroundRisk');
-      expect(result.faceSlimTargetCount, 2);
-      expect(result.faceTargetRegions, hasLength(2));
-      expect(result.faceTargetRegions.last.left, 0.6);
+      expect(result.faceSlimTargetCount, 0);
+      expect(result.faceTargetRegions, hasLength(1));
+      expect(result.faceTargetRegions.single.left, 0.1);
       expect(result.body.name, 'applicable');
       expect(result.bodyTargetCount, 2);
       expect(result.bodyTargetRegions, hasLength(2));

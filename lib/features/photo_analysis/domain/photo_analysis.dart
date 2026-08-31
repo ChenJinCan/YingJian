@@ -273,11 +273,6 @@ class LocalPhotoAnalysis {
 
     final faceTargetRegions = regions('faceTargetRegions');
     final bodyTargetRegions = regions('bodyTargetRegions');
-    if (faceTargetRegions.isNotEmpty &&
-        faceSlimTargetCount != null &&
-        faceTargetRegions.length != (faceSlimTargetCount as num).toInt()) {
-      throw const FormatException('Face target regions do not match count');
-    }
     if (bodyTargetRegions.isNotEmpty &&
         bodyTargetCount != null &&
         bodyTargetRegions.length != (bodyTargetCount as num).toInt()) {

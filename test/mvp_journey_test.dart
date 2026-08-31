@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' show SemanticsAction;
 
@@ -5,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:yingjian/app/navigation/app_router.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
@@ -14,7 +16,7 @@ import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'support/test_services.dart';
 
 void main() {
-  testWidgets('complete one-photo MVP journey stays focused and offline', (
+  testWidgets('legacy editor export regression stays focused and offline', (
     tester,
   ) async {
     var networkClientCreations = 0;
@@ -49,8 +51,7 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        await tester.tap(find.byKey(const ValueKey('home-start-editing')));
-        await tester.pumpAndSettle();
+        await _openLegacyEditor(tester, startWithImport: true);
 
         expect(store.project?.photos, [photo]);
         expect(store.project?.flowState, PhotoProjectFlowState.editing);
@@ -129,8 +130,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('home-resume-project')));
-    await tester.pumpAndSettle();
+    await _openLegacyEditor(tester);
     expect(tester.takeException(), isNull);
     expect(find.byKey(const Key('photo-strip-scroll')), findsNothing);
     expect(find.byKey(const ValueKey('editor-open-tools')), findsOneWidget);
@@ -274,6 +274,19 @@ void main() {
     semantics.dispose();
     debugDefaultTargetPlatformOverride = null;
   });
+}
+
+Future<void> _openLegacyEditor(
+  WidgetTester tester, {
+  bool startWithImport = false,
+}) async {
+  unawaited(
+    AppRouter.navigatorKey.currentState!.pushNamed(
+      AppRoutes.editor,
+      arguments: startWithImport,
+    ),
+  );
+  await tester.pumpAndSettle();
 }
 
 void _expectCurrentTapSemanticsAtLeast(WidgetTester tester, double minimum) {

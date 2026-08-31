@@ -6,7 +6,7 @@
 
 ## 背景
 
-Flutter `ColorFilter.matrix` 可以验证页面和滑杆交互，但无法承载 LUT、曲线、局部遮罩、颗粒、辉光、人像保护和组图补偿。竞品 Android 包的静态证据也显示其图像能力位于原生 EGL/GLES、shader、LUT 和模型组合中；出现 Vulkan 或 OpenCL 字符串不代表某个运行时主路径。
+Flutter `ColorFilter.matrix` 可以验证基础页面与预览交互，但无法承载 LUT、曲线、局部遮罩、颗粒、辉光或人像保护。竞品 Android 包的静态证据也显示其图像能力位于原生 EGL/GLES、shader、LUT 和模型组合中；出现 Vulkan 或 OpenCL 字符串不代表某个运行时主路径。
 
 ## 决策
 
@@ -25,7 +25,7 @@ Flutter 业务层只认识版本化 `ImagePipelineV1`/`ImagePipelineV2` 和两�
 
 - 使用 Flutter `SurfaceProducer` 暴露 Texture；调用方不接触 Android Surface。
 - 在独立线程创建 EGL context，使用 GLES3、纹理、FBO/窗口 surface 和 shader 绘制最长边不超过 2048 px 的代理图。
-- 滑杆更新在 Dart 侧合并，同一时刻最多一个通道更新在途。
+- 实时预览更新在 Dart 侧合并，同一时刻最多一个通道更新在途。
 - 预览不可用时退回既有 Flutter 矩阵，只作为兼容路径，不作为正式图像引擎。
 - 高清导出解析同一版本化管线。V1 和无几何 V2 继续在单个可变 sRGB Bitmap 上分块处理；V2 几何先把已调色像素按行写入应用私有临时映射，成功 unlink 后才回收源 Bitmap并分行采样到唯一完整输出 Bitmap，因此不保留源图与目标图双 Bitmap 峰值。若 unlink 失败则中止导出并立即截断临时内容；该文件路径与像素不进入日志，成功和失败回归均检查无完整 RGBA 残留。48 MP Profile/Release 物理设备仍必须验证映射页、输出 Bitmap、磁盘余量、耗时和温控的实际峰值。
 - GLES3 shader 执行与 CPU 导出相同的光色顺序和几何坐标语义；配方更新保持单一在途。GL 资源在专用渲染线程释放，Flutter `SurfaceProducer` 只在主线程注销。
@@ -46,5 +46,5 @@ Flutter 业务层只认识版本化 `ImagePipelineV1`/`ImagePipelineV2` 和两�
 
 - 单元测试锁定 V1/V2 序列化、严格拒绝规则、MethodChannel 无字节合同和纹理元数据校验。
 - Android 编译必须验证 GLES 源码与当前 Flutter Texture Registry 接口兼容。
-- Android Profile 或 Release 真机验证：方向、首帧、连续滑杆、前后台、快速切图、内存与释放。
+- Android Profile 或 Release 真机验证：方向、首帧、连续风格切换、前后台、快速切图、内存与释放。
 - 固定样片比较 Android GLES 预览、Android 导出和 iOS Core Image 导出的数值/视觉差异。

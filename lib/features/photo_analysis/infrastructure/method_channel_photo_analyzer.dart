@@ -24,7 +24,7 @@ final class MethodChannelPhotoAnalyzer implements PhotoAnalyzer {
       nativeCapabilityVersion ??
       (Platform.isAndroid
           ? 'android-bitmap-face-v1'
-          : 'ios-core-image-vision-v14-target-regions');
+          : 'ios-core-image-vision-v15-independent-face-targets');
 
   @override
   PhotoAnalysisEngineIdentity identityFor(ProjectPhoto photo) {
@@ -60,10 +60,8 @@ final class MethodChannelPhotoAnalyzer implements PhotoAnalyzer {
           ? null
           : _boundedTargetCount(raw['bodyTargetCount']);
       final bodyTargetRegions = _targetRegions(raw['bodyTargetRegions']);
-      if ((faceTargetRegions.isNotEmpty &&
-              faceTargetRegions.length != faceSlimTargetCount) ||
-          (bodyTargetRegions.isNotEmpty &&
-              bodyTargetRegions.length != bodyTargetCount)) {
+      if (bodyTargetRegions.isNotEmpty &&
+          bodyTargetRegions.length != bodyTargetCount) {
         throw const FormatException(
           'Portrait target regions do not match count',
         );

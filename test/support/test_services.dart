@@ -136,10 +136,15 @@ final class FakePhotoExporter implements PhotoExporter {
 }
 
 final class FakePhotoSharer implements PhotoSharer {
-  FakePhotoSharer({this.outcome = PhotoShareOutcome.completed, this.error});
+  FakePhotoSharer({
+    this.outcome = PhotoShareOutcome.completed,
+    this.error,
+    this.discardError,
+  });
 
   final PhotoShareOutcome outcome;
   final Object? error;
+  final Object? discardError;
   List<String>? sharedPaths;
   List<String>? discardedPaths;
 
@@ -153,6 +158,7 @@ final class FakePhotoSharer implements PhotoSharer {
   @override
   Future<void> discard({required List<String> localPaths}) async {
     discardedPaths = List.unmodifiable(localPaths);
+    if (discardError case final error?) throw error;
   }
 }
 
@@ -240,6 +246,7 @@ final class MemoryPhotoProjectStore implements PhotoProjectCatalogStore {
 
   final List<PhotoProject> _projects;
   String? _activeProjectId;
+  String? _projectBeforeNewId;
   bool _startingNewProject = false;
 
   List<PhotoProject> get projects => List.unmodifiable(_projects);
@@ -259,26 +266,43 @@ final class MemoryPhotoProjectStore implements PhotoProjectCatalogStore {
   Future<List<PhotoProject>> loadProjects() async => projects;
 
   @override
+  Future<PhotoProject?> loadProject(String projectId) async =>
+      _projects.where((project) => project.id == projectId).firstOrNull;
+
+  @override
   Future<void> activateProject(String projectId) async {
     if (!_projects.any((project) => project.id == projectId)) {
       throw StateError('Photo project does not exist');
     }
     _activeProjectId = projectId;
+    _projectBeforeNewId = null;
     _startingNewProject = false;
   }
 
   @override
   Future<void> startNewProject() async {
+    if (_startingNewProject) return;
+    _projectBeforeNewId = _activeProjectId ?? _projects.firstOrNull?.id;
     _activeProjectId = null;
     _startingNewProject = true;
   }
 
   @override
+  Future<void> cancelNewProject() async {
+    if (!_startingNewProject && _projectBeforeNewId == null) return;
+    _activeProjectId = _projectBeforeNewId;
+    _projectBeforeNewId = null;
+    _startingNewProject = false;
+  }
+
+  @override
   Future<void> save(PhotoProject project) async {
+    final completingNewProject = _startingNewProject;
     _projects.removeWhere((candidate) => candidate.id == project.id);
     _projects.add(project);
     _sortProjects();
     _activeProjectId = project.id;
+    if (!completingNewProject) _projectBeforeNewId = null;
     _startingNewProject = false;
   }
 

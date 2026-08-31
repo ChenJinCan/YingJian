@@ -72,19 +72,23 @@ struct IOSPhotoFileRenderer {
     pipeline: IOSImagePipeline,
     destinationURL: URL,
     options: IOSPhotoExportOptions = .defaults,
-    preparedPortraitContext: IOSPortraitRetouchContext? = nil
+    preparedPortraitContext: IOSPortraitRetouchContext? = nil,
+    cancellationCheck: () throws -> Void = {}
   ) throws -> IOSPhotoRenderedFile {
+    try cancellationCheck()
     guard let input = CIImage(
       contentsOf: URL(fileURLWithPath: sourcePath),
       options: [.applyOrientationProperty: true]
     ) else {
       throw IOSPhotoFileRenderError.decodeFailed
     }
+    try cancellationCheck()
     let normalizedInput = input.transformed(
       by: CGAffineTransform(translationX: -input.extent.minX, y: -input.extent.minY)
     )
     let metadata = ImageExportMetadata.sanitize(input.properties)
     let sourceExtent = normalizedInput.extent.integral
+    try cancellationCheck()
     let portraitContext = preparedPortraitContext
       ?? (pipeline.textureSmoothing > 0
         || pipeline.skinToneLighting > 0
@@ -103,6 +107,7 @@ struct IOSPhotoFileRenderer {
         || pipeline.semanticEditing != .neutral
         ? IOSPortraitRetoucher.prepare(source: normalizedInput, extent: sourceExtent)
         : .unavailable)
+    try cancellationCheck()
     var output = pipeline
       .applying(
         to: normalizedInput,
@@ -110,6 +115,7 @@ struct IOSPhotoFileRenderer {
         portraitContext: portraitContext
       )
       .settingProperties(metadata)
+    try cancellationCheck()
     if let longEdge = options.longEdgePixels {
       let currentLongEdge = max(output.extent.width, output.extent.height)
       if currentLongEdge > CGFloat(longEdge) {
@@ -121,6 +127,7 @@ struct IOSPhotoFileRenderer {
     guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
       throw IOSPhotoFileRenderError.renderFailed
     }
+    try cancellationCheck()
     do {
       let representationOptions = [
         kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption:
@@ -146,6 +153,7 @@ struct IOSPhotoFileRenderer {
       try? FileManager.default.removeItem(at: destinationURL)
       throw IOSPhotoFileRenderError.renderFailed
     }
+    try cancellationCheck()
     return IOSPhotoRenderedFile(
       width: Int(outputExtent.width),
       height: Int(outputExtent.height),
@@ -1746,14 +1754,14 @@ struct IOSImagePipeline {
       for adjustment in targetedPortraitAdjustments {
         guard let targetIndex = matchedFaceTargetIndex(
           for: adjustment,
-          targets: portraitContext.faceSlimTargets,
+          targets: portraitContext.faceTargets,
           extent: extent,
           excluding: usedTargetIndices
         ) else {
           continue
         }
         usedTargetIndices.insert(targetIndex)
-        let mask = portraitContext.faceSlimTargets[targetIndex].mask
+        let mask = portraitContext.faceTargets[targetIndex].mask
         if adjustment.blemishReduction > 0 {
           output = IOSBlemishReductionCandidate.applying(
             to: output,
@@ -1785,7 +1793,7 @@ struct IOSImagePipeline {
       for adjustment in directionalLightingAdjustments {
         guard let targetIndex = matchedFaceTargetIndex(
           for: adjustment,
-          targets: portraitContext.faceSlimTargets,
+          targets: portraitContext.faceTargets,
           extent: extent,
           excluding: usedTargetIndices
         ) else { continue }
@@ -1793,7 +1801,7 @@ struct IOSImagePipeline {
         output = applyingDirectionalLighting(
           to: output,
           adjustment: adjustment,
-          target: portraitContext.faceSlimTargets[targetIndex],
+          target: portraitContext.faceTargets[targetIndex],
           extent: extent
         )
       }
