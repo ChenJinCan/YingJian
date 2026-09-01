@@ -35,6 +35,10 @@ assert(!stdout.include?("upload-package"), "local build plan unexpectedly upload
 build_source = File.read(BUILD_SCRIPT)
 assert(build_source.include?("--no-enable-swift-package-manager"),
        "build wrapper may mutate the CocoaPods project into a partial SPM migration")
+gem_reset_position = build_source.index("unset GEM_HOME GEM_PATH")
+flutter_config_position = build_source.index("flutter config")
+assert(!gem_reset_position.nil? && !flutter_config_position.nil? && gem_reset_position < flutter_config_position,
+       "build wrapper must isolate CocoaPods from Fastlane's Ruby gem environment")
 
 _stdout, stderr, status = run(BUILD_SCRIPT, "--dry-run", "1.2", "112")
 assert(!status.success? && stderr.include?("x.y.z"), "build wrapper accepted an invalid version")

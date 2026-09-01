@@ -40,6 +40,9 @@ fi
 
 cd "$ROOT_DIR"
 load_testflight_environment "$ROOT_DIR"
+# Homebrew Fastlane exports a private Ruby gem environment to child processes.
+# CocoaPods has its own launcher and must not inherit those Fastlane gem paths.
+unset GEM_HOME GEM_PATH
 : "${RELEASE_SOURCE_COMMIT:?freeze the exact pushed source commit before building}"
 [[ -f "$EXPORT_OPTIONS" ]] || { echo "missing $EXPORT_OPTIONS" >&2; exit 66; }
 
