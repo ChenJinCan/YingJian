@@ -11,6 +11,7 @@ import 'package:yingjian/app/settings/app_settings.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/platform_meta_op_capabilities.dart';
+import 'package:yingjian/features/editor/presentation/editor_page.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 
 import 'support/test_services.dart';
@@ -281,9 +282,10 @@ Future<void> _openLegacyEditor(
   bool startWithImport = false,
 }) async {
   unawaited(
-    AppRouter.navigatorKey.currentState!.pushNamed(
-      AppRoutes.editor,
-      arguments: startWithImport,
+    AppRouter.navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => EditorPage(startWithImport: startWithImport),
+      ),
     ),
   );
   await tester.pumpAndSettle();

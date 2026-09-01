@@ -2,6 +2,29 @@ import AVFoundation
 import Flutter
 import Speech
 
+enum IOSSpeechRecognitionAvailability: Equatable {
+  case available
+  case recognizerUnavailable
+  case onDeviceRecognitionUnavailable
+}
+
+enum IOSSpeechRecognitionPolicy {
+  static let requiresOnDeviceRecognition = true
+
+  static func evaluate(
+    isRecognizerAvailable: Bool,
+    supportsOnDeviceRecognition: Bool
+  ) -> IOSSpeechRecognitionAvailability {
+    guard isRecognizerAvailable else {
+      return .recognizerUnavailable
+    }
+    guard supportsOnDeviceRecognition else {
+      return .onDeviceRecognitionUnavailable
+    }
+    return .available
+  }
+}
+
 final class IOSSpeechTranscriber {
   private let audioEngine = AVAudioEngine()
   private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
@@ -75,9 +98,7 @@ final class IOSSpeechTranscriber {
 
   private func beginRecognition(localeIdentifier: String) {
     let locale = Locale(identifier: localeIdentifier)
-    guard let recognizer = SFSpeechRecognizer(locale: locale),
-          recognizer.isAvailable
-    else {
+    guard let recognizer = SFSpeechRecognizer(locale: locale) else {
       finish(error: FlutterError(
         code: "speechUnavailable",
         message: "Speech recognition is unavailable for the current locale",
@@ -86,9 +107,32 @@ final class IOSSpeechTranscriber {
       return
     }
 
+    switch IOSSpeechRecognitionPolicy.evaluate(
+      isRecognizerAvailable: recognizer.isAvailable,
+      supportsOnDeviceRecognition: recognizer.supportsOnDeviceRecognition
+    ) {
+    case .available:
+      break
+    case .recognizerUnavailable:
+      finish(error: FlutterError(
+        code: "speechUnavailable",
+        message: "Speech recognition is unavailable for the current locale",
+        details: nil
+      ))
+      return
+    case .onDeviceRecognitionUnavailable:
+      finish(error: FlutterError(
+        code: "speechOnDeviceUnavailable",
+        message: "On-device speech recognition is unavailable for the current locale",
+        details: nil
+      ))
+      return
+    }
+
     let request = SFSpeechAudioBufferRecognitionRequest()
     request.shouldReportPartialResults = true
-    request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
+    request.requiresOnDeviceRecognition =
+      IOSSpeechRecognitionPolicy.requiresOnDeviceRecognition
     recognitionRequest = request
 
     do {

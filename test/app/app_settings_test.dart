@@ -16,6 +16,7 @@ void main() {
     expect(settings.diagnosticsEnabled, isFalse);
     expect(settings.onboardingComplete, isFalse);
     expect(settings.exportQuality, AppExportQuality.high);
+    expect(settings.developerLogsUnlocked, isFalse);
   });
 
   test('persists onboarding completion', () async {
@@ -62,6 +63,15 @@ void main() {
     final restored = await AppSettings.load();
 
     expect(restored.exportQuality, AppExportQuality.compact);
+  });
+
+  test('persists developer log access after the hidden unlock', () async {
+    final settings = await AppSettings.load();
+
+    await settings.unlockDeveloperLogs();
+    final restored = await AppSettings.load();
+
+    expect(restored.developerLogsUnlocked, isTrue);
   });
 
   test('clears the locale override to follow the device again', () async {

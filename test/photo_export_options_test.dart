@@ -28,6 +28,18 @@ void main() {
     });
   });
 
+  test('serializes PNG without changing the default export contract', () {
+    final options = PhotoExportOptions(format: PhotoExportFormat.png);
+
+    expect(options.toPlatformArguments(), {
+      'format': 'png',
+      'size': 'original',
+      'quality': 'high',
+      'colorSpace': 'srgb',
+    });
+    expect(PhotoExportOptions.defaults.format, PhotoExportFormat.jpeg);
+  });
+
   test('long-edge export requires a safe pixel count', () {
     expect(
       () => PhotoExportOptions(

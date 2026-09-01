@@ -76,7 +76,7 @@ abstract interface class CanonicalPhotoExporter
   });
 }
 
-enum PhotoExportFormat { jpeg, heif }
+enum PhotoExportFormat { jpeg, heif, png }
 
 enum PhotoExportSize { original, longEdge }
 

@@ -1,8 +1,10 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:yingjian/features/creation/domain/creation_capability.dart';
 import 'package:yingjian/features/creation/domain/creation_intent.dart';
 import 'package:yingjian/features/creation/domain/creation_task.dart';
+import 'package:yingjian/features/creation/domain/style_definition.dart';
 import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/directional_lighting_recipe.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
@@ -833,6 +835,7 @@ final class StaticStyleResultIdentity {
     required this.editStateVersion,
     required this.styleId,
     required this.recipe,
+    this.capability,
     this.styleName,
   }) {
     if (sourcePhotoId.isEmpty || sourcePhotoId.length > 160) {
@@ -845,9 +848,7 @@ final class StaticStyleResultIdentity {
     if (editStateVersion < 0) {
       throw RangeError.value(editStateVersion, 'editStateVersion');
     }
-    if (styleId.isEmpty ||
-        styleId.length > 64 ||
-        !RegExp(r'^[a-z0-9-]+$').hasMatch(styleId)) {
+    if (!StyleDefinition.isValidStyleId(styleId)) {
       throw ArgumentError.value(
         styleId,
         'styleId',
@@ -870,6 +871,7 @@ final class StaticStyleResultIdentity {
   final String sourcePhotoId;
   final int editStateVersion;
   final String styleId;
+  final CreationCapability? capability;
   final String? styleName;
   final EditRecipe recipe;
 
@@ -877,6 +879,7 @@ final class StaticStyleResultIdentity {
     'sourcePhotoId': sourcePhotoId,
     'editStateVersion': editStateVersion,
     'styleId': styleId,
+    'capability': ?capability?.persistedId,
     'styleName': ?styleName,
     'recipe': recipe.toJson(),
   };
@@ -886,6 +889,9 @@ final class StaticStyleResultIdentity {
         sourcePhotoId: json['sourcePhotoId']! as String,
         editStateVersion: (json['editStateVersion']! as num).toInt(),
         styleId: json['styleId']! as String,
+        capability: json['capability'] == null
+            ? null
+            : CreationCapability.fromPersistedId(json['capability']),
         styleName: json['styleName'] as String?,
         recipe: EditRecipe.fromJson(
           Map<String, Object?>.from(json['recipe']! as Map),
@@ -898,12 +904,19 @@ final class StaticStyleResultIdentity {
       other.sourcePhotoId == sourcePhotoId &&
       other.editStateVersion == editStateVersion &&
       other.styleId == styleId &&
+      other.capability == capability &&
       other.styleName == styleName &&
       other.recipe == recipe;
 
   @override
-  int get hashCode =>
-      Object.hash(sourcePhotoId, editStateVersion, styleId, styleName, recipe);
+  int get hashCode => Object.hash(
+    sourcePhotoId,
+    editStateVersion,
+    styleId,
+    capability,
+    styleName,
+    recipe,
+  );
 }
 
 @immutable
@@ -915,9 +928,11 @@ class PhotoProject {
     required List<ProjectPhoto> photos,
     this.creationIntent = CreationIntent.apply,
     CreationTask? creationTask,
+    this.creationCapability,
     this.creationStyleId,
     this.creationStyleName,
     this.creationStyleRecipe,
+    this.creationStyleDefinition,
     this.creationResult,
     bool? creationResultActive,
     EditRecipe? recipe,
@@ -991,13 +1006,19 @@ class PhotoProject {
         'The task must use the same execution intent as its project',
       );
     }
+    if (creationCapability case final capability?
+        when capability.task != this.creationTask) {
+      throw ArgumentError.value(
+        capability,
+        'creationCapability',
+        'The capability must belong to the selected creation task',
+      );
+    }
     if (photos.isEmpty || photos.length > maxPhotoCount) {
       throw RangeError.range(photos.length, 1, maxPhotoCount, 'photos.length');
     }
     if (creationStyleId case final styleId?
-        when styleId.isEmpty ||
-            styleId.length > 64 ||
-            !RegExp(r'^[a-z0-9-]+$').hasMatch(styleId)) {
+        when !StyleDefinition.isValidStyleId(styleId)) {
       throw ArgumentError.value(
         styleId,
         'creationStyleId',
@@ -1015,7 +1036,32 @@ class PhotoProject {
         'Creation style names must be trimmed printable text up to 120 chars',
       );
     }
+    if (creationStyleDefinition case final definition?) {
+      if (this.creationTask != CreationTask.style) {
+        throw ArgumentError.value(
+          definition,
+          'creationStyleDefinition',
+          'Only style projects can carry a style definition',
+        );
+      }
+      if (creationStyleId != definition.styleId ||
+          creationStyleName != definition.title) {
+        throw ArgumentError.value(
+          definition,
+          'creationStyleDefinition',
+          'The selected style definition must match the persisted style view',
+        );
+      }
+    }
     if (creationResult case final result?) {
+      if (result.capability case final resultCapability?
+          when resultCapability.task != this.creationTask) {
+        throw ArgumentError.value(
+          resultCapability,
+          'creationResult.capability',
+          'The result capability must belong to the project task',
+        );
+      }
       if (!photos.any((photo) => photo.id == result.sourcePhotoId)) {
         throw ArgumentError.value(
           result.sourcePhotoId,
@@ -1216,7 +1262,7 @@ class PhotoProject {
   // so flips and perspective never freeze later group-style edits. V8's
   // broader overridesBasicEditing flag is accepted as a conservative look
   // override during migration.
-  static const schemaVersion = 18;
+  static const schemaVersion = 20;
   static const checkpointInterval = 20;
 
   final String id;
@@ -1225,9 +1271,11 @@ class PhotoProject {
   final List<ProjectPhoto> photos;
   final CreationIntent creationIntent;
   final CreationTask creationTask;
+  final CreationCapability? creationCapability;
   final String? creationStyleId;
   final String? creationStyleName;
   final EditRecipe? creationStyleRecipe;
+  final StyleDefinition? creationStyleDefinition;
   final StaticStyleResultIdentity? creationResult;
   final bool creationResultActive;
   final SharedStyle sharedStyle;
@@ -1276,6 +1324,7 @@ class PhotoProject {
       return null;
     }
     if (result.editStateVersion != editStateVersion ||
+        result.capability != creationCapability ||
         !photos.any((photo) => photo.id == result.sourcePhotoId) ||
         effectiveRecipeFor(result.sourcePhotoId) != result.recipe) {
       return null;
@@ -1527,9 +1576,7 @@ class PhotoProject {
       updatedAt: updatedAt,
       photos: photos,
       creationIntent: creationIntent,
-      creationStyleId: creationStyleId,
-      creationStyleName: creationStyleName,
-      creationStyleRecipe: creationStyleRecipe,
+      creationTask: creationTask,
       flowState: PhotoProjectFlowState.editing,
       focusPhotoId: focusPhotoId,
       sharedStyle: SharedStyle(recipe: EditRecipe.neutral),
@@ -1697,9 +1744,11 @@ class PhotoProject {
     List<ProjectPhoto>? photos,
     CreationIntent? creationIntent,
     CreationTask? creationTask,
+    Object? creationCapability = _notProvided,
     Object? creationStyleId = _notProvided,
     Object? creationStyleName = _notProvided,
     Object? creationStyleRecipe = _notProvided,
+    Object? creationStyleDefinition = _notProvided,
     Object? creationResult = _notProvided,
     bool? creationResultActive,
     EditRecipe? recipe,
@@ -1737,6 +1786,9 @@ class PhotoProject {
       photos: photos ?? this.photos,
       creationIntent: nextCreationIntent,
       creationTask: nextCreationTask,
+      creationCapability: creationCapability == _notProvided
+          ? this.creationCapability
+          : creationCapability as CreationCapability?,
       creationStyleId: creationStyleId == _notProvided
           ? this.creationStyleId
           : creationStyleId as String?,
@@ -1746,6 +1798,9 @@ class PhotoProject {
       creationStyleRecipe: creationStyleRecipe == _notProvided
           ? this.creationStyleRecipe
           : creationStyleRecipe as EditRecipe?,
+      creationStyleDefinition: creationStyleDefinition == _notProvided
+          ? this.creationStyleDefinition
+          : creationStyleDefinition as StyleDefinition?,
       creationResult: creationResult == _notProvided
           ? this.creationResult
           : creationResult as StaticStyleResultIdentity?,
@@ -1798,9 +1853,11 @@ class PhotoProject {
       'photos': photos.map((photo) => photo.toJson()).toList(),
       'creationIntent': creationIntent.name,
       'creationTask': creationTask.name,
+      'creationCapability': ?creationCapability?.persistedId,
       'creationStyleId': ?creationStyleId,
       'creationStyleName': ?creationStyleName,
       'creationStyleRecipe': ?creationStyleRecipe?.toJson(),
+      'creationStyleDefinition': ?creationStyleDefinition?.toJson(),
       'creationResult': ?creationResult?.toJson(),
       'creationResultActive': creationResultActive,
       'flowState': flowState.name,
@@ -1906,6 +1963,10 @@ class PhotoProject {
           .toList(),
       creationIntent: creationIntent,
       creationTask: creationTask,
+      creationCapability:
+          storedVersion < 20 || json['creationCapability'] == null
+          ? null
+          : CreationCapability.fromPersistedId(json['creationCapability']),
       creationStyleId: storedVersion < 15
           ? null
           : json['creationStyleId'] as String?,
@@ -1917,6 +1978,14 @@ class PhotoProject {
           ? null
           : EditRecipe.fromJson(
               Map<String, Object?>.from(json['creationStyleRecipe']! as Map),
+            ),
+      creationStyleDefinition:
+          storedVersion < 19 || json['creationStyleDefinition'] == null
+          ? null
+          : StyleDefinition.fromJson(
+              Map<String, Object?>.from(
+                json['creationStyleDefinition']! as Map,
+              ),
             ),
       creationResult: storedVersion < 16 || json['creationResult'] == null
           ? null
@@ -2146,9 +2215,11 @@ class PhotoProject {
         other.updatedAt == updatedAt &&
         other.creationIntent == creationIntent &&
         other.creationTask == creationTask &&
+        other.creationCapability == creationCapability &&
         other.creationStyleId == creationStyleId &&
         other.creationStyleName == creationStyleName &&
         other.creationStyleRecipe == creationStyleRecipe &&
+        other.creationStyleDefinition == creationStyleDefinition &&
         other.creationResult == creationResult &&
         other.creationResultActive == creationResultActive &&
         other.sharedStyle == sharedStyle &&
@@ -2182,9 +2253,11 @@ class PhotoProject {
     updatedAt,
     creationIntent,
     creationTask,
+    creationCapability,
     creationStyleId,
     creationStyleName,
     creationStyleRecipe,
+    creationStyleDefinition,
     creationResult,
     creationResultActive,
     sharedStyle,

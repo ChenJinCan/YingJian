@@ -12,6 +12,58 @@ class RunnerTests: XCTestCase {
   private let imageContext = CIContext(options: [.cacheIntermediates: false])
   private let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
 
+  func testGenerationAutomaticInstallationUsesExactV2SigningMessage() {
+    XCTAssertEqual(
+      IOSGenerationSessionCredentialHost.installationRegistrationMessageV2(
+        challengeID: "installation-challenge-1",
+        challenge: "challenge-value-1",
+        keyID: "key-id-1"
+      ),
+      "yingjian-installation-v2\ninstallation-challenge-1\nchallenge-value-1\nkey-id-1\n"
+    )
+  }
+
+  func testGenerationUploadPolicyAcceptsAiNaturalMotionWithServerContract() throws {
+    let policy = try IOSGenerationUploadPolicy.policy(for: "motion.aiNatural")
+
+    XCTAssertEqual(policy.minDimension, 240)
+    XCTAssertEqual(policy.maxDimension, 8_000)
+    XCTAssertEqual(policy.maxBytes, 20 * 1024 * 1024)
+    XCTAssertEqual(policy.maxAspectRatio, 8)
+    XCTAssertFalse(policy.requiresMask)
+  }
+
+  func testSpeechRecognitionPolicyRejectsAppleNetworkFallback() {
+    XCTAssertEqual(
+      IOSSpeechRecognitionPolicy.evaluate(
+        isRecognizerAvailable: true,
+        supportsOnDeviceRecognition: false
+      ),
+      .onDeviceRecognitionUnavailable
+    )
+    XCTAssertTrue(IOSSpeechRecognitionPolicy.requiresOnDeviceRecognition)
+  }
+
+  func testSpeechRecognitionPolicyRejectsUnavailableRecognizer() {
+    XCTAssertEqual(
+      IOSSpeechRecognitionPolicy.evaluate(
+        isRecognizerAvailable: false,
+        supportsOnDeviceRecognition: true
+      ),
+      .recognizerUnavailable
+    )
+  }
+
+  func testSpeechRecognitionPolicyAcceptsAvailableOnDeviceRecognition() {
+    XCTAssertEqual(
+      IOSSpeechRecognitionPolicy.evaluate(
+        isRecognizerAvailable: true,
+        supportsOnDeviceRecognition: true
+      ),
+      .available
+    )
+  }
+
   func testPickedPhotoFileStorePreservesOriginalBytes() throws {
     let source = temporaryURL(extension: "jpg")
     let directory = FileManager.default.temporaryDirectory
@@ -1317,9 +1369,13 @@ class RunnerTests: XCTestCase {
     ])
     XCTAssertEqual(resized?.format, "heif")
     XCTAssertEqual(resized?.longEdgePixels, 2048)
-    XCTAssertNil(IOSPhotoExportOptions(arguments: [
+    let png = IOSPhotoExportOptions(arguments: [
       "format": "png", "size": "original", "quality": "high", "colorSpace": "srgb",
-    ]))
+    ])
+    XCTAssertEqual(png?.format, "png")
+    XCTAssertEqual(png?.fileExtension, "png")
+    XCTAssertEqual(resized?.fileExtension, "heic")
+    XCTAssertEqual(original?.fileExtension, "jpg")
   }
 
   func testImagePipelineV6NeutralIsPixelEquivalentToV5() throws {
@@ -2571,6 +2627,119 @@ class RunnerTests: XCTestCase {
     XCTAssertGreaterThanOrEqual(pixel[1], 250)
     XCTAssertGreaterThanOrEqual(pixel[2], 250)
     XCTAssertEqual(pixel[3], 255)
+  }
+
+  func testFileRendererWritesPersonMatteAsTransparentPngAlpha() throws {
+    let sourceURL = temporaryURL(extension: "png")
+    let outputURL = temporaryURL(extension: "png")
+    defer { removeTemporaryFiles(sourceURL, outputURL) }
+    let extent = CGRect(x: 0, y: 0, width: 8, height: 8)
+    let source = CIImage(
+      color: CIColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 1)
+    ).cropped(to: extent)
+    try imageContext.writePNGRepresentation(
+      of: source,
+      to: sourceURL,
+      format: .RGBA8,
+      colorSpace: sRGB,
+      options: [:]
+    )
+    let matte = CIImage(color: .white)
+      .cropped(to: CGRect(x: 0, y: 0, width: 4, height: 8))
+      .composited(over: CIImage(color: .black).cropped(to: extent))
+    let portraitContext = IOSPortraitRetouchContext(
+      effectiveMask: nil,
+      semanticSubjectMask: matte
+    )
+    let pipeline = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV10(
+      background: "transparent"
+    )))
+    let options = try XCTUnwrap(IOSPhotoExportOptions(arguments: [
+      "format": "png", "size": "original", "quality": "high", "colorSpace": "srgb",
+    ]))
+
+    _ = try IOSPhotoFileRenderer(context: imageContext).render(
+      sourcePath: sourceURL.path,
+      pipeline: pipeline,
+      destinationURL: outputURL,
+      options: options,
+      preparedPortraitContext: portraitContext
+    )
+    let outputSource = try XCTUnwrap(CGImageSourceCreateWithURL(outputURL as CFURL, nil))
+    let outputType = try XCTUnwrap(CGImageSourceGetType(outputSource))
+    let output = try XCTUnwrap(CIImage(contentsOf: outputURL))
+    let pixels = try rgbaBytes(output)
+    let foreground = Array(pixels[4..<(4 + 4)]).map(Int.init)
+    let background = Array(pixels[24..<(24 + 4)]).map(Int.init)
+
+    XCTAssertEqual(outputType as String, UTType.png.identifier)
+    XCTAssertEqual(foreground[3], 255)
+    XCTAssertEqual(background[3], 0)
+    XCTAssertEqual(foreground[0], 51, accuracy: 1)
+    XCTAssertEqual(foreground[1], 102, accuracy: 1)
+    XCTAssertEqual(foreground[2], 153, accuracy: 1)
+  }
+
+  func testFileRendererRejectsTransparentPngWithoutSemanticPersonMatte() throws {
+    let sourceURL = temporaryURL(extension: "png")
+    let outputURL = temporaryURL(extension: "png")
+    defer { removeTemporaryFiles(sourceURL, outputURL) }
+    try writePNG(
+      CIImage(color: .red).cropped(
+        to: CGRect(x: 0, y: 0, width: 8, height: 8)
+      ),
+      to: sourceURL
+    )
+    let pipeline = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV10(
+      background: "transparent"
+    )))
+    let options = try XCTUnwrap(IOSPhotoExportOptions(arguments: [
+      "format": "png", "size": "original", "quality": "high", "colorSpace": "srgb",
+    ]))
+    let fallbackBodyContext = IOSPortraitRetouchContext(
+      effectiveMask: nil,
+      bodySlimGeometry: IOSBodySlimGeometry(
+        centerX: 4,
+        halfWidth: 4,
+        lowerY: 0,
+        upperY: 8
+      ),
+      personMask: CIImage(color: .white).cropped(
+        to: CGRect(x: 0, y: 0, width: 8, height: 8)
+      )
+    )
+
+    XCTAssertThrowsError(try IOSPhotoFileRenderer(context: imageContext).render(
+      sourcePath: sourceURL.path,
+      pipeline: pipeline,
+      destinationURL: outputURL,
+      options: options,
+      preparedPortraitContext: fallbackBodyContext
+    ))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: outputURL.path))
+  }
+
+  func testFileRendererRejectsTransparentBackgroundForLossyOutput() throws {
+    let sourceURL = temporaryURL(extension: "png")
+    let outputURL = temporaryURL(extension: "jpg")
+    defer { removeTemporaryFiles(sourceURL, outputURL) }
+    let extent = CGRect(x: 0, y: 0, width: 8, height: 8)
+    try writePNG(CIImage(color: .red).cropped(to: extent), to: sourceURL)
+    let pipeline = try XCTUnwrap(IOSImagePipeline(arguments: pipelineV10(
+      background: "transparent"
+    )))
+    let context = IOSPortraitRetouchContext(
+      effectiveMask: nil,
+      semanticSubjectMask: CIImage(color: .white).cropped(to: extent)
+    )
+
+    XCTAssertThrowsError(try IOSPhotoFileRenderer(context: imageContext).render(
+      sourcePath: sourceURL.path,
+      pipeline: pipeline,
+      destinationURL: outputURL,
+      preparedPortraitContext: context
+    ))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: outputURL.path))
   }
 
   func testFileRendererConvertsDisplayP3JpegToSrgb() throws {

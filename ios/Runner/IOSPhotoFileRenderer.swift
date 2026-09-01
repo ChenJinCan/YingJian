@@ -19,6 +19,14 @@ struct IOSPhotoExportOptions {
   let longEdgePixels: Int?
   let compressionQuality: Double
 
+  var fileExtension: String {
+    switch format {
+    case "heif": return "heic"
+    case "png": return "png"
+    default: return "jpg"
+    }
+  }
+
   static let defaults = IOSPhotoExportOptions(
     format: "jpeg",
     longEdgePixels: nil,
@@ -35,7 +43,7 @@ struct IOSPhotoExportOptions {
     guard
       let values = arguments as? [String: Any],
       let format = values["format"] as? String,
-      ["jpeg", "heif"].contains(format),
+      ["jpeg", "heif", "png"].contains(format),
       let size = values["size"] as? String,
       ["original", "longEdge"].contains(size),
       let quality = values["quality"] as? String,
@@ -62,7 +70,7 @@ struct IOSPhotoExportOptions {
 
 /// Renders one app-owned source file through the same production pipeline used
 /// before PhotoKit persistence. Keeping this seam independent from PhotoKit
-/// makes the final JPEG contract directly inspectable without weakening the
+/// makes the encoded-file contract directly inspectable without weakening the
 /// system-library save boundary.
 struct IOSPhotoFileRenderer {
   let context: CIContext
@@ -108,6 +116,15 @@ struct IOSPhotoFileRenderer {
         ? IOSPortraitRetoucher.prepare(source: normalizedInput, extent: sourceExtent)
         : .unavailable)
     try cancellationCheck()
+    let requestsTransparentBackground = pipeline.semanticEditing.background == "transparent"
+    guard !requestsTransparentBackground || options.format == "png" else {
+      throw IOSPhotoFileRenderError.renderFailed
+    }
+    guard
+      !requestsTransparentBackground || portraitContext.semanticSubjectMask != nil
+    else {
+      throw IOSPhotoFileRenderError.renderFailed
+    }
     var output = pipeline
       .applying(
         to: normalizedInput,
@@ -140,6 +157,14 @@ struct IOSPhotoFileRenderer {
           format: .RGBA8,
           colorSpace: colorSpace,
           options: representationOptions
+        )
+      } else if options.format == "png" {
+        try context.writePNGRepresentation(
+          of: output,
+          to: destinationURL,
+          format: .RGBA8,
+          colorSpace: colorSpace,
+          options: [:]
         )
       } else {
         try context.writeJPEGRepresentation(
@@ -339,6 +364,17 @@ enum IOSSemanticEditor {
         path: parameters.backgroundImagePath,
         extent: extent
       )
+    case "transparent":
+      let transparent = CIImage(
+        color: CIColor(red: 0, green: 0, blue: 0, alpha: 0)
+      ).cropped(to: extent)
+      return output.applyingFilter(
+        "CIBlendWithMask",
+        parameters: [
+          kCIInputBackgroundImageKey: transparent,
+          kCIInputMaskImageKey: foregroundMask,
+        ]
+      ).cropped(to: extent)
     default:
       replacement = nil
     }
@@ -1261,7 +1297,7 @@ struct IOSImagePipeline {
   ]
 
   private static let supportedBackgroundTreatments: Set<String> = [
-    "original", "blur", "white", "black", "warm", "cool", "image",
+    "original", "blur", "white", "black", "warm", "cool", "image", "transparent",
   ]
 
   private static func parseEraseStrokes(_ rawStrokes: [Any]) -> [IOSEraseStroke]? {
@@ -1478,10 +1514,12 @@ struct IOSImagePipeline {
     extent: CGRect,
     portraitContext: IOSPortraitRetouchContext? = nil
   ) -> CIImage {
+    let preservesTransparency = schemaVersion >= 9
+      && semanticEditing.background == "transparent"
     let white = CIImage(color: CIColor(red: 1, green: 1, blue: 1, alpha: 1))
       .cropped(to: extent)
     let opaqueInput = input.composited(over: white)
-    var reshapedInput = opaqueInput
+    var reshapedInput = preservesTransparency ? input : opaqueInput
     if schemaVersion >= 8 && bodyGeometryTargets.contains(where: {
       $0.slimming != 0 || $0.height != 0 || $0.shoulders != 0 || $0.waist != 0 || $0.legs != 0
     }) {
@@ -1814,12 +1852,17 @@ struct IOSImagePipeline {
       output = IOSSemanticEditor.applying(
         to: output,
         parameters: semanticEditing,
-        subjectMask: context.combinedPersonMask,
+        subjectMask: preservesTransparency
+          ? context.semanticSubjectMask
+          : context.combinedPersonMask,
         extent: extent
       )
     }
     let geometricallyAdjusted = applyingGeometry(to: output, sourceExtent: extent)
     let geometryExtent = geometricallyAdjusted.extent.integral
+    if preservesTransparency {
+      return geometricallyAdjusted.cropped(to: geometryExtent)
+    }
     let geometryBackground = CIImage(
       color: CIColor(red: 1, green: 1, blue: 1, alpha: 1)
     ).cropped(to: geometryExtent)

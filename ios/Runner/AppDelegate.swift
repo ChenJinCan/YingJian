@@ -102,6 +102,12 @@ enum IOSPortraitCapabilityPolicy {
   private var photoInputChannel: FlutterMethodChannel?
   private var photoAnalysisChannel: FlutterMethodChannel?
   private var speechTranscriptionChannel: FlutterMethodChannel?
+  private var motionPhotoChannel: FlutterMethodChannel?
+  private var photoUpscaleChannel: IOSPhotoUpscaleChannel?
+  private var generatedMediaActionsChannel: IOSGeneratedMediaActionsChannel?
+  private var generationUploadPreparerChannel: IOSGenerationUploadPreparerChannel?
+  private var generationSessionCredentialHost: IOSGenerationSessionCredentialHost?
+  private var pendingGenerationActivationURL: URL?
   private var photoPreviewRenderer: IOSPhotoPreviewRenderer?
   private let photoExportContext = CIContext(options: [.cacheIntermediates: false])
   private let photoPreparationQueue = DispatchQueue(
@@ -123,6 +129,30 @@ enum IOSPortraitCapabilityPolicy {
   ) -> Bool {
     cleanupAbandonedShareFiles()
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  override func application(
+    _ app: UIApplication,
+    open url: URL,
+    options: [UIApplication.OpenURLOptionsKey: Any] = [:]
+  ) -> Bool {
+    if acceptGenerationActivationURL(url) {
+      return true
+    }
+    return super.application(app, open: url, options: options)
+  }
+
+  @discardableResult
+  func acceptGenerationActivationURL(_ url: URL) -> Bool {
+    if let generationSessionCredentialHost {
+      return generationSessionCredentialHost.acceptActivationURL(url)
+    }
+    guard IOSGenerationSessionCredentialHost.isActivationURL(url) else {
+      return false
+    }
+    guard pendingGenerationActivationURL == nil else { return false }
+    pendingGenerationActivationURL = url
+    return true
   }
 
   private func cleanupAbandonedShareFiles() {
@@ -183,6 +213,23 @@ enum IOSPortraitCapabilityPolicy {
     configurePhotoInput(messenger: registrar.messenger())
     configurePhotoAnalysis(messenger: registrar.messenger())
     configureSpeechTranscription(messenger: registrar.messenger())
+    configureMotionPhoto(messenger: registrar.messenger())
+    photoUpscaleChannel = IOSPhotoUpscaleChannel(messenger: registrar.messenger())
+    generatedMediaActionsChannel = IOSGeneratedMediaActionsChannel(
+      messenger: registrar.messenger(),
+      presenterProvider: { [weak self] in self?.topViewController() }
+    )
+    generationUploadPreparerChannel = IOSGenerationUploadPreparerChannel(
+      messenger: registrar.messenger()
+    )
+    let sessionCredentialHost = IOSGenerationSessionCredentialHost(
+      messenger: registrar.messenger()
+    )
+    generationSessionCredentialHost = sessionCredentialHost
+    if let pendingGenerationActivationURL {
+      _ = sessionCredentialHost.acceptActivationURL(pendingGenerationActivationURL)
+      self.pendingGenerationActivationURL = nil
+    }
     photoPreviewRenderer = IOSPhotoPreviewRenderer(
       messenger: registrar.messenger(),
       textureRegistry: registrar.textures()
@@ -231,6 +278,81 @@ enum IOSPortraitCapabilityPolicy {
       }
     }
     speechTranscriptionChannel = channel
+  }
+
+  private func configureMotionPhoto(messenger: FlutterBinaryMessenger) {
+    let channel = FlutterMethodChannel(
+      name: "yingjian/motion_photo",
+      binaryMessenger: messenger
+    )
+    channel.setMethodCallHandler { call, result in
+      guard call.method == "generate" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      guard
+        let arguments = call.arguments as? [String: Any],
+        let sourcePath = arguments["sourcePath"] as? String,
+        !sourcePath.isEmpty,
+        let effectId = arguments["effectId"] as? String,
+        let effect = IOSMotionPhotoEffect(rawValue: effectId)
+      else {
+        result(FlutterError(
+          code: "invalidArguments",
+          message: "A source path and explicit motion effect are required",
+          details: nil
+        ))
+        return
+      }
+      let directory = FileManager.default.urls(
+        for: .applicationSupportDirectory,
+        in: .userDomainMask
+      )[0].appendingPathComponent("motion-results", isDirectory: true)
+      do {
+        try FileManager.default.createDirectory(
+          at: directory,
+          withIntermediateDirectories: true
+        )
+      } catch {
+        result(FlutterError(
+          code: "motionPhotoUnavailable",
+          message: "The motion photo result directory is unavailable",
+          details: nil
+        ))
+        return
+      }
+      let outputURL = directory
+        .appendingPathComponent("Yingjian_motion_\(UUID().uuidString)")
+        .appendingPathExtension("mp4")
+      IOSMotionPhotoRenderer(
+        context: CIContext(options: [.cacheIntermediates: false])
+      ).render(
+        sourcePath: sourcePath,
+        effect: effect,
+        destinationURL: outputURL
+      ) { renderResult in
+        DispatchQueue.main.async {
+          switch renderResult {
+          case .success(let artifact):
+            result([
+              "outputPath": outputURL.path,
+              "contentSha256": artifact.contentSha256,
+              "effectId": artifact.effect.rawValue,
+              "width": artifact.width,
+              "height": artifact.height,
+              "durationMilliseconds": artifact.durationMilliseconds,
+            ])
+          case .failure:
+            result(FlutterError(
+              code: "motionPhotoFailed",
+              message: "The selected motion effect could not be rendered",
+              details: nil
+            ))
+          }
+        }
+      }
+    }
+    motionPhotoChannel = channel
   }
 
   private func configurePhotoPicker(messenger: FlutterBinaryMessenger) {
@@ -405,7 +527,7 @@ enum IOSPortraitCapabilityPolicy {
       guard
         url.deletingLastPathComponent() == temporaryRoot,
         url.lastPathComponent.hasPrefix("Yingjian_"),
-        url.pathExtension.lowercased() == "jpg"
+        ["jpg", "png"].contains(url.pathExtension.lowercased())
       else {
         return nil
       }
@@ -891,7 +1013,7 @@ enum IOSPortraitCapabilityPolicy {
       let sourcePath = values["sourcePath"] as? String,
       let pipeline = IOSImagePipeline(arguments: values["pipeline"]),
       let options = IOSPhotoExportOptions(arguments: values["options"]),
-      options.format == "jpeg",
+      ["jpeg", "png"].contains(options.format),
       photoPreparationTokens[requestId] == nil
     else {
       result(FlutterError(code: "invalidArguments", message: "Invalid photo preparation request", details: nil))
@@ -903,7 +1025,9 @@ enum IOSPortraitCapabilityPolicy {
     photoPreparationQueue.async { [weak self] in
       guard let self else { return }
       let temporaryURL = FileManager.default.temporaryDirectory
-        .appendingPathComponent("Yingjian_\(UUID().uuidString).jpg")
+        .appendingPathComponent(
+          "Yingjian_\(UUID().uuidString).\(options.fileExtension)"
+        )
       do {
         let artifact = try IOSPhotoFileRenderer(context: self.photoExportContext).render(
           sourcePath: sourcePath,
@@ -1014,9 +1138,10 @@ enum IOSPortraitCapabilityPolicy {
     options: IOSPhotoExportOptions,
     result: @escaping FlutterResult
   ) {
-    let fileExtension = options.format == "heif" ? "heic" : "jpg"
     let temporaryURL = FileManager.default.temporaryDirectory
-      .appendingPathComponent("Yingjian_\(UUID().uuidString).\(fileExtension)")
+      .appendingPathComponent(
+        "Yingjian_\(UUID().uuidString).\(options.fileExtension)"
+      )
     let artifact: IOSPhotoRenderedFile
     do {
       artifact = try IOSPhotoFileRenderer(context: photoExportContext).render(
@@ -1034,6 +1159,7 @@ enum IOSPortraitCapabilityPolicy {
     }
 
     var assetId: String?
+    let exportFileExtension = options.fileExtension
     DispatchQueue.main.async { [weak self] in
       self?.photoExportChannel?.invokeMethod(
         "exportStage",
@@ -1043,9 +1169,14 @@ enum IOSPortraitCapabilityPolicy {
     PHPhotoLibrary.shared().performChanges {
       let request = PHAssetCreationRequest.forAsset()
       request.creationDate = ImageExportMetadata.captureDate(from: artifact.metadata)
-      let options = PHAssetResourceCreationOptions()
-      options.originalFilename = "Yingjian_\(Int(Date().timeIntervalSince1970)).\(fileExtension)"
-      request.addResource(with: .photo, fileURL: temporaryURL, options: options)
+      let resourceOptions = PHAssetResourceCreationOptions()
+      resourceOptions.originalFilename =
+        "Yingjian_\(Int(Date().timeIntervalSince1970)).\(exportFileExtension)"
+      request.addResource(
+        with: .photo,
+        fileURL: temporaryURL,
+        options: resourceOptions
+      )
       assetId = request.placeholderForCreatedAsset?.localIdentifier
     } completionHandler: { success, _ in
       DispatchQueue.main.async {

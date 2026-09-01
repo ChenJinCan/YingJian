@@ -10,12 +10,15 @@ import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yingjian/app/navigation/app_router.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
+import 'package:yingjian/features/creation/domain/creation_capability.dart';
 import 'package:yingjian/features/creation/domain/creation_task.dart';
+import 'package:yingjian/features/creation/domain/style_definition.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
 import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/content_sha256.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
+import 'package:yingjian/features/editor/domain/editing_resource.dart';
 import 'package:yingjian/features/editor/domain/editing_core.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline.dart';
 import 'package:yingjian/features/editor/domain/meta_op.dart';
@@ -25,11 +28,15 @@ import 'package:yingjian/features/editor/domain/semantic_editing_recipe.dart';
 import 'package:yingjian/features/editor/infrastructure/method_channel_photo_exporter.dart';
 import 'package:yingjian/features/editor/infrastructure/method_channel_photo_preview_renderer.dart';
 import 'package:yingjian/features/editor/infrastructure/method_channel_photo_sharer.dart';
+import 'package:yingjian/features/editor/presentation/editor_page.dart';
+import 'package:yingjian/features/generation/infrastructure/method_channel_motion_photo_generator.dart';
+import 'package:yingjian/features/generation/infrastructure/method_channel_upscale_photo_generator.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/project/infrastructure/app_owned_photo_importer.dart';
 import 'package:yingjian/features/project/infrastructure/json_photo_project_store.dart';
 import 'package:yingjian/features/photo_analysis/domain/photo_analysis.dart';
+import 'package:yingjian/observability/local_diagnostic_log.dart';
 
 import '../test/support/test_services.dart';
 
@@ -132,6 +139,116 @@ void main() {
   );
 
   testWidgets(
+    'settings unlocks and copies local diagnostic logs through production routing',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+      final log = MemoryDiagnosticLog()
+        ..record(
+          const DiagnosticLogEvent(
+            level: DiagnosticLogLevel.error,
+            component: 'photo_import',
+            operation: 'pick_photos',
+            result: 'failed',
+            reason: 'platform_pickerfailed',
+          ),
+        );
+
+      await tester.pumpWidget(buildTestApp(settings, diagnosticLog: log));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('home-settings')));
+      await tester.pumpAndSettle();
+      final version = find.byKey(const ValueKey('settings-version'));
+      await tester.drag(find.byType(ListView), const Offset(0, -500));
+      await tester.pumpAndSettle();
+      for (var tap = 0; tap < 5; tap++) {
+        await tester.tap(version);
+      }
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('developer-log-page')), findsOneWidget);
+      expect(find.textContaining('photo_import.pick_photos'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('developer-log-copy-all')));
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(find.text('日志已复制'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'a second photo selection opens optimize workspace when picker cleanup fails',
+    (tester) async {
+      final fixtureDirectory = await Directory.systemTemp.createTemp(
+        'yingjian-second-selection-route-',
+      );
+      addTearDown(() => fixtureDirectory.delete(recursive: true));
+      final source = File('${fixtureDirectory.path}/portrait.png');
+      await source.writeAsBytes(await _createPngFixtureBytes(), flush: true);
+      final projectRoot = Directory('${fixtureDirectory.path}/project');
+      final store = JsonPhotoProjectStore(directory: () async => projectRoot);
+      final photoSource = _SecondReleaseFailsPhotoSource(
+        SelectedPhoto(path: source.path, name: 'portrait.png'),
+      );
+      final log = MemoryDiagnosticLog();
+      var nextId = 0;
+      final importer = AppOwnedPhotoImporter(
+        source: photoSource,
+        mediaDirectory: () async => Directory('${projectRoot.path}/media'),
+        createId: () => 'route-photo-${nextId++}',
+        diagnosticLog: log,
+      );
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoImporter: importer,
+          photoProjectStore: store,
+          photoPreviewRenderer: FakePhotoPreviewRenderer.supported(),
+          diagnosticLog: log,
+          metaOpCapabilities: iosMetaOpCapabilities,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('home-style')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('apply-style-workspace')),
+        findsOneWidget,
+      );
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+
+      final optimize = find.byKey(const ValueKey('home-optimize'));
+      await tester.ensureVisible(optimize);
+      await tester.pumpAndSettle();
+      await tester.tap(optimize.hitTestable());
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('apply-style-workspace')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('optimize-task-controls')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('editor-page')), findsNothing);
+      expect(photoSource.releaseCount, 2);
+      final entries = await log.readEntries();
+      expect(
+        entries.any(
+          (entry) =>
+              entry.operation == 'release_picker_files' &&
+              entry.result == 'failed',
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  testWidgets(
     'home applies a style and saves its static result through production routing',
     (tester) async {
       final fixtureDirectory = await Directory.systemTemp.createTemp(
@@ -183,8 +300,13 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.byKey(const ValueKey('apply-style-primary-action')),
+        find.byKey(const ValueKey('style-capability-official')),
         findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('style-options')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('apply-style-primary-action')),
+        findsNothing,
       );
       expect(
         find.byKey(const ValueKey('motion-style-primary-action')),
@@ -197,16 +319,32 @@ void main() {
       );
       final beforeVersion = beforeSelection.editStateVersion;
       final beforeUndoCount = beforeSelection.undoHistory.length;
+      expect(beforeSelection.creationCapability, isNull);
+
+      await tester.tap(find.byKey(const ValueKey('style-capability-official')));
+      await tester.pumpAndSettle();
+      expect(
+        (await store.loadLatest())!.creationCapability,
+        CreationCapability.styleOfficial,
+      );
+      expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('apply-style-primary-action')),
+        findsNothing,
+      );
 
       await tester.tap(find.byKey(const ValueKey('style-option-soft-light')));
-      await tester.pumpAndSettle();
+      await _pumpUntilButtonEnabled(
+        tester,
+        find.byKey(const ValueKey('apply-style-primary-action')),
+      );
       expect(
         tester
             .widget<Text>(find.byKey(const ValueKey('current-style-name')))
             .data,
         '柔光',
       );
-      expect(previewRenderer.updates, isNotEmpty);
+      expect(previewRenderer.creates, isNotEmpty);
       final afterSelection = (await store.loadLatest())!;
       expect(
         afterSelection.effectiveRecipeFor('apply-route-photo'),
@@ -214,6 +352,10 @@ void main() {
       );
       expect(afterSelection.editStateVersion, beforeVersion);
       expect(afterSelection.undoHistory, hasLength(beforeUndoCount));
+      expect(
+        afterSelection.creationCapability,
+        CreationCapability.styleOfficial,
+      );
       expect(afterSelection.creationStyleId, 'soft-light');
       await tester.tap(
         find.byKey(const ValueKey('apply-style-primary-action')),
@@ -264,11 +406,24 @@ void main() {
       expect(find.text('已保存到系统相册'), findsOneWidget);
       expect(find.byKey(const ValueKey('style-result-share')), findsOneWidget);
 
-      await tester.binding.handlePopRoute();
+      await tester.tap(find.byKey(const ValueKey('style-workspace-close')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('home-style')), findsOneWidget);
       expect(find.byKey(const ValueKey('home-motion')), findsOneWidget);
+      expect(await store.loadProjects(), hasLength(1));
+      expect(
+        find.byKey(const ValueKey('home-project-needs-recovery')),
+        findsNothing,
+      );
       final resume = find.byKey(const ValueKey('home-resume-project'));
+      await tester.scrollUntilVisible(
+        resume,
+        320,
+        scrollable: find.descendant(
+          of: find.byKey(const ValueKey('home-scroll')),
+          matching: find.byType(Scrollable),
+        ),
+      );
       await tester.ensureVisible(resume);
       await tester.pumpAndSettle();
       await tester.tap(resume);
@@ -278,6 +433,10 @@ void main() {
             .widget<Text>(find.byKey(const ValueKey('current-style-name')))
             .data,
         '柔光',
+      );
+      expect(
+        (await store.loadLatest())!.creationCapability,
+        CreationCapability.styleOfficial,
       );
       expect(find.text('已保存到系统相册'), findsOneWidget);
 
@@ -291,7 +450,7 @@ void main() {
   );
 
   testWidgets(
-    'home opens optimize through production navigation and applies its primary action',
+    'home completes optimize through production navigation, save, and share',
     (tester) async {
       final source = File(
         'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
@@ -300,6 +459,8 @@ void main() {
       SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
       final settings = await AppSettings.load();
       final store = MemoryPhotoProjectStore();
+      final exporter = FakePhotoExporter();
+      final sharer = FakePhotoSharer();
       await tester.pumpWidget(
         buildTestApp(
           settings,
@@ -311,34 +472,75 @@ void main() {
             ),
           ]),
           photoProjectStore: store,
+          photoExporter: exporter,
+          photoSharer: sharer,
           photoPreviewRenderer: FakePhotoPreviewRenderer.supported(),
           metaOpCapabilities: iosMetaOpCapabilities,
         ),
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const ValueKey('home-optimize')));
+      await _tapHomeTarget(tester, find.byKey(const ValueKey('home-optimize')));
       await tester.pumpAndSettle();
 
       expect(
-        find.byKey(const ValueKey('editor-task-optimize')),
+        find.byKey(const ValueKey('apply-style-workspace')),
         findsOneWidget,
       );
       expect(
-        find.byKey(const ValueKey('editor-apply-quality-improvement')),
+        find.byKey(const ValueKey('optimize-capability-natural')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('optimize-capability-ai-repair')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('optimize-capability-upscale')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('optimize-capability-old-photo')),
+        findsOneWidget,
+      );
+      expect(store.project!.creationCapability, isNull);
+      expect(
+        find.byKey(const ValueKey('optimize-task-controls')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('optimize-primary-action')),
+        findsNothing,
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('optimize-capability-natural')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        store.project!.creationCapability,
+        CreationCapability.optimizeNatural,
+      );
+      expect(
+        find.byKey(const ValueKey('optimize-task-controls')),
         findsOneWidget,
       );
       final applyQuality = find.byKey(
-        const ValueKey('editor-apply-quality-improvement'),
+        const ValueKey('optimize-primary-action'),
       );
       await tester.ensureVisible(applyQuality);
       await tester.pumpAndSettle();
       expect(applyQuality.hitTestable(), findsOneWidget);
+      expect(tester.widget<FilledButton>(applyQuality).onPressed, isNotNull);
       await tester.tap(applyQuality);
       await tester.pumpAndSettle();
 
       final project = store.project!;
       expect(project.creationTask, CreationTask.optimize);
+      final expected = EditRecipe(
+        qualityEnhancementRecipe: QualityEnhancementRecipe.safeAutomatic,
+      );
       final quality = project
           .effectiveRecipeFor('optimize-route-photo')
           .qualityEnhancementRecipe;
@@ -358,11 +560,104 @@ void main() {
         quality.detailSharpening,
         QualityEnhancementRecipe.safeAutomatic.detailSharpening,
       );
+      final result = project.currentStaticStyleResult;
+      expect(result, isNotNull);
+      expect(result!.sourcePhotoId, 'optimize-route-photo');
+      expect(result.styleId, 'local-optimize-automatic-v1');
+      expect(result.editStateVersion, project.editStateVersion);
+      expect(result.recipe, expected);
+      expect(project.recoverableStaticStyleResult, result);
+      expect(
+        find.byKey(const ValueKey('style-static-result-controls')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('style-result-save')), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('style-result-save')));
+      await tester.pumpAndSettle();
+
+      expect(exporter.exportedPhoto?.id, 'optimize-route-photo');
+      expect(exporter.exportedRecipe, expected);
+      expect(store.project!.flowState, PhotoProjectFlowState.exported);
+      expect(
+        store.project!.exportStates['optimize-route-photo'],
+        PhotoExportState.saved,
+      );
+      expect(find.byKey(const ValueKey('style-result-share')), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('style-result-share')));
+      await tester.pumpAndSettle();
+
+      expect(sharer.sharedPaths, ['/tmp/Yingjian_fixture.jpg']);
     },
   );
 
   testWidgets(
-    'home opens cleanup through production navigation and applies white background',
+    'home generates the explicitly selected 2x HD result through production navigation',
+    (tester) async {
+      final fixtureDirectory = await Directory.systemTemp.createTemp(
+        'yingjian-upscale-route-',
+      );
+      addTearDown(() => fixtureDirectory.delete(recursive: true));
+      final source = File('${fixtureDirectory.path}/upscale.png');
+      await source.writeAsBytes(await _createPngFixtureBytes(), flush: true);
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+      final sharer = FakePhotoSharer();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoImporter: FakePhotoImporter([
+            ProjectPhoto(
+              id: 'upscale-route-photo',
+              localPath: source.path,
+              originalName: 'upscale.png',
+            ),
+          ]),
+          photoSharer: sharer,
+          upscalePhotoGenerator: MethodChannelUpscalePhotoGenerator(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await _tapHomeTarget(tester, find.byKey(const ValueKey('home-optimize')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('optimize-capability-upscale')),
+      );
+      await tester.pumpAndSettle();
+
+      final action = find.byKey(
+        const ValueKey('optimize-upscale-primary-action'),
+      );
+      expect(tester.widget<FilledButton>(action).onPressed, isNull);
+      await tester.tap(find.byKey(const ValueKey('upscale-scale-2x')));
+      await tester.pumpAndSettle();
+      await tester.tap(action);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('optimize-generated-result-ready')),
+        findsOneWidget,
+      );
+      final share = find.byKey(
+        const ValueKey('optimize-generated-result-share'),
+      );
+      await tester.ensureVisible(share);
+      await tester.tap(share);
+      await tester.pumpAndSettle();
+      expect(sharer.sharedPaths, hasLength(1));
+      final resultPath = sharer.sharedPaths!.single;
+      expect(resultPath, endsWith('.jpg'));
+      expect(await File(resultPath).exists(), isTrue);
+      addTearDown(() async {
+        final result = File(resultPath);
+        if (await result.exists()) await result.delete();
+      });
+    },
+  );
+
+  testWidgets(
+    'home defines and applies a bounded text style through production navigation',
     (tester) async {
       final source = File(
         'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
@@ -371,6 +666,147 @@ void main() {
       SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
       final settings = await AppSettings.load();
       final store = MemoryPhotoProjectStore();
+      final previewRenderer = FakePhotoPreviewRenderer.supported();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoImporter: FakePhotoImporter([
+            ProjectPhoto(
+              id: 'text-style-route-photo',
+              localPath: source.path,
+              originalName: 'text-style.png',
+            ),
+          ]),
+          photoProjectStore: store,
+          photoPreviewRenderer: previewRenderer,
+          metaOpCapabilities: iosMetaOpCapabilities,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapHomeTarget(tester, find.byKey(const ValueKey('home-style')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('apply-style-workspace')),
+        findsOneWidget,
+      );
+
+      expect(
+        find.byKey(const ValueKey('style-capability-text')),
+        findsOneWidget,
+      );
+      expect(store.project!.creationCapability, isNull);
+      expect(
+        find.byKey(const ValueKey('style-capability-unavailable-state')),
+        findsNothing,
+      );
+      final beforeDefinition = store.project!;
+      final beforeRecipe = beforeDefinition.effectiveRecipeFor(
+        'text-style-route-photo',
+      );
+      final beforeVersion = beforeDefinition.editStateVersion;
+      final beforeUndoCount = beforeDefinition.undoHistory.length;
+
+      await tester.tap(find.byKey(const ValueKey('style-capability-text')));
+      await tester.pumpAndSettle();
+      expect(store.project!.creationCapability, CreationCapability.styleText);
+      expect(
+        find.byKey(const ValueKey('style-capability-unavailable-state')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('style-define-primary-action')),
+        findsOneWidget,
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('style-define-primary-action')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('style-definition-sheet')),
+        findsOneWidget,
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('style-definition-prompt')),
+        '帮我随便弄一下',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('style-definition-submit')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('style-definition-input-error')),
+        findsOneWidget,
+      );
+      expect(store.project!.creationStyleDefinition, isNull);
+
+      const prompt = '雨后的电影感，人物保持自然';
+      await tester.enterText(
+        find.byKey(const ValueKey('style-definition-prompt')),
+        prompt,
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('style-definition-submit')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('style-definition-sheet')),
+        findsNothing,
+      );
+
+      final defined = store.project!;
+      final definition = defined.creationStyleDefinition!;
+      expect(definition.origin, StyleDefinitionOrigin.text);
+      expect(definition.sourceText, prompt);
+      expect(
+        definition.recipe.basicEditingRecipe.filter,
+        PhotoFilter.cinematic,
+      );
+      expect(definition.recipe.contrast, greaterThan(0));
+      expect(defined.creationCapability, CreationCapability.styleText);
+      expect(
+        defined.effectiveRecipeFor('text-style-route-photo'),
+        beforeRecipe,
+      );
+      expect(defined.editStateVersion, beforeVersion);
+      expect(defined.undoHistory, hasLength(beforeUndoCount));
+      expect(defined.currentStaticStyleResult, isNull);
+
+      final apply = find.byKey(const ValueKey('apply-style-primary-action'));
+      await _pumpUntilButtonEnabled(tester, apply);
+      expect(previewRenderer.creates, isNotEmpty);
+      await tester.tap(apply);
+      await tester.pumpAndSettle();
+
+      final applied = store.project!;
+      expect(applied.creationCapability, CreationCapability.styleText);
+      expect(
+        applied.effectiveRecipeFor('text-style-route-photo'),
+        definition.recipe,
+      );
+      expect(applied.editStateVersion, beforeVersion + 1);
+      expect(applied.undoHistory, hasLength(beforeUndoCount + 1));
+      expect(applied.currentStaticStyleResult, isNotNull);
+      expect(applied.currentStaticStyleResult!.styleId, definition.styleId);
+      expect(
+        find.byKey(const ValueKey('style-static-result-controls')),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'home completes cleanup through production navigation, save, and share',
+    (tester) async {
+      final source = File(
+        'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+        'Icon-App-1024x1024@1x.png',
+      );
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+      final store = MemoryPhotoProjectStore();
+      final exporter = FakePhotoExporter();
+      final sharer = FakePhotoSharer();
+      final analyzer = _ApplicablePortraitAnalyzer();
       await tester.pumpWidget(
         buildTestApp(
           settings,
@@ -382,32 +818,369 @@ void main() {
             ),
           ]),
           photoProjectStore: store,
+          photoExporter: exporter,
+          photoSharer: sharer,
           photoPreviewRenderer: FakePhotoPreviewRenderer.supported(),
-          photoAnalyzer: _ApplicablePortraitAnalyzer(),
+          photoAnalyzer: analyzer,
           metaOpCapabilities: iosMetaOpCapabilities,
         ),
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const ValueKey('home-cleanup')));
+      await _tapHomeTarget(tester, find.byKey(const ValueKey('home-cleanup')));
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const ValueKey('editor-task-cleanup')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('apply-style-workspace')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('cleanup-capability-white')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('cleanup-capability-transparent')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('cleanup-capability-replace-background')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('cleanup-capability-remove-passerby')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('cleanup-capability-brush-remove')),
+        findsOneWidget,
+      );
+      expect(store.project!.creationCapability, isNull);
+      expect(analyzer.photoIds, isEmpty);
+      expect(find.byKey(const ValueKey('cleanup-task-controls')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('cleanup-primary-action')),
+        findsNothing,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('cleanup-capability-white')));
+      await tester.pumpAndSettle();
+
+      expect(
+        store.project!.creationCapability,
+        CreationCapability.cleanupWhite,
+      );
+      expect(
+        find.byKey(const ValueKey('cleanup-task-controls')),
+        findsOneWidget,
+      );
       final whiteBackground = find.byKey(
-        const ValueKey('editor-background-white'),
+        const ValueKey('cleanup-primary-action'),
       );
       await tester.ensureVisible(whiteBackground);
+      expect(whiteBackground.hitTestable(), findsOneWidget);
       await tester.tap(whiteBackground);
       await tester.pumpAndSettle();
 
       final project = store.project!;
       expect(project.creationTask, CreationTask.cleanup);
+      expect(analyzer.photoIds, contains('cleanup-route-photo'));
+      final expected = EditRecipe(
+        semanticEditingRecipe: SemanticEditingRecipe(
+          background: BackgroundTreatment.white,
+        ),
+      );
       expect(
         project
             .effectiveRecipeFor('cleanup-route-photo')
             .semanticEditingRecipe
             .background,
         BackgroundTreatment.white,
+      );
+      final result = project.currentStaticStyleResult;
+      expect(result, isNotNull);
+      expect(result!.sourcePhotoId, 'cleanup-route-photo');
+      expect(result.styleId, 'local-cleanup-white-background-v1');
+      expect(result.editStateVersion, project.editStateVersion);
+      expect(result.recipe, expected);
+      expect(project.recoverableStaticStyleResult, result);
+      expect(
+        find.byKey(const ValueKey('style-static-result-controls')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('style-result-save')), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('style-result-save')));
+      await tester.pumpAndSettle();
+
+      expect(exporter.exportedPhoto?.id, 'cleanup-route-photo');
+      expect(exporter.exportedRecipe, expected);
+      expect(store.project!.flowState, PhotoProjectFlowState.exported);
+      expect(
+        store.project!.exportStates['cleanup-route-photo'],
+        PhotoExportState.saved,
+      );
+      expect(find.byKey(const ValueKey('style-result-share')), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('style-result-share')));
+      await tester.pumpAndSettle();
+
+      expect(sharer.sharedPaths, ['/tmp/Yingjian_fixture.jpg']);
+    },
+  );
+
+  testWidgets('home explicitly applies transparent cleanup and exports PNG', (
+    tester,
+  ) async {
+    final source = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+      'Icon-App-1024x1024@1x.png',
+    );
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    final store = MemoryPhotoProjectStore();
+    final analyzer = _ApplicablePortraitAnalyzer();
+    final previewRenderer = FakePhotoPreviewRenderer.supported();
+    final exporter = _RecordingConfigurablePhotoExporter(
+      sharePath: '/tmp/Yingjian_transparent.png',
+    );
+    final sharer = FakePhotoSharer();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoImporter: FakePhotoImporter([
+          ProjectPhoto(
+            id: 'transparent-route-photo',
+            localPath: source.path,
+            originalName: 'transparent.png',
+          ),
+        ]),
+        photoProjectStore: store,
+        photoExporter: exporter,
+        photoSharer: sharer,
+        photoPreviewRenderer: previewRenderer,
+        photoAnalyzer: analyzer,
+        metaOpCapabilities: iosMetaOpCapabilities,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _tapHomeTarget(tester, find.byKey(const ValueKey('home-cleanup')));
+    await tester.pumpAndSettle();
+
+    final beforeSelection = store.project!;
+    final beforeRecipe = beforeSelection.effectiveRecipeFor(
+      'transparent-route-photo',
+    );
+    final beforeVersion = beforeSelection.editStateVersion;
+    final beforeUndoCount = beforeSelection.undoHistory.length;
+    expect(beforeSelection.creationCapability, isNull);
+    expect(analyzer.photoIds, isEmpty);
+    expect(find.byKey(const ValueKey('cleanup-primary-action')), findsNothing);
+
+    final transparent = find.byKey(
+      const ValueKey('cleanup-capability-transparent'),
+    );
+    await tester.ensureVisible(transparent);
+    await tester.tap(transparent);
+    await tester.pumpAndSettle();
+
+    final selected = store.project!;
+    expect(selected.creationCapability, CreationCapability.cleanupTransparent);
+    expect(analyzer.photoIds, ['transparent-route-photo']);
+    expect(
+      selected.effectiveRecipeFor('transparent-route-photo'),
+      beforeRecipe,
+    );
+    expect(selected.editStateVersion, beforeVersion);
+    expect(selected.undoHistory, hasLength(beforeUndoCount));
+    expect(selected.currentStaticStyleResult, isNull);
+
+    final apply = find.byKey(const ValueKey('cleanup-primary-action'));
+    await _pumpUntilButtonEnabled(tester, apply);
+    expect(previewRenderer.creates, isNotEmpty);
+    await tester.ensureVisible(apply);
+    await tester.tap(apply);
+    await tester.pumpAndSettle();
+
+    final applied = store.project!;
+    final semantic = applied
+        .effectiveRecipeFor('transparent-route-photo')
+        .semanticEditingRecipe;
+    expect(semantic.background, BackgroundTreatment.transparent);
+    expect(semantic.backgroundImagePath, isNull);
+    expect(semantic.backgroundImageResourceId, isNull);
+    expect(applied.editStateVersion, beforeVersion + 1);
+    expect(applied.undoHistory, hasLength(beforeUndoCount + 1));
+    expect(
+      applied.currentStaticStyleResult?.styleId,
+      'local-cleanup-transparent-background-v1',
+    );
+    expect(
+      find.byKey(const ValueKey('style-static-result-controls')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('style-result-share')));
+    await tester.pumpAndSettle();
+
+    expect(exporter.preparedOptions, hasLength(1));
+    expect(exporter.preparedOptions.single.format, PhotoExportFormat.png);
+    expect(sharer.sharedPaths, ['/tmp/Yingjian_transparent.png']);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('style-result-save')));
+    await tester.pumpAndSettle();
+
+    expect(exporter.exportedPhoto?.id, 'transparent-route-photo');
+    expect(exporter.options, hasLength(1));
+    expect(exporter.options.single.format, PhotoExportFormat.png);
+    expect(
+      store.project!.exportStates['transparent-route-photo'],
+      PhotoExportState.saved,
+    );
+  });
+
+  testWidgets(
+    'home explicitly chooses a replacement background before applying cleanup',
+    (tester) async {
+      final source = File(
+        'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+        'Icon-App-1024x1024@1x.png',
+      );
+      final resourceRoot = await Directory.systemTemp.createTemp(
+        'yingjian-replacement-background-',
+      );
+      addTearDown(() => resourceRoot.delete(recursive: true));
+      final backgroundBytes = await _createPngFixtureBytes();
+      final backgroundSha = ContentSha256.ofBytes(backgroundBytes);
+      final backgroundDirectory = Directory(
+        '${resourceRoot.path}/resources/${backgroundSha.substring(0, 2)}',
+      );
+      await backgroundDirectory.create(recursive: true);
+      final background = File('${backgroundDirectory.path}/$backgroundSha.png');
+      await background.writeAsBytes(backgroundBytes, flush: true);
+      final sourcePhoto = ProjectPhoto(
+        id: 'replace-background-route-photo',
+        localPath: source.path,
+        originalName: 'source.png',
+      );
+      final backgroundResource = ImportedEditingResource(
+        descriptor: EditingResourceDescriptor(
+          id: 'resource-v1-$backgroundSha',
+          kind: EditingResourceKind.backgroundImage,
+          relativePath:
+              'resources/${backgroundSha.substring(0, 2)}/'
+              '$backgroundSha.png',
+          contentSha256: backgroundSha,
+          byteLength: backgroundBytes.length,
+        ),
+        localPath: background.path,
+      );
+      final importer = _RouteEditingResourceImporter(
+        sourcePhoto: sourcePhoto,
+        backgroundResource: backgroundResource,
+      );
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+      final store = MemoryPhotoProjectStore();
+      final analyzer = _ApplicablePortraitAnalyzer();
+      final previewRenderer = FakePhotoPreviewRenderer.supported();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoImporter: importer,
+          photoProjectStore: store,
+          photoPreviewRenderer: previewRenderer,
+          photoAnalyzer: analyzer,
+          metaOpCapabilities: iosMetaOpCapabilities,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapHomeTarget(tester, find.byKey(const ValueKey('home-cleanup')));
+      await tester.pumpAndSettle();
+
+      final beforeSelection = store.project!;
+      final beforeRecipe = beforeSelection.effectiveRecipeFor(sourcePhoto.id);
+      final beforeVersion = beforeSelection.editStateVersion;
+      final beforeUndoCount = beforeSelection.undoHistory.length;
+      expect(beforeSelection.creationCapability, isNull);
+      expect(analyzer.photoIds, isEmpty);
+      expect(importer.backgroundImportCount, 0);
+
+      final replace = find.byKey(
+        const ValueKey('cleanup-capability-replace-background'),
+      );
+      await tester.ensureVisible(replace);
+      await tester.tap(replace);
+      await tester.pumpAndSettle();
+
+      expect(
+        store.project!.creationCapability,
+        CreationCapability.cleanupReplaceBackground,
+      );
+      expect(analyzer.photoIds, [sourcePhoto.id]);
+      expect(importer.backgroundImportCount, 0);
+      expect(
+        find.byKey(const ValueKey('cleanup-primary-action')),
+        findsNothing,
+      );
+      final chooseBackground = find.byKey(
+        const ValueKey('cleanup-choose-background-action'),
+      );
+      expect(chooseBackground, findsOneWidget);
+      expect(
+        tester.widget<FilledButton>(chooseBackground).onPressed,
+        isNotNull,
+      );
+
+      await tester.tap(chooseBackground);
+      await tester.pumpAndSettle();
+
+      final selected = store.project!;
+      expect(importer.backgroundImportCount, 1);
+      expect(selected.effectiveRecipeFor(sourcePhoto.id), beforeRecipe);
+      expect(selected.editStateVersion, beforeVersion);
+      expect(selected.undoHistory, hasLength(beforeUndoCount));
+      expect(selected.currentStaticStyleResult, isNull);
+      expect(
+        selected.editingResources.resources,
+        isNot(contains(backgroundResource.descriptor.id)),
+      );
+
+      final apply = find.byKey(const ValueKey('cleanup-primary-action'));
+      await _pumpUntilButtonEnabled(tester, apply);
+      expect(previewRenderer.creates, isNotEmpty);
+      await tester.ensureVisible(apply);
+      await tester.tap(apply);
+      await tester.pumpAndSettle();
+
+      final applied = store.project!;
+      final semantic = applied
+          .effectiveRecipeFor(sourcePhoto.id)
+          .semanticEditingRecipe;
+      expect(semantic.background, BackgroundTreatment.image);
+      expect(semantic.backgroundImagePath, background.path);
+      expect(
+        semantic.backgroundImageResourceId,
+        backgroundResource.descriptor.id,
+      );
+      expect(applied.photos.single.localPath, source.path);
+      expect(applied.editStateVersion, beforeVersion + 1);
+      expect(applied.undoHistory, hasLength(beforeUndoCount + 1));
+      expect(
+        applied.editingResources.resources,
+        contains(backgroundResource.descriptor.id),
+      );
+      expect(importer.discardedResourceIds, isEmpty);
+      expect(
+        applied.currentStaticStyleResult?.styleId,
+        'local-cleanup-replace-background-v1',
+      );
+      expect(
+        find.byKey(const ValueKey('style-static-result-controls')),
+        findsOneWidget,
       );
     },
   );
@@ -452,15 +1225,18 @@ void main() {
   });
 
   testWidgets(
-    'home chooses motion before picking and keeps an independent primary action',
+    'home generates only the selected motion direction and returns to home',
     (tester) async {
-      final source = File(
-        'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
-        'Icon-App-1024x1024@1x.png',
+      final fixtureDirectory = await Directory.systemTemp.createTemp(
+        'yingjian-motion-route-',
       );
+      addTearDown(() => fixtureDirectory.delete(recursive: true));
+      final source = File('${fixtureDirectory.path}/motion.png');
+      await source.writeAsBytes(await _createPngFixtureBytes(), flush: true);
       SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
       final settings = await AppSettings.load();
       final store = MemoryPhotoProjectStore();
+      final sharer = FakePhotoSharer();
       await tester.pumpWidget(
         buildTestApp(
           settings,
@@ -472,25 +1248,53 @@ void main() {
             ),
           ]),
           photoProjectStore: store,
+          photoSharer: sharer,
+          motionPhotoGenerator: MethodChannelMotionPhotoGenerator(),
           metaOpCapabilities: iosMetaOpCapabilities,
         ),
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const ValueKey('home-motion')));
+      await _tapHomeTarget(tester, find.byKey(const ValueKey('home-motion')));
       await tester.pumpAndSettle();
       expect(
         find.byKey(const ValueKey('motion-style-workspace')),
         findsOneWidget,
       );
       expect(
-        find.byKey(const ValueKey('motion-style-primary-action')),
+        find.byKey(const ValueKey('motion-capability-subtle')),
         findsOneWidget,
       );
       expect(
-        find.byKey(const ValueKey('apply-style-primary-action')),
+        find.byKey(const ValueKey('motion-capability-camera-push')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('motion-capability-light-flow')),
+        findsOneWidget,
+      );
+      expect(store.project!.creationCapability, isNull);
+      expect(
+        find.byKey(const ValueKey('motion-capability-unavailable-state')),
         findsNothing,
       );
+      expect(
+        find.byKey(const ValueKey('motion-unavailable-state')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('motion-generate-primary-action')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('motion-style-primary-action')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('motion-confirmation-sheet')),
+        findsNothing,
+      );
+      expect(find.byKey(const ValueKey('style-options')), findsNothing);
       final beforeSelection = store.project!;
       final beforeRecipe = beforeSelection.effectiveRecipeFor(
         'motion-route-photo',
@@ -498,35 +1302,69 @@ void main() {
       final beforeVersion = beforeSelection.editStateVersion;
       final beforeUndoCount = beforeSelection.undoHistory.length;
 
-      await tester.tap(find.byKey(const ValueKey('style-option-breeze')));
-      await tester.pumpAndSettle();
-      expect(
-        tester
-            .widget<Text>(find.byKey(const ValueKey('current-style-name')))
-            .data,
-        '微风',
-      );
-      expect(
-        store.project!.effectiveRecipeFor('motion-route-photo'),
-        beforeRecipe,
-      );
-      expect(store.project!.editStateVersion, beforeVersion);
-      expect(store.project!.undoHistory, hasLength(beforeUndoCount));
-      expect(store.project!.creationStyleId, 'breeze');
       await tester.tap(
-        find.byKey(const ValueKey('motion-style-primary-action')),
+        find.byKey(const ValueKey('motion-capability-camera-push')),
       );
       await tester.pumpAndSettle();
+
       expect(
-        find.byKey(const ValueKey('motion-confirmation-sheet')),
+        store.project!.creationCapability,
+        CreationCapability.motionCameraPush,
+      );
+      expect(
+        find.byKey(const ValueKey('motion-capability-unavailable-state')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('motion-generate-primary-action')),
         findsOneWidget,
       );
       expect(
+        find.byKey(const ValueKey('motion-style-primary-action')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('motion-confirmation-sheet')),
+        findsNothing,
+      );
+      expect(
         store.project!.effectiveRecipeFor('motion-route-photo'),
         beforeRecipe,
       );
       expect(store.project!.editStateVersion, beforeVersion);
       expect(store.project!.undoHistory, hasLength(beforeUndoCount));
+      expect(store.project!.currentStaticStyleResult, isNull);
+      expect(store.project!.creationStyleId, isNull);
+      expect(store.project!.creationStyleRecipe, isNull);
+      expect(store.project!.creationStyleDefinition, isNull);
+
+      final generate = find.byKey(
+        const ValueKey('motion-generate-primary-action'),
+      );
+      await tester.ensureVisible(generate);
+      await tester.tap(generate);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('motion-generated-result-ready')),
+        findsOneWidget,
+      );
+      final share = find.byKey(const ValueKey('motion-generated-result-share'));
+      await tester.ensureVisible(share);
+      await tester.tap(share);
+      await tester.pumpAndSettle();
+      expect(sharer.sharedPaths, hasLength(1));
+      final resultPath = sharer.sharedPaths!.single;
+      expect(resultPath, endsWith('.mp4'));
+      expect(await File(resultPath).exists(), isTrue);
+      addTearDown(() async {
+        final result = File(resultPath);
+        if (await result.exists()) await result.delete();
+      });
+
+      await tester.tap(find.byKey(const ValueKey('style-workspace-back')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('home-page')), findsOneWidget);
+      expect(find.byKey(const ValueKey('home-motion')), findsOneWidget);
     },
   );
 
@@ -1452,12 +2290,42 @@ Future<void> _openLegacyEditor(
   bool startWithImport = false,
 }) async {
   unawaited(
-    AppRouter.navigatorKey.currentState!.pushNamed(
-      AppRoutes.editor,
-      arguments: startWithImport,
+    AppRouter.navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => EditorPage(startWithImport: startWithImport),
+      ),
     ),
   );
   await tester.pumpAndSettle();
+}
+
+Future<void> _tapHomeTarget(WidgetTester tester, Finder target) async {
+  await tester.scrollUntilVisible(
+    target,
+    320,
+    scrollable: find.descendant(
+      of: find.byKey(const ValueKey('home-scroll')),
+      matching: find.byType(Scrollable),
+    ),
+  );
+  await tester.pumpAndSettle();
+  await tester.tap(target);
+}
+
+Future<void> _pumpUntilButtonEnabled(
+  WidgetTester tester,
+  Finder finder, {
+  int maxPumps = 100,
+}) async {
+  for (var pump = 0; pump < maxPumps; pump++) {
+    await tester.pump(const Duration(milliseconds: 50));
+    final widgets = finder.evaluate();
+    if (widgets.length == 1 &&
+        tester.widget<ButtonStyleButton>(finder).onPressed != null) {
+      return;
+    }
+  }
+  throw TestFailure('Timed out waiting for $finder to become enabled');
 }
 
 Future<List<int>> _createPngFixtureBytes() async {
@@ -1585,6 +2453,24 @@ final class _SelectedPhotoSource implements PhotoSource {
   }
 }
 
+final class _SecondReleaseFailsPhotoSource implements ReleasablePhotoSource {
+  _SecondReleaseFailsPhotoSource(this.photo);
+
+  final SelectedPhoto photo;
+  var releaseCount = 0;
+
+  @override
+  Future<List<SelectedPhoto>> pickPhotos({required int limit}) async => [photo];
+
+  @override
+  Future<void> releasePhotos(List<SelectedPhoto> photos) async {
+    releaseCount += 1;
+    if (releaseCount == 2) {
+      throw const FileSystemException('temporary cleanup failed');
+    }
+  }
+}
+
 final class _TimeoutThenSuccessImporter implements PhotoImporter {
   _TimeoutThenSuccessImporter(this.photo);
 
@@ -1596,6 +2482,105 @@ final class _TimeoutThenSuccessImporter implements PhotoImporter {
     calls += 1;
     if (calls == 1) throw TimeoutException('fixture timeout');
     return PhotoImportBatch(photos: [photo]);
+  }
+}
+
+final class _RouteEditingResourceImporter implements EditingResourceImporter {
+  _RouteEditingResourceImporter({
+    required this.sourcePhoto,
+    required this.backgroundResource,
+  });
+
+  final ProjectPhoto sourcePhoto;
+  final ImportedEditingResource backgroundResource;
+  int backgroundImportCount = 0;
+  final List<String> discardedResourceIds = [];
+
+  @override
+  Future<PhotoImportBatch> importPhotos({required int limit}) async =>
+      PhotoImportBatch(photos: [sourcePhoto]);
+
+  @override
+  Future<ImportedEditingResource?> importEditingResource(
+    EditingResourceKind kind,
+  ) async {
+    if (kind != EditingResourceKind.backgroundImage) {
+      throw StateError('Only the explicit background fixture is available');
+    }
+    backgroundImportCount += 1;
+    return backgroundResource;
+  }
+
+  @override
+  Future<ImportedEditingResource> storeEditingResource({
+    required EditingResourceKind kind,
+    required List<int> bytes,
+    String extension = '.json',
+    Object? payload,
+  }) => throw UnsupportedError(
+    'The route fixture only supplies a user-selected background resource',
+  );
+
+  @override
+  Future<void> discardEditingResource(ImportedEditingResource resource) async {
+    discardedResourceIds.add(resource.descriptor.id);
+  }
+}
+
+final class _RecordingConfigurablePhotoExporter
+    implements ConfigurablePhotoExporter, PhotoResultPreparer {
+  _RecordingConfigurablePhotoExporter({required this.sharePath});
+
+  final String sharePath;
+  ProjectPhoto? exportedPhoto;
+  EditRecipe? exportedRecipe;
+  final List<PhotoExportOptions> options = [];
+  final List<PhotoExportOptions> preparedOptions = [];
+
+  @override
+  Future<ExportedPhoto> export({
+    required ProjectPhoto photo,
+    required EditRecipe recipe,
+  }) => exportWithOptions(
+    photo: photo,
+    recipe: recipe,
+    options: PhotoExportOptions.defaults,
+  );
+
+  @override
+  Future<ExportedPhoto> exportWithOptions({
+    required ProjectPhoto photo,
+    required EditRecipe recipe,
+    required PhotoExportOptions options,
+  }) async {
+    exportedPhoto = photo;
+    exportedRecipe = recipe;
+    this.options.add(options);
+    return ExportedPhoto(
+      assetId: 'route-export-${options.format.name}',
+      width: 4032,
+      height: 3024,
+      sharePath: sharePath,
+    );
+  }
+
+  @override
+  PhotoPreparation prepareCanonical({
+    required ProjectPhoto photo,
+    required EditRecipe recipe,
+    required EditState editState,
+    required EditContext editContext,
+    required PhotoExportOptions options,
+  }) {
+    preparedOptions.add(options);
+    return _IntegrationPhotoPreparation(
+      PreparedPhoto(
+        requestId: 'transparent-share-${preparedOptions.length}',
+        localPath: sharePath,
+        width: 4032,
+        height: 3024,
+      ),
+    );
   }
 }
 

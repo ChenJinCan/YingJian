@@ -11,8 +11,15 @@ import 'package:yingjian/observability/analytics_event.dart';
 import 'package:yingjian/observability/app_observability.dart';
 import 'package:yingjian/review/review_manager.dart';
 
-final class SettingsPage extends StatelessWidget {
+final class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+final class _SettingsPageState extends State<SettingsPage> {
+  int _versionTapCount = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -122,8 +129,16 @@ final class SettingsPage extends StatelessWidget {
                   title: _zh(context) ? '版本' : 'Version',
                   value: snapshot.data?.version ?? '—',
                   showChevron: false,
+                  onTap: () => _onVersionTap(context, settings),
                 ),
               ),
+              if (settings.developerLogsUnlocked)
+                _SettingsRow(
+                  key: const ValueKey('settings-developer-logs'),
+                  title: _zh(context) ? '诊断日志' : 'Diagnostic logs',
+                  onTap: () =>
+                      Navigator.of(context).pushNamed(AppRoutes.developerLogs),
+                ),
             ],
           ),
         ],
@@ -388,6 +403,19 @@ final class SettingsPage extends StatelessWidget {
         SnackBar(content: Text(context.l10n.storeListingUnavailable)),
       );
     }
+  }
+
+  Future<void> _onVersionTap(BuildContext context, AppSettings settings) async {
+    if (settings.developerLogsUnlocked) {
+      await Navigator.of(context).pushNamed(AppRoutes.developerLogs);
+      return;
+    }
+    _versionTapCount += 1;
+    if (_versionTapCount < 5) return;
+    _versionTapCount = 0;
+    await settings.unlockDeveloperLogs();
+    if (!context.mounted) return;
+    await Navigator.of(context).pushNamed(AppRoutes.developerLogs);
   }
 }
 

@@ -612,6 +612,7 @@ final class MetaOpCatalog {
             'warm',
             'cool',
             'image',
+            'transparent',
           ],
         ),
         MetaOpParameterDefinition.resource(id: 'backgroundImageResource'),

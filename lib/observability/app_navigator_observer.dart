@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:yingjian/app/navigation/app_router.dart';
-import 'package:yingjian/observability/analytics_event.dart';
 import 'package:yingjian/observability/app_observability.dart';
 
 final class AppNavigatorObserver extends NavigatorObserver {
@@ -25,7 +24,6 @@ final class AppNavigatorObserver extends NavigatorObserver {
   void _track(String? routeName) {
     final screen = switch (routeName) {
       AppRoutes.home => 'home',
-      AppRoutes.editor => 'editor',
       AppRoutes.applyStyleWorkspace => 'apply_style_workspace',
       AppRoutes.motionStyleWorkspace => 'motion_style_workspace',
       AppRoutes.settings => 'settings',
@@ -34,17 +32,5 @@ final class AppNavigatorObserver extends NavigatorObserver {
       _ => 'unknown',
     };
     unawaited(_observability.trackScreen(screen));
-    if (routeName == AppRoutes.editor) {
-      unawaited(
-        _observability.track(
-          AnalyticsEvent(
-            AnalyticsEventName.editorOpened,
-            parameters: const <String, Object?>{
-              AnalyticsParameter.source: 'home',
-            },
-          ),
-        ),
-      );
-    }
   }
 }

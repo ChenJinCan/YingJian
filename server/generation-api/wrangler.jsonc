@@ -1,0 +1,59 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "yingjian-generation-api",
+  "main": "src/cloudflare/worker.mjs",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "placement": { "mode": "smart" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "yingjian-generation-production",
+      "database_id": "4f6a552c-be07-4df1-bd20-1f34ecc8b2ec",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "yingjian-generation-private"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "REGISTRATION_RATE_LIMITER",
+      "namespace_id": "2026090101",
+      "simple": {
+        "limit": 6,
+        "period": 60
+      }
+    },
+    {
+      "name": "SESSION_RATE_LIMITER",
+      "namespace_id": "2026090102",
+      "simple": {
+        "limit": 12,
+        "period": 60
+      }
+    }
+  ],
+  "vars": {
+    "GENERATION_SESSION_ISSUER": "https://yingjian-generation-api.baby-animals-ai-cjc.workers.dev",
+    "GENERATION_MAX_CREDITS": "5",
+    "GENERATION_MAX_CONCURRENT": "1",
+    "GENERATION_MAX_RESERVATIONS_PER_WINDOW": "5",
+    "GENERATION_MAX_GLOBAL_RESERVATIONS_PER_WINDOW": "20",
+    "GENERATION_RATE_WINDOW_MS": "3600000",
+    "GENERATION_MAX_STORAGE_BYTES": "104857600",
+    "GENERATION_MEDIA_RETENTION_HOURS": "24",
+    "ALIBABA_WORKSPACE_ID": "llm-utlhsesto70a5yg0",
+    "BAIDU_IMAGE_REPAIR_ENABLED": "true",
+    "ALIBABA_IMAGE_ENABLED": "true",
+    "ALIBABA_VIDEO_ENABLED": "true",
+    "VOLC_LENS_OPR_ENABLED": "false"
+  },
+  "triggers": {
+    "crons": ["17 * * * *"]
+  }
+}

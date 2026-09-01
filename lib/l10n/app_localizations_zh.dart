@@ -78,6 +78,297 @@ class AppLocalizationsZh extends AppLocalizations {
   String get currentStyle => '当前风格';
 
   @override
+  String get currentResult => '当前结果';
+
+  @override
+  String get chooseCapabilityTitle => '请选择能力';
+
+  @override
+  String get chooseCapabilityHint => '系统不会替你选择；每次只执行你点选的一项。';
+
+  @override
+  String get chooseAnotherCapability => '重新选择能力';
+
+  @override
+  String get capabilityUnavailable => '该能力尚未完成';
+
+  @override
+  String get capabilityUnavailableDetail =>
+      '当前不会处理、上传、创建任务或扣费。你可以返回能力列表自己选择下一步。';
+
+  @override
+  String get capabilityOptimizeNatural => '自然优化';
+
+  @override
+  String get capabilityOptimizeAiRepair => 'AI 修复';
+
+  @override
+  String get capabilityOptimizeUpscale => '高清放大';
+
+  @override
+  String get capabilityOptimizeOldPhoto => '老照片修复';
+
+  @override
+  String get capabilityStyleOfficial => '官方风格';
+
+  @override
+  String get capabilityStyleText => '文字定风格';
+
+  @override
+  String get capabilityStyleVoice => '语音定风格';
+
+  @override
+  String get capabilityStyleReference => '参考图风格';
+
+  @override
+  String get capabilityStyleAiRedraw => 'AI 风格重绘';
+
+  @override
+  String get capabilityCleanupWhite => '人物白底';
+
+  @override
+  String get capabilityCleanupTransparent => '透明抠图';
+
+  @override
+  String get capabilityCleanupReplaceBackground => '替换背景';
+
+  @override
+  String get capabilityCleanupRemovePasserby => '去路人';
+
+  @override
+  String get capabilityCleanupBrushRemove => '涂抹去物';
+
+  @override
+  String get capabilityMotionSubtle => '轻微动态';
+
+  @override
+  String get capabilityMotionCameraPush => '镜头推进';
+
+  @override
+  String get capabilityMotionLightFlow => '光影流动';
+
+  @override
+  String get capabilityMotionAiNatural => 'AI 自然动效';
+
+  @override
+  String get capabilityOptimizeNaturalDescription => '本地改善亮度、清晰度和质感，原图保持不变。';
+
+  @override
+  String get capabilityOptimizeAiRepairDescription => '修复模糊、噪点和细节缺失。';
+
+  @override
+  String get capabilityOptimizeUpscaleDescription => '提升分辨率并保留主体细节。';
+
+  @override
+  String get capabilityOptimizeOldPhotoDescription => '修复划痕、褪色和老照片损伤。';
+
+  @override
+  String get capabilityStyleOfficialDescription => '从内置可复现风格中明确选择一种。';
+
+  @override
+  String get capabilityStyleTextDescription => '根据你输入的文字定义风格。';
+
+  @override
+  String get capabilityStyleVoiceDescription => '根据你确认的语音转写定义风格。';
+
+  @override
+  String get capabilityStyleReferenceDescription => '将参考图的光色质感应用到当前照片。';
+
+  @override
+  String get capabilityStyleAiRedrawDescription => '生成重新绘制的风格化静态图片。';
+
+  @override
+  String get capabilityCleanupWhiteDescription => '识别人像主体并生成白色背景。';
+
+  @override
+  String get capabilityCleanupTransparentDescription => '抠出主体并生成透明背景图片。';
+
+  @override
+  String get capabilityCleanupReplaceBackgroundDescription => '抠出主体后使用你选择的新背景。';
+
+  @override
+  String get capabilityCleanupRemovePasserbyDescription => '移除画面中的路人并补全背景。';
+
+  @override
+  String get capabilityCleanupBrushRemoveDescription => '只移除你明确涂抹标记的内容。';
+
+  @override
+  String get capabilityMotionSubtleDescription => '为整张照片添加幅度克制的平移与缩放动态。';
+
+  @override
+  String get capabilityMotionCameraPushDescription => '生成镜头缓慢推进的动态效果。';
+
+  @override
+  String get capabilityMotionLightFlowDescription => '生成光影自然流动的动态效果。';
+
+  @override
+  String get capabilityMotionAiNaturalDescription => '将照片上传到云端并生成 3 秒自然动态视频。';
+
+  @override
+  String get chooseUpscaleScale => '选择放大倍率';
+
+  @override
+  String get generateUpscale => '生成高清图片';
+
+  @override
+  String get generatingResult => '正在生成…';
+
+  @override
+  String get upscaleReady => '高清图片已生成，可分享或保存。';
+
+  @override
+  String get generateMotion => '生成动态照片';
+
+  @override
+  String get motionReady => '动态照片已生成，可分享或保存。';
+
+  @override
+  String get generationFailed => '生成失败，请重试。';
+
+  @override
+  String get cloudGenerationConsentTitle => '确认云端处理';
+
+  @override
+  String get cloudGenerationConsentDetail =>
+      '确认后才会上传并创建这一项任务；处理可能需要等待，可取消阶段会显示取消操作。源图、蒙版和云端结果在网关最多保留 24 小时。';
+
+  @override
+  String get cloudUploadConsent => '同意上传当前照片完成所选能力';
+
+  @override
+  String cloudCostConsent(int creditCost) {
+    return '确认消耗 $creditCost 次云端权益';
+  }
+
+  @override
+  String get confirmAndGenerate => '确认并生成';
+
+  @override
+  String get confirmCloudGeneration => '开始云端处理';
+
+  @override
+  String get cloudGenerationReady => '云端处理结果已生成，可分享或保存。';
+
+  @override
+  String get cloudGenerationQueued => '任务已创建，正在等待云端处理。';
+
+  @override
+  String get cloudGenerationRunning => '云端正在处理所选能力。';
+
+  @override
+  String get cancelGeneration => '取消这次处理';
+
+  @override
+  String get generationCancelled => '这次处理已取消，原图和已有结果没有改变。';
+
+  @override
+  String get generationCancelledCreditReleased =>
+      '这次处理已取消，本次权益已释放；原图和已有结果没有改变。';
+
+  @override
+  String get generationCancellationStillRunning =>
+      '供应商已经开始处理，无法取消；同一任务继续运行，权益仍暂时占用。';
+
+  @override
+  String get generationStatusCreditHeld =>
+      '处理结果仍需确认，权益暂时保留。请刷新同一任务，不会新建任务或再次扣费。';
+
+  @override
+  String get previewMotionResult => '播放动态结果';
+
+  @override
+  String get chooseOldPhotoColorMode => '选择老照片的颜色处理';
+
+  @override
+  String get oldPhotoPreserveColor => '保留原有色彩';
+
+  @override
+  String get oldPhotoColorize => '智能上色';
+
+  @override
+  String get aiRedrawDefinitionLabel => '描述要重绘成什么风格';
+
+  @override
+  String get aiRedrawDefinitionHint => '例如：保留人物身份，改成低饱和电影剧照';
+
+  @override
+  String get aiRedrawDefinitionSummary => '只按你确认的生成意图重绘，不会自动改成其他方向。';
+
+  @override
+  String get aiRedrawConfirmIntent => '确认生成意图';
+
+  @override
+  String get aiRedrawIntentPreviewTitle => '生成意图';
+
+  @override
+  String get aiRedrawIntentConfirmed => '已冻结这份定义；修改文字后需要重新确认。';
+
+  @override
+  String aiRedrawIntentVersion(int revision) {
+    return '定义版本 $revision';
+  }
+
+  @override
+  String get aiRedrawIntentInvalid => '请输入 1 至 500 个可见字符，不能包含隐藏或控制字符。';
+
+  @override
+  String get markRemovalArea => '涂抹要移除的区域';
+
+  @override
+  String get changeRemovalArea => '重新涂抹区域';
+
+  @override
+  String get removalAreaReady => '已使用你手动涂抹的区域，不会自动选择其他内容。';
+
+  @override
+  String get applyNaturalOptimization => '应用自然优化';
+
+  @override
+  String get applyWhiteBackground => '应用白底';
+
+  @override
+  String get applyTransparentBackground => '生成透明抠图';
+
+  @override
+  String get applyReplacementBackground => '应用新背景';
+
+  @override
+  String get chooseReplacementBackground => '选择新背景';
+
+  @override
+  String get chooseAnotherBackground => '更换背景图片';
+
+  @override
+  String get importingBackground => '正在导入背景…';
+
+  @override
+  String get optimizeResult => '自动优化';
+
+  @override
+  String get cleanupResult => '白底清理';
+
+  @override
+  String get optimizeApplied => '照片已优化';
+
+  @override
+  String get cleanupApplied => '清理已应用';
+
+  @override
+  String get optimizeAgain => '重新优化';
+
+  @override
+  String get cleanupAgain => '继续清理';
+
+  @override
+  String get cleanupWhiteBackgroundUnavailable => '暂未识别到可安全处理的主体，本次人物白底不会执行。';
+
+  @override
+  String get cleanupSubjectUnavailable => '暂未识别到可安全处理的主体，本次背景处理不会执行。';
+
+  @override
+  String get localStaticTaskIosOnly => '该本地处理当前仅支持 iPhone。';
+
+  @override
   String get aiDefineStyle => 'AI 定风格';
 
   @override
@@ -85,6 +376,57 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get describeStyleHint => '例如：雨后的电影感，人物保持自然';
+
+  @override
+  String get styleDefinitionInputHint => '可用文字、确认后的语音转写或单独的参考图定义风格；源照片始终是结果主体。';
+
+  @override
+  String get styleInputText => '文字';
+
+  @override
+  String get styleInputVoice => '语音';
+
+  @override
+  String get styleInputReference => '参考图';
+
+  @override
+  String get styleVoiceTranscriptHint => '先说出你的想法，再确认或修改转写内容后定义风格。';
+
+  @override
+  String get styleVoiceRecord => '开始录音';
+
+  @override
+  String get styleVoiceStop => '停止录音';
+
+  @override
+  String get styleVoiceListening => '正在聆听…';
+
+  @override
+  String get styleVoiceFailed => '语音暂未转写成功。当前图片和输入均已保留。';
+
+  @override
+  String get styleReferenceHint => '单独选择一张参考图。只提取色彩、光线、质感和氛围，不复制人物、物体、文字或构图。';
+
+  @override
+  String get styleReferenceChoose => '选择参考图';
+
+  @override
+  String get styleReferenceSource => '源照片';
+
+  @override
+  String get styleReferenceImage => '风格参考';
+
+  @override
+  String get styleReferenceRemove => '移除参考图';
+
+  @override
+  String get styleReferenceKeptLocal => '参考图不会替换源照片；风格定义完成后会移除本地临时副本。';
+
+  @override
+  String get styleReferenceUnavailable => '当前设备无法使用参考图。当前图片保持不变。';
+
+  @override
+  String get styleReferenceFailed => '这张参考图暂时无法使用，源照片和当前风格均未改变。';
 
   @override
   String get defineStyle => '定义风格';
@@ -97,6 +439,27 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get styleSavedCustom => '已保存风格';
+
+  @override
+  String get styleOfficialDefinitionSummary => '固定且可复现的本地风格。';
+
+  @override
+  String get styleTextDefinitionSummary => '根据你确认的文字描述生成的本地风格。';
+
+  @override
+  String get styleVoiceDefinitionSummary => '根据你确认的语音转写生成的本地风格。';
+
+  @override
+  String get styleReferenceDefinitionSummary => '只使用参考图的色彩、光线、质感与氛围生成的本地风格。';
+
+  @override
+  String get styleReferenceWarmTitle => '暖调参考';
+
+  @override
+  String get styleReferenceCoolTitle => '冷调参考';
+
+  @override
+  String get styleReferenceNaturalTitle => '自然参考';
 
   @override
   String get styleNatural => '自然';
@@ -144,9 +507,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get changeStyle => '换个风格';
 
   @override
-  String get generateMotion => '生成动态';
-
-  @override
   String get motionConfirmationTitle => '生成动态作品';
 
   @override
@@ -155,6 +515,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get motionUnavailable => '动态生成服务尚未接入';
+
+  @override
+  String get motionUnavailableDetail => '当前不会上传图片、创建任务或消耗额度。你可以返回能力列表或首页。';
 
   @override
   String get gotIt => '知道了';
@@ -181,7 +544,8 @@ class AppLocalizationsZh extends AppLocalizations {
   String get deleteDraft => '删除草稿';
 
   @override
-  String get draftDeleteConfirmation => '只会删除映见中的草稿，不会删除系统相册原图。';
+  String get draftDeleteConfirmation =>
+      '会删除映见中的草稿、生成结果，并取消仍可取消的云端任务；不会删除系统相册原图。云端任务已无法取消时，本次不会删除。';
 
   @override
   String get draftStatusEditing => '编辑中';
@@ -220,6 +584,14 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get projectDeleteFailed => '无法删除本地项目，现有内容未改变。';
+
+  @override
+  String get projectDeleteCloudTaskActive =>
+      '云端任务已经开始且暂时无法取消；为保留任务与权益状态，本次没有删除创作。';
+
+  @override
+  String get projectDeletedGenerationCleanupPending =>
+      '创作已删除，但本地生成缓存尚未清理完成。系统相册内容不受影响。';
 
   @override
   String lastProjectSummary(int count, String date, String time) {

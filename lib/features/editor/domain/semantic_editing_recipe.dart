@@ -1,6 +1,15 @@
 import 'package:flutter/foundation.dart';
 
-enum BackgroundTreatment { original, blur, white, black, warm, cool, image }
+enum BackgroundTreatment {
+  original,
+  blur,
+  white,
+  black,
+  warm,
+  cool,
+  image,
+  transparent,
+}
 
 enum MaskBrushOperation { paint, erase }
 

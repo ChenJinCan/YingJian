@@ -149,4 +149,15 @@ void main() {
     );
     expect(SemanticEditingRecipe.fromJson(recipe.toJson()), recipe);
   });
+
+  test('round trips transparent background without a replacement resource', () {
+    final recipe = SemanticEditingRecipe(
+      background: BackgroundTreatment.transparent,
+    );
+
+    expect(recipe.toJson()['background'], 'transparent');
+    expect(SemanticEditingRecipe.fromJson(recipe.toJson()), recipe);
+    expect(recipe.backgroundImagePath, isNull);
+    expect(recipe.backgroundImageResourceId, isNull);
+  });
 }

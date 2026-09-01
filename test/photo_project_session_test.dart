@@ -2,9 +2,12 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yingjian/features/creation/domain/creation_capability.dart';
 import 'package:yingjian/features/creation/domain/creation_intent.dart';
+import 'package:yingjian/features/creation/domain/creation_task.dart';
 import 'package:yingjian/features/editor/application/ai_edit_planner.dart';
 import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
+import 'package:yingjian/features/editor/domain/content_sha256.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/edit_target.dart';
 import 'package:yingjian/features/editor/domain/editing_core.dart';
@@ -2539,6 +2542,14 @@ void main() {
           ),
         );
         final projected = session.projectCreationStyle(style);
+        await session.selectCreationCapability(
+          CreationCapability.styleOfficial,
+        );
+        await session.selectCreationStyle(
+          styleId: 'soft-light',
+          styleName: '柔光',
+          recipe: style,
+        );
 
         final commit = await session.applyCreationStyle(
           styleId: 'soft-light',
@@ -2579,7 +2590,714 @@ void main() {
         expect(session.project!.currentStaticStyleResult!.recipe, projected);
       },
     );
+
+    test(
+      'commits an iOS optimize result and its recoverable identity atomically',
+      () async {
+        final saved = PhotoProject(
+          id: 'optimize-result-project',
+          createdAt: DateTime.utc(2026, 9, 1),
+          updatedAt: DateTime.utc(2026, 9, 1),
+          photos: const [
+            ProjectPhoto(
+              id: 'photo-1',
+              localPath: '/app/media/photo-1.jpg',
+              originalName: 'first.jpg',
+            ),
+          ],
+          creationIntent: CreationIntent.apply,
+          creationTask: CreationTask.optimize,
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        await session.selectCreationCapability(
+          CreationCapability.optimizeNatural,
+        );
+        final desired = EditRecipe(
+          qualityEnhancementRecipe: QualityEnhancementRecipe.safeAutomatic,
+        );
+
+        final commit = await session.applyLocalStaticTaskResult(
+          task: CreationTask.optimize,
+          desiredRecipe: desired,
+          resultId: 'optimize-safe-auto',
+          resultName: '自动优化',
+          context: const EditContext(
+            platform: EditPlatform.ios,
+            photoIds: {'photo-1'},
+            applicability: {'photo'},
+          ),
+        );
+
+        expect(commit.result, isA<AcceptedEdit>());
+        expect(commit.appliedToGroup, isFalse);
+        expect(session.effectiveRecipeFor('photo-1'), desired);
+        expect(session.project!.undoHistory, hasLength(1));
+        expect(
+          session.project!.currentStaticStyleResult,
+          StaticStyleResultIdentity(
+            sourcePhotoId: 'photo-1',
+            editStateVersion: 1,
+            styleId: 'optimize-safe-auto',
+            capability: CreationCapability.optimizeNatural,
+            styleName: '自动优化',
+            recipe: desired,
+          ),
+        );
+        expect(
+          session.project!.recoverableStaticStyleResult,
+          session.project!.currentStaticStyleResult,
+        );
+        expect(store.savedProject, session.project);
+      },
+    );
+
+    test(
+      'commits a cleanup result through the local static task seam',
+      () async {
+        final saved = PhotoProject(
+          id: 'cleanup-result-project',
+          createdAt: DateTime.utc(2026, 9, 1),
+          updatedAt: DateTime.utc(2026, 9, 1),
+          photos: const [
+            ProjectPhoto(
+              id: 'photo-1',
+              localPath: '/app/media/photo-1.jpg',
+              originalName: 'first.jpg',
+            ),
+          ],
+          creationIntent: CreationIntent.apply,
+          creationTask: CreationTask.cleanup,
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        await session.selectCreationCapability(CreationCapability.cleanupWhite);
+        final desired = EditRecipe(
+          semanticEditingRecipe: SemanticEditingRecipe(
+            background: BackgroundTreatment.white,
+          ),
+        );
+
+        final commit = await session.applyLocalStaticTaskResult(
+          task: CreationTask.cleanup,
+          desiredRecipe: desired,
+          resultId: 'cleanup-white',
+          resultName: '白底',
+          context: const EditContext(
+            platform: EditPlatform.ios,
+            photoIds: {'photo-1'},
+            applicability: {'photo'},
+          ),
+        );
+
+        expect(commit.result, isA<AcceptedEdit>());
+        expect(commit.appliedToGroup, isFalse);
+        expect(
+          session
+              .effectiveRecipeFor('photo-1')
+              .semanticEditingRecipe
+              .background,
+          BackgroundTreatment.white,
+        );
+        expect(
+          session.project!.currentStaticStyleResult,
+          StaticStyleResultIdentity(
+            sourcePhotoId: 'photo-1',
+            editStateVersion: 1,
+            styleId: 'cleanup-white',
+            capability: CreationCapability.cleanupWhite,
+            styleName: '白底',
+            recipe: desired,
+          ),
+        );
+        expect(store.savedProject, session.project);
+      },
+    );
+
+    test('commits only a transparent recipe for cleanup transparent', () async {
+      final saved = PhotoProject(
+        id: 'cleanup-transparent-project',
+        createdAt: DateTime.utc(2026, 9, 1),
+        updatedAt: DateTime.utc(2026, 9, 1),
+        photos: const [
+          ProjectPhoto(
+            id: 'photo-1',
+            localPath: '/app/media/photo-1.jpg',
+            originalName: 'first.jpg',
+          ),
+        ],
+        creationIntent: CreationIntent.apply,
+        creationTask: CreationTask.cleanup,
+      );
+      final store = _MemoryPhotoProjectStore()..savedProject = saved;
+      final session = PhotoProjectSession(
+        importer: _FakePhotoImporter(const []),
+        store: store,
+      );
+      await session.restore();
+      await session.selectCreationCapability(
+        CreationCapability.cleanupTransparent,
+      );
+      final desired = EditRecipe(
+        semanticEditingRecipe: SemanticEditingRecipe(
+          background: BackgroundTreatment.transparent,
+        ),
+      );
+
+      final commit = await session.applyLocalStaticTaskResult(
+        task: CreationTask.cleanup,
+        desiredRecipe: desired,
+        resultId: 'cleanup-transparent',
+        resultName: '透明抠图',
+        context: const EditContext(
+          platform: EditPlatform.ios,
+          photoIds: {'photo-1'},
+          applicability: {'photo'},
+        ),
+      );
+
+      expect(commit.result, isA<AcceptedEdit>());
+      expect(commit.appliedToGroup, isFalse);
+      expect(session.effectiveRecipeFor('photo-1'), desired);
+      expect(
+        session.project!.currentStaticStyleResult!.capability,
+        CreationCapability.cleanupTransparent,
+      );
+      expect(store.savedProject, session.project);
+    });
+
+    test(
+      'rejects cleanup recipes whose background does not match the selection',
+      () async {
+        Future<void> expectMismatch({
+          required CreationCapability capability,
+          required BackgroundTreatment background,
+        }) async {
+          final saved = PhotoProject(
+            id: 'cleanup-background-mismatch-${capability.persistedId}',
+            createdAt: DateTime.utc(2026, 9, 1),
+            updatedAt: DateTime.utc(2026, 9, 1),
+            photos: const [
+              ProjectPhoto(
+                id: 'photo-1',
+                localPath: '/app/media/photo-1.jpg',
+                originalName: 'first.jpg',
+              ),
+            ],
+            creationIntent: CreationIntent.apply,
+            creationTask: CreationTask.cleanup,
+          );
+          final store = _MemoryPhotoProjectStore()..savedProject = saved;
+          final session = PhotoProjectSession(
+            importer: _FakePhotoImporter(const []),
+            store: store,
+          );
+          await session.restore();
+          await session.selectCreationCapability(capability);
+          final prior = session.project;
+
+          await expectLater(
+            session.applyLocalStaticTaskResult(
+              task: CreationTask.cleanup,
+              desiredRecipe: EditRecipe(
+                semanticEditingRecipe: SemanticEditingRecipe(
+                  background: background,
+                ),
+              ),
+              resultId: 'mismatched-cleanup',
+              resultName: '不匹配',
+              context: const EditContext(
+                platform: EditPlatform.ios,
+                photoIds: {'photo-1'},
+                applicability: {'photo'},
+              ),
+            ),
+            throwsStateError,
+          );
+          expect(session.project, prior);
+          expect(store.savedProject, prior);
+        }
+
+        await expectMismatch(
+          capability: CreationCapability.cleanupWhite,
+          background: BackgroundTreatment.transparent,
+        );
+        await expectMismatch(
+          capability: CreationCapability.cleanupTransparent,
+          background: BackgroundTreatment.white,
+        );
+      },
+    );
+
+    test(
+      'requires an imported app-owned resource for replacement background',
+      () async {
+        final fixture = await _createBackgroundResourceFixture();
+        addTearDown(() => fixture.root.delete(recursive: true));
+        final saved = _cleanupProject('cleanup-replacement-contract');
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        await session.selectCreationCapability(
+          CreationCapability.cleanupReplaceBackground,
+        );
+        final prior = session.project;
+        final desired = EditRecipe(
+          semanticEditingRecipe: SemanticEditingRecipe(
+            background: BackgroundTreatment.image,
+            backgroundImagePath: fixture.file.path,
+            backgroundImageResourceId: fixture.resourceId,
+          ),
+        );
+
+        await expectLater(
+          session.applyLocalStaticTaskResult(
+            task: CreationTask.cleanup,
+            desiredRecipe: desired,
+            resultId: 'cleanup-replace-background',
+            resultName: '替换背景',
+            context: const EditContext(
+              platform: EditPlatform.ios,
+              photoIds: {'photo-1'},
+              applicability: {'photo'},
+            ),
+          ),
+          throwsStateError,
+        );
+        expect(session.project, prior);
+        expect(store.savedProject, prior);
+
+        final outsideResources = File(
+          '${fixture.root.path}/${fixture.sha256}.png',
+        );
+        await outsideResources.writeAsBytes(const [1, 2, 3], flush: true);
+        final importer = _TrackingEditingResourceImporter();
+        await expectLater(
+          session.applyLocalStaticTaskResult(
+            task: CreationTask.cleanup,
+            desiredRecipe: EditRecipe(
+              semanticEditingRecipe: SemanticEditingRecipe(
+                background: BackgroundTreatment.image,
+                backgroundImagePath: outsideResources.path,
+                backgroundImageResourceId: fixture.resourceId,
+              ),
+            ),
+            resultId: 'cleanup-replace-background',
+            resultName: '替换背景',
+            context: const EditContext(
+              platform: EditPlatform.ios,
+              photoIds: {'photo-1'},
+              applicability: {'photo'},
+            ),
+            resourceImporter: importer,
+          ),
+          throwsStateError,
+        );
+        expect(importer.storeCallCount, 0);
+        expect(importer.discardedResources, isEmpty);
+        expect(session.project, prior);
+        expect(store.savedProject, prior);
+      },
+    );
+
+    test(
+      'registers an imported replacement background without changing identity',
+      () async {
+        final fixture = await _createBackgroundResourceFixture();
+        addTearDown(() => fixture.root.delete(recursive: true));
+        final saved = _cleanupProject('cleanup-replacement-success');
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final importer = _TrackingEditingResourceImporter();
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        await session.selectCreationCapability(
+          CreationCapability.cleanupReplaceBackground,
+        );
+        final desired = EditRecipe(
+          semanticEditingRecipe: SemanticEditingRecipe(
+            background: BackgroundTreatment.image,
+            backgroundImagePath: fixture.file.path,
+            backgroundImageResourceId: fixture.resourceId,
+          ),
+        );
+
+        final commit = await session.applyLocalStaticTaskResult(
+          task: CreationTask.cleanup,
+          desiredRecipe: desired,
+          resultId: 'cleanup-replace-background',
+          resultName: '替换背景',
+          context: const EditContext(
+            platform: EditPlatform.ios,
+            photoIds: {'photo-1'},
+            applicability: {'photo'},
+          ),
+          resourceImporter: importer,
+        );
+
+        expect(commit.result, isA<AcceptedEdit>());
+        expect(commit.appliedToGroup, isFalse);
+        final semantic = session
+            .effectiveRecipeFor('photo-1')
+            .semanticEditingRecipe;
+        expect(semantic.background, BackgroundTreatment.image);
+        expect(semantic.backgroundImagePath, fixture.file.path);
+        expect(semantic.backgroundImageResourceId, fixture.resourceId);
+        expect(session.project!.currentStaticStyleResult!.recipe, desired);
+        expect(
+          session.project!.currentStaticStyleResult!.capability,
+          CreationCapability.cleanupReplaceBackground,
+        );
+        final registered =
+            session.project!.editingResources.resources[fixture.resourceId]!;
+        expect(registered.id, fixture.resourceId);
+        expect(registered.kind, EditingResourceKind.backgroundImage);
+        expect(registered.contentSha256, fixture.sha256);
+        expect(
+          registered.relativePath,
+          'resources/${fixture.sha256.substring(0, 2)}/${fixture.sha256}.png',
+        );
+        expect(registered.byteLength, await fixture.file.length());
+        expect(importer.storeCallCount, 0);
+        expect(importer.discardedResources, isEmpty);
+        expect(store.savedProject, session.project);
+      },
+    );
+
+    test(
+      'discards an imported replacement background when project save fails',
+      () async {
+        final fixture = await _createBackgroundResourceFixture();
+        addTearDown(() => fixture.root.delete(recursive: true));
+        final saved = _cleanupProject('cleanup-replacement-save-failure');
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final importer = _TrackingEditingResourceImporter();
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        await session.selectCreationCapability(
+          CreationCapability.cleanupReplaceBackground,
+        );
+        final prior = session.project;
+        store.failOnSave = true;
+
+        await expectLater(
+          session.applyLocalStaticTaskResult(
+            task: CreationTask.cleanup,
+            desiredRecipe: EditRecipe(
+              semanticEditingRecipe: SemanticEditingRecipe(
+                background: BackgroundTreatment.image,
+                backgroundImagePath: fixture.file.path,
+                backgroundImageResourceId: fixture.resourceId,
+              ),
+            ),
+            resultId: 'cleanup-replace-background',
+            resultName: '替换背景',
+            context: const EditContext(
+              platform: EditPlatform.ios,
+              photoIds: {'photo-1'},
+              applicability: {'photo'},
+            ),
+            resourceImporter: importer,
+          ),
+          throwsA(isA<FileSystemException>()),
+        );
+
+        expect(importer.storeCallCount, 0);
+        expect(importer.discardedResources, hasLength(1));
+        expect(
+          importer.discardedResources.single.descriptor.id,
+          fixture.resourceId,
+        );
+        expect(importer.discardedResources.single.localPath, fixture.file.path);
+        expect(session.project, prior);
+        expect(store.savedProject, prior);
+      },
+    );
+
+    test(
+      'rejects AI and destructive cleanup capabilities at the local seam',
+      () async {
+        final unsupported = <CreationCapability>[
+          CreationCapability.optimizeAiRepair,
+          CreationCapability.optimizeUpscale,
+          CreationCapability.optimizeOldPhoto,
+          CreationCapability.cleanupRemovePasserby,
+          CreationCapability.cleanupBrushRemove,
+        ];
+        for (final capability in unsupported) {
+          final task = capability.task;
+          final saved = PhotoProject(
+            id: 'unsupported-local-${capability.persistedId}',
+            createdAt: DateTime.utc(2026, 9, 1),
+            updatedAt: DateTime.utc(2026, 9, 1),
+            photos: const [
+              ProjectPhoto(
+                id: 'photo-1',
+                localPath: '/app/media/photo-1.jpg',
+                originalName: 'first.jpg',
+              ),
+            ],
+            creationIntent: CreationIntent.apply,
+            creationTask: task,
+          );
+          final store = _MemoryPhotoProjectStore()..savedProject = saved;
+          final session = PhotoProjectSession(
+            importer: _FakePhotoImporter(const []),
+            store: store,
+          );
+          await session.restore();
+          await session.selectCreationCapability(capability);
+          final prior = session.project;
+
+          await expectLater(
+            session.applyLocalStaticTaskResult(
+              task: task,
+              desiredRecipe: task == CreationTask.optimize
+                  ? EditRecipe(
+                      qualityEnhancementRecipe:
+                          QualityEnhancementRecipe.safeAutomatic,
+                    )
+                  : EditRecipe(
+                      semanticEditingRecipe: SemanticEditingRecipe(
+                        eraseStrokes: [
+                          EraseStroke(
+                            radius: 0.05,
+                            points: const [NormalizedPoint(0.5, 0.5)],
+                          ),
+                        ],
+                      ),
+                    ),
+              resultId: 'unsupported-local-result',
+              resultName: '不支持',
+              context: const EditContext(
+                platform: EditPlatform.ios,
+                photoIds: {'photo-1'},
+                applicability: {'photo'},
+              ),
+            ),
+            throwsStateError,
+            reason: capability.persistedId,
+          );
+          expect(session.project, prior, reason: capability.persistedId);
+          expect(store.savedProject, prior, reason: capability.persistedId);
+        }
+      },
+    );
+
+    test(
+      'rejects local static results outside the matching iOS editing task',
+      () async {
+        final saved = PhotoProject(
+          id: 'cleanup-result-project',
+          createdAt: DateTime.utc(2026, 9, 1),
+          updatedAt: DateTime.utc(2026, 9, 1),
+          photos: const [
+            ProjectPhoto(
+              id: 'photo-1',
+              localPath: '/app/media/photo-1.jpg',
+              originalName: 'first.jpg',
+            ),
+          ],
+          creationIntent: CreationIntent.apply,
+          creationTask: CreationTask.cleanup,
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        final desired = EditRecipe(
+          semanticEditingRecipe: SemanticEditingRecipe(
+            background: BackgroundTreatment.white,
+          ),
+        );
+
+        await expectLater(
+          session.applyLocalStaticTaskResult(
+            task: CreationTask.style,
+            desiredRecipe: desired,
+            resultId: 'cleanup-white',
+            resultName: '白底',
+            context: EditContext.ios,
+          ),
+          throwsArgumentError,
+        );
+        await expectLater(
+          session.applyLocalStaticTaskResult(
+            task: CreationTask.optimize,
+            desiredRecipe: desired,
+            resultId: 'cleanup-white',
+            resultName: '白底',
+            context: EditContext.ios,
+          ),
+          throwsStateError,
+        );
+        await expectLater(
+          session.applyLocalStaticTaskResult(
+            task: CreationTask.cleanup,
+            desiredRecipe: desired,
+            resultId: 'cleanup-white',
+            resultName: '白底',
+            context: const EditContext(platform: EditPlatform.android),
+          ),
+          throwsStateError,
+        );
+
+        expect(session.project, saved);
+        expect(store.savedProject, saved);
+
+        final motion = saved.copyWith(
+          creationIntent: CreationIntent.motion,
+          creationTask: CreationTask.motion,
+        );
+        final motionStore = _MemoryPhotoProjectStore()..savedProject = motion;
+        final motionSession = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: motionStore,
+        );
+        await motionSession.restore();
+        await expectLater(
+          motionSession.applyLocalStaticTaskResult(
+            task: CreationTask.cleanup,
+            desiredRecipe: desired,
+            resultId: 'cleanup-white',
+            resultName: '白底',
+            context: EditContext.ios,
+          ),
+          throwsStateError,
+        );
+        expect(motionSession.project, motion);
+        expect(motionStore.savedProject, motion);
+
+        final exporting = saved.copyWith(
+          flowState: PhotoProjectFlowState.exporting,
+          exportStates: const {'photo-1': PhotoExportState.queued},
+        );
+        final exportingStore = _MemoryPhotoProjectStore()
+          ..savedProject = exporting;
+        final exportingSession = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: exportingStore,
+        );
+        await exportingSession.restore();
+        await expectLater(
+          exportingSession.applyLocalStaticTaskResult(
+            task: CreationTask.cleanup,
+            desiredRecipe: desired,
+            resultId: 'cleanup-white',
+            resultName: '白底',
+            context: EditContext.ios,
+          ),
+          throwsStateError,
+        );
+        expect(exportingSession.project, exporting);
+        expect(exportingStore.savedProject, exporting);
+      },
+    );
+
+    test(
+      'keeps the prior cleanup project when its static result cannot persist',
+      () async {
+        final saved = PhotoProject(
+          id: 'cleanup-save-failure',
+          createdAt: DateTime.utc(2026, 9, 1),
+          updatedAt: DateTime.utc(2026, 9, 1),
+          photos: const [
+            ProjectPhoto(
+              id: 'photo-1',
+              localPath: '/app/media/photo-1.jpg',
+              originalName: 'first.jpg',
+            ),
+          ],
+          creationIntent: CreationIntent.apply,
+          creationTask: CreationTask.cleanup,
+        );
+        final store = _MemoryPhotoProjectStore()..savedProject = saved;
+        final session = PhotoProjectSession(
+          importer: _FakePhotoImporter(const []),
+          store: store,
+        );
+        await session.restore();
+        await session.selectCreationCapability(CreationCapability.cleanupWhite);
+        final prior = session.project;
+        store.failOnSave = true;
+
+        await expectLater(
+          session.applyLocalStaticTaskResult(
+            task: CreationTask.cleanup,
+            desiredRecipe: EditRecipe(
+              semanticEditingRecipe: SemanticEditingRecipe(
+                background: BackgroundTreatment.white,
+              ),
+            ),
+            resultId: 'cleanup-white',
+            resultName: '白底',
+            context: const EditContext(
+              platform: EditPlatform.ios,
+              photoIds: {'photo-1'},
+              applicability: {'photo'},
+            ),
+          ),
+          throwsA(isA<FileSystemException>()),
+        );
+
+        expect(session.project, prior);
+        expect(store.savedProject, prior);
+      },
+    );
   });
+}
+
+PhotoProject _cleanupProject(String id) => PhotoProject(
+  id: id,
+  createdAt: DateTime.utc(2026, 9, 1),
+  updatedAt: DateTime.utc(2026, 9, 1),
+  photos: const [
+    ProjectPhoto(
+      id: 'photo-1',
+      localPath: '/app/media/photo-1.jpg',
+      originalName: 'first.jpg',
+    ),
+  ],
+  creationIntent: CreationIntent.apply,
+  creationTask: CreationTask.cleanup,
+);
+
+Future<({Directory root, File file, String sha256, String resourceId})>
+_createBackgroundResourceFixture() async {
+  const bytes = <int>[1, 2, 3];
+  final sha256 = ContentSha256.ofBytes(bytes);
+  final root = await Directory.systemTemp.createTemp(
+    'yingjian-cleanup-background-',
+  );
+  final file = File(
+    '${root.path}/resources/${sha256.substring(0, 2)}/$sha256.png',
+  );
+  await file.parent.create(recursive: true);
+  await file.writeAsBytes(bytes, flush: true);
+  return (
+    root: root,
+    file: file,
+    sha256: sha256,
+    resourceId: 'resource-v1-$sha256',
+  );
 }
 
 PhotoProject _twoPhotoProject() {
@@ -2613,6 +3331,37 @@ final class _FakePhotoImporter implements PhotoImporter {
   Future<PhotoImportBatch> importPhotos({required int limit}) async {
     requestedLimits.add(limit);
     return PhotoImportBatch(photos: photos, failures: failures);
+  }
+}
+
+final class _TrackingEditingResourceImporter
+    implements EditingResourceImporter {
+  int storeCallCount = 0;
+  final List<ImportedEditingResource> discardedResources = [];
+
+  @override
+  Future<PhotoImportBatch> importPhotos({required int limit}) async =>
+      const PhotoImportBatch(photos: []);
+
+  @override
+  Future<ImportedEditingResource?> importEditingResource(
+    EditingResourceKind kind,
+  ) async => null;
+
+  @override
+  Future<ImportedEditingResource> storeEditingResource({
+    required EditingResourceKind kind,
+    required List<int> bytes,
+    String extension = '.json',
+    Object? payload,
+  }) {
+    storeCallCount += 1;
+    throw StateError('Replacement backgrounds must not be stored twice');
+  }
+
+  @override
+  Future<void> discardEditingResource(ImportedEditingResource resource) async {
+    discardedResources.add(resource);
   }
 }
 

@@ -9,6 +9,8 @@ class AppSettings extends ChangeNotifier {
     _locale = _readLocale();
     _diagnosticsEnabled = _preferences.getBool(_diagnosticsEnabledKey) ?? false;
     _exportQuality = _readExportQuality();
+    _developerLogsUnlocked =
+        _preferences.getBool(_developerLogsUnlockedKey) ?? false;
     _onboardingComplete =
         _preferences.getBool(_onboardingCompleteKey) ??
         _hasExistingAppPreference();
@@ -19,6 +21,7 @@ class AppSettings extends ChangeNotifier {
   static const _diagnosticsEnabledKey = 'privacy.diagnostics_enabled';
   static const _onboardingCompleteKey = 'app.onboarding_complete';
   static const _exportQualityKey = 'export.default_quality';
+  static const _developerLogsUnlockedKey = 'developer.logs_unlocked';
 
   final SharedPreferences _preferences;
   late ThemeMode _themeMode;
@@ -26,6 +29,7 @@ class AppSettings extends ChangeNotifier {
   late bool _diagnosticsEnabled;
   late bool _onboardingComplete;
   late AppExportQuality _exportQuality;
+  late bool _developerLogsUnlocked;
 
   static Future<AppSettings> load() async {
     final preferences = await SharedPreferences.getInstance();
@@ -37,6 +41,7 @@ class AppSettings extends ChangeNotifier {
   bool get diagnosticsEnabled => _diagnosticsEnabled;
   bool get onboardingComplete => _onboardingComplete;
   AppExportQuality get exportQuality => _exportQuality;
+  bool get developerLogsUnlocked => _developerLogsUnlocked;
 
   Future<void> completeOnboarding() async {
     if (_onboardingComplete) return;
@@ -99,6 +104,14 @@ class AppSettings extends ChangeNotifier {
     final saved = await _preferences.setString(_exportQualityKey, value.name);
     if (!saved) throw StateError('Unable to persist export quality');
     _exportQuality = value;
+    notifyListeners();
+  }
+
+  Future<void> unlockDeveloperLogs() async {
+    if (_developerLogsUnlocked) return;
+    final saved = await _preferences.setBool(_developerLogsUnlockedKey, true);
+    if (!saved) throw StateError('Unable to persist developer log access');
+    _developerLogsUnlocked = true;
     notifyListeners();
   }
 

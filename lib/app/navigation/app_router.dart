@@ -4,17 +4,16 @@ import 'package:yingjian/app/theme/app_theme.dart';
 import 'package:yingjian/features/creation/domain/creation_intent.dart';
 import 'package:yingjian/features/creation/domain/creation_task.dart';
 import 'package:yingjian/features/creation/presentation/style_workspace_page.dart';
-import 'package:yingjian/features/editor/presentation/editor_page.dart';
 import 'package:yingjian/features/home/presentation/home_page.dart';
 import 'package:yingjian/features/onboarding/presentation/onboarding_page.dart';
 import 'package:yingjian/features/settings/presentation/legal_document_page.dart';
+import 'package:yingjian/features/settings/presentation/developer_log_page.dart';
 import 'package:yingjian/features/settings/presentation/settings_page.dart';
 import 'package:yingjian/l10n/l10n.dart';
 
 abstract final class AppRoutes {
   static const onboarding = '/onboarding';
   static const home = '/';
-  static const editor = '/editor';
   static const optimizeWorkspace = '/create/optimize';
   static const applyStyleWorkspace = '/create/apply';
   static const cleanupWorkspace = '/create/cleanup';
@@ -22,6 +21,7 @@ abstract final class AppRoutes {
   static const settings = '/settings';
   static const privacy = '/settings/privacy';
   static const terms = '/settings/terms';
+  static const developerLogs = '/settings/logs';
 }
 
 abstract final class AppRouter {
@@ -31,18 +31,15 @@ abstract final class AppRouter {
     return switch (settings.name) {
       AppRoutes.onboarding => _page(const OnboardingPage(), settings),
       AppRoutes.home => _page(_creationSurface(const HomePage()), settings),
-      AppRoutes.editor => _page(
-        EditorPage(startWithImport: settings.arguments == true),
-        settings,
-      ),
       AppRoutes.optimizeWorkspace => _iosPage(
         _creationSurface(
-          EditorPage(
+          StyleWorkspacePage(
+            intent: CreationIntent.apply,
+            task: CreationTask.optimize,
             projectId: _projectIdForTask(
               settings.arguments,
               CreationTask.optimize,
             ),
-            entryPoint: EditorEntryPoint.optimize,
           ),
         ),
         settings,
@@ -62,12 +59,13 @@ abstract final class AppRouter {
       ),
       AppRoutes.cleanupWorkspace => _iosPage(
         _creationSurface(
-          EditorPage(
+          StyleWorkspacePage(
+            intent: CreationIntent.apply,
+            task: CreationTask.cleanup,
             projectId: _projectIdForTask(
               settings.arguments,
               CreationTask.cleanup,
             ),
-            entryPoint: EditorEntryPoint.cleanup,
           ),
         ),
         settings,
@@ -86,6 +84,7 @@ abstract final class AppRouter {
         settings,
       ),
       AppRoutes.settings => _page(const SettingsPage(), settings),
+      AppRoutes.developerLogs => _page(const DeveloperLogPage(), settings),
       AppRoutes.privacy => _page(
         const LegalDocumentPage(type: LegalDocumentType.privacy),
         settings,
@@ -115,8 +114,8 @@ abstract final class AppRouter {
   /// A [CreationRouteArguments] object is created by Home when resuming a
   /// draft. Reject a mismatched goal here instead of letting an arbitrary
   /// route argument change the destination workspace. The string case keeps
-  /// old in-process callers working; [EditorPage] validates the restored
-  /// project against its entry point as a second boundary.
+  /// old in-process callers working; [StyleWorkspacePage] validates the
+  /// restored project against its task as a second boundary.
   static String? _projectIdForTask(
     Object? arguments,
     CreationTask expectedTask,

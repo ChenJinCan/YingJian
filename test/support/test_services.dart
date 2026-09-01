@@ -4,16 +4,24 @@ import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 import 'package:yingjian/app/app.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
+import 'package:yingjian/features/creation/application/local_reference_style_analyzer.dart';
 import 'package:yingjian/features/editor/application/meta_op_capabilities_provider.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
 import 'package:yingjian/features/editor/application/photo_sharer.dart';
+import 'package:yingjian/features/editor/application/speech_transcriber.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/editing_resource.dart';
 import 'package:yingjian/features/editor/domain/content_sha256.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline.dart';
 import 'package:yingjian/features/editor/domain/meta_op_availability.dart';
 import 'package:yingjian/features/editor/domain/platform_meta_op_capabilities.dart';
+import 'package:yingjian/features/generation/application/generation_coordinator.dart';
+import 'package:yingjian/features/generation/application/generated_media_actions.dart';
+import 'package:yingjian/features/generation/application/mask_removal_input_builder.dart';
+import 'package:yingjian/features/generation/application/motion_photo_generator.dart';
+import 'package:yingjian/features/generation/application/upscale_photo_generator.dart';
+import 'package:yingjian/features/generation/infrastructure/unavailable_generation_provider.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/photo_analysis/application/photo_analysis_cache.dart';
@@ -21,6 +29,7 @@ import 'package:yingjian/features/photo_analysis/domain/photo_analysis.dart';
 import 'package:yingjian/observability/analytics_event.dart';
 import 'package:yingjian/observability/app_observability.dart';
 import 'package:yingjian/observability/observability_backend.dart';
+import 'package:yingjian/observability/local_diagnostic_log.dart';
 import 'package:yingjian/review/review_manager.dart';
 
 import 'memory_photo_analysis_cache.dart';
@@ -35,8 +44,22 @@ Widget buildTestApp(
   PhotoAnalyzer? photoAnalyzer,
   PhotoAnalysisCache? photoAnalysisCache,
   PlatformMetaOpCapabilities? metaOpCapabilities,
+  DiagnosticLog? diagnosticLog,
+  SpeechTranscriber? speechTranscriber,
+  ReferenceStyleAnalyzer? referenceStyleAnalyzer,
+  GenerationCoordinator? generationCoordinator,
+  GeneratedMediaActions? generatedMediaActions,
+  MotionPhotoGenerator? motionPhotoGenerator,
+  UpscalePhotoGenerator? upscalePhotoGenerator,
+  MaskRemovalInputCreator? maskRemovalInputCreator,
 }) {
   final observability = AppObservability(FakeObservabilityBackend());
+  final resolvedGenerationCoordinator =
+      generationCoordinator ??
+      GenerationCoordinator(
+        provider: const UnavailableGenerationProvider(),
+        store: _MemoryGenerationJobStore(),
+      );
   return MultiProvider(
     providers: [
       ChangeNotifierProvider<AppSettings>.value(value: settings),
@@ -66,9 +89,128 @@ Widget buildTestApp(
       Provider<PhotoAnalysisCache>.value(
         value: photoAnalysisCache ?? MemoryPhotoAnalysisCache(),
       ),
+      Provider<DiagnosticLog>.value(
+        value: diagnosticLog ?? MemoryDiagnosticLog(),
+      ),
+      Provider<SpeechTranscriber>.value(
+        value: speechTranscriber ?? const _UnsupportedSpeechTranscriber(),
+      ),
+      Provider<ReferenceStyleAnalyzer>.value(
+        value: referenceStyleAnalyzer ?? const LocalReferenceStyleAnalyzer(),
+      ),
+      Provider<GenerationCoordinator>.value(
+        value: resolvedGenerationCoordinator,
+      ),
+      Provider<GeneratedMediaActions?>.value(value: generatedMediaActions),
+      Provider<MotionPhotoGenerator?>.value(value: motionPhotoGenerator),
+      Provider<UpscalePhotoGenerator?>.value(value: upscalePhotoGenerator),
+      Provider<MaskRemovalInputCreator>.value(
+        value: maskRemovalInputCreator ?? MaskRemovalInputBuilder(),
+      ),
     ],
     child: const YingjianApp(),
   );
+}
+
+final class _MemoryGenerationJobStore implements GenerationJobStore {
+  final Map<String, GenerationJob> _jobsById = {};
+  final Map<GenerationRequestIdentity, GenerationRequestReservation>
+  _reservations = {};
+
+  @override
+  Future<GenerationJob?> findByClientRequestId(String clientRequestId) async {
+    for (final job in _jobsById.values) {
+      if (job.clientRequestId == clientRequestId) return job;
+    }
+    return null;
+  }
+
+  @override
+  Future<GenerationJob?> findById(String id) async => _jobsById[id];
+
+  @override
+  Future<List<GenerationJob>> findByProjectId(String projectId) async =>
+      _jobsById.values
+          .where((job) => job.projectId == projectId)
+          .toList(growable: false);
+
+  @override
+  Future<GenerationJob?> findLatest(
+    GenerationRequestIdentity identity, {
+    Set<GenerationJobState>? states,
+    bool includeAnyInput = false,
+  }) async {
+    final matches =
+        _jobsById.values
+            .where(
+              (job) =>
+                  identity.matches(job, includeAnyInput: includeAnyInput) &&
+                  (states == null || states.contains(job.state)),
+            )
+            .toList()
+          ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
+    return matches.firstOrNull;
+  }
+
+  @override
+  Future<GenerationRequestReservation?> findReservation(
+    GenerationRequestIdentity identity,
+  ) async => _reservations[identity];
+
+  @override
+  Future<void> saveReservation(GenerationRequestReservation reservation) async {
+    _reservations[reservation.identity] = reservation;
+  }
+
+  @override
+  Future<void> deleteReservation(String clientRequestId) async {
+    _reservations.removeWhere(
+      (_, reservation) => reservation.clientRequestId == clientRequestId,
+    );
+  }
+
+  @override
+  Future<void> deleteProjectState(String projectId) async {
+    _jobsById.removeWhere((_, job) => job.projectId == projectId);
+    _reservations.removeWhere((identity, _) => identity.projectId == projectId);
+  }
+
+  @override
+  Future<void> save(GenerationJob job) async {
+    _jobsById[job.id] = job;
+  }
+}
+
+final class _UnsupportedSpeechTranscriber implements SpeechTranscriber {
+  const _UnsupportedSpeechTranscriber();
+
+  @override
+  Future<String> start({required String localeIdentifier}) =>
+      Future.error(UnsupportedError('Speech is not configured in this test'));
+
+  @override
+  Future<void> stop() async {}
+}
+
+final class FakeSpeechTranscriber implements SpeechTranscriber {
+  FakeSpeechTranscriber({required this.transcript, this.error});
+
+  final String transcript;
+  final Object? error;
+  int startCalls = 0;
+  int stopCalls = 0;
+
+  @override
+  Future<String> start({required String localeIdentifier}) async {
+    startCalls += 1;
+    if (error case final error?) throw error;
+    return transcript;
+  }
+
+  @override
+  Future<void> stop() async {
+    stopCalls += 1;
+  }
 }
 
 final class FakePhotoPreviewRenderer implements PhotoPreviewRenderer {

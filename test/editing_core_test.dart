@@ -710,6 +710,12 @@ void main() {
           .accepts(BackgroundTreatment.white.name),
       isTrue,
     );
+    expect(
+      definition
+          .parameter('background')!
+          .accepts(BackgroundTreatment.transparent.name),
+      isTrue,
+    );
   });
 
   test('legacy adapter round trips portrait values by stable target id', () {

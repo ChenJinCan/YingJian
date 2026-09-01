@@ -7,17 +7,27 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
+import 'package:yingjian/features/creation/application/local_reference_style_analyzer.dart';
+import 'package:yingjian/features/creation/domain/creation_capability.dart';
 import 'package:yingjian/features/creation/domain/creation_intent.dart';
 import 'package:yingjian/features/creation/domain/creation_task.dart';
+import 'package:yingjian/features/creation/domain/style_definition.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_sharer.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/editing_core.dart';
 import 'package:yingjian/features/editor/domain/platform_meta_op_capabilities.dart';
+import 'package:yingjian/features/editor/domain/semantic_editing_recipe.dart';
 import 'package:yingjian/features/editor/presentation/native_photo_preview.dart';
+import 'package:yingjian/features/generation/application/upscale_photo_generator.dart';
+import 'package:yingjian/features/generation/application/motion_photo_generator.dart';
+import 'package:yingjian/features/generation/application/generation_coordinator.dart';
+import 'package:yingjian/features/generation/application/mask_removal_input_builder.dart';
+import 'package:yingjian/features/generation/domain/generation_input.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
+import 'package:yingjian/features/photo_analysis/domain/photo_analysis.dart';
 
 import 'support/test_services.dart';
 
@@ -32,6 +42,7 @@ void main() {
         photos: [_fixturePhoto('persisted-motion')],
         creationIntent: CreationIntent.motion,
         creationTask: CreationTask.motion,
+        creationCapability: CreationCapability.motionSubtle,
         creationStyleId: 'breeze',
         creationStyleName: '轻风',
         creationStyleRecipe: EditRecipe(
@@ -56,6 +67,7 @@ void main() {
       final restored = PhotoProject.fromJson(project.toJson());
       expect(restored.creationIntent, CreationIntent.motion);
       expect(restored.creationTask, CreationTask.motion);
+      expect(restored.creationCapability, CreationCapability.motionSubtle);
       expect(restored.creationStyleId, 'breeze');
       expect(restored.creationStyleName, '轻风');
       expect(restored.creationStyleRecipe, project.creationStyleRecipe);
@@ -154,7 +166,7 @@ void main() {
     );
   });
 
-  testWidgets('default style is frozen before the user applies it', (
+  testWidgets('style workspace waits for explicit capability and style', (
     tester,
   ) async {
     final store = MemoryPhotoProjectStore();
@@ -170,8 +182,1102 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
 
+    expect(
+      find.byKey(const ValueKey('style-capability-official')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('style-capability-text')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('style-capability-voice')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('style-capability-reference')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('style-capability-ai-redraw')),
+      findsOneWidget,
+    );
+    expect(store.project!.creationStyleId, isNull);
+    expect(store.project!.creationStyleRecipe, isNull);
+    expect(store.project!.creationCapability, isNull);
+    expect(find.byKey(const ValueKey('style-options')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('apply-style-primary-action')),
+      findsNothing,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('style-capability-official')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
+    expect(store.project!.creationCapability, CreationCapability.styleOfficial);
+    expect(store.project!.creationStyleId, isNull);
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const ValueKey('style-capability-description')),
+          )
+          .data,
+      '从内置可复现风格中明确选择一种。',
+    );
+    expect(
+      find.byKey(const ValueKey('apply-style-primary-action')),
+      findsNothing,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('style-option-natural')));
+    await tester.pumpAndSettle();
+
     expect(store.project!.creationStyleId, 'natural');
     expect(store.project!.creationStyleRecipe, isNotNull);
+    expect(
+      find.byKey(const ValueKey('apply-style-primary-action')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('text style stays in its selected capability through apply', (
+    tester,
+  ) async {
+    final store = MemoryPhotoProjectStore();
+    final settings = await _settings();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoImporter: FakePhotoImporter([_fixturePhoto('text-style')]),
+        photoProjectStore: store,
+        referenceStyleAnalyzer: const _FixedReferenceStyleAnalyzer(),
+        metaOpCapabilities: iosMetaOpCapabilities,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('home-style')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('style-capability-text')));
+    await tester.pumpAndSettle();
+
+    expect(store.project!.creationCapability, CreationCapability.styleText);
+    expect(
+      find.byKey(const ValueKey('style-capability-unavailable-state')),
+      findsNothing,
+    );
+    final define = find.byKey(const ValueKey('style-define-primary-action'));
+    expect(define, findsOneWidget);
+    await tester.tap(define);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('style-input-text')), findsNothing);
+    expect(find.byKey(const ValueKey('style-input-voice')), findsNothing);
+    expect(find.byKey(const ValueKey('style-input-reference')), findsNothing);
+    await tester.enterText(
+      find.byKey(const ValueKey('style-definition-prompt')),
+      '温暖的胶片感',
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('style-definition-submit')));
+    await tester.pumpAndSettle();
+
+    expect(
+      store.project!.creationStyleDefinition?.origin,
+      StyleDefinitionOrigin.text,
+    );
+    expect(store.project!.creationStyleDefinition?.sourceText, '温暖的胶片感');
+    expect(
+      find.byKey(const ValueKey('apply-style-primary-action')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
+    await tester.pumpAndSettle();
+
+    expect(
+      store.project!.currentStaticStyleResult?.capability,
+      CreationCapability.styleText,
+    );
+  });
+
+  testWidgets('voice style requires a confirmed transcript in its own path', (
+    tester,
+  ) async {
+    final store = MemoryPhotoProjectStore();
+    final transcriber = FakeSpeechTranscriber(transcript: '雨后电影感');
+    final settings = await _settings();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoImporter: FakePhotoImporter([_fixturePhoto('voice-style')]),
+        photoProjectStore: store,
+        speechTranscriber: transcriber,
+        metaOpCapabilities: iosMetaOpCapabilities,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('home-style')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('style-capability-voice')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('style-define-primary-action')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('style-input-text')), findsNothing);
+    expect(find.byKey(const ValueKey('style-input-reference')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('style-voice-record')));
+    await tester.pumpAndSettle();
+    expect(transcriber.startCalls, 1);
+    expect(store.project!.creationStyleDefinition, isNull);
+    expect(
+      tester
+          .widget<TextField>(
+            find.byKey(const ValueKey('style-definition-prompt')),
+          )
+          .controller!
+          .text,
+      '雨后电影感',
+    );
+
+    await tester.tap(find.byKey(const ValueKey('style-definition-submit')));
+    await tester.pumpAndSettle();
+    expect(
+      store.project!.creationStyleDefinition?.origin,
+      StyleDefinitionOrigin.voice,
+    );
+    expect(store.project!.creationCapability, CreationCapability.styleVoice);
+  });
+
+  testWidgets(
+    'reference style uses a separate local reference and discards it',
+    (tester) async {
+      const path =
+          'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+          'Icon-App-1024x1024@1x.png';
+      final sha = 'a' * 64;
+      final photo = ProjectPhoto(
+        id: 'reference-style',
+        localPath: path,
+        originalName: 'source.png',
+        contentSha256: sha,
+      );
+      final importer = FakePhotoImporter([photo]);
+      final store = MemoryPhotoProjectStore();
+      final settings = await _settings();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoImporter: importer,
+          photoProjectStore: store,
+          referenceStyleAnalyzer: const _FixedReferenceStyleAnalyzer(),
+          metaOpCapabilities: iosMetaOpCapabilities,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('home-style')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('style-capability-reference')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('style-define-primary-action')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('style-input-text')), findsNothing);
+      expect(find.byKey(const ValueKey('style-input-voice')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('style-reference-choose')));
+      await tester.pumpAndSettle();
+      expect(importer.editingResourceImportCount, 1);
+      expect(
+        find.byKey(const ValueKey('style-reference-image')),
+        findsOneWidget,
+      );
+
+      final submit = find.byKey(const ValueKey('style-definition-submit'));
+      await tester.ensureVisible(submit);
+      await tester.tap(submit);
+      await tester.pumpAndSettle();
+
+      expect(
+        store.project!.creationStyleDefinition?.origin,
+        StyleDefinitionOrigin.reference,
+      );
+      expect(store.project!.creationStyleDefinition?.referenceFingerprint, sha);
+      expect(importer.discardedEditingResourceIds, hasLength(1));
+      expect(
+        store.project!.creationCapability,
+        CreationCapability.styleReference,
+      );
+    },
+  );
+
+  testWidgets('optimize workspace waits for an explicit capability', (
+    tester,
+  ) async {
+    final store = MemoryPhotoProjectStore();
+    final previewRenderer = FakePhotoPreviewRenderer.supported();
+    final settings = await _settings();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoImporter: FakePhotoImporter([_fixturePhoto('optimize-choice')]),
+        photoProjectStore: store,
+        photoPreviewRenderer: previewRenderer,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _tapHomeTarget(tester, find.byKey(const ValueKey('home-optimize')));
+    await tester.pumpAndSettle();
+
+    _expectCapabilityKeyOrder(tester, const [
+      'optimize-capability-natural',
+      'optimize-capability-ai-repair',
+      'optimize-capability-upscale',
+      'optimize-capability-old-photo',
+    ]);
+    expect(store.project!.creationStyleId, isNull);
+    expect(store.project!.creationStyleRecipe, isNull);
+    expect(store.project!.creationCapability, isNull);
+    expect(find.byKey(const ValueKey('optimize-primary-action')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('optimize-capability-unavailable-state')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('optimize-task-unavailable')),
+      findsNothing,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('optimize-capability-ai-repair')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      store.project!.creationCapability,
+      CreationCapability.optimizeAiRepair,
+    );
+    expect(
+      find.byKey(const ValueKey('optimize-capability-unavailable-state')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('optimize-primary-action')), findsNothing);
+    expect(previewRenderer.creates, isEmpty);
+    expect(previewRenderer.updates, isEmpty);
+
+    await tester.tap(find.byKey(const ValueKey('optimize-capability-natural')));
+    await tester.pumpAndSettle();
+
+    expect(
+      store.project!.creationCapability,
+      CreationCapability.optimizeNatural,
+    );
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const ValueKey('optimize-capability-description')),
+          )
+          .data,
+      '本地改善亮度、清晰度和质感，原图保持不变。',
+    );
+    expect(find.text('应用自然优化'), findsOneWidget);
+  });
+
+  testWidgets('HD upscale requires the user to choose 2x or 4x', (
+    tester,
+  ) async {
+    final store = MemoryPhotoProjectStore();
+    final generator = _RecordingUpscalePhotoGenerator();
+    final sharer = FakePhotoSharer();
+    final settings = await _settings();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoImporter: FakePhotoImporter([
+          _fixturePhoto('upscale-choice', contentSha256: 'a' * 64),
+        ]),
+        photoProjectStore: store,
+        upscalePhotoGenerator: generator,
+        photoSharer: sharer,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _tapHomeTarget(tester, find.byKey(const ValueKey('home-optimize')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('optimize-capability-upscale')));
+    await tester.pumpAndSettle();
+
+    final action = find.byKey(
+      const ValueKey('optimize-upscale-primary-action'),
+    );
+    expect(find.byKey(const ValueKey('upscale-scale-2x')), findsOneWidget);
+    expect(find.byKey(const ValueKey('upscale-scale-4x')), findsOneWidget);
+    expect(tester.widget<FilledButton>(action).onPressed, isNull);
+    expect(generator.scales, isEmpty);
+
+    await tester.tap(find.byKey(const ValueKey('upscale-scale-2x')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(action).onPressed, isNotNull);
+    await tester.ensureVisible(action);
+    await tester.tap(action);
+    await tester.pumpAndSettle();
+
+    expect(generator.scales, [UpscalePhotoScale.twoX]);
+    expect(
+      find.byKey(const ValueKey('optimize-generated-result-ready')),
+      findsOneWidget,
+    );
+    final share = find.byKey(const ValueKey('optimize-generated-result-share'));
+    await tester.ensureVisible(share);
+    await tester.tap(share);
+    await tester.pumpAndSettle();
+    expect(sharer.sharedPaths, ['/tmp/yingjian-upscaled-2x.jpg']);
+  });
+
+  testWidgets(
+    'cloud repair uploads and charges only after both confirmations',
+    (tester) async {
+      final store = MemoryPhotoProjectStore();
+      final provider = _CompletedCloudGenerationProvider();
+      final coordinator = GenerationCoordinator(
+        provider: provider,
+        store: _UiGenerationJobStore(),
+      );
+      final settings = await _settings();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoImporter: FakePhotoImporter([
+            ProjectPhoto(
+              id: 'cloud-repair-photo',
+              localPath:
+                  'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+                  'Icon-App-1024x1024@1x.png',
+              originalName: 'cloud-repair.png',
+              contentSha256: 'a' * 64,
+            ),
+          ]),
+          photoProjectStore: store,
+          generationCoordinator: coordinator,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await _tapHomeTarget(tester, find.byKey(const ValueKey('home-optimize')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('optimize-capability-ai-repair')),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('optimize-cloud-primary-action')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('generation-consent-sheet')),
+        findsOneWidget,
+      );
+      expect(provider.createCount, 0);
+      final confirm = find.byKey(const ValueKey('generation-confirm-create'));
+      expect(tester.widget<FilledButton>(confirm).onPressed, isNull);
+
+      await tester.tap(find.byKey(const ValueKey('generation-upload-consent')));
+      await tester.pumpAndSettle();
+      expect(provider.createCount, 0);
+      expect(tester.widget<FilledButton>(confirm).onPressed, isNull);
+      await tester.tap(find.byKey(const ValueKey('generation-cost-consent')));
+      await tester.pumpAndSettle();
+      expect(tester.widget<FilledButton>(confirm).onPressed, isNotNull);
+      await tester.tap(confirm);
+      await tester.pumpAndSettle();
+
+      expect(provider.createCount, 1);
+      expect(
+        find.byKey(const ValueKey('optimize-cloud-result-ready')),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets('old photo repair requires an explicit color mode', (
+    tester,
+  ) async {
+    final provider = _CompletedCloudGenerationProvider(
+      capabilities: const {CreationCapability.optimizeOldPhoto},
+    );
+    final settings = await _settings();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoImporter: FakePhotoImporter([
+          ProjectPhoto(
+            id: 'old-photo-input',
+            localPath:
+                'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+                'Icon-App-1024x1024@1x.png',
+            originalName: 'old-photo-input.png',
+            contentSha256: 'c' * 64,
+          ),
+        ]),
+        generationCoordinator: GenerationCoordinator(
+          provider: provider,
+          store: _UiGenerationJobStore(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _tapHomeTarget(tester, find.byKey(const ValueKey('home-optimize')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('optimize-capability-old-photo')),
+    );
+    await tester.pumpAndSettle();
+
+    final action = find.byKey(const ValueKey('optimize-cloud-primary-action'));
+    expect(find.byKey(const ValueKey('old-photo-mode-preserve')), findsOne);
+    expect(find.byKey(const ValueKey('old-photo-mode-colorize')), findsOne);
+    expect(
+      tester
+          .widget<ChoiceChip>(
+            find.byKey(const ValueKey('old-photo-mode-preserve')),
+          )
+          .selected,
+      isFalse,
+    );
+    expect(
+      tester
+          .widget<ChoiceChip>(
+            find.byKey(const ValueKey('old-photo-mode-colorize')),
+          )
+          .selected,
+      isFalse,
+    );
+    expect(tester.widget<FilledButton>(action).onPressed, isNull);
+    expect(provider.createCount, 0);
+
+    await tester.tap(find.byKey(const ValueKey('old-photo-mode-colorize')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(action).onPressed, isNotNull);
+    await tester.tap(action);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('generation-upload-consent')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('generation-cost-consent')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('generation-confirm-create')));
+    await tester.pumpAndSettle();
+
+    expect(provider.createCount, 1);
+    expect(
+      provider.snapshots.single.input,
+      isA<OldPhotoGenerationInput>().having(
+        (input) => input.colorMode,
+        'colorMode',
+        OldPhotoColorMode.colorize,
+      ),
+    );
+  });
+
+  testWidgets(
+    'AI redraw freezes and previews a StyleDefinition before cloud consent',
+    (tester) async {
+      final store = MemoryPhotoProjectStore();
+      final provider = _CompletedCloudGenerationProvider(
+        capabilities: const {CreationCapability.styleAiRedraw},
+      );
+      final settings = await _settings();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoImporter: FakePhotoImporter([
+            ProjectPhoto(
+              id: 'redraw-input',
+              localPath:
+                  'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+                  'Icon-App-1024x1024@1x.png',
+              originalName: 'redraw-input.png',
+              contentSha256: 'd' * 64,
+            ),
+          ]),
+          photoProjectStore: store,
+          generationCoordinator: GenerationCoordinator(
+            provider: provider,
+            store: _UiGenerationJobStore(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await _tapHomeTarget(tester, find.byKey(const ValueKey('home-style')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('style-capability-ai-redraw')),
+      );
+      await tester.pumpAndSettle();
+
+      final definition = find.byKey(
+        const ValueKey('ai-redraw-style-definition'),
+      );
+      final confirmDefinition = find.byKey(
+        const ValueKey('ai-redraw-confirm-definition'),
+      );
+      final intentPreview = find.byKey(
+        const ValueKey('ai-redraw-intent-preview'),
+      );
+      final action = find.byKey(const ValueKey('style-cloud-primary-action'));
+      expect(definition, findsOneWidget);
+      expect(confirmDefinition, findsOneWidget);
+      expect(intentPreview, findsNothing);
+      expect(tester.widget<FilledButton>(action).onPressed, isNull);
+      expect(provider.createCount, 0);
+
+      await tester.enterText(definition, '  保留人物身份，\n  改成低饱和电影剧照  ');
+      await tester.pumpAndSettle();
+      expect(intentPreview, findsNothing);
+      expect(tester.widget<FilledButton>(action).onPressed, isNull);
+      expect(provider.createCount, 0);
+
+      await tester.ensureVisible(confirmDefinition);
+      await tester.tap(confirmDefinition);
+      await tester.pumpAndSettle();
+
+      expect(intentPreview, findsOneWidget);
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('ai-redraw-confirmed-visual-intent')),
+            )
+            .data,
+        '保留人物身份， 改成低饱和电影剧照',
+      );
+      expect(
+        store.project!.creationStyleDefinition,
+        isA<StyleDefinition>()
+            .having(
+              (definition) => definition.origin,
+              'origin',
+              StyleDefinitionOrigin.aiRedraw,
+            )
+            .having(
+              (definition) => definition.visualIntent,
+              'visualIntent',
+              '保留人物身份， 改成低饱和电影剧照',
+            ),
+      );
+      expect(tester.widget<FilledButton>(action).onPressed, isNotNull);
+      await tester.ensureVisible(action);
+      await tester.pumpAndSettle();
+      await tester.tap(action);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('generation-upload-consent')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('generation-cost-consent')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('generation-confirm-create')));
+      await tester.pumpAndSettle();
+
+      expect(provider.createCount, 1);
+      expect(
+        provider.snapshots.single.input,
+        isA<StyleRedrawGenerationInput>()
+            .having(
+              (input) => input.confirmedDefinition,
+              'confirmedDefinition',
+              '保留人物身份， 改成低饱和电影剧照',
+            )
+            .having(
+              (input) => input.definitionFingerprint,
+              'definitionFingerprint',
+              StyleDefinition.aiRedraw(
+                confirmedVisualIntent: '保留人物身份， 改成低饱和电影剧照',
+                title: 'stable display title',
+                summary: 'stable display summary',
+              ).contentFingerprint,
+            ),
+      );
+    },
+  );
+
+  testWidgets('AI redraw rejects hidden controls before intent confirmation', (
+    tester,
+  ) async {
+    final store = MemoryPhotoProjectStore();
+    final provider = _CompletedCloudGenerationProvider(
+      capabilities: const {CreationCapability.styleAiRedraw},
+    );
+    final settings = await _settings();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoImporter: FakePhotoImporter([
+          ProjectPhoto(
+            id: 'redraw-invalid-input',
+            localPath:
+                'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+                'Icon-App-1024x1024@1x.png',
+            originalName: 'redraw-invalid-input.png',
+            contentSha256: 'e' * 64,
+          ),
+        ]),
+        photoProjectStore: store,
+        generationCoordinator: GenerationCoordinator(
+          provider: provider,
+          store: _UiGenerationJobStore(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _tapHomeTarget(tester, find.byKey(const ValueKey('home-style')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('style-capability-ai-redraw')));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey('ai-redraw-style-definition')),
+      '低饱和\u202E电影感',
+    );
+    await tester.pumpAndSettle();
+    final confirm = find.byKey(const ValueKey('ai-redraw-confirm-definition'));
+    await tester.ensureVisible(confirm);
+    await tester.tap(confirm);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('ai-redraw-intent-error')), findsOne);
+    expect(
+      find.byKey(const ValueKey('ai-redraw-intent-preview')),
+      findsNothing,
+    );
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const ValueKey('style-cloud-primary-action')),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(store.project!.creationStyleDefinition, isNull);
+    expect(provider.createCount, 0);
+  });
+
+  testWidgets('cleanup workspace waits for an explicit capability', (
+    tester,
+  ) async {
+    final store = MemoryPhotoProjectStore();
+    final analyzer = _CountingPhotoAnalyzer(subjectAvailable: true);
+    final settings = await _settings();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoImporter: FakePhotoImporter([_fixturePhoto('cleanup-choice')]),
+        photoProjectStore: store,
+        photoAnalyzer: analyzer,
+        metaOpCapabilities: iosMetaOpCapabilities,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _tapHomeTarget(tester, find.byKey(const ValueKey('home-cleanup')));
+    await tester.pumpAndSettle();
+
+    _expectCapabilityKeyOrder(tester, const [
+      'cleanup-capability-white',
+      'cleanup-capability-transparent',
+      'cleanup-capability-replace-background',
+      'cleanup-capability-remove-passerby',
+      'cleanup-capability-brush-remove',
+    ]);
+    expect(store.project!.creationStyleId, isNull);
+    expect(store.project!.creationStyleRecipe, isNull);
+    expect(store.project!.creationCapability, isNull);
+    expect(find.byKey(const ValueKey('cleanup-primary-action')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('cleanup-capability-unavailable-state')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('cleanup-task-unavailable')),
+      findsNothing,
+    );
+    expect(analyzer.analyzeCalls, 0);
+
+    await tester.tap(find.byKey(const ValueKey('cleanup-capability-white')));
+    await tester.pumpAndSettle();
+
+    expect(analyzer.analyzeCalls, 1);
+    expect(store.project!.creationCapability, CreationCapability.cleanupWhite);
+    expect(find.text('应用白底'), findsOneWidget);
+  });
+
+  testWidgets('brush removal uploads only the mask the user explicitly drew', (
+    tester,
+  ) async {
+    final provider = _CompletedCloudGenerationProvider(
+      capabilities: const {CreationCapability.cleanupBrushRemove},
+    );
+    final maskCreator = _RecordingMaskRemovalInputCreator();
+    final settings = await _settings();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoImporter: FakePhotoImporter([
+          ProjectPhoto(
+            id: 'brush-remove-input',
+            localPath:
+                'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+                'Icon-App-1024x1024@1x.png',
+            originalName: 'brush-remove.png',
+            contentSha256: 'e' * 64,
+            pixelWidth: 1024,
+            pixelHeight: 1024,
+          ),
+        ]),
+        generationCoordinator: GenerationCoordinator(
+          provider: provider,
+          store: _UiGenerationJobStore(),
+        ),
+        maskRemovalInputCreator: maskCreator,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _tapHomeTarget(tester, find.byKey(const ValueKey('home-cleanup')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('cleanup-capability-brush-remove')),
+    );
+    await tester.pumpAndSettle();
+
+    final cloudAction = find.byKey(
+      const ValueKey('cleanup-cloud-primary-action'),
+    );
+    expect(tester.widget<FilledButton>(cloudAction).onPressed, isNull);
+    expect(provider.createCount, 0);
+    await tester.tap(find.byKey(const ValueKey('cleanup-mask-input-action')));
+    await tester.pumpAndSettle();
+    final maskConfirm = find.byKey(const ValueKey('mask-removal-confirm'));
+    expect(tester.widget<FilledButton>(maskConfirm).onPressed, isNull);
+    await tester.tap(find.byKey(const ValueKey('mask-removal-canvas')));
+    await tester.pump();
+    expect(tester.widget<FilledButton>(maskConfirm).onPressed, isNotNull);
+    expect(provider.createCount, 0);
+    await tester.ensureVisible(maskConfirm);
+    await tester.pumpAndSettle();
+    await tester.tap(maskConfirm);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('cleanup-mask-input-ready')),
+      findsOneWidget,
+    );
+    expect(tester.widget<FilledButton>(cloudAction).onPressed, isNotNull);
+    expect(maskCreator.calls, hasLength(1));
+    await tester.ensureVisible(cloudAction);
+    await tester.pumpAndSettle();
+    await tester.tap(cloudAction);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('generation-upload-consent')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('generation-cost-consent')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('generation-confirm-create')));
+    await tester.pumpAndSettle();
+
+    expect(provider.createCount, 1);
+    expect(provider.snapshots.single.input, same(maskCreator.result));
+  });
+
+  testWidgets(
+    'replacement background imports only after its explicit selection',
+    (tester) async {
+      final temp = Directory.systemTemp.createTempSync(
+        'yingjian-replacement-background-',
+      );
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final sha = 'a' * 64;
+      final path = '${temp.path}/resources/aa/$sha.png';
+      final file = File(path);
+      file.parent.createSync(recursive: true);
+      file.writeAsBytesSync(
+        File(
+          'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+          'Icon-App-1024x1024@1x.png',
+        ).readAsBytesSync(),
+      );
+      final sourceAndBackground = ProjectPhoto(
+        id: 'cleanup-replacement-choice',
+        localPath: path,
+        originalName: 'background.png',
+        contentSha256: sha,
+        pixelWidth: 1024,
+        pixelHeight: 1024,
+        colorSpace: PhotoColorSpace.srgb,
+        inputFormat: PhotoInputFormat.png,
+        supportState: PhotoSupportState.supported,
+      );
+      final importer = FakePhotoImporter([sourceAndBackground]);
+      final analyzer = _CountingPhotoAnalyzer(subjectAvailable: true);
+      final store = MemoryPhotoProjectStore();
+      final settings = await _settings();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoImporter: importer,
+          photoProjectStore: store,
+          photoAnalyzer: analyzer,
+          metaOpCapabilities: iosMetaOpCapabilities,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await _tapHomeTarget(tester, find.byKey(const ValueKey('home-cleanup')));
+      await tester.pumpAndSettle();
+
+      expect(importer.editingResourceImportCount, 0);
+      expect(analyzer.analyzeCalls, 0);
+      await tester.tap(
+        find.byKey(const ValueKey('cleanup-capability-replace-background')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        store.project!.creationCapability,
+        CreationCapability.cleanupReplaceBackground,
+      );
+      expect(analyzer.analyzeCalls, 1);
+      expect(importer.editingResourceImportCount, 0);
+      final choose = find.byKey(
+        const ValueKey('cleanup-choose-background-action'),
+      );
+      expect(choose, findsOneWidget);
+      await tester.tap(choose);
+      await tester.pumpAndSettle();
+
+      final imported = importer.lastImportedEditingResource!;
+      expect(importer.editingResourceImportCount, 1);
+      expect(imported.localPath, path);
+      expect(
+        store.project!.editingResources.resources,
+        isNot(contains(imported.descriptor.id)),
+      );
+
+      await tester.tap(find.byKey(const ValueKey('cleanup-choose-capability')));
+      await tester.pumpAndSettle();
+      expect(store.project!.creationCapability, isNull);
+      expect(importer.discardedEditingResourceIds, [imported.descriptor.id]);
+
+      await tester.tap(
+        find.byKey(const ValueKey('cleanup-capability-replace-background')),
+      );
+      await tester.pumpAndSettle();
+      expect(analyzer.analyzeCalls, 2);
+      await tester.tap(
+        find.byKey(const ValueKey('cleanup-choose-background-action')),
+      );
+      await tester.pumpAndSettle();
+      expect(importer.editingResourceImportCount, 2);
+
+      final apply = find.byKey(const ValueKey('cleanup-primary-action'));
+      expect(apply, findsOneWidget);
+      expect(tester.widget<FilledButton>(apply).onPressed, isNotNull);
+      await tester.tap(apply);
+      await tester.pumpAndSettle();
+
+      final result = store.project!.currentStaticStyleResult!;
+      expect(result.capability, CreationCapability.cleanupReplaceBackground);
+      expect(
+        result.recipe.semanticEditingRecipe.background,
+        BackgroundTreatment.image,
+      );
+      expect(result.recipe.semanticEditingRecipe.backgroundImagePath, path);
+      expect(
+        result.recipe.semanticEditingRecipe.backgroundImageResourceId,
+        imported.descriptor.id,
+      );
+      expect(
+        store.project!.editingResources.resources[imported.descriptor.id],
+        imported.descriptor,
+      );
+      expect(importer.discardedEditingResourceIds, [imported.descriptor.id]);
+    },
+  );
+
+  testWidgets('transparent cutout applies only after its explicit selection', (
+    tester,
+  ) async {
+    final store = MemoryPhotoProjectStore();
+    final analyzer = _CountingPhotoAnalyzer(subjectAvailable: true);
+    final exporter = _PreparingPhotoExporter();
+    final settings = await _settings();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoImporter: FakePhotoImporter([
+          _fixturePhoto('cleanup-transparent-choice'),
+        ]),
+        photoProjectStore: store,
+        photoAnalyzer: analyzer,
+        photoExporter: exporter,
+        metaOpCapabilities: iosMetaOpCapabilities,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _tapHomeTarget(tester, find.byKey(const ValueKey('home-cleanup')));
+    await tester.pumpAndSettle();
+
+    expect(analyzer.analyzeCalls, 0);
+    await tester.tap(
+      find.byKey(const ValueKey('cleanup-capability-transparent')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      store.project!.creationCapability,
+      CreationCapability.cleanupTransparent,
+    );
+    expect(analyzer.analyzeCalls, 1);
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const ValueKey('cleanup-capability-description')),
+          )
+          .data,
+      '抠出主体并生成透明背景图片。',
+    );
+    expect(
+      find.byKey(const ValueKey('cleanup-capability-unavailable-state')),
+      findsNothing,
+    );
+    final action = find.byKey(const ValueKey('cleanup-primary-action'));
+    expect(action, findsOneWidget);
+    expect(tester.widget<FilledButton>(action).onPressed, isNotNull);
+    await tester.tap(action);
+    await tester.pumpAndSettle();
+    expect(
+      store.project!.currentStaticStyleResult?.capability,
+      CreationCapability.cleanupTransparent,
+    );
+    expect(
+      store
+          .project!
+          .currentStaticStyleResult
+          ?.recipe
+          .semanticEditingRecipe
+          .background,
+      BackgroundTreatment.transparent,
+    );
+    await tester.tap(find.byKey(const ValueKey('style-result-share')));
+    await tester.pumpAndSettle();
+    expect(exporter.preparedOptions.single.format, PhotoExportFormat.png);
+  });
+
+  testWidgets('motion workspace waits for an explicit capability', (
+    tester,
+  ) async {
+    final store = MemoryPhotoProjectStore();
+    final settings = await _settings();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoImporter: FakePhotoImporter([_fixturePhoto('motion-choice')]),
+        photoProjectStore: store,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _tapHomeTarget(tester, find.byKey(const ValueKey('home-motion')));
+    await tester.pumpAndSettle();
+
+    _expectCapabilityKeyOrder(tester, const [
+      'motion-capability-subtle',
+      'motion-capability-camera-push',
+      'motion-capability-light-flow',
+    ]);
+    expect(store.project!.creationStyleId, isNull);
+    expect(store.project!.creationStyleRecipe, isNull);
+    expect(store.project!.creationCapability, isNull);
+    expect(
+      find.byKey(const ValueKey('motion-unavailable-state')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('motion-generate-primary-action')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('motion-style-primary-action')),
+      findsNothing,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('motion-capability-camera-push')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      store.project!.creationCapability,
+      CreationCapability.motionCameraPush,
+    );
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const ValueKey('motion-capability-description')),
+          )
+          .data,
+      '生成镜头缓慢推进的动态效果。',
+    );
+    expect(
+      find.byKey(const ValueKey('motion-capability-unavailable-state')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('motion-generate-primary-action')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('motion-style-primary-action')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('motion generates only the direction the user selected', (
+    tester,
+  ) async {
+    final store = MemoryPhotoProjectStore();
+    final generator = _RecordingMotionPhotoGenerator();
+    final sharer = FakePhotoSharer();
+    final settings = await _settings();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoImporter: FakePhotoImporter([
+          _fixturePhoto('motion-local', contentSha256: 'b' * 64),
+        ]),
+        photoProjectStore: store,
+        motionPhotoGenerator: generator,
+        photoSharer: sharer,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _tapHomeTarget(tester, find.byKey(const ValueKey('home-motion')));
+    await tester.pumpAndSettle();
+
+    expect(generator.effects, isEmpty);
+    await tester.tap(
+      find.byKey(const ValueKey('motion-capability-camera-push')),
+    );
+    await tester.pumpAndSettle();
+
+    final action = find.byKey(const ValueKey('motion-generate-primary-action'));
+    expect(action, findsOneWidget);
+    await tester.ensureVisible(action);
+    await tester.tap(action);
+    await tester.pumpAndSettle();
+
+    expect(generator.effects, [MotionPhotoEffect.cameraPush]);
+    expect(
+      find.byKey(const ValueKey('motion-generated-result-ready')),
+      findsOneWidget,
+    );
+    final share = find.byKey(const ValueKey('motion-generated-result-share'));
+    await tester.ensureVisible(share);
+    await tester.tap(share);
+    await tester.pumpAndSettle();
+    expect(sharer.sharedPaths, ['/tmp/yingjian-motion-cameraPush.mp4']);
   });
 
   testWidgets('a style cannot be applied before its preview succeeds', (
@@ -194,6 +1300,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
+    await _selectOfficialStyle(tester);
 
     final apply = tester.widget<FilledButton>(
       find.byKey(const ValueKey('apply-style-primary-action')),
@@ -214,7 +1321,7 @@ void main() {
     expect(store.project!.currentStaticStyleResult, isNull);
   });
 
-  testWidgets('legacy custom recipe is restored without visual replacement', (
+  testWidgets('legacy custom recipe waits for an explicit capability', (
     tester,
   ) async {
     final customRecipe = EditRecipe(warmth: 0.07, saturation: -0.03);
@@ -237,22 +1344,19 @@ void main() {
     );
     await tester.pumpAndSettle();
     final resume = find.byKey(const ValueKey('home-resume-project'));
-    await tester.ensureVisible(resume);
+    await _scrollHomeTo(tester, resume);
     await tester.tap(resume);
     await tester.pumpAndSettle();
 
+    expect(store.project!.recipe, customRecipe);
+    expect(store.project!.creationCapability, isNull);
+    expect(store.project!.creationStyleId, isNull);
+    expect(store.project!.creationStyleRecipe, isNull);
     expect(
-      tester.widget<NativePhotoPreview>(find.byType(NativePhotoPreview)).recipe,
-      customRecipe,
+      find.byKey(const ValueKey('style-capability-official')),
+      findsOneWidget,
     );
-    expect(store.project!.creationStyleId, 'saved-custom');
-    expect(store.project!.creationStyleRecipe, customRecipe);
-    expect(
-      tester
-          .widget<Text>(find.byKey(const ValueKey('current-style-name')))
-          .data,
-      '已保存风格',
-    );
+    expect(find.byKey(const ValueKey('style-options')), findsNothing);
   });
 
   for (final legacySchema in [11, 13, 14]) {
@@ -300,7 +1404,10 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        await tester.tap(find.byKey(const ValueKey('home-resume-project')));
+        await _tapHomeTarget(
+          tester,
+          find.byKey(const ValueKey('home-resume-project')),
+        );
         await tester.pumpAndSettle();
 
         expect(
@@ -344,14 +1451,18 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('home-resume-project')));
+    await _tapHomeTarget(
+      tester,
+      find.byKey(const ValueKey('home-resume-project')),
+    );
     await tester.pumpAndSettle();
 
     expect(store.project!.flowState, PhotoProjectFlowState.editing);
-    expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
+    expect(store.project!.creationCapability, isNull);
+    expect(find.byKey(const ValueKey('style-options')), findsNothing);
     expect(
       find.byKey(const ValueKey('apply-style-primary-action')),
-      findsOneWidget,
+      findsNothing,
     );
   });
 
@@ -378,7 +1489,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-resume-project')));
+    await _tapHomeTarget(
+      tester,
+      find.byKey(const ValueKey('home-resume-project')),
+    );
     await tester.pumpAndSettle();
 
     expect(store.project!.photos, [first, focused]);
@@ -403,12 +1517,14 @@ void main() {
         updatedAt: DateTime.utc(2026, 8, 20),
         photos: [photo],
         recipe: recipe,
+        creationCapability: CreationCapability.styleOfficial,
         creationStyleId: 'natural',
         creationStyleRecipe: recipe,
         creationResult: StaticStyleResultIdentity(
           sourcePhotoId: photo.id,
           editStateVersion: 0,
           styleId: 'natural',
+          capability: CreationCapability.styleOfficial,
           recipe: recipe,
         ),
         flowState: PhotoProjectFlowState.exporting,
@@ -424,7 +1540,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-resume-project')));
+    await _tapHomeTarget(
+      tester,
+      find.byKey(const ValueKey('home-resume-project')),
+    );
     await tester.pumpAndSettle();
 
     expect(store.project!.flowState, PhotoProjectFlowState.exported);
@@ -464,6 +1583,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(entry);
     await tester.pumpAndSettle();
+    await _selectOfficialStyle(tester);
     expect(tester.takeException(), isNull);
     expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
     final action = find.byKey(const ValueKey('apply-style-primary-action'));
@@ -479,11 +1599,14 @@ void main() {
     await tester.ensureVisible(save);
     await tester.pump();
     expect(save, findsOneWidget);
-    expect(find.text('换个风格'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('style-result-change-style')),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('motion confirmation stays reachable with large text', (
+  testWidgets('motion unavailable state stays reachable with large text', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(320, 568);
@@ -512,20 +1635,28 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(entry);
     await tester.pumpAndSettle();
-    final action = find.byKey(const ValueKey('motion-style-primary-action'));
-    await tester.ensureVisible(action);
-    await tester.tap(action);
+    await tester.tap(find.byKey(const ValueKey('motion-capability-subtle')));
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
-    final close = find.byKey(const ValueKey('motion-confirmation-close'));
-    await tester.ensureVisible(close);
-    await tester.tap(close);
-    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('motion-capability-unavailable-state')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('motion-style-primary-action')),
+      findsNothing,
+    );
     expect(
       find.byKey(const ValueKey('motion-confirmation-sheet')),
       findsNothing,
     );
+    expect(find.byKey(const ValueKey('style-options')), findsNothing);
+    final back = find.byKey(const ValueKey('style-workspace-back'));
+    await tester.ensureVisible(back);
+    await tester.tap(back);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('home-page')), findsOneWidget);
   });
 
   testWidgets(
@@ -559,6 +1690,7 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
+      await _selectOfficialStyle(tester);
 
       expect(
         find.byKey(const ValueKey('apply-style-workspace')),
@@ -577,6 +1709,11 @@ void main() {
         findsNothing,
       );
       expect(find.byKey(const ValueKey('editor-page')), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('style-workspace-back')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('home-resume-project')), findsOneWidget);
     },
   );
 
@@ -596,7 +1733,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const ValueKey('home-motion')));
+      await _tapHomeTarget(tester, find.byKey(const ValueKey('home-motion')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('motion-capability-light-flow')),
+      );
       await tester.pumpAndSettle();
 
       expect(
@@ -604,14 +1745,24 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.byKey(const ValueKey('motion-style-primary-action')),
+        find.byKey(const ValueKey('motion-capability-unavailable-state')),
         findsOneWidget,
       );
       expect(
         find.byKey(const ValueKey('apply-style-primary-action')),
         findsNothing,
       );
+      expect(
+        find.byKey(const ValueKey('motion-style-primary-action')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('motion-confirmation-sheet')),
+        findsNothing,
+      );
+      expect(find.byKey(const ValueKey('style-options')), findsNothing);
       expect(store.project?.creationIntent, CreationIntent.motion);
+      expect(store.project?.creationTask, CreationTask.motion);
     },
   );
 
@@ -627,7 +1778,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('home-motion')));
+    await _tapHomeTarget(tester, find.byKey(const ValueKey('home-motion')));
     await tester.pump(const Duration(milliseconds: 220));
     expect(find.byKey(const ValueKey('home-motion-preparing')), findsOneWidget);
     expect(find.byKey(const ValueKey('home-style-preparing')), findsNothing);
@@ -663,7 +1814,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-motion')));
+    await _tapHomeTarget(tester, find.byKey(const ValueKey('home-motion')));
     await tester.pumpAndSettle();
 
     expect((await store.loadLatest())?.id, previous.id);
@@ -705,6 +1856,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
+    await _selectOfficialCapability(tester);
 
     final beforeSelection = store.project!;
     final beforeRecipe = beforeSelection.effectiveRecipeFor(photo.id);
@@ -719,11 +1871,7 @@ void main() {
           .data,
       '柔光',
     );
-    expect(previewRenderer.updates, isNotEmpty);
-    expect(
-      previewRenderer.updates.last.toPlatformArguments(),
-      isNot(previewRenderer.creates.first.toPlatformArguments()),
-    );
+    expect(previewRenderer.creates, isNotEmpty);
     expect(store.project!.effectiveRecipeFor(photo.id), beforeRecipe);
     expect(store.project!.editStateVersion, beforeVersion);
     expect(store.project!.undoHistory, hasLength(beforeUndoCount));
@@ -749,6 +1897,8 @@ void main() {
         sourcePhotoId: photo.id,
         editStateVersion: beforeVersion + 1,
         styleId: 'soft-light',
+        capability: CreationCapability.styleOfficial,
+        styleName: '柔光',
         recipe: expected,
       ),
     );
@@ -757,7 +1907,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.pump();
     final resume = find.byKey(const ValueKey('home-resume-project'));
-    await tester.ensureVisible(resume);
+    await _scrollHomeTo(tester, resume);
     await tester.pumpAndSettle();
     await tester.tap(resume);
     await tester.pumpAndSettle();
@@ -775,13 +1925,19 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('style-result-change-style')));
     await tester.pumpAndSettle();
     expect(store.project!.currentStaticStyleResult, isNull);
+    expect(store.project!.creationCapability, isNull);
+    expect(store.project!.creationResult, isNotNull);
+    await _selectOfficialCapability(tester);
     expect(store.project!.recoverableStaticStyleResult, isNotNull);
     await tester.tap(find.byKey(const ValueKey('style-option-natural')));
     await tester.pumpAndSettle();
     expect(store.project!.currentStaticStyleResult, isNull);
     await tester.tap(find.byKey(const ValueKey('style-workspace-back')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-resume-project')));
+    await _tapHomeTarget(
+      tester,
+      find.byKey(const ValueKey('home-resume-project')),
+    );
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
     expect(
@@ -824,13 +1980,14 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-resume-project')));
-    await tester.pumpAndSettle();
-
-    final preview = tester.widget<NativePhotoPreview>(
-      find.byType(NativePhotoPreview),
+    await _tapHomeTarget(
+      tester,
+      find.byKey(const ValueKey('home-resume-project')),
     );
-    expect(preview.recipe.crop, crop);
+    await tester.pumpAndSettle();
+    expect(store.project!.recipe.crop, crop);
+    expect(store.project!.creationCapability, isNull);
+    await _selectOfficialCapability(tester);
 
     await tester.tap(find.byKey(const ValueKey('style-option-soft-light')));
     await tester.pumpAndSettle();
@@ -869,6 +2026,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
+    await _selectOfficialCapability(tester);
     await tester.tap(find.byKey(const ValueKey('style-option-soft-light')));
     await tester.pumpAndSettle();
     final before = store.project!;
@@ -907,6 +2065,7 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
+      await _selectOfficialCapability(tester);
       await tester.tap(find.byKey(const ValueKey('style-option-soft-light')));
       await tester.pumpAndSettle();
       await tester.tap(
@@ -916,7 +2075,10 @@ void main() {
 
       final save = find.byKey(const ValueKey('style-result-save'));
       expect(save, findsOneWidget);
-      expect(find.text('换个风格'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('style-result-change-style')),
+        findsOneWidget,
+      );
       expect(find.byKey(const ValueKey('style-options')), findsNothing);
       expect(find.byKey(const ValueKey('style-ai-entry')), findsNothing);
       expect(
@@ -955,7 +2117,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('style-workspace-close')));
       await tester.pumpAndSettle();
       final resume = find.byKey(const ValueKey('home-resume-project'));
-      await tester.ensureVisible(resume);
+      await _scrollHomeTo(tester, resume);
       await tester.tap(resume);
       await tester.pumpAndSettle();
       expect(find.text('已保存到系统相册'), findsOneWidget);
@@ -983,6 +2145,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
+    await _selectOfficialStyle(tester);
     await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('style-result-save')));
@@ -991,6 +2154,7 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('style-result-change-style')));
     await tester.pumpAndSettle();
+    await _selectOfficialStyle(tester);
     await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
     await tester.pumpAndSettle();
 
@@ -1018,6 +2182,7 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
+      await _selectOfficialStyle(tester);
       await tester.tap(
         find.byKey(const ValueKey('apply-style-primary-action')),
       );
@@ -1051,12 +2216,14 @@ void main() {
         updatedAt: DateTime.utc(2026, 8, 31),
         photos: [photo],
         recipe: recipe,
-        creationStyleId: 'saved-custom',
+        creationCapability: CreationCapability.styleOfficial,
+        creationStyleId: 'natural',
         creationStyleRecipe: recipe,
         creationResult: StaticStyleResultIdentity(
           sourcePhotoId: photo.id,
           editStateVersion: 0,
-          styleId: 'saved-custom',
+          styleId: 'natural',
+          capability: CreationCapability.styleOfficial,
           recipe: recipe,
         ),
       ),
@@ -1064,7 +2231,10 @@ void main() {
     final settings = await _settings();
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-resume-project')));
+    await _tapHomeTarget(
+      tester,
+      find.byKey(const ValueKey('home-resume-project')),
+    );
     await tester.pumpAndSettle();
 
     expect(
@@ -1096,6 +2266,7 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
+      await _selectOfficialStyle(tester);
       await tester.tap(
         find.byKey(const ValueKey('apply-style-primary-action')),
       );
@@ -1114,7 +2285,10 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('style-workspace-close')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('home-resume-project')));
+      await _tapHomeTarget(
+        tester,
+        find.byKey(const ValueKey('home-resume-project')),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('style-result-share')));
       await tester.pumpAndSettle();
@@ -1144,6 +2318,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
+    await _selectOfficialStyle(tester);
     await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
     await tester.pumpAndSettle();
 
@@ -1184,6 +2359,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
+    await _selectOfficialStyle(tester);
     await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
     await tester.pumpAndSettle();
 
@@ -1230,6 +2406,7 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
+      await _selectOfficialStyle(tester);
       await tester.tap(
         find.byKey(const ValueKey('apply-style-primary-action')),
       );
@@ -1290,6 +2467,7 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
+    await _selectOfficialStyle(tester);
     await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
     await tester.pumpAndSettle();
     final appliedRecipe = store.project!.sharedStyle.recipe;
@@ -1327,6 +2505,7 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
+      await _selectOfficialStyle(tester);
       await tester.tap(
         find.byKey(const ValueKey('apply-style-primary-action')),
       );
@@ -1376,6 +2555,7 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
+      await _selectOfficialStyle(tester);
       await tester.tap(
         find.byKey(const ValueKey('apply-style-primary-action')),
       );
@@ -1399,7 +2579,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(sharer.discardedPaths, ['/tmp/Yingjian_fixture.jpg']);
       expect(store.project!.flowState, PhotoProjectFlowState.editing);
-      expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
+      expect(store.project!.creationCapability, isNull);
+      expect(
+        find.byKey(const ValueKey('style-capability-official')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('style-options')), findsNothing);
     },
   );
 
@@ -1426,6 +2611,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
+    await _selectOfficialStyle(tester);
     await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('style-result-share')));
@@ -1438,6 +2624,7 @@ void main() {
     await tester.ensureVisible(changeStyle);
     await tester.tap(changeStyle);
     await tester.pumpAndSettle();
+    await _selectOfficialCapability(tester);
     await tester.tap(find.byKey(const ValueKey('style-option-soft-light')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
@@ -1467,6 +2654,7 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
+      await _selectOfficialStyle(tester);
       await tester.tap(
         find.byKey(const ValueKey('apply-style-primary-action')),
       );
@@ -1504,11 +2692,15 @@ void main() {
 
       store.completeTransition();
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('style-capability-official')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('style-options')), findsNothing);
     },
   );
 
-  testWidgets('motion primary action keeps generation behind confirmation', (
+  testWidgets('motion unavailable never creates a job or static result', (
     tester,
   ) async {
     final store = MemoryPhotoProjectStore();
@@ -1521,7 +2713,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-motion')));
+    await _tapHomeTarget(tester, find.byKey(const ValueKey('home-motion')));
     await tester.pumpAndSettle();
 
     final beforeSelection = store.project!;
@@ -1529,24 +2721,37 @@ void main() {
     final beforeRecipe = beforeSelection.effectiveRecipeFor(photoId);
     final beforeVersion = beforeSelection.editStateVersion;
     final beforeUndoCount = beforeSelection.undoHistory.length;
-    await tester.tap(find.byKey(const ValueKey('style-option-breeze')));
-    await tester.pumpAndSettle();
-    expect(store.project!.creationStyleId, 'breeze');
-    expect(store.project!.effectiveRecipeFor(photoId), beforeRecipe);
-    expect(store.project!.editStateVersion, beforeVersion);
-    expect(store.project!.undoHistory, hasLength(beforeUndoCount));
 
-    await tester.tap(find.byKey(const ValueKey('motion-style-primary-action')));
+    await tester.tap(
+      find.byKey(const ValueKey('motion-capability-camera-push')),
+    );
     await tester.pumpAndSettle();
 
     expect(
-      find.byKey(const ValueKey('motion-confirmation-sheet')),
+      find.byKey(const ValueKey('motion-capability-unavailable-state')),
       findsOneWidget,
     );
-    expect(find.text('动态生成服务尚未接入'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('motion-style-primary-action')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('motion-confirmation-sheet')),
+      findsNothing,
+    );
+    expect(find.byKey(const ValueKey('style-options')), findsNothing);
     expect(store.project!.effectiveRecipeFor(photoId), beforeRecipe);
     expect(store.project!.editStateVersion, beforeVersion);
     expect(store.project!.undoHistory, hasLength(beforeUndoCount));
+    expect(store.project!.currentStaticStyleResult, isNull);
+    expect(
+      store.project!.creationCapability,
+      CreationCapability.motionCameraPush,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('style-workspace-back')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('home-page')), findsOneWidget);
   });
 
   testWidgets('recent motion creation resumes only the motion workspace', (
@@ -1558,18 +2763,17 @@ void main() {
       updatedAt: DateTime.utc(2026, 8, 31),
       photos: [_fixturePhoto('persisted-motion-photo')],
       creationIntent: CreationIntent.motion,
-      creationStyleId: 'breeze',
+      creationCapability: CreationCapability.motionLightFlow,
     );
+    final store = MemoryPhotoProjectStore(project);
     final settings = await _settings();
 
-    await tester.pumpWidget(
-      buildTestApp(
-        settings,
-        photoProjectStore: MemoryPhotoProjectStore(project),
-      ),
-    );
+    await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-resume-project')));
+    await _tapHomeTarget(
+      tester,
+      find.byKey(const ValueKey('home-resume-project')),
+    );
     await tester.pumpAndSettle();
 
     expect(
@@ -1577,7 +2781,7 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.byKey(const ValueKey('motion-style-primary-action')),
+      find.byKey(const ValueKey('motion-capability-unavailable-state')),
       findsOneWidget,
     );
     expect(
@@ -1585,11 +2789,20 @@ void main() {
       findsNothing,
     );
     expect(
-      tester
-          .widget<Text>(find.byKey(const ValueKey('current-style-name')))
-          .data,
-      '微风',
+      find.byKey(const ValueKey('motion-style-primary-action')),
+      findsNothing,
     );
+    expect(
+      find.byKey(const ValueKey('motion-confirmation-sheet')),
+      findsNothing,
+    );
+    expect(find.byKey(const ValueKey('style-options')), findsNothing);
+    expect(store.project?.creationTask, CreationTask.motion);
+    expect(
+      store.project?.creationCapability,
+      CreationCapability.motionLightFlow,
+    );
+    expect(store.project?.currentStaticStyleResult, isNull);
   });
 
   testWidgets('recent creation route restores the tapped immutable project', (
@@ -1617,6 +2830,9 @@ void main() {
       createdAt: updatedAt,
       updatedAt: updatedAt,
       photos: [_fixturePhoto(photoId)],
+      creationCapability: styleId == null
+          ? null
+          : CreationCapability.styleOfficial,
       creationStyleId: styleId,
       creationStyleRecipe: styleRecipe,
     );
@@ -1640,8 +2856,7 @@ void main() {
     final selectedCard = find.byKey(
       const ValueKey('home-draft-selected-draft'),
     );
-    await tester.ensureVisible(selectedCard);
-    await tester.pumpAndSettle();
+    await _scrollHomeTo(tester, selectedCard);
     await tester.tap(selectedCard);
     await tester.pumpAndSettle();
 
@@ -1671,7 +2886,7 @@ void main() {
     final delete = find.byKey(
       const ValueKey('home-delete-draft-delete-pending'),
     );
-    await tester.ensureVisible(delete);
+    await _scrollHomeTo(tester, delete);
     await tester.tap(delete);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('home-confirm-delete-draft')));
@@ -1711,6 +2926,7 @@ void main() {
       updatedAt: DateTime.utc(2026, 8, 31),
       photos: [_fixturePhoto('versioned-style-photo')],
       recipe: persistedRecipe,
+      creationCapability: CreationCapability.styleOfficial,
       creationStyleId: 'soft-light',
       creationStyleRecipe: persistedRecipe,
     );
@@ -1725,7 +2941,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     final resume = find.byKey(const ValueKey('home-resume-project'));
-    await tester.ensureVisible(resume);
+    await _scrollHomeTo(tester, resume);
     await tester.pumpAndSettle();
     await tester.tap(resume);
     await tester.pumpAndSettle();
@@ -1741,90 +2957,20 @@ void main() {
     );
   });
 
-  testWidgets('AI style starts from the latest applied recipe', (tester) async {
-    final store = MemoryPhotoProjectStore();
-    final settings = await _settings();
-    await tester.pumpWidget(
-      buildTestApp(
-        settings,
-        photoImporter: FakePhotoImporter([_fixturePhoto('ai-current-state')]),
-        photoProjectStore: store,
-        metaOpCapabilities: iosMetaOpCapabilities,
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-style')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('style-option-warm-sun')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
-    await tester.pumpAndSettle();
-    expect(store.project!.recipe.warmth, closeTo(0.04, 0.0001));
-
-    await tester.tap(find.byKey(const ValueKey('style-result-change-style')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('style-ai-entry')));
-    await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const ValueKey('ai-style-prompt')),
-      '暖一点',
-    );
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('ai-style-define')));
-    await tester.pumpAndSettle();
-
-    expect(store.project!.creationStyleRecipe!.warmth, closeTo(0.16, 0.0001));
-  });
-
-  testWidgets('failed AI style save restores the visible persisted style', (
+  testWidgets('local style inputs stay idle until explicitly opened', (
     tester,
   ) async {
-    final store = _FailingAiStyleStore();
-    final settings = await _settings();
-    await tester.pumpWidget(
-      buildTestApp(
-        settings,
-        photoImporter: FakePhotoImporter([_fixturePhoto('ai-save-failure')]),
-        photoProjectStore: store,
-        metaOpCapabilities: iosMetaOpCapabilities,
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-style')));
-    await tester.pumpAndSettle();
-    expect(store.project!.creationStyleId, 'natural');
-
-    await tester.tap(find.byKey(const ValueKey('style-ai-entry')));
-    await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const ValueKey('ai-style-prompt')),
-      '电影感',
-    );
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('ai-style-define')));
-    await tester.pumpAndSettle();
-
-    expect(store.project!.creationStyleId, 'natural');
-    expect(find.byKey(const ValueKey('style-option-ai-custom')), findsNothing);
-    expect(
-      tester
-          .widget<Text>(find.byKey(const ValueKey('current-style-name')))
-          .data,
-      '自然',
-    );
-  });
-
-  testWidgets('redefining the AI style persists the newest recipe', (
-    tester,
-  ) async {
-    final photo = _fixturePhoto('ai-style-photo');
     final store = MemoryPhotoProjectStore();
+    final previewRenderer = FakePhotoPreviewRenderer.supported();
     final settings = await _settings();
     await tester.pumpWidget(
       buildTestApp(
         settings,
-        photoImporter: FakePhotoImporter([photo]),
+        photoImporter: FakePhotoImporter([
+          _fixturePhoto('unavailable-style-capabilities'),
+        ]),
         photoProjectStore: store,
+        photoPreviewRenderer: previewRenderer,
         metaOpCapabilities: iosMetaOpCapabilities,
       ),
     );
@@ -1832,48 +2978,97 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
 
-    Future<void> define(String prompt) async {
-      await tester.tap(find.byKey(const ValueKey('style-ai-entry')));
+    const localCases = <(String, CreationCapability)>[
+      ('style-capability-text', CreationCapability.styleText),
+      ('style-capability-voice', CreationCapability.styleVoice),
+      ('style-capability-reference', CreationCapability.styleReference),
+    ];
+    for (final (key, capability) in localCases) {
+      await tester.tap(find.byKey(ValueKey(key)));
       await tester.pumpAndSettle();
-      await tester.enterText(
-        find.byKey(const ValueKey('ai-style-prompt')),
-        prompt,
+
+      expect(store.project!.creationCapability, capability);
+      expect(store.project!.creationStyleId, isNull);
+      expect(store.project!.creationStyleRecipe, isNull);
+      expect(store.project!.creationStyleDefinition, isNull);
+      expect(
+        find.byKey(const ValueKey('style-capability-unavailable-state')),
+        findsNothing,
       );
-      await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('ai-style-define')));
-      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('style-define-primary-action')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('style-options')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('apply-style-primary-action')),
+        findsNothing,
+      );
+      expect(previewRenderer.creates, isEmpty);
+      expect(previewRenderer.updates, isEmpty);
     }
 
-    await define('电影感一点');
-    final firstRecipe = store.project!.creationStyleRecipe;
-    expect(store.project!.creationStyleId, 'ai-custom');
-    expect(store.project!.creationStyleName, '电影感一点');
-    expect(firstRecipe, isNotNull);
-
-    await define('暖一点');
-    final latestRecipe = store.project!.creationStyleRecipe;
-    expect(latestRecipe, isNot(firstRecipe));
-    expect(store.project!.creationStyleId, 'ai-custom');
-    expect(store.project!.creationStyleName, '暖一点');
-
-    await tester.tap(find.byKey(const ValueKey('style-workspace-back')));
+    await tester.tap(find.byKey(const ValueKey('style-capability-ai-redraw')));
     await tester.pumpAndSettle();
-    final resume = find.byKey(const ValueKey('home-resume-project'));
-    await tester.ensureVisible(resume);
-    await tester.pumpAndSettle();
-    await tester.tap(resume);
-    await tester.pumpAndSettle();
+    expect(store.project!.creationCapability, CreationCapability.styleAiRedraw);
     expect(
-      tester.widget<NativePhotoPreview>(find.byType(NativePhotoPreview)).recipe,
-      latestRecipe,
+      find.byKey(const ValueKey('style-capability-unavailable-state')),
+      findsOneWidget,
     );
     expect(
-      tester
-          .widget<Text>(find.byKey(const ValueKey('current-style-name')))
-          .data,
-      '暖一点',
+      find.byKey(const ValueKey('style-define-primary-action')),
+      findsNothing,
     );
   });
+}
+
+Future<void> _selectOfficialCapability(WidgetTester tester) async {
+  final capability = find.byKey(const ValueKey('style-capability-official'));
+  await tester.ensureVisible(capability);
+  await tester.pump();
+  await tester.tap(capability);
+  await tester.pumpAndSettle();
+}
+
+Future<void> _selectOfficialStyle(
+  WidgetTester tester, {
+  String styleKey = 'style-option-natural',
+}) async {
+  await _selectOfficialCapability(tester);
+  final style = find.byKey(ValueKey(styleKey));
+  await tester.ensureVisible(style);
+  await tester.pump();
+  await tester.tap(style);
+  await tester.pumpAndSettle();
+}
+
+Future<void> _scrollHomeTo(WidgetTester tester, Finder target) async {
+  await tester.scrollUntilVisible(
+    target,
+    320,
+    scrollable: find.descendant(
+      of: find.byKey(const ValueKey('home-scroll')),
+      matching: find.byType(Scrollable),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+Future<void> _tapHomeTarget(WidgetTester tester, Finder target) async {
+  await _scrollHomeTo(tester, target);
+  await tester.tap(target);
+}
+
+void _expectCapabilityKeyOrder(WidgetTester tester, List<String> expectedKeys) {
+  final renderedKeys = find
+      .byWidgetPredicate((widget) {
+        final key = widget.key;
+        return key is ValueKey<String> && expectedKeys.contains(key.value);
+      })
+      .evaluate()
+      .map((element) => (element.widget.key! as ValueKey<String>).value)
+      .toList(growable: false);
+  expect(renderedKeys, expectedKeys);
 }
 
 Future<AppSettings> _settings() async {
@@ -1881,13 +3076,266 @@ Future<AppSettings> _settings() async {
   return AppSettings.load();
 }
 
-ProjectPhoto _fixturePhoto(String id) => ProjectPhoto(
-  id: id,
-  localPath:
-      'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
-      'Icon-App-1024x1024@1x.png',
-  originalName: '$id.png',
-);
+ProjectPhoto _fixturePhoto(String id, {String contentSha256 = ''}) =>
+    ProjectPhoto(
+      id: id,
+      localPath:
+          'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+          'Icon-App-1024x1024@1x.png',
+      originalName: '$id.png',
+      contentSha256: contentSha256,
+    );
+
+final class _RecordingUpscalePhotoGenerator implements UpscalePhotoGenerator {
+  final List<UpscalePhotoScale> scales = [];
+
+  @override
+  Future<UpscalePhotoArtifact> generate({
+    required String sourcePath,
+    required UpscalePhotoScale scale,
+  }) async {
+    scales.add(scale);
+    return UpscalePhotoArtifact(
+      outputPath: '/tmp/yingjian-upscaled-${scale.factor}x.jpg',
+      contentSha256: 'e' * 64,
+      scale: scale,
+      width: 2048 * scale.factor,
+      height: 2048 * scale.factor,
+    );
+  }
+}
+
+final class _RecordingMotionPhotoGenerator implements MotionPhotoGenerator {
+  final List<MotionPhotoEffect> effects = [];
+
+  @override
+  Future<MotionPhotoArtifact> generate({
+    required String sourcePath,
+    required MotionPhotoEffect effect,
+  }) async {
+    effects.add(effect);
+    return MotionPhotoArtifact(
+      outputPath: '/tmp/yingjian-motion-${effect.id}.mp4',
+      contentSha256: 'f' * 64,
+      effect: effect,
+      width: 720,
+      height: 1280,
+      duration: const Duration(seconds: 3),
+    );
+  }
+}
+
+final class _UiGenerationJobStore implements GenerationJobStore {
+  final Map<String, GenerationJob> jobs = {};
+  final Map<GenerationRequestIdentity, GenerationRequestReservation>
+  reservations = {};
+
+  @override
+  Future<GenerationJob?> findByClientRequestId(String clientRequestId) async =>
+      jobs.values
+          .where((job) => job.clientRequestId == clientRequestId)
+          .firstOrNull;
+
+  @override
+  Future<GenerationJob?> findById(String id) async => jobs[id];
+
+  @override
+  Future<List<GenerationJob>> findByProjectId(String projectId) async => jobs
+      .values
+      .where((job) => job.projectId == projectId)
+      .toList(growable: false);
+
+  @override
+  Future<GenerationJob?> findLatest(
+    GenerationRequestIdentity identity, {
+    Set<GenerationJobState>? states,
+    bool includeAnyInput = false,
+  }) async {
+    final matches =
+        jobs.values
+            .where(
+              (job) =>
+                  identity.matches(job, includeAnyInput: includeAnyInput) &&
+                  (states == null || states.contains(job.state)),
+            )
+            .toList()
+          ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
+    return matches.firstOrNull;
+  }
+
+  @override
+  Future<GenerationRequestReservation?> findReservation(
+    GenerationRequestIdentity identity,
+  ) async => reservations[identity];
+
+  @override
+  Future<void> saveReservation(GenerationRequestReservation reservation) async {
+    reservations[reservation.identity] = reservation;
+  }
+
+  @override
+  Future<void> deleteReservation(String clientRequestId) async {
+    reservations.removeWhere(
+      (_, reservation) => reservation.clientRequestId == clientRequestId,
+    );
+  }
+
+  @override
+  Future<void> deleteProjectState(String projectId) async {
+    jobs.removeWhere((_, job) => job.projectId == projectId);
+    reservations.removeWhere((identity, _) => identity.projectId == projectId);
+  }
+
+  @override
+  Future<void> save(GenerationJob job) async {
+    jobs[job.id] = job;
+  }
+}
+
+final class _RecordingMaskRemovalInputCreator
+    implements MaskRemovalInputCreator {
+  final calls = <({int width, int height, int strokeCount})>[];
+  final result = MaskRemovalGenerationInput(
+    maskPath: '/app-support/explicit-mask.png',
+    maskSha256: 'f' * 64,
+  );
+
+  @override
+  Future<MaskRemovalGenerationInput> create({
+    required int pixelWidth,
+    required int pixelHeight,
+    required List<MaskStroke> strokes,
+  }) async {
+    calls.add((
+      width: pixelWidth,
+      height: pixelHeight,
+      strokeCount: strokes.length,
+    ));
+    return result;
+  }
+}
+
+final class _CompletedCloudGenerationProvider implements GenerationProvider {
+  _CompletedCloudGenerationProvider({
+    this.capabilities = const {CreationCapability.optimizeAiRepair},
+  });
+
+  final Set<CreationCapability> capabilities;
+  int createCount = 0;
+  final List<GenerationSourceSnapshot> snapshots = [];
+
+  @override
+  Set<CreationCapability> get availableCapabilities => capabilities;
+
+  @override
+  Future<void> refreshCapabilities() async {}
+
+  @override
+  GenerationOffer offerFor(CreationCapability capability) =>
+      GenerationOffer.cloud(
+        id: 'baidu-repair-v1',
+        capability: capability,
+        creditCost: 1,
+        expiresAt: DateTime.utc(2026, 9, 2),
+      );
+
+  @override
+  Future<GenerationJob> create({
+    required GenerationSourceSnapshot snapshot,
+    required String clientRequestId,
+    required GenerationConsent? consent,
+  }) async {
+    createCount += 1;
+    snapshots.add(snapshot);
+    return GenerationJob(
+      id: 'cloud-job-1',
+      clientRequestId: clientRequestId,
+      projectId: snapshot.projectId,
+      sourcePhotoId: snapshot.sourcePhotoId,
+      sourceSha256: snapshot.sourceSha256,
+      inputIdentity: snapshot.input?.identity,
+      capability: snapshot.capability,
+      state: GenerationJobState.succeeded,
+      provider: 'baidu',
+      model: 'image_definition_enhance',
+      canCancel: false,
+      createdAt: DateTime.utc(2026, 9, 1),
+      updatedAt: DateTime.utc(2026, 9, 1),
+      output: GeneratedMedia(
+        id: 'cloud-media-1',
+        kind: GeneratedMediaKind.image,
+        localPath: '/tmp/cloud-repair-result.jpg',
+        contentSha256: 'b' * 64,
+        width: 2048,
+        height: 2048,
+      ),
+    );
+  }
+
+  @override
+  Future<GenerationJob> cancel(GenerationJob job) async => job;
+
+  @override
+  Stream<GenerationJob> observe(GenerationJob job) => const Stream.empty();
+}
+
+final class _CountingPhotoAnalyzer implements PhotoAnalyzer {
+  _CountingPhotoAnalyzer({this.subjectAvailable = false});
+
+  final PhotoAnalyzer _delegate = const MetadataSafePhotoAnalyzer();
+  final bool subjectAvailable;
+  int analyzeCalls = 0;
+
+  @override
+  PhotoAnalysisEngineIdentity identityFor(ProjectPhoto photo) =>
+      _delegate.identityFor(photo);
+
+  @override
+  Future<LocalPhotoAnalysis> analyze(ProjectPhoto photo) {
+    analyzeCalls += 1;
+    if (subjectAvailable) {
+      return Future.value(
+        LocalPhotoAnalysis(
+          analysisVersion: 'widget-subject-v1',
+          capabilityVersion: 'widget-subject',
+          contentSha256: photo.contentSha256,
+          orientation: photo.orientation,
+          pixelWidth: photo.pixelWidth,
+          pixelHeight: photo.pixelHeight,
+          colorSpace: photo.colorSpace,
+          disposition: PhotoAnalysisDisposition.ready,
+          fallbackReason: AnalysisFallbackReason.none,
+          portrait: PortraitApplicability.applicable,
+          faceTargetRegions: const [
+            NormalizedTargetRegion(
+              left: 0.2,
+              top: 0.1,
+              right: 0.8,
+              bottom: 0.9,
+            ),
+          ],
+        ),
+      );
+    }
+    return _delegate.analyze(photo);
+  }
+}
+
+final class _FixedReferenceStyleAnalyzer implements ReferenceStyleAnalyzer {
+  const _FixedReferenceStyleAnalyzer();
+
+  @override
+  Future<ReferenceStyleSignals> analyze(String localPath) async =>
+      const ReferenceStyleSignals(
+        red: 0.72,
+        green: 0.54,
+        blue: 0.31,
+        luminance: 0.56,
+        saturation: 0.57,
+        contrast: 0.42,
+        edgeStrength: 0.18,
+      );
+}
 
 final class _DeniedPhotoExporter
     implements
@@ -1974,6 +3422,7 @@ final class _PreparingPhotoExporter
   int exportCalls = 0;
   final List<ProjectPhoto> preparedPhotos = [];
   final List<EditRecipe> preparedRecipes = [];
+  final List<PhotoExportOptions> preparedOptions = [];
 
   @override
   Future<ExportedPhoto> export({
@@ -1994,11 +3443,13 @@ final class _PreparingPhotoExporter
   }) {
     preparedPhotos.add(photo);
     preparedRecipes.add(recipe);
+    preparedOptions.add(options);
     final count = preparedPhotos.length;
+    final extension = options.format == PhotoExportFormat.png ? 'png' : 'jpg';
     return _ImmediatePhotoPreparation(
       PreparedPhoto(
         requestId: 'prepared-$count',
-        localPath: '/tmp/Yingjian_prepared-$count.jpg',
+        localPath: '/tmp/Yingjian_prepared-$count.$extension',
         width: 4032,
         height: 3024,
       ),
@@ -2133,21 +3584,6 @@ final class _ErrorAfterCancelImporter implements CancelablePhotoImporter {
     if (!_result.isCompleted) {
       _result.completeError(StateError('picker cancellation raced timeout'));
     }
-  }
-}
-
-final class _FailingAiStyleStore implements PhotoProjectStore {
-  PhotoProject? project;
-
-  @override
-  Future<PhotoProject?> loadLatest() async => project;
-
-  @override
-  Future<void> save(PhotoProject project) async {
-    if (project.creationStyleId == 'ai-custom') {
-      throw StateError('AI style snapshot save failed');
-    }
-    this.project = project;
   }
 }
 

@@ -1,0 +1,18 @@
+{
+  "name": "yingjian-generation-api",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "import-media": "node src/import-media.mjs",
+    "start": "node src/server.mjs",
+    "test": "node --test",
+    "worker:dev": "npx wrangler dev",
+    "worker:deploy": "npx wrangler deploy",
+    "worker:migrate:local": "npx wrangler d1 migrations apply yingjian-generation-production --local",
+    "worker:migrate:remote": "npx wrangler d1 migrations apply yingjian-generation-production --remote",
+    "worker:provision-enrollment": "node src/cloudflare/provision-enrollment-code.mjs"
+  }
+}

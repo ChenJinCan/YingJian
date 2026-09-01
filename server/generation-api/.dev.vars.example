@@ -1,0 +1,9 @@
+# Copy to .dev.vars for local Worker development only. .dev.vars is ignored.
+# Values below are placeholders and must never be committed after replacement.
+GENERATION_SESSION_SIGNING_KEY=replace-with-at-least-32-random-bytes
+GENERATION_OFFER_SIGNING_KEY=replace-with-at-least-32-random-bytes
+BAIDU_API_KEY=replace-only-when-baidu-is-explicitly-enabled
+BAIDU_SECRET_KEY=replace-only-when-baidu-is-explicitly-enabled
+ALIBABA_DASHSCOPE_API_KEY=replace-only-when-alibaba-is-explicitly-enabled
+VOLC_ACCESS_KEY_ID=replace-only-when-volcengine-is-explicitly-enabled
+VOLC_SECRET_ACCESS_KEY=replace-only-when-volcengine-is-explicitly-enabled

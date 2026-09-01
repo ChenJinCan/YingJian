@@ -236,6 +236,570 @@ abstract class AppLocalizations {
   /// **'当前风格'**
   String get currentStyle;
 
+  /// No description provided for @currentResult.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前结果'**
+  String get currentResult;
+
+  /// No description provided for @chooseCapabilityTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'请选择能力'**
+  String get chooseCapabilityTitle;
+
+  /// No description provided for @chooseCapabilityHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统不会替你选择；每次只执行你点选的一项。'**
+  String get chooseCapabilityHint;
+
+  /// No description provided for @chooseAnotherCapability.
+  ///
+  /// In zh, this message translates to:
+  /// **'重新选择能力'**
+  String get chooseAnotherCapability;
+
+  /// No description provided for @capabilityUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'该能力尚未完成'**
+  String get capabilityUnavailable;
+
+  /// No description provided for @capabilityUnavailableDetail.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前不会处理、上传、创建任务或扣费。你可以返回能力列表自己选择下一步。'**
+  String get capabilityUnavailableDetail;
+
+  /// No description provided for @capabilityOptimizeNatural.
+  ///
+  /// In zh, this message translates to:
+  /// **'自然优化'**
+  String get capabilityOptimizeNatural;
+
+  /// No description provided for @capabilityOptimizeAiRepair.
+  ///
+  /// In zh, this message translates to:
+  /// **'AI 修复'**
+  String get capabilityOptimizeAiRepair;
+
+  /// No description provided for @capabilityOptimizeUpscale.
+  ///
+  /// In zh, this message translates to:
+  /// **'高清放大'**
+  String get capabilityOptimizeUpscale;
+
+  /// No description provided for @capabilityOptimizeOldPhoto.
+  ///
+  /// In zh, this message translates to:
+  /// **'老照片修复'**
+  String get capabilityOptimizeOldPhoto;
+
+  /// No description provided for @capabilityStyleOfficial.
+  ///
+  /// In zh, this message translates to:
+  /// **'官方风格'**
+  String get capabilityStyleOfficial;
+
+  /// No description provided for @capabilityStyleText.
+  ///
+  /// In zh, this message translates to:
+  /// **'文字定风格'**
+  String get capabilityStyleText;
+
+  /// No description provided for @capabilityStyleVoice.
+  ///
+  /// In zh, this message translates to:
+  /// **'语音定风格'**
+  String get capabilityStyleVoice;
+
+  /// No description provided for @capabilityStyleReference.
+  ///
+  /// In zh, this message translates to:
+  /// **'参考图风格'**
+  String get capabilityStyleReference;
+
+  /// No description provided for @capabilityStyleAiRedraw.
+  ///
+  /// In zh, this message translates to:
+  /// **'AI 风格重绘'**
+  String get capabilityStyleAiRedraw;
+
+  /// No description provided for @capabilityCleanupWhite.
+  ///
+  /// In zh, this message translates to:
+  /// **'人物白底'**
+  String get capabilityCleanupWhite;
+
+  /// No description provided for @capabilityCleanupTransparent.
+  ///
+  /// In zh, this message translates to:
+  /// **'透明抠图'**
+  String get capabilityCleanupTransparent;
+
+  /// No description provided for @capabilityCleanupReplaceBackground.
+  ///
+  /// In zh, this message translates to:
+  /// **'替换背景'**
+  String get capabilityCleanupReplaceBackground;
+
+  /// No description provided for @capabilityCleanupRemovePasserby.
+  ///
+  /// In zh, this message translates to:
+  /// **'去路人'**
+  String get capabilityCleanupRemovePasserby;
+
+  /// No description provided for @capabilityCleanupBrushRemove.
+  ///
+  /// In zh, this message translates to:
+  /// **'涂抹去物'**
+  String get capabilityCleanupBrushRemove;
+
+  /// No description provided for @capabilityMotionSubtle.
+  ///
+  /// In zh, this message translates to:
+  /// **'轻微动态'**
+  String get capabilityMotionSubtle;
+
+  /// No description provided for @capabilityMotionCameraPush.
+  ///
+  /// In zh, this message translates to:
+  /// **'镜头推进'**
+  String get capabilityMotionCameraPush;
+
+  /// No description provided for @capabilityMotionLightFlow.
+  ///
+  /// In zh, this message translates to:
+  /// **'光影流动'**
+  String get capabilityMotionLightFlow;
+
+  /// No description provided for @capabilityMotionAiNatural.
+  ///
+  /// In zh, this message translates to:
+  /// **'AI 自然动效'**
+  String get capabilityMotionAiNatural;
+
+  /// No description provided for @capabilityOptimizeNaturalDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'本地改善亮度、清晰度和质感，原图保持不变。'**
+  String get capabilityOptimizeNaturalDescription;
+
+  /// No description provided for @capabilityOptimizeAiRepairDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'修复模糊、噪点和细节缺失。'**
+  String get capabilityOptimizeAiRepairDescription;
+
+  /// No description provided for @capabilityOptimizeUpscaleDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'提升分辨率并保留主体细节。'**
+  String get capabilityOptimizeUpscaleDescription;
+
+  /// No description provided for @capabilityOptimizeOldPhotoDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'修复划痕、褪色和老照片损伤。'**
+  String get capabilityOptimizeOldPhotoDescription;
+
+  /// No description provided for @capabilityStyleOfficialDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'从内置可复现风格中明确选择一种。'**
+  String get capabilityStyleOfficialDescription;
+
+  /// No description provided for @capabilityStyleTextDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'根据你输入的文字定义风格。'**
+  String get capabilityStyleTextDescription;
+
+  /// No description provided for @capabilityStyleVoiceDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'根据你确认的语音转写定义风格。'**
+  String get capabilityStyleVoiceDescription;
+
+  /// No description provided for @capabilityStyleReferenceDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'将参考图的光色质感应用到当前照片。'**
+  String get capabilityStyleReferenceDescription;
+
+  /// No description provided for @capabilityStyleAiRedrawDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'生成重新绘制的风格化静态图片。'**
+  String get capabilityStyleAiRedrawDescription;
+
+  /// No description provided for @capabilityCleanupWhiteDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'识别人像主体并生成白色背景。'**
+  String get capabilityCleanupWhiteDescription;
+
+  /// No description provided for @capabilityCleanupTransparentDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'抠出主体并生成透明背景图片。'**
+  String get capabilityCleanupTransparentDescription;
+
+  /// No description provided for @capabilityCleanupReplaceBackgroundDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'抠出主体后使用你选择的新背景。'**
+  String get capabilityCleanupReplaceBackgroundDescription;
+
+  /// No description provided for @capabilityCleanupRemovePasserbyDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'移除画面中的路人并补全背景。'**
+  String get capabilityCleanupRemovePasserbyDescription;
+
+  /// No description provided for @capabilityCleanupBrushRemoveDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'只移除你明确涂抹标记的内容。'**
+  String get capabilityCleanupBrushRemoveDescription;
+
+  /// No description provided for @capabilityMotionSubtleDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'为整张照片添加幅度克制的平移与缩放动态。'**
+  String get capabilityMotionSubtleDescription;
+
+  /// No description provided for @capabilityMotionCameraPushDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'生成镜头缓慢推进的动态效果。'**
+  String get capabilityMotionCameraPushDescription;
+
+  /// No description provided for @capabilityMotionLightFlowDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'生成光影自然流动的动态效果。'**
+  String get capabilityMotionLightFlowDescription;
+
+  /// No description provided for @capabilityMotionAiNaturalDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'将照片上传到云端并生成 3 秒自然动态视频。'**
+  String get capabilityMotionAiNaturalDescription;
+
+  /// No description provided for @chooseUpscaleScale.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择放大倍率'**
+  String get chooseUpscaleScale;
+
+  /// No description provided for @generateUpscale.
+  ///
+  /// In zh, this message translates to:
+  /// **'生成高清图片'**
+  String get generateUpscale;
+
+  /// No description provided for @generatingResult.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在生成…'**
+  String get generatingResult;
+
+  /// No description provided for @upscaleReady.
+  ///
+  /// In zh, this message translates to:
+  /// **'高清图片已生成，可分享或保存。'**
+  String get upscaleReady;
+
+  /// No description provided for @generateMotion.
+  ///
+  /// In zh, this message translates to:
+  /// **'生成动态照片'**
+  String get generateMotion;
+
+  /// No description provided for @motionReady.
+  ///
+  /// In zh, this message translates to:
+  /// **'动态照片已生成，可分享或保存。'**
+  String get motionReady;
+
+  /// No description provided for @generationFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'生成失败，请重试。'**
+  String get generationFailed;
+
+  /// No description provided for @cloudGenerationConsentTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'确认云端处理'**
+  String get cloudGenerationConsentTitle;
+
+  /// No description provided for @cloudGenerationConsentDetail.
+  ///
+  /// In zh, this message translates to:
+  /// **'确认后才会上传并创建这一项任务；处理可能需要等待，可取消阶段会显示取消操作。源图、蒙版和云端结果在网关最多保留 24 小时。'**
+  String get cloudGenerationConsentDetail;
+
+  /// No description provided for @cloudUploadConsent.
+  ///
+  /// In zh, this message translates to:
+  /// **'同意上传当前照片完成所选能力'**
+  String get cloudUploadConsent;
+
+  /// No description provided for @cloudCostConsent.
+  ///
+  /// In zh, this message translates to:
+  /// **'确认消耗 {creditCost} 次云端权益'**
+  String cloudCostConsent(int creditCost);
+
+  /// No description provided for @confirmAndGenerate.
+  ///
+  /// In zh, this message translates to:
+  /// **'确认并生成'**
+  String get confirmAndGenerate;
+
+  /// No description provided for @confirmCloudGeneration.
+  ///
+  /// In zh, this message translates to:
+  /// **'开始云端处理'**
+  String get confirmCloudGeneration;
+
+  /// No description provided for @cloudGenerationReady.
+  ///
+  /// In zh, this message translates to:
+  /// **'云端处理结果已生成，可分享或保存。'**
+  String get cloudGenerationReady;
+
+  /// No description provided for @cloudGenerationQueued.
+  ///
+  /// In zh, this message translates to:
+  /// **'任务已创建，正在等待云端处理。'**
+  String get cloudGenerationQueued;
+
+  /// No description provided for @cloudGenerationRunning.
+  ///
+  /// In zh, this message translates to:
+  /// **'云端正在处理所选能力。'**
+  String get cloudGenerationRunning;
+
+  /// No description provided for @cancelGeneration.
+  ///
+  /// In zh, this message translates to:
+  /// **'取消这次处理'**
+  String get cancelGeneration;
+
+  /// No description provided for @generationCancelled.
+  ///
+  /// In zh, this message translates to:
+  /// **'这次处理已取消，原图和已有结果没有改变。'**
+  String get generationCancelled;
+
+  /// No description provided for @generationCancelledCreditReleased.
+  ///
+  /// In zh, this message translates to:
+  /// **'这次处理已取消，本次权益已释放；原图和已有结果没有改变。'**
+  String get generationCancelledCreditReleased;
+
+  /// No description provided for @generationCancellationStillRunning.
+  ///
+  /// In zh, this message translates to:
+  /// **'供应商已经开始处理，无法取消；同一任务继续运行，权益仍暂时占用。'**
+  String get generationCancellationStillRunning;
+
+  /// No description provided for @generationStatusCreditHeld.
+  ///
+  /// In zh, this message translates to:
+  /// **'处理结果仍需确认，权益暂时保留。请刷新同一任务，不会新建任务或再次扣费。'**
+  String get generationStatusCreditHeld;
+
+  /// No description provided for @previewMotionResult.
+  ///
+  /// In zh, this message translates to:
+  /// **'播放动态结果'**
+  String get previewMotionResult;
+
+  /// No description provided for @chooseOldPhotoColorMode.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择老照片的颜色处理'**
+  String get chooseOldPhotoColorMode;
+
+  /// No description provided for @oldPhotoPreserveColor.
+  ///
+  /// In zh, this message translates to:
+  /// **'保留原有色彩'**
+  String get oldPhotoPreserveColor;
+
+  /// No description provided for @oldPhotoColorize.
+  ///
+  /// In zh, this message translates to:
+  /// **'智能上色'**
+  String get oldPhotoColorize;
+
+  /// No description provided for @aiRedrawDefinitionLabel.
+  ///
+  /// In zh, this message translates to:
+  /// **'描述要重绘成什么风格'**
+  String get aiRedrawDefinitionLabel;
+
+  /// No description provided for @aiRedrawDefinitionHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'例如：保留人物身份，改成低饱和电影剧照'**
+  String get aiRedrawDefinitionHint;
+
+  /// No description provided for @aiRedrawDefinitionSummary.
+  ///
+  /// In zh, this message translates to:
+  /// **'只按你确认的生成意图重绘，不会自动改成其他方向。'**
+  String get aiRedrawDefinitionSummary;
+
+  /// No description provided for @aiRedrawConfirmIntent.
+  ///
+  /// In zh, this message translates to:
+  /// **'确认生成意图'**
+  String get aiRedrawConfirmIntent;
+
+  /// No description provided for @aiRedrawIntentPreviewTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'生成意图'**
+  String get aiRedrawIntentPreviewTitle;
+
+  /// No description provided for @aiRedrawIntentConfirmed.
+  ///
+  /// In zh, this message translates to:
+  /// **'已冻结这份定义；修改文字后需要重新确认。'**
+  String get aiRedrawIntentConfirmed;
+
+  /// No description provided for @aiRedrawIntentVersion.
+  ///
+  /// In zh, this message translates to:
+  /// **'定义版本 {revision}'**
+  String aiRedrawIntentVersion(int revision);
+
+  /// No description provided for @aiRedrawIntentInvalid.
+  ///
+  /// In zh, this message translates to:
+  /// **'请输入 1 至 500 个可见字符，不能包含隐藏或控制字符。'**
+  String get aiRedrawIntentInvalid;
+
+  /// No description provided for @markRemovalArea.
+  ///
+  /// In zh, this message translates to:
+  /// **'涂抹要移除的区域'**
+  String get markRemovalArea;
+
+  /// No description provided for @changeRemovalArea.
+  ///
+  /// In zh, this message translates to:
+  /// **'重新涂抹区域'**
+  String get changeRemovalArea;
+
+  /// No description provided for @removalAreaReady.
+  ///
+  /// In zh, this message translates to:
+  /// **'已使用你手动涂抹的区域，不会自动选择其他内容。'**
+  String get removalAreaReady;
+
+  /// No description provided for @applyNaturalOptimization.
+  ///
+  /// In zh, this message translates to:
+  /// **'应用自然优化'**
+  String get applyNaturalOptimization;
+
+  /// No description provided for @applyWhiteBackground.
+  ///
+  /// In zh, this message translates to:
+  /// **'应用白底'**
+  String get applyWhiteBackground;
+
+  /// No description provided for @applyTransparentBackground.
+  ///
+  /// In zh, this message translates to:
+  /// **'生成透明抠图'**
+  String get applyTransparentBackground;
+
+  /// No description provided for @applyReplacementBackground.
+  ///
+  /// In zh, this message translates to:
+  /// **'应用新背景'**
+  String get applyReplacementBackground;
+
+  /// No description provided for @chooseReplacementBackground.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择新背景'**
+  String get chooseReplacementBackground;
+
+  /// No description provided for @chooseAnotherBackground.
+  ///
+  /// In zh, this message translates to:
+  /// **'更换背景图片'**
+  String get chooseAnotherBackground;
+
+  /// No description provided for @importingBackground.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在导入背景…'**
+  String get importingBackground;
+
+  /// No description provided for @optimizeResult.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动优化'**
+  String get optimizeResult;
+
+  /// No description provided for @cleanupResult.
+  ///
+  /// In zh, this message translates to:
+  /// **'白底清理'**
+  String get cleanupResult;
+
+  /// No description provided for @optimizeApplied.
+  ///
+  /// In zh, this message translates to:
+  /// **'照片已优化'**
+  String get optimizeApplied;
+
+  /// No description provided for @cleanupApplied.
+  ///
+  /// In zh, this message translates to:
+  /// **'清理已应用'**
+  String get cleanupApplied;
+
+  /// No description provided for @optimizeAgain.
+  ///
+  /// In zh, this message translates to:
+  /// **'重新优化'**
+  String get optimizeAgain;
+
+  /// No description provided for @cleanupAgain.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续清理'**
+  String get cleanupAgain;
+
+  /// No description provided for @cleanupWhiteBackgroundUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂未识别到可安全处理的主体，本次人物白底不会执行。'**
+  String get cleanupWhiteBackgroundUnavailable;
+
+  /// No description provided for @cleanupSubjectUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂未识别到可安全处理的主体，本次背景处理不会执行。'**
+  String get cleanupSubjectUnavailable;
+
+  /// No description provided for @localStaticTaskIosOnly.
+  ///
+  /// In zh, this message translates to:
+  /// **'该本地处理当前仅支持 iPhone。'**
+  String get localStaticTaskIosOnly;
+
   /// No description provided for @aiDefineStyle.
   ///
   /// In zh, this message translates to:
@@ -253,6 +817,108 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'例如：雨后的电影感，人物保持自然'**
   String get describeStyleHint;
+
+  /// No description provided for @styleDefinitionInputHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'可用文字、确认后的语音转写或单独的参考图定义风格；源照片始终是结果主体。'**
+  String get styleDefinitionInputHint;
+
+  /// No description provided for @styleInputText.
+  ///
+  /// In zh, this message translates to:
+  /// **'文字'**
+  String get styleInputText;
+
+  /// No description provided for @styleInputVoice.
+  ///
+  /// In zh, this message translates to:
+  /// **'语音'**
+  String get styleInputVoice;
+
+  /// No description provided for @styleInputReference.
+  ///
+  /// In zh, this message translates to:
+  /// **'参考图'**
+  String get styleInputReference;
+
+  /// No description provided for @styleVoiceTranscriptHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'先说出你的想法，再确认或修改转写内容后定义风格。'**
+  String get styleVoiceTranscriptHint;
+
+  /// No description provided for @styleVoiceRecord.
+  ///
+  /// In zh, this message translates to:
+  /// **'开始录音'**
+  String get styleVoiceRecord;
+
+  /// No description provided for @styleVoiceStop.
+  ///
+  /// In zh, this message translates to:
+  /// **'停止录音'**
+  String get styleVoiceStop;
+
+  /// No description provided for @styleVoiceListening.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在聆听…'**
+  String get styleVoiceListening;
+
+  /// No description provided for @styleVoiceFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'语音暂未转写成功。当前图片和输入均已保留。'**
+  String get styleVoiceFailed;
+
+  /// No description provided for @styleReferenceHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'单独选择一张参考图。只提取色彩、光线、质感和氛围，不复制人物、物体、文字或构图。'**
+  String get styleReferenceHint;
+
+  /// No description provided for @styleReferenceChoose.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择参考图'**
+  String get styleReferenceChoose;
+
+  /// No description provided for @styleReferenceSource.
+  ///
+  /// In zh, this message translates to:
+  /// **'源照片'**
+  String get styleReferenceSource;
+
+  /// No description provided for @styleReferenceImage.
+  ///
+  /// In zh, this message translates to:
+  /// **'风格参考'**
+  String get styleReferenceImage;
+
+  /// No description provided for @styleReferenceRemove.
+  ///
+  /// In zh, this message translates to:
+  /// **'移除参考图'**
+  String get styleReferenceRemove;
+
+  /// No description provided for @styleReferenceKeptLocal.
+  ///
+  /// In zh, this message translates to:
+  /// **'参考图不会替换源照片；风格定义完成后会移除本地临时副本。'**
+  String get styleReferenceKeptLocal;
+
+  /// No description provided for @styleReferenceUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前设备无法使用参考图。当前图片保持不变。'**
+  String get styleReferenceUnavailable;
+
+  /// No description provided for @styleReferenceFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'这张参考图暂时无法使用，源照片和当前风格均未改变。'**
+  String get styleReferenceFailed;
 
   /// No description provided for @defineStyle.
   ///
@@ -277,6 +943,48 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'已保存风格'**
   String get styleSavedCustom;
+
+  /// No description provided for @styleOfficialDefinitionSummary.
+  ///
+  /// In zh, this message translates to:
+  /// **'固定且可复现的本地风格。'**
+  String get styleOfficialDefinitionSummary;
+
+  /// No description provided for @styleTextDefinitionSummary.
+  ///
+  /// In zh, this message translates to:
+  /// **'根据你确认的文字描述生成的本地风格。'**
+  String get styleTextDefinitionSummary;
+
+  /// No description provided for @styleVoiceDefinitionSummary.
+  ///
+  /// In zh, this message translates to:
+  /// **'根据你确认的语音转写生成的本地风格。'**
+  String get styleVoiceDefinitionSummary;
+
+  /// No description provided for @styleReferenceDefinitionSummary.
+  ///
+  /// In zh, this message translates to:
+  /// **'只使用参考图的色彩、光线、质感与氛围生成的本地风格。'**
+  String get styleReferenceDefinitionSummary;
+
+  /// No description provided for @styleReferenceWarmTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'暖调参考'**
+  String get styleReferenceWarmTitle;
+
+  /// No description provided for @styleReferenceCoolTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'冷调参考'**
+  String get styleReferenceCoolTitle;
+
+  /// No description provided for @styleReferenceNaturalTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'自然参考'**
+  String get styleReferenceNaturalTitle;
 
   /// No description provided for @styleNatural.
   ///
@@ -368,12 +1076,6 @@ abstract class AppLocalizations {
   /// **'换个风格'**
   String get changeStyle;
 
-  /// No description provided for @generateMotion.
-  ///
-  /// In zh, this message translates to:
-  /// **'生成动态'**
-  String get generateMotion;
-
   /// No description provided for @motionConfirmationTitle.
   ///
   /// In zh, this message translates to:
@@ -391,6 +1093,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'动态生成服务尚未接入'**
   String get motionUnavailable;
+
+  /// No description provided for @motionUnavailableDetail.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前不会上传图片、创建任务或消耗额度。你可以返回能力列表或首页。'**
+  String get motionUnavailableDetail;
 
   /// No description provided for @gotIt.
   ///
@@ -443,7 +1151,7 @@ abstract class AppLocalizations {
   /// No description provided for @draftDeleteConfirmation.
   ///
   /// In zh, this message translates to:
-  /// **'只会删除映见中的草稿，不会删除系统相册原图。'**
+  /// **'会删除映见中的草稿、生成结果，并取消仍可取消的云端任务；不会删除系统相册原图。云端任务已无法取消时，本次不会删除。'**
   String get draftDeleteConfirmation;
 
   /// No description provided for @draftStatusEditing.
@@ -517,6 +1225,18 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'无法删除本地项目，现有内容未改变。'**
   String get projectDeleteFailed;
+
+  /// No description provided for @projectDeleteCloudTaskActive.
+  ///
+  /// In zh, this message translates to:
+  /// **'云端任务已经开始且暂时无法取消；为保留任务与权益状态，本次没有删除创作。'**
+  String get projectDeleteCloudTaskActive;
+
+  /// No description provided for @projectDeletedGenerationCleanupPending.
+  ///
+  /// In zh, this message translates to:
+  /// **'创作已删除，但本地生成缓存尚未清理完成。系统相册内容不受影响。'**
+  String get projectDeletedGenerationCleanupPending;
 
   /// No description provided for @lastProjectSummary.
   ///

@@ -40,6 +40,16 @@ import 'package:yingjian/l10n/l10n.dart';
 
 enum EditorEntryPoint { standard, optimize, cleanup }
 
+const _legacyBackgroundTreatments = [
+  BackgroundTreatment.original,
+  BackgroundTreatment.blur,
+  BackgroundTreatment.white,
+  BackgroundTreatment.black,
+  BackgroundTreatment.warm,
+  BackgroundTreatment.cool,
+  BackgroundTreatment.image,
+];
+
 class EditorPage extends StatefulWidget {
   const EditorPage({
     this.speechTranscriber = const MethodChannelSpeechTranscriber(),
@@ -6244,13 +6254,13 @@ class _SemanticTools extends StatelessWidget {
               children: [
                 for (
                   var index = 0;
-                  index < BackgroundTreatment.values.length;
+                  index < _legacyBackgroundTreatments.length;
                   index++
                 ) ...[
                   if (index > 0) const SizedBox(width: 8),
                   Builder(
                     builder: (context) {
-                      final treatment = BackgroundTreatment.values[index];
+                      final treatment = _legacyBackgroundTreatments[index];
                       final label = _backgroundLabel(context, treatment);
                       final canSelect =
                           enabled &&
@@ -6576,6 +6586,9 @@ class _SemanticTools extends StatelessWidget {
     BackgroundTreatment.warm => context.l10n.backgroundWarm,
     BackgroundTreatment.cool => context.l10n.backgroundCool,
     BackgroundTreatment.image => context.l10n.backgroundImage,
+    BackgroundTreatment.transparent => throw StateError(
+      'Transparent background is not exposed by the legacy editor.',
+    ),
   };
 }
 

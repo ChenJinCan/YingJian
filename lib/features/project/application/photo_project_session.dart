@@ -2,8 +2,10 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:yingjian/features/creation/domain/creation_capability.dart';
 import 'package:yingjian/features/creation/domain/creation_intent.dart';
 import 'package:yingjian/features/creation/domain/creation_task.dart';
+import 'package:yingjian/features/creation/domain/style_definition.dart';
 import 'package:yingjian/features/editor/application/ai_edit_planner.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/edit_target.dart';
@@ -416,10 +418,69 @@ class PhotoProjectSession extends ChangeNotifier {
     await _saveAndPublish(next);
   }
 
+  Future<void> selectCreationCapability(CreationCapability capability) async {
+    final current = _project;
+    if (current == null) {
+      throw StateError('A project is required before selecting a capability');
+    }
+    if (current.flowState != PhotoProjectFlowState.editing) {
+      throw StateError('A capability can only be selected while editing');
+    }
+    if (capability.task != current.creationTask) {
+      throw ArgumentError.value(
+        capability,
+        'capability',
+        'The capability must belong to the current creation task',
+      );
+    }
+    if (current.creationCapability == capability) return;
+    await _saveAndPublish(
+      current.copyWith(
+        updatedAt: _now(),
+        creationCapability: capability,
+        creationStyleId: null,
+        creationStyleName: null,
+        creationStyleRecipe: null,
+        creationStyleDefinition: null,
+        creationResultActive: false,
+      ),
+    );
+  }
+
+  Future<void> clearCreationCapability() async {
+    final current = _project;
+    if (current == null) {
+      throw StateError('A project is required before clearing a capability');
+    }
+    if (current.flowState != PhotoProjectFlowState.editing) {
+      throw StateError('A capability can only be cleared while editing');
+    }
+    if (current.creationCapability == null &&
+        current.creationStyleId == null &&
+        current.creationStyleName == null &&
+        current.creationStyleRecipe == null &&
+        current.creationStyleDefinition == null &&
+        !current.creationResultActive) {
+      return;
+    }
+    await _saveAndPublish(
+      current.copyWith(
+        updatedAt: _now(),
+        creationCapability: null,
+        creationStyleId: null,
+        creationStyleName: null,
+        creationStyleRecipe: null,
+        creationStyleDefinition: null,
+        creationResultActive: false,
+      ),
+    );
+  }
+
   Future<void> selectCreationStyle({
     required String styleId,
     required EditRecipe recipe,
     String? styleName,
+    StyleDefinition? definition,
   }) async {
     final current = _project;
     if (current == null) {
@@ -428,9 +489,37 @@ class PhotoProjectSession extends ChangeNotifier {
     if (current.flowState != PhotoProjectFlowState.editing) {
       throw StateError('A style can only be selected while editing');
     }
+    if (current.creationTask != CreationTask.style ||
+        !_styleDefinitionMatchesCapability(
+          current.creationCapability,
+          definition,
+        )) {
+      throw StateError(
+        'A style definition must match the explicitly selected style '
+        'capability',
+      );
+    }
+    if (definition != null) {
+      if (definition.styleId != styleId || definition.recipe != recipe) {
+        throw ArgumentError.value(
+          definition,
+          'definition',
+          'The definition must match the selected style id and recipe',
+        );
+      }
+      if (styleName != null && styleName != definition.title) {
+        throw ArgumentError.value(
+          styleName,
+          'styleName',
+          'A definition-backed style name must equal its title',
+        );
+      }
+    }
+    final resolvedStyleName = definition?.title ?? styleName;
     if (current.creationStyleId == styleId &&
-        current.creationStyleName == styleName &&
+        current.creationStyleName == resolvedStyleName &&
         current.creationStyleRecipe == recipe &&
+        current.creationStyleDefinition == definition &&
         !current.creationResultActive) {
       return;
     }
@@ -438,8 +527,9 @@ class PhotoProjectSession extends ChangeNotifier {
       current.copyWith(
         updatedAt: _now(),
         creationStyleId: styleId,
-        creationStyleName: styleName,
+        creationStyleName: resolvedStyleName,
         creationStyleRecipe: recipe,
+        creationStyleDefinition: definition,
         creationResultActive: false,
       ),
     );
@@ -487,6 +577,11 @@ class PhotoProjectSession extends ChangeNotifier {
         creationStyleId: result.styleId,
         creationStyleName: result.styleName,
         creationStyleRecipe: result.recipe,
+        creationStyleDefinition:
+            current.creationStyleDefinition?.styleId == result.styleId &&
+                current.creationStyleDefinition?.title == result.styleName
+            ? current.creationStyleDefinition
+            : null,
         creationResultActive: true,
         flowState: wasSaved
             ? PhotoProjectFlowState.exported
@@ -500,8 +595,10 @@ class PhotoProjectSession extends ChangeNotifier {
     required String styleId,
     required String? styleName,
     required EditRecipe recipe,
+    StyleDefinition? definition,
   }) {
     if (project.creationIntent != CreationIntent.apply ||
+        project.creationCapability == null ||
         project.photos.length != 1 ||
         project.flowState != PhotoProjectFlowState.editing) {
       throw StateError('A static style result requires one editing photo');
@@ -522,11 +619,13 @@ class PhotoProjectSession extends ChangeNotifier {
       creationStyleId: styleId,
       creationStyleName: styleName,
       creationStyleRecipe: recipe,
+      creationStyleDefinition: definition,
       creationResultActive: true,
       creationResult: StaticStyleResultIdentity(
         sourcePhotoId: photoId,
         editStateVersion: project.editStateVersion,
         styleId: styleId,
+        capability: project.creationCapability,
         styleName: styleName,
         recipe: recipe,
       ),
@@ -741,10 +840,31 @@ class PhotoProjectSession extends ChangeNotifier {
     if (current.creationIntent != CreationIntent.apply) {
       throw StateError('Only an image-application project can apply a style');
     }
+    if (current.creationTask != CreationTask.style ||
+        !_styleDefinitionMatchesCapability(
+          current.creationCapability,
+          current.creationStyleDefinition,
+        )) {
+      throw StateError(
+        'A style can only be applied after its matching style capability was '
+        'selected',
+      );
+    }
+    if (current.creationStyleId != styleId ||
+        current.creationStyleRecipe != recipe) {
+      throw StateError('The applied style must match the explicit selection');
+    }
     if (current.photos.length != 1 ||
         current.flowState != PhotoProjectFlowState.editing) {
       throw StateError('A creation style requires one editing photo');
     }
+    final selectedDefinition = current.creationStyleDefinition;
+    final definitionMatchesSelection =
+        selectedDefinition?.styleId == styleId &&
+        selectedDefinition?.recipe == recipe;
+    final resolvedStyleName = definitionMatchesSelection
+        ? selectedDefinition!.title
+        : styleName;
     final photoId = current.focusPhotoId ?? current.photos.single.id;
     final beforeShared = current.sharedStyle.recipe;
     final afterShared = _replaceStyleOwned(beforeShared, recipe);
@@ -764,8 +884,9 @@ class PhotoProjectSession extends ChangeNotifier {
         _withStaticStyleResult(
           current,
           styleId: styleId,
-          styleName: styleName,
+          styleName: resolvedStyleName,
           recipe: current.effectiveRecipeFor(photoId),
+          definition: definitionMatchesSelection ? selectedDefinition : null,
         ),
       );
       return const ManualEditCommit(
@@ -778,12 +899,129 @@ class PhotoProjectSession extends ChangeNotifier {
       source: EditSource.manual,
       context: context,
       creationResultStyleId: styleId,
-      creationResultStyleName: styleName,
+      creationResultStyleName: resolvedStyleName,
+      creationResultStyleDefinition: definitionMatchesSelection
+          ? selectedDefinition
+          : null,
     );
     if (result is RejectedEdit) {
       throw StateError('Style meta op rejected: ${result.reason.name}');
     }
     return ManualEditCommit(result: result, appliedToGroup: true);
+  }
+
+  /// Commits the final local result for a task-specific iOS static workflow.
+  ///
+  /// Unlike [applyCreationStyle], optimize and cleanup operate on the focused
+  /// photo through the admitted manual-recipe transaction. The result identity
+  /// is published in that same persistence operation, so an interrupted save
+  /// cannot expose pixels without a recoverable result contract.
+  Future<ManualEditCommit> applyLocalStaticTaskResult({
+    required CreationTask task,
+    required EditRecipe desiredRecipe,
+    required String resultId,
+    required String resultName,
+    required EditContext context,
+    EditingResourceImporter? resourceImporter,
+  }) async {
+    if (task != CreationTask.optimize && task != CreationTask.cleanup) {
+      throw ArgumentError.value(
+        task,
+        'task',
+        'Only optimize and cleanup can publish a local static result',
+      );
+    }
+    final current = _project;
+    if (current == null) {
+      throw StateError('A project is required before applying a local result');
+    }
+    if (context.platform != EditPlatform.ios) {
+      throw StateError('A local static task result requires the iOS context');
+    }
+    if (current.creationIntent != CreationIntent.apply ||
+        current.creationTask != task) {
+      throw StateError(
+        'The local result task must match the image-application project',
+      );
+    }
+    switch (task) {
+      case CreationTask.optimize:
+        if (current.creationCapability != CreationCapability.optimizeNatural) {
+          throw StateError(
+            'The local result requires its explicitly selected capability',
+          );
+        }
+        break;
+      case CreationTask.cleanup:
+        final requiredBackground = switch (current.creationCapability) {
+          CreationCapability.cleanupWhite => BackgroundTreatment.white,
+          CreationCapability.cleanupTransparent =>
+            BackgroundTreatment.transparent,
+          CreationCapability.cleanupReplaceBackground =>
+            BackgroundTreatment.image,
+          CreationCapability.styleOfficial ||
+          CreationCapability.styleText ||
+          CreationCapability.styleVoice ||
+          CreationCapability.styleReference ||
+          CreationCapability.styleAiRedraw ||
+          CreationCapability.optimizeNatural ||
+          CreationCapability.optimizeAiRepair ||
+          CreationCapability.optimizeUpscale ||
+          CreationCapability.optimizeOldPhoto ||
+          CreationCapability.cleanupRemovePasserby ||
+          CreationCapability.cleanupBrushRemove ||
+          CreationCapability.motionSubtle ||
+          CreationCapability.motionCameraPush ||
+          CreationCapability.motionLightFlow ||
+          CreationCapability.motionAiNatural ||
+          null => null,
+        };
+        if (requiredBackground == null) {
+          throw StateError(
+            'The local result requires its explicitly selected capability',
+          );
+        }
+        if (desiredRecipe.semanticEditingRecipe.background !=
+            requiredBackground) {
+          throw StateError(
+            'The cleanup recipe must match the explicitly selected '
+            'capability',
+          );
+        }
+        if (current.creationCapability ==
+            CreationCapability.cleanupReplaceBackground) {
+          final semantic = desiredRecipe.semanticEditingRecipe;
+          final path = semantic.backgroundImagePath;
+          final resourceId = semantic.backgroundImageResourceId;
+          if (resourceImporter == null ||
+              path == null ||
+              resourceId == null ||
+              !_isAppOwnedBackgroundResource(
+                path: path,
+                resourceId: resourceId,
+              )) {
+            throw StateError(
+              'A replacement background requires an imported app-owned '
+              'resource',
+            );
+          }
+        }
+        break;
+      case CreationTask.style:
+      case CreationTask.motion:
+        throw StateError('Unsupported local static task');
+    }
+    if (current.photos.length != 1 ||
+        current.flowState != PhotoProjectFlowState.editing) {
+      throw StateError('A local static result requires one editing photo');
+    }
+    return _commitManualRecipe(
+      desiredRecipe: desiredRecipe,
+      context: context,
+      resourceImporter: resourceImporter,
+      creationResultStyleId: resultId,
+      creationResultStyleName: resultName,
+    );
   }
 
   EditRecipe _replaceStyleOwned(EditRecipe base, EditRecipe style) {
@@ -805,6 +1043,36 @@ class PhotoProjectSession extends ChangeNotifier {
       ),
     );
   }
+
+  static bool _styleDefinitionMatchesCapability(
+    CreationCapability? capability,
+    StyleDefinition? definition,
+  ) => switch (capability) {
+    CreationCapability.styleOfficial =>
+      definition == null || definition.origin == StyleDefinitionOrigin.official,
+    CreationCapability.styleText =>
+      definition?.origin == StyleDefinitionOrigin.text,
+    CreationCapability.styleVoice =>
+      definition?.origin == StyleDefinitionOrigin.voice,
+    CreationCapability.styleReference =>
+      definition?.origin == StyleDefinitionOrigin.reference,
+    CreationCapability.styleAiRedraw =>
+      definition?.origin == StyleDefinitionOrigin.aiRedraw,
+    CreationCapability.optimizeNatural ||
+    CreationCapability.optimizeAiRepair ||
+    CreationCapability.optimizeUpscale ||
+    CreationCapability.optimizeOldPhoto ||
+    CreationCapability.cleanupWhite ||
+    CreationCapability.cleanupTransparent ||
+    CreationCapability.cleanupReplaceBackground ||
+    CreationCapability.cleanupRemovePasserby ||
+    CreationCapability.cleanupBrushRemove ||
+    CreationCapability.motionSubtle ||
+    CreationCapability.motionCameraPush ||
+    CreationCapability.motionLightFlow ||
+    CreationCapability.motionAiNatural ||
+    null => false,
+  };
 
   Future<ManualEditCommit> _commitManualRecipe({
     required EditRecipe desiredRecipe,
@@ -1017,6 +1285,30 @@ class PhotoProjectSession extends ChangeNotifier {
         : '.jpg';
   }
 
+  static bool _isAppOwnedBackgroundResource({
+    required String path,
+    required String resourceId,
+  }) {
+    const idPrefix = 'resource-v1-';
+    if (!resourceId.startsWith(idPrefix)) return false;
+    final sha = resourceId.substring(idPrefix.length);
+    if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(sha)) return false;
+    final normalizedPath = path.replaceAll('\\', '/');
+    if (!normalizedPath.startsWith('/') ||
+        normalizedPath.contains('/../') ||
+        normalizedPath.contains('/./')) {
+      return false;
+    }
+    final expectedSuffix =
+        '/resources/${sha.substring(0, 2)}/$sha${_resourceExtension(path)}';
+    if (!normalizedPath.endsWith(expectedSuffix)) return false;
+    try {
+      return File(path).lengthSync() > 0;
+    } on FileSystemException {
+      return false;
+    }
+  }
+
   Future<EditResult> commitAiProposal(
     AiEditProposal proposal, {
     required EditContext context,
@@ -1057,6 +1349,7 @@ class PhotoProjectSession extends ChangeNotifier {
     double? afterSharedIntensity,
     String? creationResultStyleId,
     String? creationResultStyleName,
+    StyleDefinition? creationResultStyleDefinition,
   }) async {
     final current = _project;
     if (current == null) {
@@ -1208,6 +1501,7 @@ class PhotoProjectSession extends ChangeNotifier {
         styleId: creationResultStyleId,
         styleName: creationResultStyleName,
         recipe: next.effectiveRecipeFor(resultPhotoId),
+        definition: creationResultStyleDefinition,
       );
     }
     await _saveAndPublish(next);

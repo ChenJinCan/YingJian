@@ -7,6 +7,7 @@ import 'package:yingjian/features/editor/domain/content_sha256.dart';
 import 'package:yingjian/features/editor/domain/editing_resource.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
+import 'package:yingjian/observability/local_diagnostic_log.dart';
 
 typedef MediaDirectoryProvider = Future<Directory> Function();
 typedef HeifSupportProvider = Future<bool> Function();
@@ -64,6 +65,7 @@ final class AppOwnedPhotoImporter
     HeifSupportProvider? supportsHeif,
     PhotoInspectionProvider? inspectPhoto,
     String Function()? createId,
+    DiagnosticLog? diagnosticLog,
   }) {
     return AppOwnedPhotoImporter._(
       source,
@@ -71,6 +73,7 @@ final class AppOwnedPhotoImporter
       supportsHeif ?? _defaultSupportsHeif,
       inspectPhoto ?? _defaultInspectPhoto,
       createId ?? _defaultId,
+      diagnosticLog,
     );
   }
 
@@ -80,6 +83,7 @@ final class AppOwnedPhotoImporter
     this._supportsHeif,
     this._inspectPhoto,
     this._createId,
+    this._diagnosticLog,
   );
 
   final PhotoSource _source;
@@ -87,6 +91,7 @@ final class AppOwnedPhotoImporter
   final HeifSupportProvider _supportsHeif;
   final PhotoInspectionProvider _inspectPhoto;
   final String Function() _createId;
+  final DiagnosticLog? _diagnosticLog;
   final Set<_PhotoImportOperation> _activeImports = {};
 
   @override
@@ -196,12 +201,17 @@ final class AppOwnedPhotoImporter
       if (selected.isNotEmpty && source is ReleasablePhotoSource) {
         try {
           await source.releasePhotos(selected);
-        } catch (_) {
-          for (final photo in completedBatch.photos) {
-            await _deleteIfExists(File(photo.localPath));
-          }
-          _activeImports.remove(operation);
-          rethrow;
+        } on Object catch (error) {
+          _diagnosticLog?.record(
+            DiagnosticLogEvent(
+              level: DiagnosticLogLevel.warning,
+              component: 'photo_import',
+              operation: 'release_picker_files',
+              result: 'failed',
+              reason: DiagnosticLogEvent.reasonFor(error),
+              itemCount: selected.length,
+            ),
+          );
         }
       }
       _activeImports.remove(operation);

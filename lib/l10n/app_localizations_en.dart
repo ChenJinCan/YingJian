@@ -81,6 +81,330 @@ class AppLocalizationsEn extends AppLocalizations {
   String get currentStyle => 'Current style';
 
   @override
+  String get currentResult => 'Current result';
+
+  @override
+  String get chooseCapabilityTitle => 'Choose a capability';
+
+  @override
+  String get chooseCapabilityHint =>
+      'Nothing is chosen for you. Only the capability you select can run.';
+
+  @override
+  String get chooseAnotherCapability => 'Choose another capability';
+
+  @override
+  String get capabilityUnavailable => 'This capability is not complete yet';
+
+  @override
+  String get capabilityUnavailableDetail =>
+      'Nothing will be processed, uploaded, queued, or charged. Return to the capability list to choose what to do next.';
+
+  @override
+  String get capabilityOptimizeNatural => 'Natural enhancement';
+
+  @override
+  String get capabilityOptimizeAiRepair => 'AI repair';
+
+  @override
+  String get capabilityOptimizeUpscale => 'HD upscale';
+
+  @override
+  String get capabilityOptimizeOldPhoto => 'Old photo restoration';
+
+  @override
+  String get capabilityStyleOfficial => 'Official styles';
+
+  @override
+  String get capabilityStyleText => 'Style from text';
+
+  @override
+  String get capabilityStyleVoice => 'Style from voice';
+
+  @override
+  String get capabilityStyleReference => 'Reference style';
+
+  @override
+  String get capabilityStyleAiRedraw => 'AI style redraw';
+
+  @override
+  String get capabilityCleanupWhite => 'Portrait white background';
+
+  @override
+  String get capabilityCleanupTransparent => 'Transparent cutout';
+
+  @override
+  String get capabilityCleanupReplaceBackground => 'Replace background';
+
+  @override
+  String get capabilityCleanupRemovePasserby => 'Remove passers-by';
+
+  @override
+  String get capabilityCleanupBrushRemove => 'Brush object removal';
+
+  @override
+  String get capabilityMotionSubtle => 'Subtle motion';
+
+  @override
+  String get capabilityMotionCameraPush => 'Camera push-in';
+
+  @override
+  String get capabilityMotionLightFlow => 'Flowing light';
+
+  @override
+  String get capabilityMotionAiNatural => 'AI natural motion';
+
+  @override
+  String get capabilityOptimizeNaturalDescription =>
+      'Improve light, clarity, and texture locally while keeping the original unchanged.';
+
+  @override
+  String get capabilityOptimizeAiRepairDescription =>
+      'Repair blur, noise, and missing detail.';
+
+  @override
+  String get capabilityOptimizeUpscaleDescription =>
+      'Increase resolution while preserving subject detail.';
+
+  @override
+  String get capabilityOptimizeOldPhotoDescription =>
+      'Repair scratches, fading, and old-photo damage.';
+
+  @override
+  String get capabilityStyleOfficialDescription =>
+      'Explicitly choose one reproducible built-in style.';
+
+  @override
+  String get capabilityStyleTextDescription =>
+      'Define a style from the text you enter.';
+
+  @override
+  String get capabilityStyleVoiceDescription =>
+      'Define a style from the voice transcript you confirm.';
+
+  @override
+  String get capabilityStyleReferenceDescription =>
+      'Apply the reference photo\'s light, color, and texture to this photo.';
+
+  @override
+  String get capabilityStyleAiRedrawDescription =>
+      'Generate a redrawn, stylized still image.';
+
+  @override
+  String get capabilityCleanupWhiteDescription =>
+      'Identify the portrait subject and create a white background.';
+
+  @override
+  String get capabilityCleanupTransparentDescription =>
+      'Cut out the subject and create an image with a transparent background.';
+
+  @override
+  String get capabilityCleanupReplaceBackgroundDescription =>
+      'Cut out the subject and use the new background you choose.';
+
+  @override
+  String get capabilityCleanupRemovePasserbyDescription =>
+      'Remove passers-by and fill in the background.';
+
+  @override
+  String get capabilityCleanupBrushRemoveDescription =>
+      'Remove only the content you explicitly mark with the brush.';
+
+  @override
+  String get capabilityMotionSubtleDescription =>
+      'Add restrained pan and zoom motion to the whole photo.';
+
+  @override
+  String get capabilityMotionCameraPushDescription =>
+      'Generate a slow camera push-in effect.';
+
+  @override
+  String get capabilityMotionLightFlowDescription =>
+      'Generate naturally flowing light and shadow.';
+
+  @override
+  String get capabilityMotionAiNaturalDescription =>
+      'Upload the photo to generate a three-second natural motion video.';
+
+  @override
+  String get chooseUpscaleScale => 'Choose an upscale factor';
+
+  @override
+  String get generateUpscale => 'Generate HD image';
+
+  @override
+  String get generatingResult => 'Generating…';
+
+  @override
+  String get upscaleReady => 'The HD image is ready to share or save.';
+
+  @override
+  String get generateMotion => 'Generate motion photo';
+
+  @override
+  String get motionReady => 'The motion photo is ready to share or save.';
+
+  @override
+  String get generationFailed => 'Generation failed. Try again.';
+
+  @override
+  String get cloudGenerationConsentTitle => 'Confirm cloud processing';
+
+  @override
+  String get cloudGenerationConsentDetail =>
+      'The upload and task start only after confirmation. Processing may take time, and cancel is shown while available. Source, mask, and cloud result media are retained by the gateway for no more than 24 hours.';
+
+  @override
+  String get cloudUploadConsent =>
+      'Allow this photo to be uploaded for the selected capability';
+
+  @override
+  String cloudCostConsent(int creditCost) {
+    return 'Confirm use of $creditCost cloud credit(s)';
+  }
+
+  @override
+  String get confirmAndGenerate => 'Confirm and generate';
+
+  @override
+  String get confirmCloudGeneration => 'Start cloud processing';
+
+  @override
+  String get cloudGenerationReady =>
+      'The cloud result is ready to share or save.';
+
+  @override
+  String get cloudGenerationQueued =>
+      'The task was created and is waiting for cloud processing.';
+
+  @override
+  String get cloudGenerationRunning =>
+      'The cloud is processing the selected capability.';
+
+  @override
+  String get cancelGeneration => 'Cancel this processing';
+
+  @override
+  String get generationCancelled =>
+      'This processing was canceled. The source and existing results are unchanged.';
+
+  @override
+  String get generationCancelledCreditReleased =>
+      'This processing was canceled and its credit was released. The source and existing results are unchanged.';
+
+  @override
+  String get generationCancellationStillRunning =>
+      'The provider has already started processing, so cancellation was not confirmed. The same task continues and its credit remains on hold.';
+
+  @override
+  String get generationStatusCreditHeld =>
+      'The result still needs confirmation and the credit remains on hold. Refresh the same task; no new task or second charge will be created.';
+
+  @override
+  String get previewMotionResult => 'Play motion result';
+
+  @override
+  String get chooseOldPhotoColorMode =>
+      'Choose how to handle the photo\'s colors';
+
+  @override
+  String get oldPhotoPreserveColor => 'Preserve existing colors';
+
+  @override
+  String get oldPhotoColorize => 'Colorize';
+
+  @override
+  String get aiRedrawDefinitionLabel => 'Describe the redraw style';
+
+  @override
+  String get aiRedrawDefinitionHint =>
+      'For example: preserve identity and use a muted cinematic look';
+
+  @override
+  String get aiRedrawDefinitionSummary =>
+      'Redraw only from your confirmed generation intent without choosing another direction.';
+
+  @override
+  String get aiRedrawConfirmIntent => 'Confirm generation intent';
+
+  @override
+  String get aiRedrawIntentPreviewTitle => 'Generation intent';
+
+  @override
+  String get aiRedrawIntentConfirmed =>
+      'This definition is frozen. Editing the text requires confirmation again.';
+
+  @override
+  String aiRedrawIntentVersion(int revision) {
+    return 'Definition version $revision';
+  }
+
+  @override
+  String get aiRedrawIntentInvalid =>
+      'Enter 1 to 500 visible characters without hidden or control characters.';
+
+  @override
+  String get markRemovalArea => 'Paint the area to remove';
+
+  @override
+  String get changeRemovalArea => 'Change painted area';
+
+  @override
+  String get removalAreaReady =>
+      'Only your manually painted area will be used; nothing else is selected automatically.';
+
+  @override
+  String get applyNaturalOptimization => 'Apply natural enhancement';
+
+  @override
+  String get applyWhiteBackground => 'Apply white background';
+
+  @override
+  String get applyTransparentBackground => 'Create transparent cutout';
+
+  @override
+  String get applyReplacementBackground => 'Apply new background';
+
+  @override
+  String get chooseReplacementBackground => 'Choose new background';
+
+  @override
+  String get chooseAnotherBackground => 'Choose another background';
+
+  @override
+  String get importingBackground => 'Importing background…';
+
+  @override
+  String get optimizeResult => 'Automatic enhancement';
+
+  @override
+  String get cleanupResult => 'White background cleanup';
+
+  @override
+  String get optimizeApplied => 'Photo enhanced';
+
+  @override
+  String get cleanupApplied => 'Cleanup applied';
+
+  @override
+  String get optimizeAgain => 'Enhance again';
+
+  @override
+  String get cleanupAgain => 'Continue cleanup';
+
+  @override
+  String get cleanupWhiteBackgroundUnavailable =>
+      'No subject can be processed safely, so portrait white background will not run.';
+
+  @override
+  String get cleanupSubjectUnavailable =>
+      'No subject can be processed safely, so this background edit will not run.';
+
+  @override
+  String get localStaticTaskIosOnly =>
+      'This local task is currently available on iPhone only.';
+
+  @override
   String get aiDefineStyle => 'Define with AI';
 
   @override
@@ -89,6 +413,64 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get describeStyleHint =>
       'For example: cinematic after rain, keep the person natural';
+
+  @override
+  String get styleDefinitionInputHint =>
+      'Use a description, a confirmed voice transcript, or a separate reference photo. Your source photo stays the subject.';
+
+  @override
+  String get styleInputText => 'Text';
+
+  @override
+  String get styleInputVoice => 'Voice';
+
+  @override
+  String get styleInputReference => 'Reference photo';
+
+  @override
+  String get styleVoiceTranscriptHint =>
+      'Record your idea, then check or edit the transcript before defining the style.';
+
+  @override
+  String get styleVoiceRecord => 'Start recording';
+
+  @override
+  String get styleVoiceStop => 'Stop recording';
+
+  @override
+  String get styleVoiceListening => 'Listening…';
+
+  @override
+  String get styleVoiceFailed =>
+      'Voice could not be transcribed. Your image and input are unchanged.';
+
+  @override
+  String get styleReferenceHint =>
+      'Choose one separate photo. We use only its color, light, texture, and mood—not its people, objects, words, or composition.';
+
+  @override
+  String get styleReferenceChoose => 'Choose reference photo';
+
+  @override
+  String get styleReferenceSource => 'Source photo';
+
+  @override
+  String get styleReferenceImage => 'Style reference';
+
+  @override
+  String get styleReferenceRemove => 'Remove reference';
+
+  @override
+  String get styleReferenceKeptLocal =>
+      'This reference will not replace your source photo. Its local copy is removed after the style is defined.';
+
+  @override
+  String get styleReferenceUnavailable =>
+      'Reference photos are unavailable on this device. Your image is unchanged.';
+
+  @override
+  String get styleReferenceFailed =>
+      'This reference could not be used. Your source photo and current style are unchanged.';
 
   @override
   String get defineStyle => 'Define style';
@@ -102,6 +484,31 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get styleSavedCustom => 'Saved style';
+
+  @override
+  String get styleOfficialDefinitionSummary =>
+      'A fixed, reproducible local style.';
+
+  @override
+  String get styleTextDefinitionSummary =>
+      'A local style interpreted from your confirmed description.';
+
+  @override
+  String get styleVoiceDefinitionSummary =>
+      'A local style interpreted from your confirmed voice transcript.';
+
+  @override
+  String get styleReferenceDefinitionSummary =>
+      'A local style using only the reference photo’s color, light, texture, and mood.';
+
+  @override
+  String get styleReferenceWarmTitle => 'Warm reference';
+
+  @override
+  String get styleReferenceCoolTitle => 'Cool reference';
+
+  @override
+  String get styleReferenceNaturalTitle => 'Natural reference';
 
   @override
   String get styleNatural => 'Natural';
@@ -149,9 +556,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get changeStyle => 'Change style';
 
   @override
-  String get generateMotion => 'Generate motion';
-
-  @override
   String get motionConfirmationTitle => 'Create a moving image';
 
   @override
@@ -160,6 +564,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get motionUnavailable => 'Motion generation is not connected yet';
+
+  @override
+  String get motionUnavailableDetail =>
+      'No image will be uploaded, no task will be created, and no credits will be used. Return to the capability list or Home.';
 
   @override
   String get gotIt => 'Got it';
@@ -189,7 +597,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get draftDeleteConfirmation =>
-      'This only deletes the draft in Yingjian. The original in Photos is not deleted.';
+      'This deletes the Yingjian draft and generated results, and cancels cloud tasks that can still be canceled. The original in Photos is not deleted. If a cloud task can no longer be canceled, nothing is deleted.';
 
   @override
   String get draftStatusEditing => 'Editing';
@@ -229,6 +637,14 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get projectDeleteFailed =>
       'The local project could not be deleted. Nothing was changed.';
+
+  @override
+  String get projectDeleteCloudTaskActive =>
+      'The cloud task has started and cannot currently be canceled. This creation was not deleted so its task and credit state remain visible.';
+
+  @override
+  String get projectDeletedGenerationCleanupPending =>
+      'The creation was deleted, but its local generation cache could not be fully cleaned up. Content in Photos is unchanged.';
 
   @override
   String lastProjectSummary(int count, String date, String time) {

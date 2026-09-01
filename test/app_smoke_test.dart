@@ -18,6 +18,7 @@ import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/meta_op.dart';
 import 'package:yingjian/features/editor/domain/platform_meta_op_capabilities.dart';
 import 'package:yingjian/features/editor/domain/semantic_editing_recipe.dart';
+import 'package:yingjian/features/editor/presentation/editor_page.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/photo_analysis/domain/photo_analysis.dart';
@@ -26,6 +27,20 @@ import 'support/memory_photo_analysis_cache.dart';
 import 'support/test_services.dart';
 
 void main() {
+  testWidgets('legacy editor route cannot bypass capability selection', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(buildTestApp(settings));
+
+    unawaited(AppRouter.navigatorKey.currentState!.pushNamed('/editor'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(UnknownRoutePage), findsOneWidget);
+    expect(find.byType(EditorPage), findsNothing);
+  });
+
   test('creation routes reject typed arguments for another task', () {
     expect(
       () => AppRouter.onGenerateRoute(
@@ -42,7 +57,7 @@ void main() {
   });
 
   testWidgets(
-    'task-specific editor refuses a restored draft for another task',
+    'task-specific workspace refuses a restored draft for another task',
     (tester) async {
       final store = MemoryPhotoProjectStore(
         PhotoProject(
@@ -72,10 +87,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.byKey(const ValueKey('editor-task-route-mismatch')),
+        find.byKey(const ValueKey('style-workspace-retry')),
         findsOneWidget,
       );
-      expect(find.text('这个草稿不属于当前任务，请返回首页继续。'), findsOneWidget);
+      expect(find.text('无法恢复上次项目'), findsOneWidget);
     },
   );
 
@@ -115,6 +130,34 @@ void main() {
     expect(find.text('最近项目'), findsNothing);
     expect(find.text('还没有项目，选一张照片开始吧'), findsNothing);
     expect(find.byKey(const ValueKey('home-new-project')), findsNothing);
+  });
+
+  testWidgets('home presents four task destinations as one vertical stack', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+
+    SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+    final settings = await AppSettings.load();
+    await tester.pumpWidget(buildTestApp(settings));
+    await tester.pumpAndSettle();
+
+    final taskRects = <Rect>[
+      tester.getRect(find.byKey(const ValueKey('home-optimize'))),
+      tester.getRect(find.byKey(const ValueKey('home-style'))),
+      tester.getRect(find.byKey(const ValueKey('home-cleanup'))),
+      tester.getRect(find.byKey(const ValueKey('home-motion'))),
+    ];
+
+    expect(taskRects.first.width, greaterThan(350));
+    for (var index = 1; index < taskRects.length; index++) {
+      expect(taskRects[index].left, closeTo(taskRects.first.left, 0.01));
+      expect(taskRects[index].right, closeTo(taskRects.first.right, 0.01));
+      expect(taskRects[index].top, greaterThan(taskRects[index - 1].bottom));
+    }
   });
 
   testWidgets('follows a persisted English locale', (tester) async {
@@ -195,7 +238,9 @@ void main() {
     expect(find.text('未完成项目'), findsNothing);
     expect(find.byKey(const ValueKey('home-style')), findsOneWidget);
     expect(find.byKey(const ValueKey('home-motion')), findsOneWidget);
-    expect(find.byKey(const ValueKey('home-resume-project')), findsOneWidget);
+    final resume = find.byKey(const ValueKey('home-resume-project'));
+    await _scrollHomeTo(tester, resume);
+    expect(resume, findsOneWidget);
     expect(find.textContaining('1 张照片'), findsNothing);
     expect(find.textContaining('14:30'), findsOneWidget);
     expect(find.text('编辑中'), findsOneWidget);
@@ -235,11 +280,10 @@ void main() {
     final settings = await AppSettings.load();
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
     await tester.pumpAndSettle();
-    await tester.drag(
-      find.byKey(const ValueKey('home-scroll')),
-      const Offset(0, -420),
+    await _scrollHomeTo(
+      tester,
+      find.byKey(const ValueKey('home-featured-draft-changed-draft')),
     );
-    await tester.pumpAndSettle();
 
     expect(
       find.descendant(
@@ -285,11 +329,10 @@ void main() {
 
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
     await tester.pumpAndSettle();
-    await tester.drag(
-      find.byKey(const ValueKey('home-scroll')),
-      const Offset(0, -420),
+    await _scrollHomeTo(
+      tester,
+      find.byKey(const ValueKey('home-featured-draft-project-2')),
     );
-    await tester.pumpAndSettle();
 
     expect(
       find.byKey(const ValueKey('home-featured-draft-project-2')),
@@ -344,11 +387,10 @@ void main() {
       final settings = await AppSettings.load();
       await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
       await tester.pumpAndSettle();
-      await tester.drag(
-        find.byKey(const ValueKey('home-scroll')),
-        const Offset(0, -520),
+      await _scrollHomeTo(
+        tester,
+        find.byKey(const ValueKey('home-delete-draft-draft-older')),
       );
-      await tester.pumpAndSettle();
 
       await tester.ensureVisible(
         find.byKey(const ValueKey('home-delete-draft-draft-older')),
@@ -357,7 +399,7 @@ void main() {
         find.byKey(const ValueKey('home-delete-draft-draft-older')),
       );
       await tester.pumpAndSettle();
-      expect(find.text('只会删除映见中的草稿，不会删除系统相册原图。'), findsOne);
+      expect(find.textContaining('取消仍可取消的云端任务'), findsOne);
       await tester.tap(find.byKey(const ValueKey('home-confirm-delete-draft')));
       await tester.pumpAndSettle();
 
@@ -365,6 +407,10 @@ void main() {
       expect(
         find.byKey(const ValueKey('home-draft-draft-older')),
         findsNothing,
+      );
+      await _scrollHomeTo(
+        tester,
+        find.byKey(const ValueKey('home-featured-draft-draft-latest')),
       );
       expect(
         find.byKey(const ValueKey('home-featured-draft-draft-latest')),
@@ -674,11 +720,10 @@ void main() {
 
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
-    await tester.drag(
-      find.byKey(const ValueKey('home-scroll')),
-      const Offset(0, -420),
+    await _scrollHomeTo(
+      tester,
+      find.byKey(const ValueKey('home-draft-project-1')),
     );
-    await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('home-draft-project-1')), findsOneWidget);
     expect(store.projects, hasLength(2));
   });
@@ -1519,6 +1564,10 @@ void main() {
       AppRouter.navigatorKey.currentState!.pushReplacementNamed(AppRoutes.home),
     );
     await tester.pumpAndSettle();
+    await _scrollHomeTo(
+      tester,
+      find.byKey(const ValueKey('home-resume-project')),
+    );
     expect(find.byKey(const ValueKey('home-resume-project')), findsOneWidget);
     final status = find.byKey(
       ValueKey('home-draft-status-${store.project!.id}'),
@@ -2840,6 +2889,7 @@ void main() {
 
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('home-page')), findsOneWidget);
+    await _scrollHomeTo(tester, find.text('需要恢复'));
     expect(find.text('需要恢复'), findsOneWidget);
     expect(find.text('无法恢复上次项目'), findsOneWidget);
     expect(find.text('重试'), findsOneWidget);
@@ -3323,13 +3373,31 @@ void main() {
 
 Future<void> _pushLegacyEditorRoute(WidgetTester tester) async {
   await tester.pumpAndSettle();
+  final homeScroll = find.byKey(const ValueKey('home-scroll'));
+  if (homeScroll.evaluate().isNotEmpty) {
+    await tester.drag(homeScroll, const Offset(0, -2000));
+    await tester.pumpAndSettle();
+  }
   final resume = find.byKey(const ValueKey('home-resume-project'));
   unawaited(
-    AppRouter.navigatorKey.currentState!.pushNamed(
-      AppRoutes.editor,
-      arguments: resume.evaluate().isEmpty,
+    AppRouter.navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => EditorPage(startWithImport: resume.evaluate().isEmpty),
+      ),
     ),
   );
+}
+
+Future<void> _scrollHomeTo(WidgetTester tester, Finder target) async {
+  await tester.scrollUntilVisible(
+    target,
+    320,
+    scrollable: find.descendant(
+      of: find.byKey(const ValueKey('home-scroll')),
+      matching: find.byType(Scrollable),
+    ),
+  );
+  await tester.pumpAndSettle();
 }
 
 Future<void> _openLegacyEditorRoute(WidgetTester tester) async {

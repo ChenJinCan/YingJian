@@ -7,6 +7,7 @@ import 'package:yingjian/features/editor/domain/editing_resource.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/project/infrastructure/app_owned_photo_importer.dart';
+import 'package:yingjian/observability/local_diagnostic_log.dart';
 
 void main() {
   test(
@@ -253,7 +254,7 @@ void main() {
     expect(await File(first.localPath).exists(), isFalse);
   });
 
-  test('removes app-owned copies when picker cleanup fails', () async {
+  test('keeps app-owned copies when picker cleanup fails', () async {
     final directory = await Directory.systemTemp.createTemp(
       'yingjian-photo-import-release-failure-',
     );
@@ -271,19 +272,56 @@ void main() {
       createId: () => 'photo-release-failure',
     );
 
-    await expectLater(
-      importer.importPhotos(limit: 6),
-      throwsA(isA<FileSystemException>()),
-    );
+    final batch = await importer.importPhotos(limit: 6);
 
     expect(source.released, [sourceFile.path]);
     expect(
       File(
         '${directory.path}/app-media/photo-release-failure.jpg',
       ).existsSync(),
-      isFalse,
+      isTrue,
     );
+    expect(batch.photos, hasLength(1));
   });
+
+  test(
+    'a second import remains usable when picker temporary cleanup fails',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'yingjian-photo-second-import-cleanup-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final firstSource = File('${directory.path}/picker/first.jpg');
+      final secondSource = File('${directory.path}/picker/second.jpg');
+      await firstSource.parent.create(recursive: true);
+      await firstSource.writeAsBytes(_jpeg(width: 1200, height: 900));
+      await secondSource.writeAsBytes(_jpeg(width: 1200, height: 900));
+      final source = _SecondReleaseFailsPhotoSource([
+        [SelectedPhoto(path: firstSource.path, name: 'first.jpg')],
+        [SelectedPhoto(path: secondSource.path, name: 'second.jpg')],
+      ]);
+      var nextId = 0;
+      final diagnosticLog = MemoryDiagnosticLog();
+      final importer = AppOwnedPhotoImporter(
+        source: source,
+        mediaDirectory: () async => Directory('${directory.path}/app-media'),
+        inspectPhoto: _inspectJpeg,
+        createId: () => 'photo-${nextId++}',
+        diagnosticLog: diagnosticLog,
+      );
+
+      final first = await importer.importPhotos(limit: 6);
+      final second = await importer.importPhotos(limit: 6);
+
+      expect(first.photos, hasLength(1));
+      expect(second.photos, hasLength(1));
+      expect(await File(second.photos.single.localPath).exists(), isTrue);
+      expect(source.releaseCount, 2);
+      final entries = await diagnosticLog.readEntries();
+      expect(entries.single.operation, 'release_picker_files');
+      expect(entries.single.result, 'failed');
+    },
+  );
 
   test(
     'keeps valid photos when another selected item is unsupported',
@@ -649,6 +687,27 @@ final class _ReleasablePhotoSource implements ReleasablePhotoSource {
     final error = releaseError;
     if (error != null) {
       throw error;
+    }
+  }
+}
+
+final class _SecondReleaseFailsPhotoSource implements ReleasablePhotoSource {
+  _SecondReleaseFailsPhotoSource(this.selections);
+
+  final List<List<SelectedPhoto>> selections;
+  var _nextSelection = 0;
+  var releaseCount = 0;
+
+  @override
+  Future<List<SelectedPhoto>> pickPhotos({required int limit}) async {
+    return selections[_nextSelection++];
+  }
+
+  @override
+  Future<void> releasePhotos(List<SelectedPhoto> photos) async {
+    releaseCount += 1;
+    if (releaseCount == 2) {
+      throw const FileSystemException('cleanup failed');
     }
   }
 }

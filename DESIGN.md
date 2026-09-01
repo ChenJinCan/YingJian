@@ -124,19 +124,19 @@ spacing:
 
 ```text
 首页
-├─ 优化照片 → 选图片 → 本地优化 → 静态结果
-├─ 换风格 → 选图片 → 定风格 → 应用风格 → 静态结果
-├─ 去背景 / 去杂物 → 选图片 → 语义背景或本地擦除 → 静态结果
-└─ 做动态效果 → 选图片 → 服务可用时定风格、确认生成 → 动态结果
+├─ 优化照片 → 选图片 → 明确选择「自然优化 / AI 修复 / 高清放大 / 老照片修复」→ 静态结果
+├─ 换风格 → 选图片 → 明确选择「官方风格 / 文字定风格 / 语音定风格 / 参考图风格 / AI 风格重绘」→ 静态结果
+├─ 去背景 / 去杂物 → 选图片 → 明确选择「人物白底 / 透明抠图 / 替换背景 / 去路人 / 涂抹去物」→ 静态结果
+└─ 做动态效果 → 选图片 → 明确选择「轻微动态 / 镜头推进 / 光影流动」→ 生成动态照片
 ```
 
 - 首页显示品牌与四个整块可点击的 iOS destination tiles：**优化照片**、**换风格**、**去背景 / 去杂物**、**做动态效果**。每个 tile 左侧是任务与一句结果说明，右侧是语义预览；不得使用重复满幅人像的海报墙。
 - 点击入口即确定任务；正式产品随后调用系统选图，原型中直接用样片模拟选图完成。
-- `CreationTask=optimize|style|cleanup|motion` 是入口身份；`CreationIntent=apply|motion` 只选择静态/生成执行分支。旧 `apply` 草稿恢复为 `style`。
-- 换风格与做动态效果可复用选图、官方风格和 AI 定风格能力，但不得复用一个可见的“双出口”页面。
-- 优化照片只显示本地优化操作；换风格只显示 **应用风格**；去背景 / 去杂物只显示受支持的语义背景或本地擦除；做动态效果服务未接入时只显示不可用状态。
-- 官方风格使用带可见名称的横向缩略图；`AI 定风格` 固定在当前风格标题右侧并替代无操作价值的“预览”标签，首次进入即可看见，点按后打开来源关联的系统式 Sheet。
-- 生成确认只在服务接入后使用底部 Sheet，保留上传范围、权益与预计等待；当前未接入时不得上传、创建任务或收费。
+- `CreationTask=optimize|style|cleanup|motion` 是入口身份；任务内还必须保存用户明确选择的 `CreationCapability`。`CreationIntent=apply|motion` 只区分静态页面和动态页面。旧 `apply` 草稿恢复为 `style`。
+- 进入工作区时不预选任何能力；能力按固定产品顺序完整展示，不依据照片、分析、历史、设备或 AI 推荐、排序、突出、组合或替用户切换。
+- 用户点选能力后才显示该能力的说明、可用性和唯一主操作。目标菜单不代表已经交付；未跑通完整闭环的能力显示明确不可用，不能自动降级到其他能力。
+- 官方风格、文字、语音、参考图和 AI 风格重绘是换风格内五个名称明确的选择；三种输入可以复用 Sheet 实现，但系统不能替用户选择入口。
+- 云端生成确认使用底部 Sheet，明确上传范围与权益；第一方网关未启用时不得上传、创建任务或收费。本地高清与本地动态不显示云端确认。
 - 静态结果使用媒体查看器；服务接入后的动态结果默认暂停并由用户明确播放。保存是主操作，分享走系统分享，返回当前任务不隐式切换任务。
 
 运行方式及验证边界见 `.scratch/prototypes/style-first-mobile/README.md`。该原型是本地验证材料，不是 Flutter 实现或发布证据。
@@ -146,29 +146,30 @@ spacing:
 The production experience starts from four explicit user tasks:
 
 ```text
-优化照片：选图片 → 本地优化
-换风格：  选图片 → 定风格 → 应用
-去背景 / 去杂物：选图片 → 受支持背景或擦除
-做动态效果：选图片 → 服务可用时定风格 → 生成
+优化照片：选图片 → 用户选一种优化能力 → 执行
+换风格：  选图片 → 用户选一种风格能力 → 应用或生成
+去背景 / 去杂物：选图片 → 用户选一种清理能力 → 执行
+做动态效果：选图片 → 用户选一种动态效果 → 生成动态照片
 ```
 
 This is not a simplified editor. It is a task-first, style-led creation experience.
 
 - **优化照片**, **换风格**, **去背景 / 去杂物**, and **做动态效果** are four stable top-level destinations, chosen before photo selection.
 - **选图片** starts one creation from one read-only source photo within the chosen task.
-- **定风格** is shared only by the style and motion tasks: the user may switch an official style or define one with text, voice, or a reference image.
-- `CreationTask` is user identity; `CreationIntent` is the execution branch. Optimize, style, and cleanup are local static work; motion is independent generation.
-- Cleanup currently supports semantic background/white-background handling and local erase only; it is not alpha cutout or unbounded generative removal. Motion currently has no service: it must not upload, create a task, or consume quota.
-- When generation is connected, it still uses the source photo and style definition directly. It never requires a static apply or export first.
+- After photo selection, the user explicitly selects one named `CreationCapability`; entering a task never preselects or authorizes a capability.
+- **定风格** belongs to the style task. Official, text, voice, reference, and AI redraw remain visibly distinct choices. Motion instead uses the explicit effects 轻微动态, 镜头推进, and 光影流动.
+- `CreationTask` is user identity; `CreationIntent` only separates static and dynamic pages. The selected capability decides local, cloud, static-generation, or motion-generation execution, and cloud work still requires a separate confirmation.
+- Current availability remains honest: natural optimization, six limited local styles, portrait white background, and simple local erase are the narrow implemented paths. All other confirmed menu items stay unavailable until their complete result flow exists.
+- Dynamic generation uses the source photo and user-selected motion effect directly. It never requires a static apply or export first.
 
-Do not expose a generic editor shell, all-purpose tool categories, parameter sliders, a “自己调” escape route, or a fixed set of three recommendations. Optimize and cleanup may expose only the task-specific local controls needed to complete their named result. Parameters may exist behind the interface only as validated execution details.
+Do not expose a generic editor shell, all-purpose tool categories, parameter sliders, a “自己调” escape route, or any recommendation surface. Optimize and cleanup expose only the confirmed, task-specific named capabilities. Parameters may exist behind the interface only as validated execution details of the capability the user selected.
 
 ## Experience Principles
 
 1. **The image is the interface.** The source, preview, or result owns most of the screen and never moves merely because a transient control opens.
-2. **One decision at a time.** Choose the task first; every later state asks only for the next decision in that branch.
+2. **One decision at a time.** Choose the task, then explicitly choose one capability. No capability is selected by default.
 3. **Style is the user language.** Names, visual examples, plain-language descriptions, and references describe a desired result; tool names do not.
-4. **AI clarifies instead of taking over.** AI returns one understandable style definition and a trustworthy preview. It does not create hidden work or automatically start generation.
+4. **AI obeys instead of deciding.** AI may validate the selected capability and execute it only after the user activates that capability's primary action. It never selects, recommends, ranks, combines, substitutes, uploads, generates, or charges on the user's behalf.
 5. **State is honest.** Preview, applied result, generation task, and exported media are visually and verbally distinct.
 6. **Calm beats density.** Fewer surfaces, low visual noise, short labels, and generous space matter more than exposing every capability.
 
@@ -188,8 +189,8 @@ Platform guidance: [Designing for iOS](https://developer.apple.com/design/human-
 
 ### Home
 
-- Show exactly four destination tiles: **优化照片** — “调亮、清晰、增强质感”；**换风格** — “日系、胶片、插画、电影感”；**去背景 / 去杂物** — “抠图、白底、清理路人杂物”；**做动态效果** — “让静态照片自然动起来”。每张整卡均为点击目标；不得把入口藏到加号、标签栏或菜单中。
-- Tiles use the standard content layer, continuous 24–28 pt corners, concise secondary copy, and a small semantic preview. They may wrap and scroll at accessibility sizes; they are not full-bleed posters and do not use Glass.
+- Show exactly four destination tiles in one full-width vertical stack: **优化照片** — “调亮、清晰、增强质感”；**换风格** — “日系、胶片、插画、电影感”；**去背景 / 去杂物** — “抠图、白底、清理路人杂物”；**做动态效果** — “让静态照片自然动起来”。每张整卡均为点击目标；手机首页不得把四个任务排成 2 × 2 宫格，也不得把入口藏到加号、标签栏或菜单中。
+- Tiles use the standard content layer, continuous 24–28 pt corners, concise secondary copy, and a small semantic preview. At accessibility sizes each tile may grow and the page scrolls while preserving the single column; tiles are not full-bleed posters and do not use Glass.
 - Selecting a destination fixes `CreationTask=optimize|style|cleanup|motion`, from which `creationIntent=apply|motion` is derived, before the system photo picker opens.
 - Returning from the picker without a photo stays on Home. Selecting a photo creates a draft in the chosen branch; it never silently replaces or deletes another draft.
 - If drafts are restored, each resume surface retains its original `CreationTask` identity. Historic `apply` drafts migrate to `style`; a draft cannot reopen as optimize or cleanup by inference.
@@ -201,18 +202,27 @@ Each task owns its workspace state. The static/creation branches may share layou
 
 1. **System navigation:** Back, inline task title, and at most one contextual trailing action.
 2. **Image stage:** the complete source, style preview, static result, or dynamic result on a stable media canvas.
-3. **Bottom control layer:** the task's current action and one outcome action inside the safe area. Style and motion tasks may show current style, named style rail and AI entry; optimize and cleanup show only their supported local actions.
+3. **Bottom control layer:** the current task's named capability choices and, only after one is selected, that choice's single primary action inside the safe area.
 
 Keep the image stage stable across all states. Text, voice, reference selection, consent, and failures use system-style sheets or inline status that preserve the image context.
+
+### Capability Choice
+
+- Optimize shows **自然优化 / AI 修复 / 高清放大 / 老照片修复**.
+- Style shows **官方风格 / 文字定风格 / 语音定风格 / 参考图风格 / AI 风格重绘**.
+- Cleanup shows **人物白底 / 透明抠图 / 替换背景 / 去路人 / 涂抹去物**.
+- Motion shows **轻微动态 / 镜头推进 / 光影流动**; **生成动态照片** is the primary action after one effect is selected.
+- Every list is single-select, initially empty, and displayed in fixed product order. No option is recommended, highlighted, reordered, combined, or substituted based on the image, analysis, history, device, or AI.
+- Availability is checked only after the user selects an option. Failure preserves the current image and selection, with no recommendation, fallback, or automatic switch.
 
 ### Result State
 
 - A static result uses a media viewer with primary **保存到照片**, system **分享**, and a task-appropriate secondary action.
-- A dynamic result, after the service is connected, uses native video playback semantics with primary **保存视频**, system **分享**, and secondary **换风格**. It does not autoplay.
+- A dynamic result, after the service is connected, uses native video playback semantics with primary **保存视频**, system **分享**, and secondary **换效果**. It does not autoplay.
 - Result dismissal uses an explicit close control labeled “关闭并返回首页”; a back chevron must never jump to Home.
 - While a dynamic result is playing, the central pause control fades after about 1.5 seconds and returns when the user taps the media. Paused state keeps the play control visible.
 - Result actions stay on the same visual surface; do not introduce an export editor or a long-lived results tab.
-- **重新定风格** returns to `applyStyleReady` or (when available) `motionStyleReady` according to the current task. Returning never overwrites the source or deletes an earlier successful result.
+- A task-appropriate secondary action returns to that task's capability choices: style uses **重新定风格**, motion uses **换效果**, and optimize / cleanup use **选择其他能力**. Returning never overwrites the source or deletes an earlier successful result.
 - Switching among optimize, style, cleanup and motion is not a result action; the user returns to Home and deliberately enters the other task.
 
 ## Core Components
@@ -226,33 +236,36 @@ Keep the image stage stable across all states. Text, voice, reference selection,
 
 ### Style Strip
 
-- Only the style and motion task workspaces show this control. Optimize and cleanup do not expose a style rail merely to make their entry surfaces look alike.
+- Only the style workspace shows this control after the user explicitly selects **官方风格**. Motion uses its own effect choices; optimize and cleanup do not expose a style rail merely to make their entry surfaces look alike.
 - A horizontally scrollable Photos/Filters-style rail of 52–56 pt rounded previews with visible names.
 - Each option has at least a 44 pt hit region and an unmistakable selected state using accent stroke plus checkmark/semantics, never color alone.
-- Selecting a card switches the active style and requests the newest preview. Older responses cannot replace the latest selection.
+- No official style is selected by default. Selecting a card switches the active style and requests the newest local preview; browsing or switching never uploads, generates, or charges. Older responses cannot replace the latest selection.
 - Do not group styles by editing tools. Optional curation uses human concepts such as mood, occasion, or visual character.
 
-### Define Style Entry
+### Style Capability Inputs
 
-- Only the style and motion task workspaces expose this entry.
-- One fixed, first-view control labeled **AI 定风格** beside the current style heading. It does not depend on horizontal rail discovery.
-- It opens a medium/large bottom Sheet that supports multiline text, voice, and one reference image without turning them into separate product modes.
-- AI returns a readable style name, a short description, and one active preview. The user can accept it, revise the description, or return to official styles.
+- Only the style workspace exposes these inputs.
+- **文字定风格 / 语音定风格 / 参考图风格** are three visible, explicitly named choices. They may reuse one medium/large bottom Sheet internally, but the system never chooses an input method for the user.
+- **AI 风格重绘** is a separate explicit capability. Accepting text, voice, or a reference image never starts it automatically; upload, generation, and quota require a separate confirmation.
+- AI returns a readable style name, a short description, and one active preview. The user can accept it, revise the current input, or return to the fixed capability list and personally choose another path.
 - Ask at most one essential clarification. Never show raw prompts, parameter chips, model selectors, or supplier controls.
 
 ### Branch Action
 
-Show exactly one full-width primary action for the chosen task:
+Show exactly one full-width primary action for the capability the user selected. Before selection, no executable primary action is shown:
 
-- In optimize: a local quality action for brightness, clarity, and texture.
-- In `applyStyleReady`: **应用风格** creates the deterministic static result.
-- In cleanup: only supported semantic background/white-background handling or local erase; never describe it as alpha cutout or unbounded generative removal.
-- In `motionUnavailable`: no generation CTA. When the service is connected, `motionStyleReady` shows **生成动态** and opens the minimal generation confirmation.
+- Optimize: **应用自然优化 / 开始 AI 修复 / 生成高清图片 / 修复老照片**.
+- Style: official, text, voice, and reference use **应用风格**; AI redraw uses **生成风格图片**.
+- Cleanup: **应用白底 / 生成透明背景 / 替换背景 / 去除路人 / 去除涂抹内容**.
+- Motion: in the current unavailable runtime there is no generation CTA. After service connection, any selected motion effect uses **生成动态照片** and opens the minimal generation confirmation.
+
+Selecting a cloud capability does not upload, create a task, or charge. Those side effects begin only after the user activates its primary action and completes the capability-specific confirmation.
 
 Never render actions for two tasks on the same screen. The capabilities may share source and static safety contracts internally, but the interface preserves the task the user chose on Home.
 
 ### Generation Status
 
+- Any selected cloud or generative capability first shows what will be uploaded, expected output, waiting time, cost or quota, and cancellation boundary. Selecting the capability itself never creates a task.
 - Current state: the motion service is unavailable. Show one clear unavailable state and do not upload, create a task, charge quota, or fake progress.
 - After the service is connected, state what will be uploaded, expected output, waiting time, cost or quota, and cancellation boundary before creating a task.
 - After confirmation, replace the outcome area with one honest task status and the actions currently available. Keep the source or style preview visible while waiting. Do not fake percentages or create a second task when local waiting times out.
@@ -292,20 +305,23 @@ Never render actions for two tasks on the same screen. The capabilities may shar
 
 ```text
 home
-  ├─ chooseOptimize → preparingSource → optimizeReady → applyingLocalTask → staticReady
-  ├─ chooseStyle → preparingSource → awaitingStyle
-  │    → definingStyle | previewingStyle
-  │    → applyStyleReady → applyingStyle → staticReady
-  ├─ chooseCleanup → preparingSource → cleanupReady → applyingLocalTask → staticReady
-  └─ chooseMotion → preparingSource → motionUnavailable
-       └─ after service connection: awaitingMotionStyle → motionStyleReady
+  ├─ chooseOptimize → preparingSource → awaitingOptimizeCapability
+  │    → selectedOptimizeCapability → applyingSelectedCapability → staticReady
+  ├─ chooseStyle → preparingSource → awaitingStyleCapability
+  │    → selectedStyleCapability → definingOrPreviewingStyle
+  │    → applyingOrGeneratingStyle → staticReady
+  ├─ chooseCleanup → preparingSource → awaitingCleanupCapability
+  │    → selectedCleanupCapability → applyingSelectedCapability → staticReady
+  └─ chooseMotion → preparingSource → awaitingMotionCapability
+       ├─ current: selectedMotionCapability → motionUnavailable
+       └─ after service connection: selectedMotionCapability
           → confirmingGeneration → generatingMotion → motionReady
 ```
 
-- Every async response binds to the current `CreationTask`, `creationIntent`, source, style version, and request identity.
-- Failure preserves the last safe image and offers one relevant recovery action.
-- The three static task workspaces never become blocked merely because generation is unavailable; generation availability is evaluated only in the motion branch.
-- Applying a style may be undone or replaced internally, but the default user recovery is the simpler **换风格** or **查看原图**.
+- Every async response binds to the current `CreationTask`, selected `CreationCapability`, `creationIntent`, source, style/effect version, and request identity.
+- Failure preserves the last safe image and selected capability. It explains the failure without recommending, substituting, or automatically switching capabilities.
+- A generative capability being unavailable never blocks another capability. Generation availability is checked only after the user selects a generative capability.
+- Applying a style may be undone or replaced internally. The user can explicitly choose **重新定风格**, **查看原图**, or return to the capability list; the system chooses none of them automatically.
 
 ## Accessibility and Responsive Rules
 
@@ -323,9 +339,10 @@ home
 - permanent generic command, manual, atmosphere, or lighting docks unrelated to the chosen task;
 - photo strips, group scope, batch controls, or multi-photo ordering;
 - automatic generation after browsing or applying a style;
-- transparent alpha cutout or unbounded generative removal under the cleanup task's current label;
+- automatic capability selection, recommendation, ranking, highlighting, combination, substitution, fallback, upload, generation, or charging;
+- generative removal outside the object or region the user explicitly selected;
 - a shared task-ready screen that exposes actions from multiple tasks;
-- separate product modes for text, voice, and reference input;
+- promoting text, voice, or reference input into new Home tasks or independent navigation stacks;
 - decorative complexity that competes with the photo.
 
 The canonical product behavior remains [MVP Spec](docs/product/mvp-spec.md). This file owns visual hierarchy and interaction presentation only; it does not declare implementation completion.

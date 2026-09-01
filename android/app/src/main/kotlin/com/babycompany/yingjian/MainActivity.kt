@@ -20,12 +20,17 @@ class MainActivity : FlutterActivity() {
     private var pendingExport: Pair<MethodCall, MethodChannel.Result>? = null
     private var photoPreviewRenderer: GlesPhotoPreviewRenderer? = null
     private var photoExportChannel: MethodChannel? = null
+    private var generationSessionCredentialHost: AndroidGenerationSessionCredentialHost? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         photoPreviewRenderer = GlesPhotoPreviewRenderer(
             messenger = flutterEngine.dartExecutor.binaryMessenger,
             textureRegistry = flutterEngine.renderer,
+        )
+        generationSessionCredentialHost = AndroidGenerationSessionCredentialHost(
+            context = applicationContext,
+            messenger = flutterEngine.dartExecutor.binaryMessenger,
         )
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PHOTO_INPUT_CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -128,6 +133,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        generationSessionCredentialHost?.close()
+        generationSessionCredentialHost = null
         photoPreviewRenderer?.close()
         photoPreviewRenderer = null
         exportExecutor.shutdown()

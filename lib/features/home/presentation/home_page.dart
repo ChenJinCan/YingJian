@@ -6,9 +6,11 @@ import 'package:provider/provider.dart';
 import 'package:yingjian/app/navigation/app_router.dart';
 import 'package:yingjian/app/theme/app_theme.dart';
 import 'package:yingjian/features/creation/domain/creation_task.dart';
+import 'package:yingjian/features/generation/application/generation_coordinator.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/l10n/l10n.dart';
+import 'package:yingjian/observability/local_diagnostic_log.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -20,6 +22,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   PhotoProjectStore? _store;
   PhotoImporter? _importer;
+  GenerationCoordinator? _generationCoordinator;
   Future<List<PhotoProject>>? _projects;
   String? _importError;
   String? _projectActionError;
@@ -28,12 +31,14 @@ class _HomePageState extends State<HomePage> {
   CreationTask? _failedTask;
   String? _openingProjectId;
   bool _cancelPreparingRequested = false;
+  bool _retryingGenerationCleanups = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final store = context.read<PhotoProjectStore>();
     _importer = context.read<PhotoImporter>();
+    _generationCoordinator = context.read<GenerationCoordinator>();
     if (!identical(store, _store)) {
       _store = store;
       _projects = _loadProjects(store);
@@ -44,10 +49,30 @@ class _HomePageState extends State<HomePage> {
     if (store is PhotoProjectCatalogStore) {
       final projects = List<PhotoProject>.of(await store.loadProjects());
       projects.sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
+      _retryGenerationCleanups(projects);
       return projects;
     }
     final latest = await store.loadLatest();
-    return latest == null ? const [] : [latest];
+    final projects = latest == null ? <PhotoProject>[] : [latest];
+    _retryGenerationCleanups(projects);
+    return projects;
+  }
+
+  void _retryGenerationCleanups(List<PhotoProject> projects) {
+    final coordinator = _generationCoordinator;
+    if (coordinator == null || _retryingGenerationCleanups) return;
+    _retryingGenerationCleanups = true;
+    unawaited(
+      coordinator
+          .retryProjectDeletionCleanups(
+            existingProjectIds: projects.map((project) => project.id).toSet(),
+          )
+          .catchError((_) {
+            // A malformed or temporarily unavailable cleanup store retries on
+            // a later catalog load and must not block the home page.
+          })
+          .whenComplete(() => _retryingGenerationCleanups = false),
+    );
   }
 
   void _reload() {
@@ -100,6 +125,17 @@ class _HomePageState extends State<HomePage> {
     if (_preparingTask != null || _openingProjectId != null) return;
     final store = _store!;
     final importer = _importer!;
+    final diagnosticLog = context.read<DiagnosticLog>();
+    final timer = Stopwatch()..start();
+    diagnosticLog.record(
+      DiagnosticLogEvent(
+        level: DiagnosticLogLevel.info,
+        component: 'home',
+        operation: 'start_photo_import',
+        result: 'started',
+        reason: task.name,
+      ),
+    );
     setState(() {
       _preparingTask = task;
       _failedTask = null;
@@ -135,6 +171,17 @@ class _HomePageState extends State<HomePage> {
       if (!mounted) return;
       switch (result) {
         case PhotoImportResult.imported:
+          diagnosticLog.record(
+            DiagnosticLogEvent(
+              level: DiagnosticLogLevel.info,
+              component: 'home',
+              operation: 'start_photo_import',
+              result: 'succeeded',
+              reason: task.name,
+              itemCount: session.project!.photos.length,
+              durationMs: timer.elapsedMilliseconds,
+            ),
+          );
           final projectId = session.project!.id;
           importedProjectKept = true;
           setState(() => _preparingTask = null);
@@ -144,15 +191,46 @@ class _HomePageState extends State<HomePage> {
           );
           if (mounted) _reload();
         case PhotoImportResult.rejected:
+          diagnosticLog.record(
+            DiagnosticLogEvent(
+              level: DiagnosticLogLevel.warning,
+              component: 'home',
+              operation: 'start_photo_import',
+              result: 'rejected',
+              reason: task.name,
+              itemCount: session.importFailures.length,
+              durationMs: timer.elapsedMilliseconds,
+            ),
+          );
           setState(() {
             _failedTask = task;
             _importFailures = session!.importFailures;
           });
         case PhotoImportResult.canceled:
         case PhotoImportResult.limitReached:
+          diagnosticLog.record(
+            DiagnosticLogEvent(
+              level: DiagnosticLogLevel.info,
+              component: 'home',
+              operation: 'start_photo_import',
+              result: result.name,
+              reason: task.name,
+              durationMs: timer.elapsedMilliseconds,
+            ),
+          );
           break;
       }
-    } on Object {
+    } on Object catch (error) {
+      diagnosticLog.record(
+        DiagnosticLogEvent(
+          level: DiagnosticLogLevel.error,
+          component: 'home',
+          operation: 'start_photo_import',
+          result: 'failed',
+          reason: DiagnosticLogEvent.reasonFor(error),
+          durationMs: timer.elapsedMilliseconds,
+        ),
+      );
       if (mounted) {
         if (!_cancelPreparingRequested) {
           setState(() {
@@ -167,7 +245,16 @@ class _HomePageState extends State<HomePage> {
           store is PhotoProjectCatalogStore) {
         try {
           await store.cancelNewProject();
-        } on Object {
+        } on Object catch (error) {
+          diagnosticLog.record(
+            DiagnosticLogEvent(
+              level: DiagnosticLogLevel.error,
+              component: 'project_catalog',
+              operation: 'cancel_new_project',
+              result: 'failed',
+              reason: DiagnosticLogEvent.reasonFor(error),
+            ),
+          );
           if (mounted && !_cancelPreparingRequested) {
             setState(
               () => _projectActionError = context.l10n.projectRestoreFailed,
@@ -247,12 +334,37 @@ class _HomePageState extends State<HomePage> {
     if (_preparingTask != null || _openingProjectId != null) return;
     setState(() => _openingProjectId = project.id);
     try {
+      final generationCoordinator = _generationCoordinator;
+      if (generationCoordinator != null) {
+        await generationCoordinator.prepareProjectDeletion(project.id);
+        // Persist the user's explicit deletion authorization before removing
+        // the project. Recovery still checks the live project catalog, so a
+        // failed project deletion can never trigger generation cleanup.
+        await generationCoordinator.stageProjectDeletionCleanup(project.id);
+      }
       await store.deleteProject(project);
+      Object? generationCleanupError;
+      try {
+        await generationCoordinator?.deleteProjectState(project.id);
+      } on Object catch (error) {
+        generationCleanupError = error;
+      }
       if (!mounted) return;
-      setState(() => _projectActionError = null);
-    } on Object {
+      if (generationCleanupError == null) {
+        setState(() => _projectActionError = null);
+      } else {
+        setState(
+          () => _projectActionError =
+              context.l10n.projectDeletedGenerationCleanupPending,
+        );
+      }
+    } on Object catch (error) {
       if (mounted) {
-        setState(() => _projectActionError = context.l10n.projectDeleteFailed);
+        setState(
+          () => _projectActionError = error is GenerationProjectDeletionBlocked
+              ? context.l10n.projectDeleteCloudTaskActive
+              : context.l10n.projectDeleteFailed,
+        );
       }
     } finally {
       if (mounted) {
@@ -300,53 +412,48 @@ class _HomePageState extends State<HomePage> {
                             : null,
                       ),
                       const SizedBox(height: 22),
-                      LayoutBuilder(
-                        builder: (context, constraints) {
-                          final twoColumns = constraints.maxWidth >= 320;
-                          final taskWidth = twoColumns
-                              ? (constraints.maxWidth - 12) / 2
-                              : constraints.maxWidth;
-                          return Wrap(
-                            spacing: 12,
-                            runSpacing: 12,
-                            children: [
-                              for (final task in CreationTask.values)
-                                SizedBox(
-                                  width: taskWidth,
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
-                                    children: [
-                                      _TaskTile(
-                                        key: ValueKey('home-${task.name}'),
-                                        task: task,
-                                        title: _taskTitle(context, task),
-                                        subtitle: _taskSubtitle(context, task),
-                                        enabled:
-                                            _preparingTask == null &&
-                                            _openingProjectId == null,
-                                        preparing: _preparingTask == task,
-                                        onTap: () => _startNew(task),
-                                      ),
-                                      if (_preparingTask == task)
-                                        _PreparingControl(
-                                          cancelRequested:
-                                              _cancelPreparingRequested,
-                                          onCancel: _cancelPreparing,
-                                        ),
-                                      if (_failedTask == task)
-                                        _ImportRecovery(
-                                          message: _importError,
-                                          failures: _importFailures,
-                                          onRetry: () => _startNew(task),
-                                        ),
-                                    ],
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (final (index, task)
+                              in CreationTask.values.indexed)
+                            Padding(
+                              padding: EdgeInsets.only(
+                                bottom: index == CreationTask.values.length - 1
+                                    ? 0
+                                    : 12,
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  _TaskTile(
+                                    key: ValueKey('home-${task.name}'),
+                                    task: task,
+                                    title: _taskTitle(context, task),
+                                    subtitle: _taskSubtitle(context, task),
+                                    enabled:
+                                        _preparingTask == null &&
+                                        _openingProjectId == null,
+                                    preparing: _preparingTask == task,
+                                    onTap: () => _startNew(task),
                                   ),
-                                ),
-                            ],
-                          );
-                        },
+                                  if (_preparingTask == task)
+                                    _PreparingControl(
+                                      cancelRequested:
+                                          _cancelPreparingRequested,
+                                      onCancel: _cancelPreparing,
+                                    ),
+                                  if (_failedTask == task)
+                                    _ImportRecovery(
+                                      message: _importError,
+                                      failures: _importFailures,
+                                      onRetry: () => _startNew(task),
+                                    ),
+                                ],
+                              ),
+                            ),
+                        ],
                       ),
                       if (snapshot.connectionState ==
                           ConnectionState.waiting) ...[
