@@ -10,6 +10,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yingjian/app/navigation/app_router.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
+import 'package:yingjian/features/creation/domain/creation_task.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
 import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
@@ -19,6 +20,7 @@ import 'package:yingjian/features/editor/domain/editing_core.dart';
 import 'package:yingjian/features/editor/domain/image_pipeline.dart';
 import 'package:yingjian/features/editor/domain/meta_op.dart';
 import 'package:yingjian/features/editor/domain/platform_meta_op_capabilities.dart';
+import 'package:yingjian/features/editor/domain/quality_enhancement_recipe.dart';
 import 'package:yingjian/features/editor/domain/semantic_editing_recipe.dart';
 import 'package:yingjian/features/editor/infrastructure/method_channel_photo_exporter.dart';
 import 'package:yingjian/features/editor/infrastructure/method_channel_photo_preview_renderer.dart';
@@ -60,7 +62,7 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('onboarding-continue')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('home-apply-style')), findsOneWidget);
+      expect(find.byKey(const ValueKey('home-style')), findsOneWidget);
       expect(find.byKey(const ValueKey('home-motion')), findsOneWidget);
       expect(
         find.byKey(const ValueKey('home-full-screen-background')),
@@ -166,10 +168,10 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const ValueKey('home-apply-style')), findsOneWidget);
+      expect(find.byKey(const ValueKey('home-style')), findsOneWidget);
       expect(find.byKey(const ValueKey('home-motion')), findsOneWidget);
       expect(find.byKey(const ValueKey('home-start-editing')), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+      await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
 
       expect(
@@ -264,7 +266,7 @@ void main() {
 
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('home-apply-style')), findsOneWidget);
+      expect(find.byKey(const ValueKey('home-style')), findsOneWidget);
       expect(find.byKey(const ValueKey('home-motion')), findsOneWidget);
       final resume = find.byKey(const ValueKey('home-resume-project'));
       await tester.ensureVisible(resume);
@@ -285,6 +287,128 @@ void main() {
         'apply-route-photo',
         'apply-route-photo',
       ]);
+    },
+  );
+
+  testWidgets(
+    'home opens optimize through production navigation and applies its primary action',
+    (tester) async {
+      final source = File(
+        'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+        'Icon-App-1024x1024@1x.png',
+      );
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+      final store = MemoryPhotoProjectStore();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoImporter: FakePhotoImporter([
+            ProjectPhoto(
+              id: 'optimize-route-photo',
+              localPath: source.path,
+              originalName: 'optimize.png',
+            ),
+          ]),
+          photoProjectStore: store,
+          photoPreviewRenderer: FakePhotoPreviewRenderer.supported(),
+          metaOpCapabilities: iosMetaOpCapabilities,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('home-optimize')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('editor-task-optimize')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('editor-apply-quality-improvement')),
+        findsOneWidget,
+      );
+      final applyQuality = find.byKey(
+        const ValueKey('editor-apply-quality-improvement'),
+      );
+      await tester.ensureVisible(applyQuality);
+      await tester.pumpAndSettle();
+      expect(applyQuality.hitTestable(), findsOneWidget);
+      await tester.tap(applyQuality);
+      await tester.pumpAndSettle();
+
+      final project = store.project!;
+      expect(project.creationTask, CreationTask.optimize);
+      final quality = project
+          .effectiveRecipeFor('optimize-route-photo')
+          .qualityEnhancementRecipe;
+      expect(
+        quality.noiseReduction,
+        QualityEnhancementRecipe.safeAutomatic.noiseReduction,
+      );
+      expect(
+        quality.lowLightRecovery,
+        QualityEnhancementRecipe.safeAutomatic.lowLightRecovery,
+      );
+      expect(
+        quality.hazeRemoval,
+        QualityEnhancementRecipe.safeAutomatic.hazeRemoval,
+      );
+      expect(
+        quality.detailSharpening,
+        QualityEnhancementRecipe.safeAutomatic.detailSharpening,
+      );
+    },
+  );
+
+  testWidgets(
+    'home opens cleanup through production navigation and applies white background',
+    (tester) async {
+      final source = File(
+        'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+        'Icon-App-1024x1024@1x.png',
+      );
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+      final store = MemoryPhotoProjectStore();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoImporter: FakePhotoImporter([
+            ProjectPhoto(
+              id: 'cleanup-route-photo',
+              localPath: source.path,
+              originalName: 'cleanup.png',
+            ),
+          ]),
+          photoProjectStore: store,
+          photoPreviewRenderer: FakePhotoPreviewRenderer.supported(),
+          photoAnalyzer: _ApplicablePortraitAnalyzer(),
+          metaOpCapabilities: iosMetaOpCapabilities,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('home-cleanup')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('editor-task-cleanup')), findsOneWidget);
+      final whiteBackground = find.byKey(
+        const ValueKey('editor-background-white'),
+      );
+      await tester.ensureVisible(whiteBackground);
+      await tester.tap(whiteBackground);
+      await tester.pumpAndSettle();
+
+      final project = store.project!;
+      expect(project.creationTask, CreationTask.cleanup);
+      expect(
+        project
+            .effectiveRecipeFor('cleanup-route-photo')
+            .semanticEditingRecipe
+            .background,
+        BackgroundTreatment.white,
+      );
     },
   );
 
@@ -454,8 +578,8 @@ void main() {
     );
     expect(find.byKey(const ValueKey('home-draft-draft-2')), findsNothing);
     expect(find.byKey(const ValueKey('home-draft-draft-1')), findsOneWidget);
-    await tester.ensureVisible(find.byKey(const ValueKey('home-apply-style')));
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.ensureVisible(find.byKey(const ValueKey('home-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('apply-style-workspace')), findsOneWidget);
     expect(
@@ -484,7 +608,7 @@ void main() {
         buildTestApp(settings, photoImporter: FakePhotoImporter()),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+      await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('home-page')), findsOneWidget);
       expect(find.byKey(const ValueKey('editor-page')), findsNothing);
@@ -504,7 +628,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+      await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('home-import-retry')), findsOneWidget);
       expect(find.textContaining('bad.gif'), findsOneWidget);
@@ -530,7 +654,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+      await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('home-import-retry')), findsOneWidget);
       expect(find.text('照片导入失败，请重试'), findsOneWidget);

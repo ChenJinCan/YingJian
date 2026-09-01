@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yingjian/app/navigation/app_router.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
+import 'package:yingjian/features/creation/domain/creation_task.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_sharer.dart';
 import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
@@ -25,6 +26,59 @@ import 'support/memory_photo_analysis_cache.dart';
 import 'support/test_services.dart';
 
 void main() {
+  test('creation routes reject typed arguments for another task', () {
+    expect(
+      () => AppRouter.onGenerateRoute(
+        const RouteSettings(
+          name: AppRoutes.optimizeWorkspace,
+          arguments: CreationRouteArguments(
+            projectId: 'style-draft',
+            task: CreationTask.style,
+          ),
+        ),
+      ),
+      throwsArgumentError,
+    );
+  });
+
+  testWidgets(
+    'task-specific editor refuses a restored draft for another task',
+    (tester) async {
+      final store = MemoryPhotoProjectStore(
+        PhotoProject(
+          id: 'style-draft',
+          createdAt: DateTime.utc(2026, 9, 1),
+          updatedAt: DateTime.utc(2026, 9, 1),
+          photos: const [
+            ProjectPhoto(
+              id: 'style-photo',
+              localPath: '/private/style-draft.jpg',
+              originalName: 'style-draft.jpg',
+            ),
+          ],
+        ),
+      );
+      SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
+      final settings = await AppSettings.load();
+      await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
+      await tester.pumpAndSettle();
+
+      unawaited(
+        AppRouter.navigatorKey.currentState!.pushNamed(
+          AppRoutes.optimizeWorkspace,
+          arguments: 'style-draft',
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('editor-task-route-mismatch')),
+        findsOneWidget,
+      );
+      expect(find.text('这个草稿不属于当前任务，请返回首页继续。'), findsOneWidget);
+    },
+  );
+
   testWidgets('user can see the Yingjian starting action', (tester) async {
     SharedPreferences.setMockInitialValues({'app.locale': 'zh'});
     final settings = await AppSettings.load();
@@ -33,9 +87,17 @@ void main() {
 
     expect(find.text('映见'), findsOneWidget);
     expect(find.text('选择想得到的结果'), findsOneWidget);
-    expect(find.text('图片应用'), findsOneWidget);
-    expect(find.text('动起来'), findsOneWidget);
-    expect(find.byKey(const ValueKey('home-apply-style')), findsOneWidget);
+    expect(find.text('优化照片'), findsOneWidget);
+    expect(find.text('调亮、清晰、增强质感'), findsOneWidget);
+    expect(find.text('换风格'), findsOneWidget);
+    expect(find.text('日系、胶片、插画、电影感'), findsOneWidget);
+    expect(find.text('去背景 / 去杂物'), findsOneWidget);
+    expect(find.text('抠图、白底、清理路人杂物'), findsOneWidget);
+    expect(find.text('做动态效果'), findsOneWidget);
+    expect(find.text('让静态照片自然动起来'), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-optimize')), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-style')), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-cleanup')), findsOneWidget);
     expect(find.byKey(const ValueKey('home-motion')), findsOneWidget);
     expect(
       find.byKey(const ValueKey('home-full-screen-background')),
@@ -62,8 +124,10 @@ void main() {
 
     expect(find.text('Yingjian'), findsOneWidget);
     expect(find.text('Choose the result you want'), findsOneWidget);
-    expect(find.text('Apply a look'), findsOneWidget);
-    expect(find.text('Bring it to life'), findsOneWidget);
+    expect(find.text('Enhance photo'), findsOneWidget);
+    expect(find.text('Change style'), findsOneWidget);
+    expect(find.text('Remove background / objects'), findsOneWidget);
+    expect(find.text('Create motion'), findsOneWidget);
   });
 
   testWidgets('English draft metadata only presents the last edit time', (
@@ -90,7 +154,17 @@ void main() {
     await tester.pumpWidget(buildTestApp(settings, photoProjectStore: store));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Last edited'), findsOneWidget);
+    final lastEdited = find.textContaining('Last edited');
+    await tester.scrollUntilVisible(
+      lastEdited,
+      260,
+      scrollable: find.descendant(
+        of: find.byKey(const ValueKey('home-scroll')),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(lastEdited, findsOneWidget);
     expect(find.textContaining('1 photo'), findsNothing);
   });
 
@@ -119,7 +193,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('未完成项目'), findsNothing);
-    expect(find.byKey(const ValueKey('home-apply-style')), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-style')), findsOneWidget);
     expect(find.byKey(const ValueKey('home-motion')), findsOneWidget);
     expect(find.byKey(const ValueKey('home-resume-project')), findsOneWidget);
     expect(find.textContaining('1 张照片'), findsNothing);
@@ -589,7 +663,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('apply-style-workspace')), findsOneWidget);
     expect(
@@ -831,7 +905,7 @@ void main() {
     );
 
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('apply-style-workspace')), findsOneWidget);
@@ -854,7 +928,7 @@ void main() {
     );
 
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('home-page')), findsOneWidget);
@@ -875,13 +949,13 @@ void main() {
     );
 
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('home-page')), findsOneWidget);
     expect(find.byKey(const ValueKey('editor-page')), findsNothing);
     expect(find.text('未添加任何照片'), findsNothing);
-    expect(find.byKey(const ValueKey('home-apply-style')), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-style')), findsOneWidget);
     expect(find.byKey(const ValueKey('home-motion')), findsOneWidget);
   });
 
@@ -894,7 +968,7 @@ void main() {
     await tester.pumpWidget(buildTestApp(settings, photoImporter: importer));
 
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
@@ -925,7 +999,7 @@ void main() {
       buildTestApp(settings, photoImporter: importer, photoProjectStore: store),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pump(const Duration(milliseconds: 220));
     await tester.tap(find.byKey(const ValueKey('home-cancel-import')));
     await tester.pump();
@@ -962,7 +1036,7 @@ void main() {
     );
 
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('home-page')), findsOneWidget);
@@ -3155,7 +3229,7 @@ void main() {
     await tester.pumpWidget(buildTestApp(settings));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('home-apply-style')), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-style')), findsOneWidget);
     expect(find.byKey(const ValueKey('home-motion')), findsOneWidget);
     expect(find.byKey(const ValueKey('home-journey-guide')), findsNothing);
     expect(tester.takeException(), isNull);

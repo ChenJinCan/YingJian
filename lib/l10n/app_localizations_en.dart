@@ -43,6 +43,32 @@ class AppLocalizationsEn extends AppLocalizations {
   String get motionCreationSubtitle => 'Create a natural moving image';
 
   @override
+  String get optimizePhoto => 'Enhance photo';
+
+  @override
+  String get optimizePhotoSubtitle => 'Brighten, sharpen, and refine texture';
+
+  @override
+  String get homeChangeStyle => 'Change style';
+
+  @override
+  String get changeStyleSubtitle => 'Japanese, film, illustration, or cinema';
+
+  @override
+  String get removeBackgroundOrObjects => 'Remove background / objects';
+
+  @override
+  String get removeBackgroundOrObjectsSubtitle =>
+      'Replace the background, use white, or clear distractions';
+
+  @override
+  String get createMotionEffect => 'Create motion';
+
+  @override
+  String get createMotionEffectSubtitle =>
+      'Bring a still photo naturally to life';
+
+  @override
   String get preparingImage => 'Preparing image…';
 
   @override
@@ -314,6 +340,10 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get projectRestoreFailed =>
       'Your previous project could not be restored';
+
+  @override
+  String get taskRouteMismatch =>
+      'This draft belongs to a different task. Return to Home to continue.';
 
   @override
   String get projectSaveFailed =>

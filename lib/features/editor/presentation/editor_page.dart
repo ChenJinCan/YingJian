@@ -30,6 +30,7 @@ import 'package:yingjian/features/editor/infrastructure/method_channel_speech_tr
 import 'package:yingjian/features/editor/presentation/native_photo_preview.dart';
 import 'package:yingjian/features/editor/presentation/visual_tracks_page.dart';
 import 'package:yingjian/features/editor/presentation/voice_edit_sheet.dart';
+import 'package:yingjian/features/creation/domain/creation_task.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/photo_analysis/application/photo_analysis_cache.dart';
@@ -37,17 +38,23 @@ import 'package:yingjian/features/photo_analysis/application/photo_analysis_coor
 import 'package:yingjian/features/photo_analysis/domain/photo_analysis.dart';
 import 'package:yingjian/l10n/l10n.dart';
 
+enum EditorEntryPoint { standard, optimize, cleanup }
+
 class EditorPage extends StatefulWidget {
   const EditorPage({
     this.speechTranscriber = const MethodChannelSpeechTranscriber(),
     this.aiEditPlanner = const LocalAiEditPlanner(),
     this.startWithImport = false,
+    this.projectId,
+    this.entryPoint = EditorEntryPoint.standard,
     super.key,
   });
 
   final SpeechTranscriber speechTranscriber;
   final AiEditPlanner aiEditPlanner;
   final bool startWithImport;
+  final String? projectId;
+  final EditorEntryPoint entryPoint;
 
   @override
   State<EditorPage> createState() => _EditorPageState();
@@ -100,6 +107,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   Completer<void>? _recipeSettlement;
   bool _allowRoutePop = false;
   bool _handledStartWithImport = false;
+  bool _openedEntryPoint = false;
   bool _manualToolsVisible = false;
   VisualTrackKind? _visualTrackKind;
   bool _immersivePreview = false;
@@ -107,6 +115,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   bool _loadedExportPreference = false;
   bool _explainedPhotoPermission = false;
   bool _photoPermissionDenied = false;
+  bool _taskRouteMismatch = false;
 
   @override
   void initState() {
@@ -207,6 +216,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     final session = PhotoProjectSession(
       importer: context.read<PhotoImporter>(),
       store: context.read<PhotoProjectStore>(),
+      projectId: widget.projectId,
     );
     _session = session;
     unawaited(_initializeSession(session));
@@ -228,6 +238,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
 
   Future<void> _initializeSession(PhotoProjectSession session) async {
     await _restoreProject(session);
+    if (!mounted || _taskRouteMismatch) return;
+    _openEntryPointIfNeeded();
     if (!mounted ||
         _handledStartWithImport ||
         !widget.startWithImport ||
@@ -238,30 +250,58 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     await _importPhotos();
   }
 
+  void _openEntryPointIfNeeded() {
+    if (!mounted ||
+        _openedEntryPoint ||
+        widget.entryPoint == EditorEntryPoint.standard ||
+        _session?.project == null) {
+      return;
+    }
+    setState(() {
+      _openedEntryPoint = true;
+      _manualToolsVisible = true;
+      _visualTrackKind = null;
+    });
+  }
+
   Future<void> _restoreProject(PhotoProjectSession session) async {
     await session.restore(enforceSinglePhoto: true);
+    final project = session.project;
+    final expectedTask = _expectedCreationTask;
+    if (project != null &&
+        expectedTask != null &&
+        project.creationTask != expectedTask) {
+      if (mounted) setState(() => _taskRouteMismatch = true);
+      return;
+    }
     await BoundedBatchPhotoExporter.recoverInterrupted(session);
     if (session.project?.flowState == PhotoProjectFlowState.exported) {
       await session.transitionTo(PhotoProjectFlowState.editing);
     }
-    final project = session.project;
+    final restoredProject = session.project;
     final analysisRefreshRequired = await _restoreCachedPortraitApplicability(
       session,
     );
     _loadEditableRecipe();
-    final focusPhotoId = project?.focusPhotoId;
+    final focusPhotoId = restoredProject?.focusPhotoId;
     if (focusPhotoId != null) {
-      final focusIndex = project!.photos.indexWhere(
+      final focusIndex = restoredProject!.photos.indexWhere(
         (photo) => photo.id == focusPhotoId,
       );
       if (focusIndex >= 0) {
         _selectedIndex = focusIndex;
       }
     }
-    if (project != null && analysisRefreshRequired) {
+    if (restoredProject != null && analysisRefreshRequired) {
       unawaited(_preparePhotoAnalysis(persistAnalysisStates: true));
     }
   }
+
+  CreationTask? get _expectedCreationTask => switch (widget.entryPoint) {
+    EditorEntryPoint.standard => null,
+    EditorEntryPoint.optimize => CreationTask.optimize,
+    EditorEntryPoint.cleanup => CreationTask.cleanup,
+  };
 
   void _loadEditableRecipe() {
     if (!mounted) return;
@@ -1470,6 +1510,22 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final session = _session!;
+    if (_taskRouteMismatch) {
+      return Scaffold(
+        key: const ValueKey('editor-task-route-mismatch'),
+        appBar: AppBar(title: Text(context.l10n.appTitle)),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Text(
+              context.l10n.taskRouteMismatch,
+              style: Theme.of(context).textTheme.titleMedium,
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
     return ListenableBuilder(
       listenable: Listenable.merge([session, _editorSession]),
       builder: (context, _) {
@@ -1537,7 +1593,11 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
             if (!didPop) _handleBlockedPop();
           },
           child: Scaffold(
-            key: const ValueKey('editor-page'),
+            key: ValueKey(switch (widget.entryPoint) {
+              EditorEntryPoint.standard => 'editor-page',
+              EditorEntryPoint.optimize => 'editor-task-optimize',
+              EditorEntryPoint.cleanup => 'editor-task-cleanup',
+            }),
             backgroundColor: _immersivePreview ? const Color(0xFF0B0D0E) : null,
             appBar: _immersivePreview
                 ? null
@@ -1545,7 +1605,14 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                     title: photos.isEmpty
                         ? null
                         : Text(
-                            context.l10n.appTitle,
+                            switch (widget.entryPoint) {
+                              EditorEntryPoint.standard =>
+                                context.l10n.appTitle,
+                              EditorEntryPoint.optimize =>
+                                context.l10n.optimizePhoto,
+                              EditorEntryPoint.cleanup =>
+                                context.l10n.removeBackgroundOrObjects,
+                            },
                             style: Theme.of(context).textTheme.titleMedium
                                 ?.copyWith(
                                   fontWeight: FontWeight.w700,
@@ -1747,6 +1814,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
                                   bodyTargetRegions: bodyTargetRegions,
                                   photoToolsVisible: photoToolsVisible,
                                   manualToolsVisible: _manualToolsVisible,
+                                  entryPoint: widget.entryPoint,
                                   visualTrackKind: _visualTrackKind,
                                   feedback: _editFeedback,
                                   showCanvasInteractionHint:
@@ -1915,6 +1983,7 @@ class _PhotoWorkspace extends StatelessWidget {
     required this.bodyTargetRegions,
     required this.photoToolsVisible,
     required this.manualToolsVisible,
+    required this.entryPoint,
     required this.visualTrackKind,
     required this.feedback,
     required this.showCanvasInteractionHint,
@@ -1951,6 +2020,7 @@ class _PhotoWorkspace extends StatelessWidget {
   final List<NormalizedTargetRegion> bodyTargetRegions;
   final bool photoToolsVisible;
   final bool manualToolsVisible;
+  final EditorEntryPoint entryPoint;
   final VisualTrackKind? visualTrackKind;
   final _EditFeedback? feedback;
   final bool showCanvasInteractionHint;
@@ -2156,6 +2226,7 @@ class _PhotoWorkspace extends StatelessWidget {
             editorSession: editorSession,
             onRecipeCommitted: onRecipeCommitted,
             onClose: onCloseTools,
+            entryPoint: entryPoint,
           ),
         if (visualTrackKind != null && exportSummary == null)
           VisualTracksDock(
@@ -2228,6 +2299,7 @@ class _EditorToolsDock extends StatefulWidget {
     required this.editorSession,
     required this.onRecipeCommitted,
     required this.onClose,
+    required this.entryPoint,
   });
 
   final List<ProjectPhoto> photos;
@@ -2249,6 +2321,7 @@ class _EditorToolsDock extends StatefulWidget {
   final EditorSession editorSession;
   final VoidCallback onRecipeCommitted;
   final VoidCallback onClose;
+  final EditorEntryPoint entryPoint;
 
   @override
   State<_EditorToolsDock> createState() => _EditorToolsDockState();
@@ -2262,6 +2335,7 @@ class _EditorToolsDockState extends State<_EditorToolsDock> {
   @override
   void initState() {
     super.initState();
+    _selectedMetaOpId = _initialMetaOpId(widget.entryPoint);
     _freezeManualOrder();
   }
 
@@ -2269,11 +2343,21 @@ class _EditorToolsDockState extends State<_EditorToolsDock> {
   void didUpdateWidget(covariant _EditorToolsDock oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.selected.id != widget.selected.id) {
-      _selectedMetaOpId = null;
+      _selectedMetaOpId = _initialMetaOpId(widget.entryPoint);
       _showAllTools = false;
       _freezeManualOrder();
     }
+    if (oldWidget.entryPoint != widget.entryPoint) {
+      _selectedMetaOpId = _initialMetaOpId(widget.entryPoint);
+      _showAllTools = false;
+    }
   }
+
+  String? _initialMetaOpId(EditorEntryPoint entryPoint) => switch (entryPoint) {
+    EditorEntryPoint.cleanup => MetaOpIds.semanticAdjustments,
+    EditorEntryPoint.standard => null,
+    EditorEntryPoint.optimize => null,
+  };
 
   void _freezeManualOrder() {
     _frozenManualMetaOpIds = widget.editorSession.orderedManualMetaOpIds(
@@ -2328,7 +2412,14 @@ class _EditorToolsDockState extends State<_EditorToolsDock> {
                       child: Text(
                         _showAllTools
                             ? context.l10n.allTools
-                            : context.l10n.adjustPhoto,
+                            : switch (widget.entryPoint) {
+                                EditorEntryPoint.standard =>
+                                  context.l10n.adjustPhoto,
+                                EditorEntryPoint.optimize =>
+                                  context.l10n.optimizePhoto,
+                                EditorEntryPoint.cleanup =>
+                                  context.l10n.removeBackgroundOrObjects,
+                              },
                         textAlign: TextAlign.center,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -2397,6 +2488,27 @@ class _EditorToolsDockState extends State<_EditorToolsDock> {
   Widget _buildSelectedTool() {
     final enabled = widget.editingEnabled && !widget.interactionsBlocked;
     final selectedId = _selectedMetaOpId;
+    if (widget.entryPoint == EditorEntryPoint.optimize && selectedId == null) {
+      return _AdjustmentToolStrip(
+        scope: _AdjustmentToolScope.quality,
+        enabled: enabled,
+        extended: true,
+        photoToolsVisible: widget.photoToolsVisible,
+        portraitAvailable: widget.portraitApplicable,
+        faceSlimAvailable: widget.faceSlimApplicable,
+        faceSlimReason: widget.faceSlimReason,
+        faceSlimTargetCount: widget.faceSlimTargetCount,
+        faceTargetRegions: widget.faceTargetRegions,
+        stableFaceTargets: widget.stableFaceTargets,
+        bodyAvailable: widget.bodyApplicable,
+        bodyTargetCount: widget.bodyTargetCount,
+        bodyTargetRegions: widget.bodyTargetRegions,
+        photo: widget.selected,
+        recipe: widget.recipe,
+        editorSession: widget.editorSession,
+        onRecipeCommitted: widget.onRecipeCommitted,
+      );
+    }
     if (selectedId == MetaOpIds.compositionGeometry) {
       return _CompositionTools(
         enabled: enabled,

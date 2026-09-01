@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:yingjian/app/theme/app_theme.dart';
 import 'package:yingjian/features/creation/domain/creation_intent.dart';
+import 'package:yingjian/features/creation/domain/creation_task.dart';
 import 'package:yingjian/features/editor/application/ai_edit_planner.dart';
 import 'package:yingjian/features/editor/application/batch_photo_exporter.dart';
 import 'package:yingjian/features/editor/application/meta_op_capabilities_provider.dart';
@@ -24,9 +25,23 @@ import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/l10n/l10n.dart';
 
 class StyleWorkspacePage extends StatefulWidget {
-  const StyleWorkspacePage({required this.intent, this.projectId, super.key});
+  StyleWorkspacePage({
+    required this.intent,
+    CreationTask? task,
+    this.projectId,
+    super.key,
+  }) : task = task ?? CreationTask.fromCreationIntent(intent) {
+    if (this.task.creationIntent != intent) {
+      throw ArgumentError.value(
+        task,
+        'task',
+        'The task must use the same execution intent as its workspace',
+      );
+    }
+  }
 
   final CreationIntent intent;
+  final CreationTask task;
   final String? projectId;
 
   @override
@@ -105,6 +120,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
       importer: context.read<PhotoImporter>(),
       store: store,
       creationIntent: widget.intent,
+      creationTask: widget.task,
       projectId: widget.projectId,
     );
     _project = _restoreProject(
@@ -118,7 +134,12 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
     MetaOpCapabilitiesProvider capabilitiesProvider,
   ) async {
     await session.restore(enforceSinglePhoto: true);
-    if (session.project == null) return null;
+    final restoredProject = session.project;
+    if (restoredProject == null ||
+        restoredProject.creationIntent != widget.intent ||
+        restoredProject.creationTask != widget.task) {
+      return null;
+    }
     await BoundedBatchPhotoExporter.recoverInterrupted(session);
     var project = session.project;
     if (project == null || project.requiresUpdate) return null;
@@ -129,7 +150,9 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
       project = session.project;
     }
     _capabilities = await capabilitiesProvider.load();
-    if (project != null && project.creationIntent == widget.intent) {
+    if (project != null &&
+        project.creationIntent == widget.intent &&
+        project.creationTask == widget.task) {
       _restoreSelectedStyle(project, session.editableRecipe);
       _styleApplied = project.currentStaticStyleResult != null;
       _restoreExportSummary(project);
@@ -897,11 +920,12 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
                   : Icons.chevron_left_rounded,
             ),
           ),
-          title: Text(
-            widget.intent == CreationIntent.apply
-                ? context.l10n.imageApplication
-                : context.l10n.motionCreation,
-          ),
+          title: Text(switch (widget.task) {
+            CreationTask.style => context.l10n.homeChangeStyle,
+            CreationTask.motion => context.l10n.createMotionEffect,
+            CreationTask.optimize => context.l10n.optimizePhoto,
+            CreationTask.cleanup => context.l10n.removeBackgroundOrObjects,
+          }),
         ),
         body: FutureBuilder<PhotoProject?>(
           future: _project,
@@ -912,7 +936,8 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
             final project = snapshot.data;
             if (snapshot.hasError ||
                 project == null ||
-                project.creationIntent != widget.intent) {
+                project.creationIntent != widget.intent ||
+                project.creationTask != widget.task) {
               return _WorkspaceFailure(
                 onRetry: _retryRestore,
                 onBack: () => Navigator.of(context).maybePop(),

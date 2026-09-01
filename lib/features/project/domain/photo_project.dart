@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:yingjian/features/creation/domain/creation_intent.dart';
+import 'package:yingjian/features/creation/domain/creation_task.dart';
 import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/directional_lighting_recipe.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
@@ -913,6 +914,7 @@ class PhotoProject {
     required this.updatedAt,
     required List<ProjectPhoto> photos,
     this.creationIntent = CreationIntent.apply,
+    CreationTask? creationTask,
     this.creationStyleId,
     this.creationStyleName,
     this.creationStyleRecipe,
@@ -939,7 +941,9 @@ class PhotoProject {
     this.focusPhotoId,
     this.groupScrollOffset = 0,
     this.lastSuccessfulExportEditStateVersion,
-  }) : creationResultActive = creationResultActive ?? (creationResult != null),
+  }) : creationTask =
+           creationTask ?? CreationTask.fromCreationIntent(creationIntent),
+       creationResultActive = creationResultActive ?? (creationResult != null),
        photos = List.unmodifiable(photos),
        sharedStyle =
            sharedStyle ?? SharedStyle(recipe: recipe ?? EditRecipe.neutral),
@@ -980,6 +984,13 @@ class PhotoProject {
            (photos.length == 1
                ? ProjectEditingScope.currentPhoto
                : ProjectEditingScope.group) {
+    if (this.creationTask.creationIntent != creationIntent) {
+      throw ArgumentError.value(
+        this.creationTask,
+        'creationTask',
+        'The task must use the same execution intent as its project',
+      );
+    }
     if (photos.isEmpty || photos.length > maxPhotoCount) {
       throw RangeError.range(photos.length, 1, maxPhotoCount, 'photos.length');
     }
@@ -1205,7 +1216,7 @@ class PhotoProject {
   // so flips and perspective never freeze later group-style edits. V8's
   // broader overridesBasicEditing flag is accepted as a conservative look
   // override during migration.
-  static const schemaVersion = 17;
+  static const schemaVersion = 18;
   static const checkpointInterval = 20;
 
   final String id;
@@ -1213,6 +1224,7 @@ class PhotoProject {
   final DateTime updatedAt;
   final List<ProjectPhoto> photos;
   final CreationIntent creationIntent;
+  final CreationTask creationTask;
   final String? creationStyleId;
   final String? creationStyleName;
   final EditRecipe? creationStyleRecipe;
@@ -1684,6 +1696,7 @@ class PhotoProject {
     DateTime? updatedAt,
     List<ProjectPhoto>? photos,
     CreationIntent? creationIntent,
+    CreationTask? creationTask,
     Object? creationStyleId = _notProvided,
     Object? creationStyleName = _notProvided,
     Object? creationStyleRecipe = _notProvided,
@@ -1711,12 +1724,19 @@ class PhotoProject {
     double? groupScrollOffset,
     Object? lastSuccessfulExportEditStateVersion = _notProvided,
   }) {
+    final nextCreationIntent = creationIntent ?? this.creationIntent;
+    final nextCreationTask =
+        creationTask ??
+        (creationIntent == null
+            ? this.creationTask
+            : CreationTask.fromCreationIntent(nextCreationIntent));
     return PhotoProject(
       id: id,
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       photos: photos ?? this.photos,
-      creationIntent: creationIntent ?? this.creationIntent,
+      creationIntent: nextCreationIntent,
+      creationTask: nextCreationTask,
       creationStyleId: creationStyleId == _notProvided
           ? this.creationStyleId
           : creationStyleId as String?,
@@ -1777,6 +1797,7 @@ class PhotoProject {
       'updatedAt': updatedAt.toUtc().toIso8601String(),
       'photos': photos.map((photo) => photo.toJson()).toList(),
       'creationIntent': creationIntent.name,
+      'creationTask': creationTask.name,
       'creationStyleId': ?creationStyleId,
       'creationStyleName': ?creationStyleName,
       'creationStyleRecipe': ?creationStyleRecipe?.toJson(),
@@ -1862,6 +1883,20 @@ class PhotoProject {
     if (flowState == null) {
       throw FormatException('Unsupported project flow state $flowStateName');
     }
+    final creationIntent = storedVersion < 15
+        ? CreationIntent.apply
+        : _enumValue(
+            json['creationIntent'],
+            CreationIntent.values,
+            'creation intent',
+          );
+    final creationTask = storedVersion < 18
+        ? CreationTask.fromCreationIntent(creationIntent)
+        : _enumValue(
+            json['creationTask'],
+            CreationTask.values,
+            'creation task',
+          );
     final project = PhotoProject(
       id: json['id']! as String,
       createdAt: DateTime.parse(json['createdAt']! as String),
@@ -1869,13 +1904,8 @@ class PhotoProject {
       photos: photoValues
           .map((value) => ProjectPhoto.fromJson(value! as Map<String, Object?>))
           .toList(),
-      creationIntent: storedVersion < 15
-          ? CreationIntent.apply
-          : _enumValue(
-              json['creationIntent'],
-              CreationIntent.values,
-              'creation intent',
-            ),
+      creationIntent: creationIntent,
+      creationTask: creationTask,
       creationStyleId: storedVersion < 15
           ? null
           : json['creationStyleId'] as String?,
@@ -2115,6 +2145,7 @@ class PhotoProject {
         other.createdAt == createdAt &&
         other.updatedAt == updatedAt &&
         other.creationIntent == creationIntent &&
+        other.creationTask == creationTask &&
         other.creationStyleId == creationStyleId &&
         other.creationStyleName == creationStyleName &&
         other.creationStyleRecipe == creationStyleRecipe &&
@@ -2150,6 +2181,7 @@ class PhotoProject {
     createdAt,
     updatedAt,
     creationIntent,
+    creationTask,
     creationStyleId,
     creationStyleName,
     creationStyleRecipe,

@@ -42,6 +42,30 @@ class AppLocalizationsZh extends AppLocalizations {
   String get motionCreationSubtitle => '生成自然动态作品';
 
   @override
+  String get optimizePhoto => '优化照片';
+
+  @override
+  String get optimizePhotoSubtitle => '调亮、清晰、增强质感';
+
+  @override
+  String get homeChangeStyle => '换风格';
+
+  @override
+  String get changeStyleSubtitle => '日系、胶片、插画、电影感';
+
+  @override
+  String get removeBackgroundOrObjects => '去背景 / 去杂物';
+
+  @override
+  String get removeBackgroundOrObjectsSubtitle => '抠图、白底、清理路人杂物';
+
+  @override
+  String get createMotionEffect => '做动态效果';
+
+  @override
+  String get createMotionEffectSubtitle => '让静态照片自然动起来';
+
+  @override
   String get preparingImage => '正在准备图片…';
 
   @override
@@ -297,6 +321,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get projectRestoreFailed => '无法恢复上次项目';
+
+  @override
+  String get taskRouteMismatch => '这个草稿不属于当前任务，请返回首页继续。';
 
   @override
   String get projectSaveFailed => '无法保存本次调整，请重试';

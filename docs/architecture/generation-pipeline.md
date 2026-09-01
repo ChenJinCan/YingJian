@@ -2,9 +2,9 @@
 
 ## 目的与首个能力
 
-生成路径负责从当前来源图片和已确定风格创建新的媒体资产。首个优先能力是“图片动起来”：用户先在首页选择“动起来”，再选图和定风格，并在完成后预览、保存或分享派生结果。
+生成路径负责从当前来源图片和已确定风格创建新的媒体资产。它只服务首页的“做动态效果”任务；优化照片、换风格和去背景 / 去杂物均是本地静态任务，不得进入本管线。
 
-“图片应用”和“动起来”是首页两个同级任务入口，不是定好风格后并排出现的两个结果按钮。presentation 在本流程固定 `creationIntent=motion`，预览成功进入独立的 `motionStyleReady`，且只显示“让图片动起来”这一个主 CTA；不得同时展示“应用风格”。
+`CreationTask.motion` 与 `creationIntent=motion` 是首页四个任务中的独立生成分支，不是在定好风格后并排出现的结果按钮。当前生成服务未接入：presentation 必须进入明确的 `motionUnavailable` 状态，不得上传、创建任务、显示虚假进度或扣费。服务接入后，预览成功进入独立的 `motionStyleReady`，且只显示“让图片动起来”这一个主 CTA；不得同时展示静态任务操作。
 
 生成不要求先创建 `StyleCommit`、先应用风格或先静态导出。它可以是异步、非确定性、远程且有成本；因此不得加入 `EditRecipe`、`EditingCore` 或静态 `RenderPlan`，也不得借用静态撤销历史表达远程任务。
 
@@ -20,7 +20,7 @@
 
 快照由 `SourcePhoto + StyleDefinition` 直接创建，不依赖静态应用结果。生成投影是供应商无关、有界且通过 schema 与能力校验的意图，不是自由提示或供应商 payload。若供应商需要风格参考图，由生成管线按确定风格创建独立、内容寻址的参考渲染；它不是 `StyleCommit`，也不写入静态历史。快照不能从屏幕截图、未提交的静态预览或上一份生成结果隐式取得。后续换图或改变风格不会改写快照与既有产物，只会把旧任务标记为相对当前选择 `stale`；用户可以保留或删除它。
 
-`creationIntent=motion` 只决定 presentation 流程，不进入来源快照。真正可重放、可审计的生成输入仍然只有来源身份、`StyleDefinition` 的规范化生成投影和用户确认的有界生成意图。
+`CreationTask.motion` 与 `creationIntent=motion` 只决定 presentation 流程，不进入来源快照。真正可重放、可审计的生成输入仍然只有来源身份、`StyleDefinition` 的规范化生成投影和用户确认的有界生成意图。
 
 ## Module 与 Interface
 
@@ -39,10 +39,12 @@
 创建远程任务前的 presentation 状态为：
 
 ```text
-首页“动起来” → 选图片 → 定风格 → motionStyleReady → 让图片动起来
+当前：首页“做动态效果” → 选图片 → 定风格（如可用） → `motionUnavailable`，不上传、不创建任务、不扣费。
+
+服务接入后：首页“做动态效果” → 选图片 → 定风格 → `motionStyleReady` → 让图片动起来
 ```
 
-`motionStyleReady` 不是静态应用的 `applyStyleReady`，也不能显示静态应用 CTA。用户点击唯一主 CTA 后，才建立下列生成任务状态；上传与成本确认仍是离开 `awaitingConsent` 的必要条件。
+服务接入后的 `motionStyleReady` 不是静态应用的 `applyStyleReady`，也不能显示静态任务 CTA。用户点击唯一主 CTA 后，才建立下列生成任务状态；上传与成本确认仍是离开 `awaitingConsent` 的必要条件。
 
 ```text
 draft → awaitingConsent → queued → running → succeeded
@@ -62,7 +64,7 @@ draft → awaitingConsent → queued → running → succeeded
 - 超时只结束本地等待，不自动创建第二个远程任务；先查询原任务终态。
 - 自动格式修复和供应商重试必须有明确次数上限。
 - 创建前展示会上传什么、预期产物和权益或费用；没有确认不上传、不排队、不扣费。
-- 进入“动起来”、浏览风格、确定风格或完成静态应用都不能自动触发生成任务；只有 `motionStyleReady` 的“让图片动起来”和后续必要确认可以推进任务。
+- 进入“做动态效果”、浏览风格、确定风格或完成任一静态任务都不能自动触发生成任务；当前服务未接入时没有任何操作可以推进任务。服务接入后，只有 `motionStyleReady` 的“让图片动起来”和后续必要确认可以推进任务。
 
 ## 隐私与数据生命周期
 
@@ -73,7 +75,7 @@ draft → awaitingConsent → queued → running → succeeded
 
 ## 图片动起来的输出合同
 
-首个生成类型使用稳定标识 `image_motion`。供应商和具体模型可替换，业务层只依赖：
+服务接入后的首个生成类型使用稳定标识 `image_motion`。供应商和具体模型可替换，业务层只依赖：
 
 - 可播放的受支持动态媒体文件；
 - 明确的时长、尺寸、帧率、静音或音频状态；
@@ -86,5 +88,5 @@ draft → awaitingConsent → queued → running → succeeded
 
 - Module 测试覆盖成功、失败、超时、取消、不可取消阶段、重启恢复、重复回调、幂等重试和产物拒绝。
 - 隐私测试证明未确认不上传，日志不含路径、提示、签名 URL、凭据、图片或人脸数据。
-- 集成测试从生产首页“动起来”入口进入，证明选图和定风格期间保持 `creationIntent=motion`、`motionStyleReady` 只显示“让图片动起来”，再明确触发 `image_motion`，验证任务状态、至少一个失败或取消恢复分支以及成功后的可播放产物入口。
-- Profile/Release 真机验证 `SourcePhoto + StyleDefinition` 可在没有 `StyleCommit` 时创建上传前快照，并覆盖后台恢复、下载、播放、分享、删除、存储压力和静态应用分支不受失败任务影响。
+- 当前集成测试从生产首页“做动态效果”入口进入，证明 `CreationTask.motion` 与 `creationIntent=motion` 保持正确，展示 `motionUnavailable`，且没有上传、任务、费用或虚假进度。服务接入同一变更中，再扩展为 `motionStyleReady`、明确触发 `image_motion`、任务状态、至少一个失败或取消恢复分支以及成功后的可播放产物入口。
+- 服务接入后的 Profile/Release 真机验证 `SourcePhoto + StyleDefinition` 可在没有 `StyleCommit` 时创建上传前快照，并覆盖后台恢复、下载、播放、分享、删除、存储压力和静态任务分支不受失败任务影响。

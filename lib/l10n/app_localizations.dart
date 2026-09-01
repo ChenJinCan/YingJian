@@ -164,6 +164,54 @@ abstract class AppLocalizations {
   /// **'生成自然动态作品'**
   String get motionCreationSubtitle;
 
+  /// No description provided for @optimizePhoto.
+  ///
+  /// In zh, this message translates to:
+  /// **'优化照片'**
+  String get optimizePhoto;
+
+  /// No description provided for @optimizePhotoSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'调亮、清晰、增强质感'**
+  String get optimizePhotoSubtitle;
+
+  /// No description provided for @homeChangeStyle.
+  ///
+  /// In zh, this message translates to:
+  /// **'换风格'**
+  String get homeChangeStyle;
+
+  /// No description provided for @changeStyleSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'日系、胶片、插画、电影感'**
+  String get changeStyleSubtitle;
+
+  /// No description provided for @removeBackgroundOrObjects.
+  ///
+  /// In zh, this message translates to:
+  /// **'去背景 / 去杂物'**
+  String get removeBackgroundOrObjects;
+
+  /// No description provided for @removeBackgroundOrObjectsSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'抠图、白底、清理路人杂物'**
+  String get removeBackgroundOrObjectsSubtitle;
+
+  /// No description provided for @createMotionEffect.
+  ///
+  /// In zh, this message translates to:
+  /// **'做动态效果'**
+  String get createMotionEffect;
+
+  /// No description provided for @createMotionEffectSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'让静态照片自然动起来'**
+  String get createMotionEffectSubtitle;
+
   /// No description provided for @preparingImage.
   ///
   /// In zh, this message translates to:
@@ -643,6 +691,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'无法恢复上次项目'**
   String get projectRestoreFailed;
+
+  /// No description provided for @taskRouteMismatch.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个草稿不属于当前任务，请返回首页继续。'**
+  String get taskRouteMismatch;
 
   /// No description provided for @projectSaveFailed.
   ///

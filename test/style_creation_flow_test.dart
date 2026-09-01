@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
 import 'package:yingjian/features/creation/domain/creation_intent.dart';
+import 'package:yingjian/features/creation/domain/creation_task.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_sharer.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
@@ -30,6 +31,7 @@ void main() {
         updatedAt: DateTime.utc(2026, 8, 31),
         photos: [_fixturePhoto('persisted-motion')],
         creationIntent: CreationIntent.motion,
+        creationTask: CreationTask.motion,
         creationStyleId: 'breeze',
         creationStyleName: '轻风',
         creationStyleRecipe: EditRecipe(
@@ -53,17 +55,47 @@ void main() {
 
       final restored = PhotoProject.fromJson(project.toJson());
       expect(restored.creationIntent, CreationIntent.motion);
+      expect(restored.creationTask, CreationTask.motion);
       expect(restored.creationStyleId, 'breeze');
       expect(restored.creationStyleName, '轻风');
       expect(restored.creationStyleRecipe, project.creationStyleRecipe);
       expect(restored.creationResult, project.creationResult);
+
+      for (final task in CreationTask.values) {
+        final taskProject = PhotoProject(
+          id: 'task-${task.name}',
+          createdAt: DateTime.utc(2026, 8, 31),
+          updatedAt: DateTime.utc(2026, 8, 31),
+          photos: [_fixturePhoto('task-${task.name}-photo')],
+          creationIntent: task.creationIntent,
+          creationTask: task,
+        );
+        final restoredTask = PhotoProject.fromJson(taskProject.toJson());
+        expect(restoredTask.creationIntent, task.creationIntent);
+        expect(restoredTask.creationTask, task);
+      }
 
       final legacyJson = Map<String, Object?>.from(project.toJson())
         ..['schemaVersion'] = 14
         ..remove('creationIntent');
       final legacy = PhotoProject.fromJson(legacyJson);
       expect(legacy.creationIntent, CreationIntent.apply);
+      expect(legacy.creationTask, CreationTask.style);
       expect(legacy.creationResult, isNull);
+
+      final previousStaticSchema =
+          PhotoProject(
+              id: 'previous-static-project',
+              createdAt: DateTime.utc(2026, 8, 31),
+              updatedAt: DateTime.utc(2026, 8, 31),
+              photos: [_fixturePhoto('previous-static-photo')],
+            ).toJson()
+            ..['schemaVersion'] = 17
+            ..remove('creationTask');
+      expect(
+        PhotoProject.fromJson(previousStaticSchema).creationTask,
+        CreationTask.style,
+      );
 
       final exportedMotion = PhotoProject(
         id: 'exported-motion-project',
@@ -82,6 +114,7 @@ void main() {
       )..['schemaVersion'] = 15;
       final restoredMotion = PhotoProject.fromJson(legacyMotionJson);
       expect(restoredMotion.creationIntent, CreationIntent.motion);
+      expect(restoredMotion.creationTask, CreationTask.motion);
       expect(restoredMotion.creationResult, isNull);
       expect(restoredMotion.creationResultActive, isFalse);
       expect(restoredMotion.flowState, PhotoProjectFlowState.exported);
@@ -111,7 +144,7 @@ void main() {
       Brightness.dark,
     );
 
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
     expect(
       Theme.of(
@@ -134,7 +167,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
 
     expect(store.project!.creationStyleId, 'natural');
@@ -159,7 +192,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
 
     final apply = tester.widget<FilledButton>(
@@ -419,8 +452,16 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
 
-    final entry = find.byKey(const ValueKey('home-apply-style'));
-    await tester.ensureVisible(entry);
+    final entry = find.byKey(const ValueKey('home-style'));
+    await tester.scrollUntilVisible(
+      entry,
+      260,
+      scrollable: find.descendant(
+        of: find.byKey(const ValueKey('home-scroll')),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(entry);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
@@ -460,7 +501,15 @@ void main() {
     );
     await tester.pumpAndSettle();
     final entry = find.byKey(const ValueKey('home-motion'));
-    await tester.ensureVisible(entry);
+    await tester.scrollUntilVisible(
+      entry,
+      260,
+      scrollable: find.descendant(
+        of: find.byKey(const ValueKey('home-scroll')),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(entry);
     await tester.pumpAndSettle();
     final action = find.byKey(const ValueKey('motion-style-primary-action'));
@@ -504,11 +553,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const ValueKey('home-apply-style')), findsOneWidget);
+      expect(find.byKey(const ValueKey('home-style')), findsOneWidget);
       expect(find.byKey(const ValueKey('home-motion')), findsOneWidget);
       expect(find.byKey(const ValueKey('home-start-editing')), findsNothing);
 
-      await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+      await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
 
       expect(
@@ -581,7 +630,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-motion')));
     await tester.pump(const Duration(milliseconds: 220));
     expect(find.byKey(const ValueKey('home-motion-preparing')), findsOneWidget);
-    expect(find.byKey(const ValueKey('home-apply-preparing')), findsNothing);
+    expect(find.byKey(const ValueKey('home-style-preparing')), findsNothing);
 
     final cancel = find.byKey(const ValueKey('home-cancel-import'));
     await tester.ensureVisible(cancel);
@@ -628,7 +677,7 @@ void main() {
     final settings = await _settings();
     await tester.pumpWidget(buildTestApp(settings, photoImporter: importer));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pump(const Duration(milliseconds: 220));
     await tester.tap(find.byKey(const ValueKey('home-cancel-import')));
     await tester.pumpAndSettle();
@@ -654,7 +703,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
 
     final beforeSelection = store.project!;
@@ -818,7 +867,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('style-option-soft-light')));
     await tester.pumpAndSettle();
@@ -856,7 +905,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+      await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('style-option-soft-light')));
       await tester.pumpAndSettle();
@@ -932,7 +981,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
     await tester.pumpAndSettle();
@@ -967,7 +1016,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+      await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
       await tester.tap(
         find.byKey(const ValueKey('apply-style-primary-action')),
@@ -1045,7 +1094,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+      await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
       await tester.tap(
         find.byKey(const ValueKey('apply-style-primary-action')),
@@ -1093,7 +1142,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
     await tester.pumpAndSettle();
@@ -1133,7 +1182,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
     await tester.pumpAndSettle();
@@ -1179,7 +1228,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+      await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
       await tester.tap(
         find.byKey(const ValueKey('apply-style-primary-action')),
@@ -1239,7 +1288,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
     await tester.pumpAndSettle();
@@ -1276,7 +1325,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+      await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
       await tester.tap(
         find.byKey(const ValueKey('apply-style-primary-action')),
@@ -1325,7 +1374,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+      await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
       await tester.tap(
         find.byKey(const ValueKey('apply-style-primary-action')),
@@ -1375,7 +1424,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
     await tester.pumpAndSettle();
@@ -1416,7 +1465,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+      await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
       await tester.tap(
         find.byKey(const ValueKey('apply-style-primary-action')),
@@ -1704,7 +1753,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('style-option-warm-sun')));
     await tester.pumpAndSettle();
@@ -1741,7 +1790,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
     expect(store.project!.creationStyleId, 'natural');
 
@@ -1780,7 +1829,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-apply-style')));
+    await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
 
     Future<void> define(String prompt) async {

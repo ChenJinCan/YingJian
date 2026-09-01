@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:yingjian/features/creation/domain/creation_intent.dart';
+import 'package:yingjian/features/creation/domain/creation_task.dart';
 import 'package:yingjian/features/editor/application/ai_edit_planner.dart';
 import 'package:yingjian/features/editor/domain/edit_recipe.dart';
 import 'package:yingjian/features/editor/domain/edit_target.dart';
@@ -141,16 +142,31 @@ class PhotoProjectSession extends ChangeNotifier {
   factory PhotoProjectSession({
     required PhotoImporter importer,
     required PhotoProjectStore store,
-    CreationIntent creationIntent = CreationIntent.apply,
+    CreationIntent? creationIntent,
+    CreationTask? creationTask,
     String? projectId,
     DateTime Function()? now,
     String Function()? createId,
   }) {
     final clock = now ?? DateTime.now;
+    if (creationIntent != null &&
+        creationTask != null &&
+        creationTask.creationIntent != creationIntent) {
+      throw ArgumentError.value(
+        creationTask,
+        'creationTask',
+        'The task must use the same execution intent as its session',
+      );
+    }
+    final resolvedIntent =
+        creationTask?.creationIntent ?? creationIntent ?? CreationIntent.apply;
+    final resolvedTask =
+        creationTask ?? CreationTask.fromCreationIntent(resolvedIntent);
     return PhotoProjectSession._(
       importer,
       store,
-      creationIntent,
+      resolvedIntent,
+      resolvedTask,
       projectId,
       () => clock().toUtc(),
       createId ?? _defaultId,
@@ -161,6 +177,7 @@ class PhotoProjectSession extends ChangeNotifier {
     this._importer,
     this._store,
     this._creationIntent,
+    this._creationTask,
     this._projectId,
     this._now,
     this._createId,
@@ -169,6 +186,7 @@ class PhotoProjectSession extends ChangeNotifier {
   final PhotoImporter _importer;
   final PhotoProjectStore _store;
   final CreationIntent _creationIntent;
+  final CreationTask _creationTask;
   final String? _projectId;
   final DateTime Function() _now;
   final String Function() _createId;
@@ -258,10 +276,7 @@ class PhotoProjectSession extends ChangeNotifier {
       throw StateError('A creation style requires one image-application photo');
     }
     final photoId = current.focusPhotoId ?? current.photos.single.id;
-    final sharedRecipe = _replaceStyleOwned(
-      current.sharedStyle.recipe,
-      style,
-    );
+    final sharedRecipe = _replaceStyleOwned(current.sharedStyle.recipe, style);
     return current.effectiveRecipeFor(photoId, sharedRecipe: sharedRecipe);
   }
 
@@ -354,6 +369,7 @@ class PhotoProjectSession extends ChangeNotifier {
             updatedAt: timestamp,
             photos: imported,
             creationIntent: _creationIntent,
+            creationTask: _creationTask,
             flowState: PhotoProjectFlowState.editing,
           )
         : existing.replacePhotosAndInvalidateDerivedState(

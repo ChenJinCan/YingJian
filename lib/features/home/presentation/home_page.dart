@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:yingjian/app/navigation/app_router.dart';
 import 'package:yingjian/app/theme/app_theme.dart';
-import 'package:yingjian/features/creation/domain/creation_intent.dart';
+import 'package:yingjian/features/creation/domain/creation_task.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/l10n/l10n.dart';
@@ -24,8 +24,8 @@ class _HomePageState extends State<HomePage> {
   String? _importError;
   String? _projectActionError;
   List<PhotoImportFailure> _importFailures = const [];
-  CreationIntent? _preparingIntent;
-  CreationIntent? _failedIntent;
+  CreationTask? _preparingTask;
+  CreationTask? _failedTask;
   String? _openingProjectId;
   bool _cancelPreparingRequested = false;
 
@@ -58,13 +58,15 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  String _routeFor(CreationIntent intent) => switch (intent) {
-    CreationIntent.apply => AppRoutes.applyStyleWorkspace,
-    CreationIntent.motion => AppRoutes.motionStyleWorkspace,
+  String _routeFor(CreationTask task) => switch (task) {
+    CreationTask.optimize => AppRoutes.optimizeWorkspace,
+    CreationTask.style => AppRoutes.applyStyleWorkspace,
+    CreationTask.cleanup => AppRoutes.cleanupWorkspace,
+    CreationTask.motion => AppRoutes.motionStyleWorkspace,
   };
 
   Future<void> _openCreation(PhotoProject project) async {
-    if (_preparingIntent != null || _openingProjectId != null) return;
+    if (_preparingTask != null || _openingProjectId != null) return;
     final store = _store;
     setState(() {
       _openingProjectId = project.id;
@@ -75,9 +77,13 @@ class _HomePageState extends State<HomePage> {
         await store.activateProject(project.id);
       }
       if (!mounted) return;
-      await Navigator.of(
-        context,
-      ).pushNamed(_routeFor(project.creationIntent), arguments: project.id);
+      await Navigator.of(context).pushNamed(
+        _routeFor(project.creationTask),
+        arguments: CreationRouteArguments(
+          projectId: project.id,
+          task: project.creationTask,
+        ),
+      );
     } on Object {
       if (mounted) {
         setState(() => _projectActionError = context.l10n.projectRestoreFailed);
@@ -90,13 +96,13 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _startNew(CreationIntent intent) async {
-    if (_preparingIntent != null || _openingProjectId != null) return;
+  Future<void> _startNew(CreationTask task) async {
+    if (_preparingTask != null || _openingProjectId != null) return;
     final store = _store!;
     final importer = _importer!;
     setState(() {
-      _preparingIntent = intent;
-      _failedIntent = null;
+      _preparingTask = task;
+      _failedTask = null;
       _cancelPreparingRequested = false;
       _importError = null;
       _projectActionError = null;
@@ -113,7 +119,8 @@ class _HomePageState extends State<HomePage> {
       session = PhotoProjectSession(
         importer: importer,
         store: store,
-        creationIntent: intent,
+        creationIntent: task.creationIntent,
+        creationTask: task,
       );
       final result = await session.importPhotos(
         isCanceled: () => _cancelPreparingRequested,
@@ -130,14 +137,15 @@ class _HomePageState extends State<HomePage> {
         case PhotoImportResult.imported:
           final projectId = session.project!.id;
           importedProjectKept = true;
-          setState(() => _preparingIntent = null);
-          await Navigator.of(
-            context,
-          ).pushNamed(_routeFor(intent), arguments: projectId);
+          setState(() => _preparingTask = null);
+          await Navigator.of(context).pushNamed(
+            _routeFor(task),
+            arguments: CreationRouteArguments(projectId: projectId, task: task),
+          );
           if (mounted) _reload();
         case PhotoImportResult.rejected:
           setState(() {
-            _failedIntent = intent;
+            _failedTask = task;
             _importFailures = session!.importFailures;
           });
         case PhotoImportResult.canceled:
@@ -148,7 +156,7 @@ class _HomePageState extends State<HomePage> {
       if (mounted) {
         if (!_cancelPreparingRequested) {
           setState(() {
-            _failedIntent = intent;
+            _failedTask = task;
             _importError = context.l10n.photoImportFailed;
           });
         }
@@ -170,7 +178,7 @@ class _HomePageState extends State<HomePage> {
       session?.dispose();
       if (mounted) {
         setState(() {
-          _preparingIntent = null;
+          _preparingTask = null;
           _cancelPreparingRequested = false;
         });
       }
@@ -178,7 +186,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _cancelPreparing() {
-    if (_preparingIntent == null) return;
+    if (_preparingTask == null) return;
     setState(() => _cancelPreparingRequested = true);
     final importer = _importer;
     if (importer is CancelablePhotoImporter) {
@@ -195,8 +203,23 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  String _taskTitle(BuildContext context, CreationTask task) => switch (task) {
+    CreationTask.optimize => context.l10n.optimizePhoto,
+    CreationTask.style => context.l10n.homeChangeStyle,
+    CreationTask.cleanup => context.l10n.removeBackgroundOrObjects,
+    CreationTask.motion => context.l10n.createMotionEffect,
+  };
+
+  String _taskSubtitle(BuildContext context, CreationTask task) =>
+      switch (task) {
+        CreationTask.optimize => context.l10n.optimizePhotoSubtitle,
+        CreationTask.style => context.l10n.changeStyleSubtitle,
+        CreationTask.cleanup => context.l10n.removeBackgroundOrObjectsSubtitle,
+        CreationTask.motion => context.l10n.createMotionEffectSubtitle,
+      };
+
   Future<void> _deleteDraft(PhotoProject project) async {
-    if (_preparingIntent != null || _openingProjectId != null) return;
+    if (_preparingTask != null || _openingProjectId != null) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -221,7 +244,7 @@ class _HomePageState extends State<HomePage> {
       setState(() => _projectActionError = context.l10n.projectDeleteFailed);
       return;
     }
-    if (_preparingIntent != null || _openingProjectId != null) return;
+    if (_preparingTask != null || _openingProjectId != null) return;
     setState(() => _openingProjectId = project.id);
     try {
       await store.deleteProject(project);
@@ -270,59 +293,61 @@ class _HomePageState extends State<HomePage> {
                     children: [
                       _HomeHeader(
                         onSettings:
-                            _preparingIntent == null &&
-                                _openingProjectId == null
+                            _preparingTask == null && _openingProjectId == null
                             ? () => Navigator.of(
                                 context,
                               ).pushNamed(AppRoutes.settings)
                             : null,
                       ),
                       const SizedBox(height: 22),
-                      _TaskTile(
-                        key: const ValueKey('home-apply-style'),
-                        intent: CreationIntent.apply,
-                        title: context.l10n.imageApplication,
-                        subtitle: context.l10n.imageApplicationSubtitle,
-                        enabled:
-                            _preparingIntent == null &&
-                            _openingProjectId == null,
-                        preparing: _preparingIntent == CreationIntent.apply,
-                        onTap: () => _startNew(CreationIntent.apply),
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          final twoColumns = constraints.maxWidth >= 320;
+                          final taskWidth = twoColumns
+                              ? (constraints.maxWidth - 12) / 2
+                              : constraints.maxWidth;
+                          return Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            children: [
+                              for (final task in CreationTask.values)
+                                SizedBox(
+                                  width: taskWidth,
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      _TaskTile(
+                                        key: ValueKey('home-${task.name}'),
+                                        task: task,
+                                        title: _taskTitle(context, task),
+                                        subtitle: _taskSubtitle(context, task),
+                                        enabled:
+                                            _preparingTask == null &&
+                                            _openingProjectId == null,
+                                        preparing: _preparingTask == task,
+                                        onTap: () => _startNew(task),
+                                      ),
+                                      if (_preparingTask == task)
+                                        _PreparingControl(
+                                          cancelRequested:
+                                              _cancelPreparingRequested,
+                                          onCancel: _cancelPreparing,
+                                        ),
+                                      if (_failedTask == task)
+                                        _ImportRecovery(
+                                          message: _importError,
+                                          failures: _importFailures,
+                                          onRetry: () => _startNew(task),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          );
+                        },
                       ),
-                      if (_preparingIntent == CreationIntent.apply)
-                        _PreparingControl(
-                          cancelRequested: _cancelPreparingRequested,
-                          onCancel: _cancelPreparing,
-                        ),
-                      if (_failedIntent == CreationIntent.apply)
-                        _ImportRecovery(
-                          message: _importError,
-                          failures: _importFailures,
-                          onRetry: () => _startNew(CreationIntent.apply),
-                        ),
-                      const SizedBox(height: 12),
-                      _TaskTile(
-                        key: const ValueKey('home-motion'),
-                        intent: CreationIntent.motion,
-                        title: context.l10n.motionCreation,
-                        subtitle: context.l10n.motionCreationSubtitle,
-                        enabled:
-                            _preparingIntent == null &&
-                            _openingProjectId == null,
-                        preparing: _preparingIntent == CreationIntent.motion,
-                        onTap: () => _startNew(CreationIntent.motion),
-                      ),
-                      if (_preparingIntent == CreationIntent.motion)
-                        _PreparingControl(
-                          cancelRequested: _cancelPreparingRequested,
-                          onCancel: _cancelPreparing,
-                        ),
-                      if (_failedIntent == CreationIntent.motion)
-                        _ImportRecovery(
-                          message: _importError,
-                          failures: _importFailures,
-                          onRetry: () => _startNew(CreationIntent.motion),
-                        ),
                       if (snapshot.connectionState ==
                           ConnectionState.waiting) ...[
                         const SizedBox(height: 18),
@@ -354,12 +379,12 @@ class _HomePageState extends State<HomePage> {
                               project: projects[index],
                               latest: index == 0,
                               onTap:
-                                  _preparingIntent == null &&
+                                  _preparingTask == null &&
                                       _openingProjectId == null
                                   ? () => _openCreation(projects[index])
                                   : null,
                               onDelete:
-                                  _preparingIntent == null &&
+                                  _preparingTask == null &&
                                       _openingProjectId == null
                                   ? () => _deleteDraft(projects[index])
                                   : null,
@@ -459,7 +484,7 @@ class _BrandMark extends StatelessWidget {
 
 class _TaskTile extends StatelessWidget {
   const _TaskTile({
-    required this.intent,
+    required this.task,
     required this.title,
     required this.subtitle,
     required this.enabled,
@@ -468,7 +493,7 @@ class _TaskTile extends StatelessWidget {
     super.key,
   });
 
-  final CreationIntent intent;
+  final CreationTask task;
   final String title;
   final String subtitle;
   final bool enabled;
@@ -477,95 +502,110 @@ class _TaskTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textScale = MediaQuery.textScalerOf(context).scale(1);
-    final compact = MediaQuery.sizeOf(context).width < 350 || textScale > 1.35;
-    return Semantics(
-      button: true,
-      enabled: enabled,
-      liveRegion: preparing,
-      label: preparing
-          ? '$title，${context.l10n.preparingImage}'
-          : '$title，$subtitle',
-      child: Material(
-        color: const Color(0xFF1C1C1E),
-        borderRadius: BorderRadius.circular(26),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: enabled ? onTap : null,
-          child: AnimatedSize(
-            duration: const Duration(milliseconds: 180),
-            alignment: Alignment.topCenter,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 14, 14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(minHeight: 124),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                title,
-                                style: Theme.of(context).textTheme.titleLarge
-                                    ?.copyWith(fontWeight: FontWeight.w700),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final textScale = MediaQuery.textScalerOf(context).scale(1);
+        final compact = constraints.maxWidth < 350 || textScale > 1.35;
+        return Semantics(
+          button: true,
+          enabled: enabled,
+          liveRegion: preparing,
+          label: preparing
+              ? '$title，${context.l10n.preparingImage}'
+              : '$title，$subtitle',
+          child: Material(
+            color: const Color(0xFF1C1C1E),
+            borderRadius: BorderRadius.circular(26),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: enabled ? onTap : null,
+              child: AnimatedSize(
+                duration: MediaQuery.of(context).disableAnimations
+                    ? Duration.zero
+                    : const Duration(milliseconds: 180),
+                alignment: Alignment.topCenter,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 14, 14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(minHeight: 124),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    title,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleLarge
+                                        ?.copyWith(fontWeight: FontWeight.w700),
+                                  ),
+                                  const SizedBox(height: 7),
+                                  Text(
+                                    preparing
+                                        ? context.l10n.preparingImage
+                                        : subtitle,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(color: AppTheme.muted),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(height: 7),
-                              Text(
-                                preparing
-                                    ? context.l10n.preparingImage
-                                    : subtitle,
-                                style: Theme.of(context).textTheme.bodyMedium
-                                    ?.copyWith(color: AppTheme.muted),
+                            ),
+                            if (!compact) ...[
+                              const SizedBox(width: 12),
+                              SizedBox(
+                                width: 112,
+                                height: 104,
+                                child: switch (task) {
+                                  CreationTask.optimize =>
+                                    const _OptimizeTaskPreview(),
+                                  CreationTask.style =>
+                                    const _ApplyTaskPreview(),
+                                  CreationTask.cleanup =>
+                                    const _CleanupTaskPreview(),
+                                  CreationTask.motion =>
+                                    const _MotionTaskPreview(),
+                                },
                               ),
                             ],
-                          ),
+                            const SizedBox(width: 8),
+                            if (preparing)
+                              const SizedBox.square(
+                                dimension: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            else
+                              const Icon(
+                                Icons.chevron_right_rounded,
+                                color: AppTheme.muted,
+                              ),
+                          ],
                         ),
-                        if (!compact) ...[
-                          const SizedBox(width: 12),
-                          SizedBox(
-                            width: 112,
-                            height: 104,
-                            child: intent == CreationIntent.apply
-                                ? const _ApplyTaskPreview()
-                                : const _MotionTaskPreview(),
-                          ),
-                        ],
-                        const SizedBox(width: 8),
-                        if (preparing)
-                          const SizedBox.square(
-                            dimension: 22,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        else
-                          const Icon(
-                            Icons.chevron_right_rounded,
-                            color: AppTheme.muted,
-                          ),
-                      ],
-                    ),
-                  ),
-                  if (preparing) ...[
-                    const SizedBox(height: 8),
-                    LinearProgressIndicator(
-                      key: ValueKey(
-                        intent == CreationIntent.apply
-                            ? 'home-apply-preparing'
-                            : 'home-motion-preparing',
                       ),
-                      minHeight: 2,
-                    ),
-                  ],
-                ],
+                      if (preparing) ...[
+                        const SizedBox(height: 8),
+                        LinearProgressIndicator(
+                          key: ValueKey('home-${task.name}-preparing'),
+                          minHeight: 2,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -587,6 +627,53 @@ class _PreparingControl extends StatelessWidget {
       onPressed: cancelRequested ? null : onCancel,
       child: Text(context.l10n.cancel),
     ),
+  );
+}
+
+class _OptimizeTaskPreview extends StatelessWidget {
+  const _OptimizeTaskPreview();
+
+  @override
+  Widget build(BuildContext context) => const _TaskGlyphPreview(
+    icon: Icons.auto_fix_high_rounded,
+    colors: [Color(0xFF725D2A), Color(0xFF302D23)],
+    accent: Color(0xFFFFD66B),
+  );
+}
+
+class _CleanupTaskPreview extends StatelessWidget {
+  const _CleanupTaskPreview();
+
+  @override
+  Widget build(BuildContext context) => const _TaskGlyphPreview(
+    icon: Icons.content_cut_rounded,
+    colors: [Color(0xFF49606A), Color(0xFF232A2F)],
+    accent: Color(0xFFE0F1F8),
+  );
+}
+
+class _TaskGlyphPreview extends StatelessWidget {
+  const _TaskGlyphPreview({
+    required this.icon,
+    required this.colors,
+    required this.accent,
+  });
+
+  final IconData icon;
+  final List<Color> colors;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(20),
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: colors,
+      ),
+    ),
+    child: Center(child: Icon(icon, size: 46, color: accent)),
   );
 }
 
@@ -737,9 +824,12 @@ class _RecentCreationCard extends StatelessWidget {
     final photo = project.photos.first;
     final local = project.updatedAt.toLocal();
     final material = MaterialLocalizations.of(context);
-    final taskName = project.creationIntent == CreationIntent.apply
-        ? context.l10n.imageApplication
-        : context.l10n.motionCreation;
+    final taskName = switch (project.creationTask) {
+      CreationTask.optimize => context.l10n.optimizePhoto,
+      CreationTask.style => context.l10n.homeChangeStyle,
+      CreationTask.cleanup => context.l10n.removeBackgroundOrObjects,
+      CreationTask.motion => context.l10n.createMotionEffect,
+    };
     return Material(
       color: const Color(0xFF1C1C1E),
       borderRadius: BorderRadius.circular(20),
