@@ -129,6 +129,19 @@ expect_failure \
     --verified-at "$verified_at"
 
 expect_failure \
+  "version must use canonical x.y.z format without leading zeroes" \
+  ruby "$CHECKER" validate-candidate \
+    --root "$FIXTURE_DIR" \
+    --config "$FIXTURE_DIR/release/release-policy.yaml" \
+    --platform ios \
+    --version 1.2.014 \
+    --build 112 \
+    --public-version 1.2.3 \
+    --remote-latest-version 1.2.14 \
+    --remote-latest-build 111 \
+    --verified-at "$verified_at"
+
+expect_failure \
   "testing version 1.2.14 must be reused; candidate version must be 1.2.14" \
   ruby "$CHECKER" validate-candidate \
     --root "$FIXTURE_DIR" \

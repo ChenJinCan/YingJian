@@ -1,0 +1,250 @@
+# frozen_string_literal: true
+
+require "digest"
+require "fileutils"
+require "json"
+require "pathname"
+require "shellwords"
+require "time"
+
+REPOSITORY_ROOT = Pathname.new(File.expand_path("..", __dir__)).freeze
+IOS_BUNDLE_ID = "com.babycompany.yingjian"
+APPLE_TEAM_ID = "V86Q54AQQU"
+
+def release_error!(message)
+  FastlaneCore::UI.user_error!(message)
+end
+
+def required_lane_value!(options, key, pattern, description)
+  value = options[key].to_s.strip
+  release_error!("#{key} must be #{description}") unless value.match?(pattern)
+  value
+end
+
+def required_environment_value!(name)
+  value = ENV[name].to_s.strip
+  release_error!("#{name} must be present in the release environment") if value.empty?
+  value
+end
+
+def regular_private_file!(path, label, outside_repository: false)
+  release_error!("#{label} is missing") unless path.file?
+  release_error!("#{label} must not be a symbolic link") if path.symlink?
+  real_path = path.realpath
+  if outside_repository && real_path.to_s.start_with?("#{REPOSITORY_ROOT.realpath}/")
+    release_error!("#{label} must remain outside the repository")
+  end
+  release_error!("#{label} permissions must not allow group or world access") unless
+    (real_path.stat.mode & 0o077).zero?
+  real_path
+end
+
+def parse_artifact_report!(path)
+  JSON.parse(path.read)
+rescue JSON::ParserError => error
+  release_error!("artifact report is invalid JSON: #{error.message}")
+end
+
+def write_private_json_exclusive!(path, payload)
+  FileUtils.mkdir_p(path.dirname, mode: 0o700)
+  release_error!("upload state directory must not be a symbolic link") if path.dirname.symlink?
+  File.chmod(0o700, path.dirname)
+  flags = File::WRONLY | File::CREAT | File::EXCL
+  File.open(path.to_s, flags, 0o600) do |file|
+    file.write(JSON.pretty_generate(payload))
+    file.write("\n")
+    file.flush
+    file.fsync
+  end
+rescue Errno::EEXIST
+  release_error!("upload state already exists; reconcile App Store Connect before any retry")
+end
+
+default_platform(:ios)
+
+platform :ios do
+  desc "Build, verify, and upload exactly one gated TestFlight candidate"
+  lane :beta do |options|
+    version = required_lane_value!(
+      options,
+      :version,
+      /\A(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\z/,
+      "a canonical x.y.z version without leading zeroes"
+    )
+    build = required_lane_value!(options, :build, /\A[1-9]\d*\z/, "a positive integer")
+    source_commit = required_lane_value!(
+      options,
+      :source_commit,
+      /\A[0-9a-f]{40}\z/,
+      "a full lowercase Git commit SHA"
+    )
+    frozen_source_commit = required_environment_value!("RELEASE_SOURCE_COMMIT")
+    release_error!("source_commit does not match RELEASE_SOURCE_COMMIT") unless
+      source_commit == frozen_source_commit
+
+    key_id = required_environment_value!("ASC_KEY_ID")
+    issuer_id = required_environment_value!("ASC_ISSUER_ID")
+    key_path = regular_private_file!(
+      Pathname.new(required_environment_value!("ASC_KEY_PATH")).expand_path,
+      "App Store Connect API key",
+      outside_repository: true
+    )
+
+    build_script = REPOSITORY_ROOT.join("scripts", "build_ios_testflight.sh")
+    sh(Shellwords.join([build_script.to_s, version, build]))
+
+    candidate_directory = REPOSITORY_ROOT.join(
+      ".release-state",
+      "ios",
+      "artifacts",
+      "#{version}-#{build}"
+    )
+    release_error!("candidate evidence directory is missing") unless candidate_directory.directory?
+    release_error!("candidate evidence directory must not be a symbolic link") if candidate_directory.symlink?
+
+    ipa_candidates = candidate_directory.children.select do |entry|
+      entry.file? && !entry.symlink? && entry.extname == ".ipa"
+    end
+    release_error!("candidate evidence must contain exactly one regular IPA") unless ipa_candidates.length == 1
+    ipa_path = ipa_candidates.fetch(0).realpath
+    release_error!("candidate IPA escaped its evidence directory") unless
+      ipa_path.dirname == candidate_directory.realpath
+
+    report_path = candidate_directory.join("artifact.json")
+    release_error!("artifact report must be a regular file") unless report_path.file? && !report_path.symlink?
+    report = parse_artifact_report!(report_path)
+    expected_report_values = {
+      "schema_version" => 1,
+      "platform" => "ios",
+      "artifact_name" => ipa_path.basename.to_s,
+      "bundle_id" => IOS_BUNDLE_ID,
+      "version" => version,
+      "build" => build,
+      "source_commit" => source_commit,
+      "team_id" => APPLE_TEAM_ID,
+      "signature_verified" => true,
+      "distribution_profile_verified" => true,
+      "development_profile_verified" => false,
+      "provisioning_profile_present" => true,
+      "firebase_configuration_verified" => true,
+      "embedded_source_commit_verified" => true
+    }
+    expected_report_values.each do |key, expected|
+      release_error!("artifact report #{key} does not match the frozen candidate") unless
+        report[key] == expected
+    end
+
+    reported_sha256 = report["sha256"].to_s
+    release_error!("artifact report SHA-256 is malformed") unless reported_sha256.match?(/\A[0-9a-f]{64}\z/)
+    actual_sha256 = Digest::SHA256.file(ipa_path).hexdigest
+    release_error!("candidate IPA SHA-256 changed after packaging") unless actual_sha256 == reported_sha256
+
+    preflight_script = REPOSITORY_ROOT.join("scripts", "release_contract_preflight.sh")
+    sh(Shellwords.join([preflight_script.to_s, "ios", version, build, "upload"]))
+    verify_script = REPOSITORY_ROOT.join("scripts", "verify_ios_ipa.rb")
+    firebase_config = REPOSITORY_ROOT.join("ios", "Runner", "GoogleService-Info.plist")
+    sh(
+      Shellwords.join(
+        [
+          "ruby",
+          verify_script.to_s,
+          ipa_path.to_s,
+          "--bundle-id",
+          IOS_BUNDLE_ID,
+          "--version",
+          version,
+          "--build",
+          build,
+          "--team-id",
+          APPLE_TEAM_ID,
+          "--firebase-config",
+          firebase_config.to_s,
+          "--source-commit",
+          source_commit,
+          "--expected-sha256",
+          reported_sha256
+        ]
+      )
+    )
+
+    api_key = app_store_connect_api_key(
+      key_id: key_id,
+      issuer_id: issuer_id,
+      key_filepath: key_path.to_s,
+      duration: 1200,
+      in_house: false,
+      set_spaceship_token: false
+    )
+
+    legacy_upload_directory = REPOSITORY_ROOT.join(
+      ".release-state",
+      "ios",
+      "uploads",
+      "#{version}-#{build}"
+    )
+    if legacy_upload_directory.exist?
+      release_error!("legacy upload state must be a regular directory") unless
+        legacy_upload_directory.directory? && !legacy_upload_directory.symlink?
+      unless legacy_upload_directory.children.empty?
+        release_error!("legacy upload state exists; reconcile App Store Connect before any retry")
+      end
+    end
+
+    upload_directory = Pathname.new(Dir.home).join(
+      "Library",
+      "Application Support",
+      "Yingjian",
+      "release-state",
+      "ios",
+      "uploads",
+      IOS_BUNDLE_ID,
+      "#{version}-#{build}"
+    )
+    attempt_path = upload_directory.join("upload-attempt.json")
+    receipt_path = upload_directory.join("upload-receipt.json")
+    if upload_directory.exist?
+      release_error!("upload state directory must be a regular directory") unless
+        upload_directory.directory? && !upload_directory.symlink?
+      unless upload_directory.children.empty?
+        release_error!("upload state already exists; reconcile App Store Connect before any retry")
+      end
+    end
+    attempt = {
+      "schema_version" => 1,
+      "state" => "upload_started",
+      "platform" => "ios",
+      "bundle_id" => IOS_BUNDLE_ID,
+      "version" => version,
+      "build" => build,
+      "source_commit" => source_commit,
+      "sha256" => reported_sha256,
+      "started_at" => Time.now.utc.iso8601
+    }
+    write_private_json_exclusive!(attempt_path, attempt)
+
+    upload_to_testflight(
+      api_key: api_key,
+      app_identifier: IOS_BUNDLE_ID,
+      ipa: ipa_path.to_s,
+      skip_submission: true,
+      skip_waiting_for_build_processing: true,
+      distribute_external: false,
+      notify_external_testers: false
+    )
+
+    receipt = attempt.merge(
+      "state" => "uploaded",
+      "uploaded_at" => Time.now.utc.iso8601,
+      "provider_processing" => "pending",
+      "test_group_distribution" => "not_requested",
+      "tester_reachability" => "not_verified",
+      "app_review" => "not_requested",
+      "public_release" => "not_requested"
+    )
+    write_private_json_exclusive!(receipt_path, receipt)
+    File.unlink(attempt_path)
+    FastlaneCore::UI.success(
+      "Uploaded #{IOS_BUNDLE_ID} #{version} (#{build}); provider processing remains pending."
+    )
+  end
+end

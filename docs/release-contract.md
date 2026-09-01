@@ -30,12 +30,21 @@ candidate chain; once its preflight passes, do not ask for another per-upload
 human confirmation. That upload chain must use Fastlane/Spaceship only. It
 must not use the App Store Connect browser UI.
 
-The repository does not yet contain an implemented Fastlane/Spaceship
-TestFlight lane. Therefore `platforms.ios.release_ready` is intentionally
-`false`: no iOS TestFlight upload is currently permitted. Browser UI and the
-legacy `scripts/upload_ios_testflight.sh` / `altool` path are forbidden
-fallbacks, not an alternate delivery route. Implement and verify a Fastlane
-lane before changing this readiness state.
+The repository-owned `fastlane ios beta` lane is the only permitted
+TestFlight upload adapter. It builds exactly one candidate through the retained
+local wrapper, re-verifies the candidate-specific IPA/report/SHA-256, creates a
+private exclusive upload-attempt marker in a machine-scoped ledger shared by
+local worktrees/clones, and calls Fastlane/Spaceship once. An
+unknown or failed result keeps the attempt marker and therefore blocks an
+automatic retry until App Store Connect is reconciled. A successful call writes
+a private local upload receipt and stops while provider processing is still
+pending. Browser UI and the legacy `scripts/upload_ios_testflight.sh` / `altool`
+path remain forbidden fallbacks, not alternate delivery routes.
+
+`platforms.ios.release_ready` remains intentionally `false` until current MVP
+acceptance, store baseline, signing, synchronized-source, and lane-verification
+evidence all pass. Merely adding the lane does not authorize an iOS build or
+upload, and the lane cannot bypass the shared release preflight.
 
 The retained local packaging command is:
 
@@ -55,15 +64,31 @@ every invocation explains the blocker and exits `78`. Its historical `altool`
 invocation has been removed and is forbidden; the stub is not an
 authorized TestFlight delivery command or an alternate to Fastlane/Spaceship.
 
-Any future Fastlane upload lane must rerun the preflight, re-verify the exact
-IPA and SHA-256, and stop as soon as Fastlane/Transporter returns Apple's
-successful receipt for that exact IPA, version, and build. Record any stable
-upload/delivery ID present in the receipt, report `uploaded`, and do not wait
-for, poll, or refresh the TestFlight/Build list or require an App Store Connect
-build ID that is not yet available. Provider processing/valid, TestFlight-group
-distribution, and tester reachability remain later one-shot checks; list delay
-must not trigger a duplicate upload. The lane must still stop before metadata
-mutation, App Review, or public release. Local packaging and any future upload lane remain
+After every release gate is satisfied, invoke the guarded lane with the exact
+runtime identity rather than persisting version/build values in an environment
+file:
+
+```sh
+fastlane ios beta --env testflight \
+  version:<version> \
+  build:<build> \
+  source_commit:<full-pushed-source-sha>
+```
+
+The `source_commit` lane option must exactly match
+`RELEASE_SOURCE_COMMIT`. The lane never supplies a changelog or tester group,
+never submits beta/App Review, never changes metadata, and never waits for or
+polls provider processing. Version components are canonical decimal integers;
+nonzero components with leading zeroes are rejected.
+
+The Fastlane upload lane reruns the preflight, re-verifies the exact IPA and
+SHA-256, and stops as soon as Fastlane/Transporter returns success for that
+exact IPA, version, and build. It records `uploaded` locally without inventing
+an App Store Connect build ID that is not yet available. Provider
+processing/valid, TestFlight-group distribution, and tester reachability remain
+later one-shot checks; list delay must not trigger a duplicate upload. The lane
+stops before metadata mutation, App Review, or public release. Local packaging
+and the upload lane remain
 fail-closed while `platforms.ios.release_ready` is false. Turning it true
 requires current signing and store-state evidence plus the verified Fastlane
 lane; the presence of legacy scripts alone is not release readiness. Packaging

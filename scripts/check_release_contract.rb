@@ -22,8 +22,8 @@ rescue Psych::Exception => error
 end
 
 def semver(value, label)
-  match = /\A(\d+)\.(\d+)\.(\d+)\z/.match(value.to_s)
-  fail_contract("#{label} must use x.y.z format") unless match
+  match = /\A(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\z/.match(value.to_s)
+  fail_contract("#{label} must use canonical x.y.z format without leading zeroes") unless match
 
   match.captures.map(&:to_i)
 end

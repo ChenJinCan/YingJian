@@ -7,6 +7,7 @@ ROOT = File.expand_path("..", __dir__)
 BUILD_SCRIPT = File.join(ROOT, "scripts", "build_ios_testflight.sh")
 UPLOAD_SCRIPT = File.join(ROOT, "scripts", "upload_ios_testflight.sh")
 PREFLIGHT_SCRIPT = File.join(ROOT, "scripts", "release_contract_preflight.sh")
+FASTFILE = File.join(ROOT, "fastlane", "Fastfile")
 
 def assert(condition, message)
   raise message unless condition
@@ -35,6 +36,9 @@ assert(build_source.include?("--no-enable-swift-package-manager"),
 
 _stdout, stderr, status = run(BUILD_SCRIPT, "--dry-run", "1.2", "112")
 assert(!status.success? && stderr.include?("x.y.z"), "build wrapper accepted an invalid version")
+_stdout, stderr, status = run(BUILD_SCRIPT, "--dry-run", "1.2.04", "112")
+assert(!status.success? && stderr.include?("leading zeroes"),
+       "build wrapper accepted a non-canonical version")
 _stdout, stderr, status = run(BUILD_SCRIPT, "--dry-run", "1.2.4", "0")
 assert(!status.success? && stderr.include?("positive integer"), "build wrapper accepted an invalid build")
 
@@ -59,6 +63,93 @@ assert(!upload_source.include?("--upload-package"),
        "legacy wrapper still contains an upload command")
 assert(!upload_source.include?("--wait"),
        "legacy wrapper still contains a processing wait")
+
+assert(File.file?(FASTFILE), "repository-owned Fastlane lane is missing")
+fastfile_source = File.read(FASTFILE)
+assert(fastfile_source.include?("platform :ios"), "Fastfile does not define the iOS platform")
+assert(fastfile_source.include?("lane :beta"), "Fastfile does not define the beta lane")
+assert(fastfile_source.scan("build_ios_testflight.sh").length == 1,
+       "Fastlane lane must invoke the guarded build wrapper exactly once")
+assert(fastfile_source.scan(/\bupload_to_testflight\s*\(/).length == 1,
+       "Fastlane lane must contain exactly one TestFlight upload action")
+assert(fastfile_source.include?('source_commit == frozen_source_commit'),
+       "Fastlane lane does not bind its source option to RELEASE_SOURCE_COMMIT")
+assert(fastfile_source.include?('release_contract_preflight.sh'),
+       "Fastlane lane does not rerun the release preflight")
+assert(fastfile_source.include?('"upload"'),
+       "Fastlane lane does not use the upload-stage preflight")
+assert(fastfile_source.include?('verify_ios_ipa.rb'),
+       "Fastlane lane does not re-verify the final IPA")
+assert(fastfile_source.include?('"--expected-sha256"'),
+       "Fastlane lane does not bind re-verification to the recorded SHA-256")
+assert(fastfile_source.include?("File::EXCL"),
+       "Fastlane lane does not create exclusive upload state")
+assert(fastfile_source.include?("file.fsync"),
+       "Fastlane lane does not durably record upload state")
+assert(fastfile_source.include?('"upload-attempt.json"'),
+       "Fastlane lane does not record a duplicate-upload guard")
+assert(fastfile_source.include?('"upload-receipt.json"'),
+       "Fastlane lane does not record successful upload state")
+assert(fastfile_source.include?("upload_directory.children.empty?"),
+       "Fastlane lane may ignore legacy upload state for the same candidate")
+assert(fastfile_source.include?('Pathname.new(Dir.home).join('),
+       "Fastlane lane does not use a machine-scoped upload ledger")
+assert(fastfile_source.include?("skip_submission: true"),
+       "Fastlane lane may submit or distribute a build")
+assert(fastfile_source.include?("skip_waiting_for_build_processing: true"),
+       "Fastlane lane may wait for provider processing")
+assert(fastfile_source.include?("distribute_external: false"),
+       "Fastlane lane may distribute to external testers")
+assert(fastfile_source.include?("notify_external_testers: false"),
+       "Fastlane lane may notify external testers")
+
+forbidden_fastlane_actions = %w[
+  deliver
+  upload_to_app_store
+  submit_for_review
+  automatic_release
+  changelog:
+  groups:
+  screenshots_path
+  metadata_path
+]
+forbidden_fastlane_actions.each do |forbidden|
+  assert(!fastfile_source.include?(forbidden),
+         "Fastlane lane contains forbidden mutation or distribution option #{forbidden}")
+end
+assert(!fastfile_source.include?("check_altool_delivery"),
+       "Fastlane lane references the retired altool workflow")
+
+ordered_tokens = [
+  'key_id = required_environment_value!("ASC_KEY_ID")',
+  'build_script = REPOSITORY_ROOT.join("scripts", "build_ios_testflight.sh")',
+  "actual_sha256 = Digest::SHA256.file(ipa_path).hexdigest",
+  'preflight_script = REPOSITORY_ROOT.join("scripts", "release_contract_preflight.sh")',
+  'verify_script = REPOSITORY_ROOT.join("scripts", "verify_ios_ipa.rb")',
+  "write_private_json_exclusive!(attempt_path, attempt)",
+  "upload_to_testflight(",
+  "write_private_json_exclusive!(receipt_path, receipt)",
+  "File.unlink(attempt_path)"
+]
+ordered_positions = ordered_tokens.map do |token|
+  position = fastfile_source.index(token)
+  assert(!position.nil?, "Fastlane lane is missing ordered release step #{token}")
+  position
+end
+ordered_positions.each_cons(2) do |before, after|
+  assert(before < after, "Fastlane release steps are in an unsafe order")
+end
+lane_source = fastfile_source[fastfile_source.index("lane :beta")..]
+assert(!lane_source.match?(/^\s*(rescue|ensure)\b/),
+       "Fastlane lane may retry upload or remove its attempt marker after failure")
+
+build_source = File.read(BUILD_SCRIPT)
+assert(build_source.include?('mkdir "$build_lock"'),
+       "build wrapper does not acquire an exclusive iOS build lock")
+assert(build_source.include?('mkdir "$candidate_directory"'),
+       "build wrapper does not atomically reserve candidate evidence")
+assert(!build_source.include?('mkdir -p "$candidate_directory"'),
+       "build wrapper still uses a racy candidate directory reservation")
 
 preflight_source = File.read(PREFLIGHT_SCRIPT)
 assert(!preflight_source.include?("YINGJIAN_OWNER_TESTFLIGHT_AUTHORIZED"),
