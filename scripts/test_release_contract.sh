@@ -244,7 +244,6 @@ ruby "$ROOT_DIR/scripts/test_mvp_acceptance.rb"
 ruby "$ROOT_DIR/scripts/test_usability_evidence.rb"
 ruby "$ROOT_DIR/scripts/test_build_usability_evidence.rb"
 ruby "$ROOT_DIR/scripts/test_device_evidence.rb"
-ruby "$ROOT_DIR/scripts/test_altool_delivery.rb"
 ruby "$ROOT_DIR/scripts/test_ios_testflight_workflow.rb"
 
 echo "Release contract tests passed."

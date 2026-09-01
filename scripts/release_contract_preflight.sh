@@ -41,12 +41,6 @@ ruby "$ROOT_DIR/scripts/check_release_contract.rb" validate-source \
   --platform "$PLATFORM" \
   --source-commit "$RELEASE_SOURCE_COMMIT"
 
-if [[ "${YINGJIAN_OWNER_TESTFLIGHT_AUTHORIZED:-0}" == "1" && \
-      "$PLATFORM" == "ios" && \
-      ( "$STAGE" == "build" || "$STAGE" == "upload" ) ]]; then
-  echo "Owner TestFlight build/upload explicitly authorized; final MVP acceptance remains pending."
-else
-  ruby "$ROOT_DIR/scripts/check_mvp_acceptance.rb" \
-    "$ROOT_DIR" \
-    "$RELEASE_SOURCE_COMMIT"
-fi
+ruby "$ROOT_DIR/scripts/check_mvp_acceptance.rb" \
+  "$ROOT_DIR" \
+  "$RELEASE_SOURCE_COMMIT"

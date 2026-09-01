@@ -21,12 +21,15 @@ source:
 platforms:
   ios:
     identifier: com.babycompany.yingjian
-    release_ready: true
+    release_ready: false
+    blocker: TestFlight uploads require an implemented Fastlane/Spaceship lane; browser UI and the legacy altool wrapper are forbidden fallback paths.
     env_file: .env.testflight
     env_example: .env.testflight.example
     required_tools:
       - flutter
       - ruby
+      - bundle
+      - fastlane
       - xcodebuild
       - xcrun
       - codesign

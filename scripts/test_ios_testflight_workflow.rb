@@ -46,24 +46,23 @@ stdout, stderr, status = run(
   "1.2.4",
   "112"
 )
-assert(status.success?, "upload dry-run failed: #{stdout}#{stderr}")
-assert(stdout.include?("TESTFLIGHT-UPLOAD"), "upload plan did not label its Apple mutation")
-assert(stdout.include?("release_contract_preflight.sh ios 1.2.4 112 upload"),
-       "upload plan omitted the fresh release contract preflight")
-assert(stdout.include?("verify_ios_ipa.rb"), "upload plan did not re-verify the exact IPA")
-assert(stdout.include?("altool --validate-app"), "upload plan omitted Apple validation")
-assert(stdout.include?("altool --upload-package") && stdout.include?("--wait"),
-       "upload plan does not wait on the uploaded delivery")
-assert(stdout.include?("provider valid only"),
-       "upload plan did not state its terminal boundary")
+assert(status.exitstatus == 78, "legacy upload did not fail closed: #{stdout}#{stderr}")
+assert(stderr.include?("TESTFLIGHT-UPLOAD BLOCKED"),
+       "legacy upload did not explain that it is disabled")
+assert(stderr.include?("Fastlane/Spaceship"),
+       "legacy upload did not name the required replacement path")
+
+upload_source = File.read(UPLOAD_SCRIPT)
+assert(!upload_source.match?(/^\s*xcrun\s+altool\b/),
+       "legacy wrapper still contains an executable altool path")
+assert(!upload_source.include?("--upload-package"),
+       "legacy wrapper still contains an upload command")
+assert(!upload_source.include?("--wait"),
+       "legacy wrapper still contains a processing wait")
 
 preflight_source = File.read(PREFLIGHT_SCRIPT)
-assert(preflight_source.include?('${YINGJIAN_OWNER_TESTFLIGHT_AUTHORIZED:-0}'),
-       "preflight omitted the explicit owner TestFlight authorization")
-assert(preflight_source.include?('"$PLATFORM" == "ios"'),
-       "acceptance exception is not restricted to iOS")
-assert(preflight_source.include?('"$STAGE" == "build" || "$STAGE" == "upload"'),
-       "acceptance exception is not restricted to build/upload")
+assert(!preflight_source.include?("YINGJIAN_OWNER_TESTFLIGHT_AUTHORIZED"),
+       "preflight still contains the removed owner acceptance bypass")
 assert(preflight_source.scan("check_mvp_acceptance.rb").length == 1,
        "default MVP acceptance checker was removed or duplicated")
 

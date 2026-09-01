@@ -10,8 +10,8 @@ Every application uses the same release boundary:
 3. Use a clean release worktree whose branch exactly matches its upstream.
 4. Build and sign locally. GitHub Actions is not a packaging or upload path.
 5. Verify the frozen MVP acceptance manifest and every referenced evidence
-   digest before packaging, except for an explicitly authorized owner
-   TestFlight build used to collect that evidence.
+   digest before packaging. A TestFlight request authorizes only the upload
+   chain after all preflight evidence passes; it does not bypass acceptance.
 6. Verify the final artifact identity, distribution profile, signed
    entitlements, required resources, Firebase identity, and SHA-256 before any
    upload.
@@ -24,12 +24,23 @@ Actual values live only in ignored local files based on the committed examples.
 A platform marked `release_ready: false` is intentionally blocked until its
 signing and artifact verification path is implemented.
 
-For iOS, packaging and TestFlight delivery are intentionally separate commands:
+For iOS, local packaging and TestFlight delivery remain separate. A direct
+user request that names TestFlight upload is the initial authorization for one
+candidate chain; once its preflight passes, do not ask for another per-upload
+human confirmation. That upload chain must use Fastlane/Spaceship only. It
+must not use the App Store Connect browser UI.
+
+The repository does not yet contain an implemented Fastlane/Spaceship
+TestFlight lane. Therefore `platforms.ios.release_ready` is intentionally
+`false`: no iOS TestFlight upload is currently permitted. Browser UI and the
+legacy `scripts/upload_ios_testflight.sh` / `altool` path are forbidden
+fallbacks, not an alternate delivery route. Implement and verify a Fastlane
+lane before changing this readiness state.
+
+The retained local packaging command is:
 
 ```sh
 scripts/build_ios_testflight.sh <version> <build>
-scripts/upload_ios_testflight.sh \
-  <ipa-path> <artifact-report-path> <version> <build>
 ```
 
 The build command is local-only. It runs the release preflight, creates one
@@ -38,16 +49,25 @@ older IPA evidence, and records the new artifact in a candidate-specific
 ignored directory. It records a
 private artifact report after verifying the bundle ID, version, build, iOS
 baseline, permissions, Firebase configuration, provisioning profile, code
-signature, App Store distribution entitlements, source commit, and SHA-256. The upload command reruns the preflight,
-re-verifies the same IPA and SHA-256, asks Apple to validate it, uploads that
-exact package, waits on the same delivery, and requires a stable delivery ID
-plus a terminal provider-valid state. It never assigns a TestFlight group,
-claims real tester reachability, uploads store metadata, submits App Review, or
-releases the app publicly.
+signature, App Store distribution entitlements, source commit, and SHA-256.
+The legacy upload-wrapper filename is retained only as a fail-closed tombstone:
+every invocation explains the blocker and exits `78`. Its historical `altool`
+invocation has been removed and is forbidden; the stub is not an
+authorized TestFlight delivery command or an alternate to Fastlane/Spaceship.
 
-Both commands remain fail-closed while `platforms.ios.release_ready` is false.
-Turning it true requires current signing and store-state evidence; the presence
-of these scripts alone is not release readiness. Packaging also requires the
+Any future Fastlane upload lane must rerun the preflight, re-verify the exact
+IPA and SHA-256, and stop as soon as Fastlane/Transporter returns Apple's
+successful receipt for that exact IPA, version, and build. Record any stable
+upload/delivery ID present in the receipt, report `uploaded`, and do not wait
+for, poll, or refresh the TestFlight/Build list or require an App Store Connect
+build ID that is not yet available. Provider processing/valid, TestFlight-group
+distribution, and tester reachability remain later one-shot checks; list delay
+must not trigger a duplicate upload. The lane must still stop before metadata
+mutation, App Review, or public release. Local packaging and any future upload lane remain
+fail-closed while `platforms.ios.release_ready` is false. Turning it true
+requires current signing and store-state evidence plus the verified Fastlane
+lane; the presence of legacy scripts alone is not release readiness. Packaging
+also requires the
 ignored `.quality/mvp-acceptance.yaml` to bind the exact pushed source commit to
 the image corpus gate, formal portrait score gate, usability gate, iOS device
 matrix, and final acceptance report. The acceptance checker executes the
@@ -55,13 +75,11 @@ repository validators for those structured inputs; arbitrary self-declared
 Markdown cannot satisfy the gate. The decision expires after seven days and
 must be regenerated for the exact release source.
 
-When the owner explicitly authorizes a TestFlight upload before final MVP
-acceptance, set `YINGJIAN_OWNER_TESTFLIGHT_AUTHORIZED=1` only on that exact iOS
-build or upload invocation. The preflight then permits only the `build` and
-`upload` stages to proceed without `.quality/mvp-acceptance.yaml`, so the signed
-candidate can be installed and used to collect device and human evidence. This
-runtime authorization is not stored in `.env.testflight`; it does not mark the
-MVP accepted, assign testers, submit App Review, or authorize public release.
+`YINGJIAN_OWNER_TESTFLIGHT_AUTHORIZED` is not a supported exception and the
+preflight does not read it. A TestFlight request cannot bypass the Fastlane
+prerequisite, MVP acceptance evidence, or any other gate; it does not make an
+iOS upload ready, assign testers, submit App Review, or authorize public
+release.
 
 The build stage does not require App Store Connect credentials. The upload
 stage requires the ignored API key configuration. Both stages still require
@@ -102,8 +120,7 @@ Release wrappers invoke `scripts/release_contract_preflight.sh` before signing
 or building. The preflight also rejects missing/forbidden stage-specific
 environment variables, an incomplete or stale MVP acceptance manifest, dirty
 worktrees, and branches ahead of, behind, or diverged from their upstream. The
-only acceptance exception is the explicit iOS owner-TestFlight runtime
-authorization described above; all other platforms and stages remain
+Fastlane prerequisite is additional; all platforms and stages remain
 fail-closed.
 
 The current MVP execution and validation target is iOS only. Android packaging,
