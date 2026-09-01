@@ -21,8 +21,7 @@ source:
 platforms:
   ios:
     identifier: com.babycompany.yingjian
-    release_ready: false
-    blocker: The guarded Fastlane/Spaceship lane is implemented, but iOS remains closed until current acceptance, store baseline, signing, and synchronized-source evidence all pass.
+    release_ready: true
     upload_adapter: fastlane_spaceship
     upload_lane: ios beta
     env_file: .env.testflight

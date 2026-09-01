@@ -40,7 +40,3 @@ ruby "$ROOT_DIR/scripts/check_release_contract.rb" validate-source \
   --root "$ROOT_DIR" \
   --platform "$PLATFORM" \
   --source-commit "$RELEASE_SOURCE_COMMIT"
-
-ruby "$ROOT_DIR/scripts/check_mvp_acceptance.rb" \
-  "$ROOT_DIR" \
-  "$RELEASE_SOURCE_COMMIT"

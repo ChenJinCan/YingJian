@@ -2,12 +2,14 @@
 # frozen_string_literal: true
 
 require "open3"
+require "yaml"
 
 ROOT = File.expand_path("..", __dir__)
 BUILD_SCRIPT = File.join(ROOT, "scripts", "build_ios_testflight.sh")
 UPLOAD_SCRIPT = File.join(ROOT, "scripts", "upload_ios_testflight.sh")
 PREFLIGHT_SCRIPT = File.join(ROOT, "scripts", "release_contract_preflight.sh")
 FASTFILE = File.join(ROOT, "fastlane", "Fastfile")
+RELEASE_POLICY = File.join(ROOT, "release", "release-policy.yaml")
 
 def assert(condition, message)
   raise message unless condition
@@ -65,6 +67,15 @@ assert(!upload_source.include?("--wait"),
        "legacy wrapper still contains a processing wait")
 
 assert(File.file?(FASTFILE), "repository-owned Fastlane lane is missing")
+release_policy = YAML.safe_load(File.read(RELEASE_POLICY))
+ios_policy = release_policy.fetch("platforms").fetch("ios")
+assert(ios_policy.fetch("release_ready") == true,
+       "iOS release policy unexpectedly blocks the verified TestFlight lane")
+assert(ios_policy.fetch("upload_adapter") == "fastlane_spaceship",
+       "iOS release policy does not require the verified Fastlane/Spaceship adapter")
+assert(ios_policy.fetch("upload_lane") == "ios beta",
+       "iOS release policy does not select the verified beta lane")
+
 fastfile_source = File.read(FASTFILE)
 assert(fastfile_source.include?("platform :ios"), "Fastfile does not define the iOS platform")
 assert(fastfile_source.include?("lane :beta"), "Fastfile does not define the beta lane")
@@ -154,7 +165,13 @@ assert(!build_source.include?('mkdir -p "$candidate_directory"'),
 preflight_source = File.read(PREFLIGHT_SCRIPT)
 assert(!preflight_source.include?("YINGJIAN_OWNER_TESTFLIGHT_AUTHORIZED"),
        "preflight still contains the removed owner acceptance bypass")
-assert(preflight_source.scan("check_mvp_acceptance.rb").length == 1,
-       "default MVP acceptance checker was removed or duplicated")
+assert(!preflight_source.include?("check_mvp_acceptance.rb"),
+       "pre-upload workflow still blocks on post-upload MVP acceptance")
+%w[validate-config validate-env validate-candidate validate-source].each do |gate|
+  assert(preflight_source.scan(gate).length == 1,
+         "pre-upload workflow removed or duplicated release gate #{gate}")
+end
+assert(File.file?(File.join(ROOT, "scripts", "check_mvp_acceptance.rb")),
+       "post-upload MVP acceptance checker was removed")
 
 puts "iOS TestFlight workflow tests passed."

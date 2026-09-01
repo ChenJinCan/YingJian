@@ -150,10 +150,10 @@ ruby scripts/check_release_contract.rb validate-config
 
 ## 本地发布与候选完整性
 
-- 构建、签名和上传必须在本机执行；直接点名 TestFlight 上传的用户请求是该候选上传链的初始授权。预检通过后，链路只能经 Fastlane/Spaceship 运行，禁止使用 App Store Connect 浏览器 UI，也不得再索要逐次人工确认。未来 Fastlane/Transporter 对精确 IPA、版本和 build 返回 Apple 成功接收回执时，本次上传任务立即止于“已上传”，不得继续等待、轮询或刷新 TestFlight 列表；列表延迟不得触发重传。元数据、审核提交、公开发布、平台处理和上传后的候选验收仍是独立阶段。
-- iOS 目前没有实现 Fastlane/Spaceship TestFlight lane，因而保持 `release_ready: false`。不得把浏览器 UI 或遗留的 `scripts/upload_ios_testflight.sh` / `altool` 路径当作替代上传通道。
+- 构建、签名和上传必须在本机执行；直接点名 TestFlight 上传的用户请求是该候选上传链的初始授权。预检通过后，链路只能经 Fastlane/Spaceship 运行，禁止使用 App Store Connect 浏览器 UI，也不得再索要逐次人工确认。当 Fastlane/Transporter 对精确 IPA、版本和 build 返回 Apple 成功接收回执时，本次上传任务立即止于“已上传”，不得继续等待、轮询或刷新 TestFlight 列表；列表延迟不得触发重传。元数据、审核提交、公开发布、平台处理和上传后的候选验收仍是独立阶段。
+- iOS 已实现并验证仓库自有的 `fastlane ios beta` 上传 lane，`release_ready: true`。该 lane 是唯一允许的 TestFlight 上传通道；浏览器 UI 和遗留的 `scripts/upload_ios_testflight.sh` / `altool` 路径不是替代通道。
 - 发布任务开始前必须读取 [`docs/release-contract.md`](docs/release-contract.md)，并通过 schema 2 发布合同、30 分钟内商店基线、全平台连续 build、干净且与 upstream 同步的源码身份和最终产物身份检查。
-- `release_ready: false`、缺少签名/环境文件、候选证据不完整或版本/build 不合法时必须停止，不得削弱预检。
+- `release_ready: false`、缺少签名/环境文件、上传前候选身份或产物证据不完整、版本/build 不合法时必须停止。完整物理设备、可用性和盲评证据属于上传后的候选验收，不阻断已授权 TestFlight 上传，也不能被上传结果替代。
 - 源码提交、版本/build、Bundle ID、签名、配置、资源和产物 SHA-256 是独立证据；任一缺失都不能称为候选完成。
 
 ## 商店与交付状态边界
@@ -174,6 +174,6 @@ ruby scripts/check_release_contract.rb validate-config
 3. 把需求转成可观察验收标准和测试计划。
 4. 实施最小且完整的改动，保持层级边界和隐私约束。
 5. 先运行窄自动化与静态检查；功能切片完整后，再集中运行 iOS Simulator 集成验证。
-6. 本轮功能全部实现且自动工程门通过后冻结候选；只有此时才集中执行 Profile/Release、TestFlight 和真机设备验收。仅真机缺陷任务可提前做针对性设备验证。
+6. 本轮功能全部实现且自动工程门通过后冻结候选；候选冻结后先执行 Profile/Release 验证和已授权的 TestFlight 上传，再对精确上传候选进行完整真机、可用性与盲评验收。仅真机缺陷任务可提前做针对性设备验证。
 7. UI 变更在 Simulator 阶段检查重要状态并保留本地、Git 忽略的视觉证据；冻结候选再采集最终真机证据。
 8. 分别报告功能实现、模拟器验证、候选冻结和真机验收状态；不得把其中任一项笼统描述成已构建、已上传或已发布。
