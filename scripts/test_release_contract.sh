@@ -82,6 +82,17 @@ ruby "$CHECKER" validate-candidate \
   --root "$FIXTURE_DIR" \
   --config "$FIXTURE_DIR/release/release-policy.yaml" \
   --platform ios \
+  --version 1.0.0 \
+  --build 20 \
+  --public-version none \
+  --remote-latest-version 1.0.0 \
+  --remote-latest-build 19 \
+  --verified-at "$verified_at"
+
+ruby "$CHECKER" validate-candidate \
+  --root "$FIXTURE_DIR" \
+  --config "$FIXTURE_DIR/release/release-policy.yaml" \
+  --platform ios \
   --version 1.2.4 \
   --build 112 \
   --public-version 1.2.3 \
@@ -152,6 +163,19 @@ expect_failure \
     --public-version 1.2.3 \
     --remote-latest-version 1.2.14 \
     --remote-latest-build 111 \
+    --verified-at "$verified_at"
+
+expect_failure \
+  "initial testing version 1.0.0 must be reused; candidate version must be 1.0.0" \
+  ruby "$CHECKER" validate-candidate \
+    --root "$FIXTURE_DIR" \
+    --config "$FIXTURE_DIR/release/release-policy.yaml" \
+    --platform ios \
+    --version 1.0.1 \
+    --build 20 \
+    --public-version none \
+    --remote-latest-version 1.0.0 \
+    --remote-latest-build 19 \
     --verified-at "$verified_at"
 
 expect_failure \

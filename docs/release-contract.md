@@ -116,7 +116,9 @@ After a store lookup, supply these runtime values:
 - Candidate version and build are positional wrapper arguments. They are passed
   to Flutter as `--build-name` and `--build-number`; do not persist them in an
   environment file.
-- `RELEASE_PUBLIC_VERSION`: current publicly available store version.
+- `RELEASE_PUBLIC_VERSION`: current publicly available store version. Use the
+  exact literal `none` only when the authenticated store shows that the app has
+  never had a publicly available version.
 - `RELEASE_REMOTE_LATEST_VERSION`: latest uploaded marketing version in the
   store, whether public or still in testing.
 - `RELEASE_REMOTE_LATEST_BUILD`: highest uploaded build number across every
@@ -126,13 +128,14 @@ After a store lookup, supply these runtime values:
   it expires after 30 minutes.
 - `RELEASE_SOURCE_COMMIT`: exact pushed commit used for the build.
 
-If `RELEASE_REMOTE_LATEST_VERSION` is higher than `RELEASE_PUBLIC_VERSION`, that
-version is still in testing and the candidate must reuse it. If both versions
-are equal, the current version is already online and the candidate must
-increment only the patch (`C`) component by one. A remote latest version lower
-than the public version is an invalid baseline. In every case, the build must
-equal `RELEASE_REMOTE_LATEST_BUILD + 1`; changing the marketing version never
-resets the build number.
+If `RELEASE_PUBLIC_VERSION=none`, the existing remote testing version must be
+reused. Otherwise, if `RELEASE_REMOTE_LATEST_VERSION` is higher than
+`RELEASE_PUBLIC_VERSION`, that version is still in testing and the candidate
+must reuse it. If both versions are equal, the current version is already
+online and the candidate must increment only the patch (`C`) component by one.
+A remote latest version lower than the public version is an invalid baseline.
+In every case, the build must equal `RELEASE_REMOTE_LATEST_BUILD + 1`; changing
+the marketing version never resets the build number.
 
 Run the policy tests with:
 

@@ -203,21 +203,24 @@ when "validate-candidate"
   public_version = options[:public_version].to_s
   remote_latest_version = options[:remote_latest_version].to_s
   version_parts = semver(version, "version")
-  public_parts = semver(public_version, "public version")
   remote_latest_version_parts = semver(remote_latest_version, "remote latest version")
-  remote_vs_public = remote_latest_version_parts <=> public_parts
-  if remote_vs_public == -1
+  public_version_absent = public_version == "none"
+  public_parts = semver(public_version, "public version") unless public_version_absent
+  remote_vs_public = remote_latest_version_parts <=> public_parts unless public_version_absent
+  if !public_version_absent && remote_vs_public == -1
     fail_contract("remote latest version #{remote_latest_version} is lower than public version #{public_version}")
   end
 
-  expected_version_parts = if remote_vs_public == 1
+  expected_version_parts = if public_version_absent || remote_vs_public == 1
                              remote_latest_version_parts
                            else
                              [public_parts[0], public_parts[1], public_parts[2] + 1]
                            end
   expected_version = expected_version_parts.join(".")
   unless version_parts == expected_version_parts
-    if remote_vs_public == 1
+    if public_version_absent
+      fail_contract("initial testing version #{remote_latest_version} must be reused; candidate version must be #{expected_version}")
+    elsif remote_vs_public == 1
       fail_contract("testing version #{remote_latest_version} must be reused; candidate version must be #{expected_version}")
     end
 
