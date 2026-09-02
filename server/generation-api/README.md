@@ -8,10 +8,10 @@
 | `styleAiRedraw` | 阿里 `wan2.7-image` | `size=2K`、`n=1`、固定 seed、`watermark=true`、组图关闭 |
 | `cleanupRemovePasserby` | 阿里 `wanx2.1-imageedit` / `description_edit_with_mask` | 只使用用户上传的 Mask 和固定去路人提示词 |
 | `cleanupBrushRemove` | 阿里同上 | 只使用用户上传的 Mask 和固定去物提示词 |
-| `optimizeOldPhoto` | 火山 `LensOpr` / `lens_opr` | 默认关闭；用户必须明确传 `colorMode=preserve|colorize`，只映射为 `if_color=0|1` |
+| `optimizeOldPhoto` | 阿里 `wanx2.1-imageedit` | 默认 `preserve` 映射为 1× 超分修复；旧客户端显式 `colorize` 才执行上色 |
 | `motionAiNatural` | 阿里 `wan2.6-i2v-flash` | 用户显式选择的独立 AI 自然动效；`720P`、3 秒、无声、禁用 prompt 改写、固定 seed 和水印 |
 
-供应商密钥只从环境变量读取。服务端不记录原图、Mask、提示全文、签名 URL 或密钥。阿里结果只允许从官方北京 OSS 域名下载；DNS 解析后的私网、loopback、link-local、重定向、超时或超限响应都会被拒绝。成功结果立即导入第一方私有媒体目录，API 只返回 `resultMediaId`。
+供应商密钥只从环境变量读取。服务端不记录原图、Mask、提示全文、签名 URL 或密钥。阿里请求固定使用官方北京 DashScope 域名 `https://dashscope.aliyuncs.com`；不在运行时自动切换域名。Cloudflare 供应商请求使用 Workers 支持的 manual redirect 模式并显式拒绝 3xx，不跟随携带凭据的重定向。阿里结果只允许从官方文档规定的动态 DashScope OSS 主机格式下载；DNS 解析后的私网、loopback、link-local、重定向、超时或超限响应都会被拒绝。成功结果立即导入第一方私有媒体目录，API 只返回 `resultMediaId`。
 
 ## Cloudflare Workers 生产运行时
 
@@ -36,11 +36,9 @@ npx wrangler secret put GENERATION_OFFER_SIGNING_KEY
 npx wrangler secret put BAIDU_API_KEY
 npx wrangler secret put BAIDU_SECRET_KEY
 npx wrangler secret put ALIBABA_DASHSCOPE_API_KEY
-npx wrangler secret put VOLC_ACCESS_KEY_ID
-npx wrangler secret put VOLC_SECRET_ACCESS_KEY
 ```
 
-不能把这些值写入 `wrangler.jsonc`、Flutter `dart-define`、原生工程、日志或命令参数。百度、阿里图片、阿里视频和火山开关分别为 `BAIDU_IMAGE_REPAIR_ENABLED`、`ALIBABA_IMAGE_ENABLED`、`ALIBABA_VIDEO_ENABLED`、`VOLC_LENS_OPR_ENABLED`；版本化配置全部从 `false` 起步。写入并核验对应 Secrets 后，才显式把该供应商开关改成 `true`。密钥存在本身不会启用能力，也不会导致供应商切换。
+不能把这些值写入 `wrangler.jsonc`、Flutter `dart-define`、原生工程、日志或命令参数。百度、阿里图片和阿里视频开关分别为 `BAIDU_IMAGE_REPAIR_ENABLED`、`ALIBABA_IMAGE_ENABLED`、`ALIBABA_VIDEO_ENABLED`；版本化配置全部从 `false` 起步。写入并核验对应 Secrets 后，才显式把该供应商开关改成 `true`。密钥存在本身不会启用能力，也不会导致供应商切换。
 
 当前 D1 已绑定 `yingjian-generation-production`，R2 bucket 名为 `yingjian-generation-private`。首次发布顺序：
 
@@ -135,16 +133,15 @@ GENERATION_TASK_DIRECTORY=<仓库外或被忽略的私有任务目录>
 GENERATION_MEDIA_DIRECTORY=<仓库外或被忽略的私有媒体目录>
 ```
 
-三家供应商能力都使用独立、显式且默认关闭的开关：
+当前生产供应商能力都使用独立、显式且默认关闭的开关：
 
 ```text
 BAIDU_IMAGE_REPAIR_ENABLED=false
 ALIBABA_IMAGE_ENABLED=false
 ALIBABA_VIDEO_ENABLED=false
-VOLC_LENS_OPR_ENABLED=false
 ```
 
-只有开关精确等于 `true` 时，runtime 才实例化对应供应商并要求其密钥：百度要求 `BAIDU_API_KEY` 与 `BAIDU_SECRET_KEY`，阿里图片与视频分别使用 `ALIBABA_IMAGE_ENABLED` 和 `ALIBABA_VIDEO_ENABLED`，但均只在服务端读取 `ALIBABA_DASHSCOPE_API_KEY` 与 `ALIBABA_WORKSPACE_ID`，火山要求 `VOLC_ACCESS_KEY_ID` 与 `VOLC_SECRET_ACCESS_KEY`。开关缺失、为空、为 `false` 或其他值时，对应能力在能力接口中保持 `disabled`，且不读取、不校验其密钥。仅配置密钥不得自动启用能力；阿里图片开关不得隐式启用视频。任一供应商关闭或失败也不得自动改走其他供应商或本地动效。
+只有开关精确等于 `true` 时，runtime 才实例化对应供应商并要求其密钥：百度要求 `BAIDU_API_KEY` 与 `BAIDU_SECRET_KEY`，阿里图片与视频分别使用 `ALIBABA_IMAGE_ENABLED` 和 `ALIBABA_VIDEO_ENABLED`，并只在服务端读取北京地域的 `ALIBABA_DASHSCOPE_API_KEY`。开关缺失、为空、为 `false` 或其他值时，对应能力在能力接口中保持 `disabled`，且不读取、不校验其密钥。仅配置密钥不得自动启用能力；阿里图片开关不得隐式启用视频。任一供应商关闭或失败也不得自动改走其他供应商或本地动效。
 
 运行测试：
 
@@ -260,7 +257,7 @@ POST /v1/generation-tasks/{taskId}/cancel
 
 查询阿里任务时会读取同一个供应商任务 ID；不会因为网络失败新建任务。付费调用前先持久化 append-only dispatch intent；若供应商已经可能接收、但其任务 ID 未能持久化，安全窗口内后续 POST/GET 只返回 `dispatch_reconciliation_required`，权益保持 hold，绝不会二次 submit。窗口结束仍无供应商 ID 时，同一任务转为 `provider_outcome_unknown`，保留权益冻结与审计记录但不再永久占用活动并发；重放原 creation identity 仍只返回原任务，不会再次 submit。任务观察和取消使用版本 CAS，过期响应不能覆盖更新状态。
 
-阿里仅在 `PENDING` 时请求供应商取消。供应商确认取消才进入 `canceled` 并 release 权益；若取消响应表明任务已经 `RUNNING`，服务端保持真实的 `running` 状态、设 `providerCancelable=false` 并保持权益 hold，绝不把它误报为已取消、停止计费或已退款。百度和火山是同步接口，从不声称支持供应商取消。
+阿里仅在 `PENDING` 时请求供应商取消。供应商确认取消才进入 `canceled` 并 release 权益；若取消响应表明任务已经 `RUNNING`，服务端保持真实的 `running` 状态、设 `providerCancelable=false` 并保持权益 hold，绝不把它误报为已取消、停止计费或已退款。百度同步接口从不声称支持供应商取消。
 
 客户端必须同时解释 `providerCancellation`、`usageState` 和 `usageDisposition`：取消已确认且 `usageState=released` 才能显示权益已释放；任务仍运行或状态待对账且 `usageDisposition=hold` 时，必须保留并刷新同一个任务，不能重新创建或宣称已退款。
 
@@ -298,4 +295,4 @@ npm run import-media -- <owner-id> <media-id> image/jpeg /absolute/path/input.jp
 
 ## 尚未完成的外部状态
 
-本目录没有部署、没有创建云账号、没有写入真实密钥，也没有进行真实图片调用或账单验证。三家供应商 runtime 开关默认关闭；生产启用仍需分别完成账号与能力开通、当前价格/SLA、内容治理和真实固定样片验收，其中火山老照片还要求企业账号资格。
+仓库不保存真实密钥，也不以代码测试替代供应商账单和固定样片验收。生产启用仍需分别完成账号与能力开通、当前价格/SLA、内容治理和真实固定样片验收。

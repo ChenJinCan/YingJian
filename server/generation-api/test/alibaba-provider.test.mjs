@@ -28,7 +28,6 @@ test('AI style redraw uses the fixed wan2.7-image recipe and confirmed style tex
   const transport = recordingFetch();
   const provider = new AlibabaImageProvider({
     apiKey: 'server-only-key',
-    workspaceId: 'workspace-123',
     fetchImpl: transport.fetchImpl,
   });
 
@@ -42,7 +41,7 @@ test('AI style redraw uses the fixed wan2.7-image recipe and confirmed style tex
   const call = transport.calls[0];
   assert.equal(
     call.url,
-    'https://workspace-123.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/image-generation/generation',
+    'https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation',
   );
   assert.equal(call.init.headers.authorization, 'Bearer server-only-key');
   assert.equal(call.init.headers['x-dashscope-async'], 'enable');
@@ -75,11 +74,110 @@ test('AI style redraw uses the fixed wan2.7-image recipe and confirmed style tex
   assert.equal(result.providerCancelable, true);
 });
 
+test('old-photo preservation performs fixed 1x detail repair without colorization', async () => {
+  const transport = recordingFetch();
+  const provider = new AlibabaImageProvider({
+    apiKey: 'server-only-key',
+    fetchImpl: transport.fetchImpl,
+  });
+
+  const result = await provider.submit({
+    capability: 'optimizeOldPhoto',
+    sourceUri: 'data:image/jpeg;base64,c291cmNl',
+    colorMode: 'preserve',
+  });
+
+  const call = transport.calls[0];
+  assert.equal(
+    call.url,
+    'https://dashscope.aliyuncs.com/api/v1/services/aigc/image2image/image-synthesis',
+  );
+  const body = JSON.parse(call.init.body);
+  assert.deepEqual(body, {
+    model: 'wanx2.1-imageedit',
+    input: {
+      function: 'super_resolution',
+      prompt: '图像超分。',
+      base_image_url: 'data:image/jpeg;base64,c291cmNl',
+    },
+    parameters: {
+      upscale_factor: 1,
+      n: 1,
+      seed: 44001,
+      watermark: true,
+    },
+  });
+  assertNoAutomaticParameters(body);
+  assert.equal(result.provider, 'alibaba');
+  assert.equal(result.model, 'wanx2.1-imageedit');
+});
+
+test('old-photo colorization runs only for the explicit colorize input', async () => {
+  const transport = recordingFetch();
+  const provider = new AlibabaImageProvider({
+    apiKey: 'server-only-key',
+    fetchImpl: transport.fetchImpl,
+  });
+
+  await provider.submit({
+    capability: 'optimizeOldPhoto',
+    sourceUri: 'https://private-media.example/old-photo.jpg',
+    colorMode: 'colorize',
+  });
+
+  assert.deepEqual(JSON.parse(transport.calls[0].init.body), {
+    model: 'wanx2.1-imageedit',
+    input: {
+      function: 'colorization',
+      prompt: '为黑白或灰度老照片自然上色，保持人物身份、构图和内容不变。',
+      base_image_url: 'https://private-media.example/old-photo.jpg',
+    },
+    parameters: {
+      n: 1,
+      seed: 44002,
+      watermark: true,
+    },
+  });
+
+  await assert.rejects(
+    provider.submit({
+      capability: 'optimizeOldPhoto',
+      sourceUri: 'https://private-media.example/old-photo.jpg',
+    }),
+    (error) => error.code === 'color_mode_required',
+  );
+});
+
+test('an explicit Alibaba error payload releases the reservation with a safe code', async () => {
+  const transport = recordingFetch({
+    code: 'InvalidParameter.DataInspection',
+    message: 'provider detail must not enter the public error',
+    request_id: 'ali-rejected-request',
+  });
+  const provider = new AlibabaImageProvider({
+    apiKey: 'server-only-key',
+    fetchImpl: transport.fetchImpl,
+  });
+
+  await assert.rejects(
+    provider.submit({
+      capability: 'optimizeOldPhoto',
+      sourceUri: 'data:image/jpeg;base64,c291cmNl',
+      colorMode: 'preserve',
+    }),
+    (error) => {
+      assert.equal(error.code, 'alibaba_invalid_parameter_data_inspection');
+      assert.equal(error.billingDisposition, 'release');
+      assert.equal(error.message.includes('provider detail'), false);
+      return true;
+    },
+  );
+});
+
 test('passerby cleanup edits only the user supplied mask with a fixed prompt', async () => {
   const transport = recordingFetch();
   const provider = new AlibabaImageProvider({
     apiKey: 'server-only-key',
-    workspaceId: 'workspace-123',
     fetchImpl: transport.fetchImpl,
   });
 
@@ -92,7 +190,7 @@ test('passerby cleanup edits only the user supplied mask with a fixed prompt', a
   const call = transport.calls[0];
   assert.equal(
     call.url,
-    'https://workspace-123.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/image2image/image-synthesis',
+    'https://dashscope.aliyuncs.com/api/v1/services/aigc/image2image/image-synthesis',
   );
   const body = JSON.parse(call.init.body);
   assert.deepEqual(body, {
@@ -117,7 +215,6 @@ test('brush cleanup has its own fixed recipe and never expands the mask', async 
   const transport = recordingFetch();
   const provider = new AlibabaImageProvider({
     apiKey: 'server-only-key',
-    workspaceId: 'workspace-123',
     fetchImpl: transport.fetchImpl,
   });
 
@@ -151,7 +248,6 @@ test('Alibaba sends provider cancellation only while a task is PENDING', async (
   });
   const provider = new AlibabaImageProvider({
     apiKey: 'server-only-key',
-    workspaceId: 'workspace-123',
     fetchImpl: transport.fetchImpl,
   });
 
@@ -172,7 +268,7 @@ test('Alibaba sends provider cancellation only while a task is PENDING', async (
   assert.equal(transport.calls.length, 1);
   assert.equal(
     transport.calls[0].url,
-    'https://workspace-123.cn-beijing.maas.aliyuncs.com/api/v1/tasks/ali-task-1/cancel',
+    'https://dashscope.aliyuncs.com/api/v1/tasks/ali-task-1/cancel',
   );
   assert.equal(transport.calls[0].init.method, 'POST');
   assert.deepEqual(pending, {
@@ -204,7 +300,6 @@ test('Alibaba task lookup returns the exact provider result for private import',
   });
   const provider = new AlibabaImageProvider({
     apiKey: 'server-only-key',
-    workspaceId: 'workspace-123',
     fetchImpl: transport.fetchImpl,
   });
 
@@ -212,7 +307,7 @@ test('Alibaba task lookup returns the exact provider result for private import',
 
   assert.equal(
     transport.calls[0].url,
-    'https://workspace-123.cn-beijing.maas.aliyuncs.com/api/v1/tasks/ali-task-1',
+    'https://dashscope.aliyuncs.com/api/v1/tasks/ali-task-1',
   );
   assert.equal(transport.calls[0].init.method, 'GET');
   assert.deepEqual(result, {

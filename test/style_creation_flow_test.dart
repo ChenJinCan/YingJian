@@ -7,7 +7,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yingjian/app/settings/app_settings.dart';
-import 'package:yingjian/features/creation/application/local_reference_style_analyzer.dart';
 import 'package:yingjian/features/creation/domain/creation_capability.dart';
 import 'package:yingjian/features/creation/domain/creation_intent.dart';
 import 'package:yingjian/features/creation/domain/creation_task.dart';
@@ -167,7 +166,7 @@ void main() {
     );
   });
 
-  testWidgets('style workspace waits for explicit capability and style', (
+  testWidgets('style workspace exposes outcome styles and applies on tap', (
     tester,
   ) async {
     final store = MemoryPhotoProjectStore();
@@ -177,241 +176,105 @@ void main() {
         settings,
         photoImporter: FakePhotoImporter([_fixturePhoto('default-style')]),
         photoProjectStore: store,
+        metaOpCapabilities: iosMetaOpCapabilities,
       ),
     );
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
 
+    expect(find.byType(AppBar), findsNothing);
+    expect(find.byKey(const ValueKey('style-workspace-title')), findsOneWidget);
+    expect(find.byKey(const ValueKey('style-workspace-back')), findsOneWidget);
+    expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
     expect(
-      find.byKey(const ValueKey('style-capability-official')),
+      find.byKey(const ValueKey('style-option-japanese-v1')),
       findsOneWidget,
     );
-    expect(find.byKey(const ValueKey('style-capability-text')), findsOneWidget);
+    expect(find.byKey(const ValueKey('style-option-film-v1')), findsOneWidget);
     expect(
-      find.byKey(const ValueKey('style-capability-voice')),
+      find.byKey(const ValueKey('style-option-illustration-v1')),
       findsOneWidget,
     );
     expect(
-      find.byKey(const ValueKey('style-capability-reference')),
+      find.byKey(const ValueKey('style-option-cinematic-v1')),
       findsOneWidget,
     );
-    expect(
-      find.byKey(const ValueKey('style-capability-ai-redraw')),
-      findsOneWidget,
-    );
+    expect(find.text('请选择能力'), findsNothing);
+    expect(find.textContaining('系统不会替你'), findsNothing);
+    expect(find.byKey(const ValueKey('style-capability-text')), findsNothing);
     expect(store.project!.creationStyleId, isNull);
     expect(store.project!.creationStyleRecipe, isNull);
     expect(store.project!.creationCapability, isNull);
-    expect(find.byKey(const ValueKey('style-options')), findsNothing);
     expect(
       find.byKey(const ValueKey('apply-style-primary-action')),
       findsNothing,
     );
 
-    await tester.tap(find.byKey(const ValueKey('style-capability-official')));
+    final film = find.byKey(const ValueKey('style-option-film-v1'));
+    await tester.ensureVisible(film);
+    expect(
+      tester
+          .widget<InkWell>(
+            find.ancestor(of: find.text('胶片'), matching: find.byType(InkWell)),
+          )
+          .onTap,
+      isNotNull,
+    );
+    await tester.tap(find.text('胶片'));
+    await tester.pump(const Duration(milliseconds: 50));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
     expect(store.project!.creationCapability, CreationCapability.styleOfficial);
-    expect(store.project!.creationStyleId, isNull);
-    expect(
-      tester
-          .widget<Text>(
-            find.byKey(const ValueKey('style-capability-description')),
-          )
-          .data,
-      '从内置可复现风格中明确选择一种。',
-    );
-    expect(
-      find.byKey(const ValueKey('apply-style-primary-action')),
-      findsNothing,
-    );
-
-    await tester.tap(find.byKey(const ValueKey('style-option-natural')));
-    await tester.pumpAndSettle();
-
-    expect(store.project!.creationStyleId, 'natural');
+    expect(store.project!.creationStyleId, 'film-v1');
     expect(store.project!.creationStyleRecipe, isNotNull);
+    expect(store.project!.currentStaticStyleResult?.styleId, 'film-v1');
+    expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
     expect(
       find.byKey(const ValueKey('apply-style-primary-action')),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('text style stays in its selected capability through apply', (
-    tester,
-  ) async {
-    final store = MemoryPhotoProjectStore();
-    final settings = await _settings();
-    await tester.pumpWidget(
-      buildTestApp(
-        settings,
-        photoImporter: FakePhotoImporter([_fixturePhoto('text-style')]),
-        photoProjectStore: store,
-        referenceStyleAnalyzer: const _FixedReferenceStyleAnalyzer(),
-        metaOpCapabilities: iosMetaOpCapabilities,
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-style')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('style-capability-text')));
-    await tester.pumpAndSettle();
-
-    expect(store.project!.creationCapability, CreationCapability.styleText);
-    expect(
-      find.byKey(const ValueKey('style-capability-unavailable-state')),
       findsNothing,
     );
-    final define = find.byKey(const ValueKey('style-define-primary-action'));
-    expect(define, findsOneWidget);
-    await tester.tap(define);
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const ValueKey('style-input-text')), findsNothing);
-    expect(find.byKey(const ValueKey('style-input-voice')), findsNothing);
-    expect(find.byKey(const ValueKey('style-input-reference')), findsNothing);
-    await tester.enterText(
-      find.byKey(const ValueKey('style-definition-prompt')),
-      '温暖的胶片感',
-    );
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('style-definition-submit')));
-    await tester.pumpAndSettle();
-
-    expect(
-      store.project!.creationStyleDefinition?.origin,
-      StyleDefinitionOrigin.text,
-    );
-    expect(store.project!.creationStyleDefinition?.sourceText, '温暖的胶片感');
-    expect(
-      find.byKey(const ValueKey('apply-style-primary-action')),
-      findsOneWidget,
-    );
-    await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
-    await tester.pumpAndSettle();
-
-    expect(
-      store.project!.currentStaticStyleResult?.capability,
-      CreationCapability.styleText,
-    );
-  });
-
-  testWidgets('voice style requires a confirmed transcript in its own path', (
-    tester,
-  ) async {
-    final store = MemoryPhotoProjectStore();
-    final transcriber = FakeSpeechTranscriber(transcript: '雨后电影感');
-    final settings = await _settings();
-    await tester.pumpWidget(
-      buildTestApp(
-        settings,
-        photoImporter: FakePhotoImporter([_fixturePhoto('voice-style')]),
-        photoProjectStore: store,
-        speechTranscriber: transcriber,
-        metaOpCapabilities: iosMetaOpCapabilities,
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-style')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('style-capability-voice')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('style-define-primary-action')));
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const ValueKey('style-input-text')), findsNothing);
-    expect(find.byKey(const ValueKey('style-input-reference')), findsNothing);
-    await tester.tap(find.byKey(const ValueKey('style-voice-record')));
-    await tester.pumpAndSettle();
-    expect(transcriber.startCalls, 1);
-    expect(store.project!.creationStyleDefinition, isNull);
-    expect(
-      tester
-          .widget<TextField>(
-            find.byKey(const ValueKey('style-definition-prompt')),
-          )
-          .controller!
-          .text,
-      '雨后电影感',
-    );
-
-    await tester.tap(find.byKey(const ValueKey('style-definition-submit')));
-    await tester.pumpAndSettle();
-    expect(
-      store.project!.creationStyleDefinition?.origin,
-      StyleDefinitionOrigin.voice,
-    );
-    expect(store.project!.creationCapability, CreationCapability.styleVoice);
   });
 
   testWidgets(
-    'reference style uses a separate local reference and discards it',
+    'style workspace keeps implementation inputs out of the main path',
     (tester) async {
-      const path =
-          'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
-          'Icon-App-1024x1024@1x.png';
-      final sha = 'a' * 64;
-      final photo = ProjectPhoto(
-        id: 'reference-style',
-        localPath: path,
-        originalName: 'source.png',
-        contentSha256: sha,
-      );
-      final importer = FakePhotoImporter([photo]);
-      final store = MemoryPhotoProjectStore();
       final settings = await _settings();
       await tester.pumpWidget(
         buildTestApp(
           settings,
-          photoImporter: importer,
-          photoProjectStore: store,
-          referenceStyleAnalyzer: const _FixedReferenceStyleAnalyzer(),
-          metaOpCapabilities: iosMetaOpCapabilities,
+          photoImporter: FakePhotoImporter([_fixturePhoto('simple-style')]),
         ),
       );
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
-      await tester.tap(
+
+      expect(find.byKey(const ValueKey('style-capability-text')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('style-capability-voice')),
+        findsNothing,
+      );
+      expect(
         find.byKey(const ValueKey('style-capability-reference')),
+        findsNothing,
       );
-      await tester.pumpAndSettle();
-      await tester.tap(
+      expect(
         find.byKey(const ValueKey('style-define-primary-action')),
+        findsNothing,
       );
-      await tester.pumpAndSettle();
-
-      expect(find.byKey(const ValueKey('style-input-text')), findsNothing);
-      expect(find.byKey(const ValueKey('style-input-voice')), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('style-reference-choose')));
-      await tester.pumpAndSettle();
-      expect(importer.editingResourceImportCount, 1);
       expect(
-        find.byKey(const ValueKey('style-reference-image')),
-        findsOneWidget,
+        find.byKey(const ValueKey('ai-redraw-style-definition')),
+        findsNothing,
       );
-
-      final submit = find.byKey(const ValueKey('style-definition-submit'));
-      await tester.ensureVisible(submit);
-      await tester.tap(submit);
-      await tester.pumpAndSettle();
-
-      expect(
-        store.project!.creationStyleDefinition?.origin,
-        StyleDefinitionOrigin.reference,
-      );
-      expect(store.project!.creationStyleDefinition?.referenceFingerprint, sha);
-      expect(importer.discardedEditingResourceIds, hasLength(1));
-      expect(
-        store.project!.creationCapability,
-        CreationCapability.styleReference,
-      );
+      expect(find.text('日系'), findsOneWidget);
+      expect(find.text('胶片'), findsOneWidget);
+      expect(find.text('插画'), findsOneWidget);
+      expect(find.text('电影感'), findsOneWidget);
     },
   );
 
-  testWidgets('optimize workspace waits for an explicit capability', (
+  testWidgets('optimize capabilities stay visible and execute on tap', (
     tester,
   ) async {
     final store = MemoryPhotoProjectStore();
@@ -423,6 +286,7 @@ void main() {
         photoImporter: FakePhotoImporter([_fixturePhoto('optimize-choice')]),
         photoProjectStore: store,
         photoPreviewRenderer: previewRenderer,
+        metaOpCapabilities: iosMetaOpCapabilities,
       ),
     );
     await tester.pumpAndSettle();
@@ -458,14 +322,16 @@ void main() {
       CreationCapability.optimizeAiRepair,
     );
     expect(
-      find.byKey(const ValueKey('optimize-capability-unavailable-state')),
+      find.byKey(const ValueKey('optimize-capability-rail')),
       findsOneWidget,
     );
     expect(find.byKey(const ValueKey('optimize-primary-action')), findsNothing);
-    expect(previewRenderer.creates, isEmpty);
+    expect(find.textContaining('本地改善亮度'), findsNothing);
     expect(previewRenderer.updates, isEmpty);
 
-    await tester.tap(find.byKey(const ValueKey('optimize-capability-natural')));
+    final natural = find.byKey(const ValueKey('optimize-capability-natural'));
+    await tester.ensureVisible(natural);
+    await tester.tap(natural);
     await tester.pumpAndSettle();
 
     expect(
@@ -473,19 +339,13 @@ void main() {
       CreationCapability.optimizeNatural,
     );
     expect(
-      tester
-          .widget<Text>(
-            find.byKey(const ValueKey('optimize-capability-description')),
-          )
-          .data,
-      '本地改善亮度、清晰度和质感，原图保持不变。',
+      store.project!.currentStaticStyleResult?.capability,
+      CreationCapability.optimizeNatural,
     );
-    expect(find.text('应用自然优化'), findsOneWidget);
+    expect(find.text('应用自然优化'), findsNothing);
   });
 
-  testWidgets('HD upscale requires the user to choose 2x or 4x', (
-    tester,
-  ) async {
+  testWidgets('HD upscale defaults to 2x and generates on tap', (tester) async {
     final store = MemoryPhotoProjectStore();
     final generator = _RecordingUpscalePhotoGenerator();
     final sharer = FakePhotoSharer();
@@ -508,25 +368,12 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('optimize-capability-upscale')));
     await tester.pumpAndSettle();
 
-    final action = find.byKey(
-      const ValueKey('optimize-upscale-primary-action'),
-    );
-    expect(find.byKey(const ValueKey('upscale-scale-2x')), findsOneWidget);
-    expect(find.byKey(const ValueKey('upscale-scale-4x')), findsOneWidget);
-    expect(tester.widget<FilledButton>(action).onPressed, isNull);
-    expect(generator.scales, isEmpty);
-
-    await tester.tap(find.byKey(const ValueKey('upscale-scale-2x')));
-    await tester.pumpAndSettle();
-    expect(tester.widget<FilledButton>(action).onPressed, isNotNull);
-    await tester.ensureVisible(action);
-    await tester.tap(action);
-    await tester.pumpAndSettle();
-
     expect(generator.scales, [UpscalePhotoScale.twoX]);
+    expect(find.byKey(const ValueKey('upscale-scale-2x')), findsNothing);
+    expect(find.byKey(const ValueKey('upscale-scale-4x')), findsNothing);
     expect(
-      find.byKey(const ValueKey('optimize-generated-result-ready')),
-      findsOneWidget,
+      find.byKey(const ValueKey('optimize-upscale-primary-action')),
+      findsNothing,
     );
     final share = find.byKey(const ValueKey('optimize-generated-result-share'));
     await tester.ensureVisible(share);
@@ -570,10 +417,6 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(
-        find.byKey(const ValueKey('optimize-cloud-primary-action')),
-      );
-      await tester.pumpAndSettle();
       expect(
         find.byKey(const ValueKey('generation-consent-sheet')),
         findsOneWidget,
@@ -594,7 +437,7 @@ void main() {
 
       expect(provider.createCount, 1);
       expect(
-        find.byKey(const ValueKey('optimize-cloud-result-ready')),
+        find.byKey(const ValueKey('optimize-cloud-result-save')),
         findsOneWidget,
       );
     },
@@ -638,10 +481,6 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(
         find.byKey(const ValueKey('optimize-capability-ai-repair')),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(
-        find.byKey(const ValueKey('optimize-cloud-primary-action')),
       );
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('generation-upload-consent')));
@@ -735,87 +574,79 @@ void main() {
     },
   );
 
-  testWidgets('old photo repair requires an explicit color mode', (
-    tester,
-  ) async {
-    final provider = _CompletedCloudGenerationProvider(
-      capabilities: const {CreationCapability.optimizeOldPhoto},
-    );
-    final settings = await _settings();
-    await tester.pumpWidget(
-      buildTestApp(
-        settings,
-        photoImporter: FakePhotoImporter([
-          ProjectPhoto(
-            id: 'old-photo-input',
-            localPath:
-                'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
-                'Icon-App-1024x1024@1x.png',
-            originalName: 'old-photo-input.png',
-            contentSha256: 'c' * 64,
+  testWidgets(
+    'old photo repair defaults to preservation and opens consent on tap',
+    (tester) async {
+      final provider = _CompletedCloudGenerationProvider(
+        capabilities: const {CreationCapability.optimizeOldPhoto},
+      );
+      final settings = await _settings();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoImporter: FakePhotoImporter([
+            ProjectPhoto(
+              id: 'old-photo-input',
+              localPath:
+                  'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+                  'Icon-App-1024x1024@1x.png',
+              originalName: 'old-photo-input.png',
+              contentSha256: 'c' * 64,
+            ),
+          ]),
+          generationCoordinator: GenerationCoordinator(
+            provider: provider,
+            store: _UiGenerationJobStore(),
           ),
-        ]),
-        generationCoordinator: GenerationCoordinator(
-          provider: provider,
-          store: _UiGenerationJobStore(),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await _tapHomeTarget(tester, find.byKey(const ValueKey('home-optimize')));
-    await tester.pumpAndSettle();
-    await tester.tap(
-      find.byKey(const ValueKey('optimize-capability-old-photo')),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
+      await _tapHomeTarget(tester, find.byKey(const ValueKey('home-optimize')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('optimize-capability-old-photo')),
+      );
+      await tester.pumpAndSettle();
 
-    final action = find.byKey(const ValueKey('optimize-cloud-primary-action'));
-    expect(find.byKey(const ValueKey('old-photo-mode-preserve')), findsOne);
-    expect(find.byKey(const ValueKey('old-photo-mode-colorize')), findsOne);
-    expect(
-      tester
-          .widget<ChoiceChip>(
-            find.byKey(const ValueKey('old-photo-mode-preserve')),
-          )
-          .selected,
-      isFalse,
-    );
-    expect(
-      tester
-          .widget<ChoiceChip>(
-            find.byKey(const ValueKey('old-photo-mode-colorize')),
-          )
-          .selected,
-      isFalse,
-    );
-    expect(tester.widget<FilledButton>(action).onPressed, isNull);
-    expect(provider.createCount, 0);
+      expect(
+        find.byKey(const ValueKey('old-photo-mode-preserve')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('old-photo-mode-colorize')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('optimize-cloud-primary-action')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('generation-consent-sheet')),
+        findsOneWidget,
+      );
+      expect(provider.createCount, 0);
 
-    await tester.tap(find.byKey(const ValueKey('old-photo-mode-colorize')));
-    await tester.pumpAndSettle();
-    expect(tester.widget<FilledButton>(action).onPressed, isNotNull);
-    await tester.tap(action);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('generation-upload-consent')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('generation-cost-consent')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('generation-confirm-create')));
-    await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('generation-upload-consent')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('generation-cost-consent')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('generation-confirm-create')));
+      await tester.pumpAndSettle();
 
-    expect(provider.createCount, 1);
-    expect(
-      provider.snapshots.single.input,
-      isA<OldPhotoGenerationInput>().having(
-        (input) => input.colorMode,
-        'colorMode',
-        OldPhotoColorMode.colorize,
-      ),
-    );
-  });
+      expect(provider.createCount, 1);
+      expect(
+        provider.snapshots.single.input,
+        isA<OldPhotoGenerationInput>().having(
+          (input) => input.colorMode,
+          'colorMode',
+          OldPhotoColorMode.preserve,
+        ),
+      );
+    },
+  );
 
   testWidgets(
-    'AI redraw freezes and previews a StyleDefinition before cloud consent',
+    'illustration freezes a safe definition and opens consent on tap',
     (tester) async {
       final store = MemoryPhotoProjectStore();
       final provider = _CompletedCloudGenerationProvider(
@@ -827,12 +658,12 @@ void main() {
           settings,
           photoImporter: FakePhotoImporter([
             ProjectPhoto(
-              id: 'redraw-input',
+              id: 'illustration-input',
               localPath:
                   'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
                   'Icon-App-1024x1024@1x.png',
-              originalName: 'redraw-input.png',
-              contentSha256: 'd' * 64,
+              originalName: 'illustration-input.png',
+              contentSha256: 'e' * 64,
             ),
           ]),
           photoProjectStore: store,
@@ -845,65 +676,35 @@ void main() {
       await tester.pumpAndSettle();
       await _tapHomeTarget(tester, find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
-      await tester.tap(
-        find.byKey(const ValueKey('style-capability-ai-redraw')),
+      final illustration = find.byKey(
+        const ValueKey('style-option-illustration-v1'),
       );
+      await tester.ensureVisible(illustration);
+      await tester.tap(illustration);
       await tester.pumpAndSettle();
 
-      final definition = find.byKey(
-        const ValueKey('ai-redraw-style-definition'),
-      );
-      final confirmDefinition = find.byKey(
-        const ValueKey('ai-redraw-confirm-definition'),
-      );
-      final intentPreview = find.byKey(
-        const ValueKey('ai-redraw-intent-preview'),
-      );
-      final action = find.byKey(const ValueKey('style-cloud-primary-action'));
-      expect(definition, findsOneWidget);
-      expect(confirmDefinition, findsOneWidget);
-      expect(intentPreview, findsNothing);
-      expect(tester.widget<FilledButton>(action).onPressed, isNull);
-      expect(provider.createCount, 0);
-
-      await tester.enterText(definition, '  保留人物身份，\n  改成低饱和电影剧照  ');
-      await tester.pumpAndSettle();
-      expect(intentPreview, findsNothing);
-      expect(tester.widget<FilledButton>(action).onPressed, isNull);
-      expect(provider.createCount, 0);
-
-      await tester.ensureVisible(confirmDefinition);
-      await tester.tap(confirmDefinition);
-      await tester.pumpAndSettle();
-
-      expect(intentPreview, findsOneWidget);
       expect(
-        tester
-            .widget<Text>(
-              find.byKey(const ValueKey('ai-redraw-confirmed-visual-intent')),
-            )
-            .data,
-        '保留人物身份， 改成低饱和电影剧照',
+        find.byKey(const ValueKey('ai-redraw-style-definition')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('style-cloud-primary-action')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('generation-consent-sheet')),
+        findsOneWidget,
       );
       expect(
         store.project!.creationStyleDefinition,
-        isA<StyleDefinition>()
-            .having(
-              (definition) => definition.origin,
-              'origin',
-              StyleDefinitionOrigin.aiRedraw,
-            )
-            .having(
-              (definition) => definition.visualIntent,
-              'visualIntent',
-              '保留人物身份， 改成低饱和电影剧照',
-            ),
+        isA<StyleDefinition>().having(
+          (definition) => definition.origin,
+          'origin',
+          StyleDefinitionOrigin.aiRedraw,
+        ),
       );
-      expect(tester.widget<FilledButton>(action).onPressed, isNotNull);
-      await tester.ensureVisible(action);
-      await tester.pumpAndSettle();
-      await tester.tap(action);
-      await tester.pumpAndSettle();
+      expect(provider.createCount, 0);
+
       await tester.tap(find.byKey(const ValueKey('generation-upload-consent')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('generation-cost-consent')));
@@ -914,85 +715,10 @@ void main() {
       expect(provider.createCount, 1);
       expect(
         provider.snapshots.single.input,
-        isA<StyleRedrawGenerationInput>()
-            .having(
-              (input) => input.confirmedDefinition,
-              'confirmedDefinition',
-              '保留人物身份， 改成低饱和电影剧照',
-            )
-            .having(
-              (input) => input.definitionFingerprint,
-              'definitionFingerprint',
-              StyleDefinition.aiRedraw(
-                confirmedVisualIntent: '保留人物身份， 改成低饱和电影剧照',
-                title: 'stable display title',
-                summary: 'stable display summary',
-              ).contentFingerprint,
-            ),
+        isA<StyleRedrawGenerationInput>(),
       );
     },
   );
-
-  testWidgets('AI redraw rejects hidden controls before intent confirmation', (
-    tester,
-  ) async {
-    final store = MemoryPhotoProjectStore();
-    final provider = _CompletedCloudGenerationProvider(
-      capabilities: const {CreationCapability.styleAiRedraw},
-    );
-    final settings = await _settings();
-    await tester.pumpWidget(
-      buildTestApp(
-        settings,
-        photoImporter: FakePhotoImporter([
-          ProjectPhoto(
-            id: 'redraw-invalid-input',
-            localPath:
-                'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
-                'Icon-App-1024x1024@1x.png',
-            originalName: 'redraw-invalid-input.png',
-            contentSha256: 'e' * 64,
-          ),
-        ]),
-        photoProjectStore: store,
-        generationCoordinator: GenerationCoordinator(
-          provider: provider,
-          store: _UiGenerationJobStore(),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await _tapHomeTarget(tester, find.byKey(const ValueKey('home-style')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('style-capability-ai-redraw')));
-    await tester.pumpAndSettle();
-
-    await tester.enterText(
-      find.byKey(const ValueKey('ai-redraw-style-definition')),
-      '低饱和\u202E电影感',
-    );
-    await tester.pumpAndSettle();
-    final confirm = find.byKey(const ValueKey('ai-redraw-confirm-definition'));
-    await tester.ensureVisible(confirm);
-    await tester.tap(confirm);
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const ValueKey('ai-redraw-intent-error')), findsOne);
-    expect(
-      find.byKey(const ValueKey('ai-redraw-intent-preview')),
-      findsNothing,
-    );
-    expect(
-      tester
-          .widget<FilledButton>(
-            find.byKey(const ValueKey('style-cloud-primary-action')),
-          )
-          .onPressed,
-      isNull,
-    );
-    expect(store.project!.creationStyleDefinition, isNull);
-    expect(provider.createCount, 0);
-  });
 
   testWidgets('cleanup workspace waits for an explicit capability', (
     tester,
@@ -1039,7 +765,11 @@ void main() {
 
     expect(analyzer.analyzeCalls, 1);
     expect(store.project!.creationCapability, CreationCapability.cleanupWhite);
-    expect(find.text('应用白底'), findsOneWidget);
+    expect(
+      store.project!.currentStaticStyleResult?.capability,
+      CreationCapability.cleanupWhite,
+    );
+    expect(find.text('应用白底'), findsNothing);
   });
 
   testWidgets('brush removal uploads only the mask the user explicitly drew', (
@@ -1080,13 +810,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final cloudAction = find.byKey(
-      const ValueKey('cleanup-cloud-primary-action'),
-    );
-    expect(tester.widget<FilledButton>(cloudAction).onPressed, isNull);
     expect(provider.createCount, 0);
-    await tester.tap(find.byKey(const ValueKey('cleanup-mask-input-action')));
-    await tester.pumpAndSettle();
     final maskConfirm = find.byKey(const ValueKey('mask-removal-confirm'));
     expect(tester.widget<FilledButton>(maskConfirm).onPressed, isNull);
     await tester.tap(find.byKey(const ValueKey('mask-removal-canvas')));
@@ -1098,16 +822,11 @@ void main() {
     await tester.tap(maskConfirm);
     await tester.pumpAndSettle();
 
+    expect(maskCreator.calls, hasLength(1));
     expect(
-      find.byKey(const ValueKey('cleanup-mask-input-ready')),
+      find.byKey(const ValueKey('generation-consent-sheet')),
       findsOneWidget,
     );
-    expect(tester.widget<FilledButton>(cloudAction).onPressed, isNotNull);
-    expect(maskCreator.calls, hasLength(1));
-    await tester.ensureVisible(cloudAction);
-    await tester.pumpAndSettle();
-    await tester.tap(cloudAction);
-    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('generation-upload-consent')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('generation-cost-consent')));
@@ -1176,43 +895,17 @@ void main() {
         CreationCapability.cleanupReplaceBackground,
       );
       expect(analyzer.analyzeCalls, 1);
-      expect(importer.editingResourceImportCount, 0);
-      final choose = find.byKey(
-        const ValueKey('cleanup-choose-background-action'),
-      );
-      expect(choose, findsOneWidget);
-      await tester.tap(choose);
-      await tester.pumpAndSettle();
-
-      final imported = importer.lastImportedEditingResource!;
       expect(importer.editingResourceImportCount, 1);
+      final imported = importer.lastImportedEditingResource!;
       expect(imported.localPath, path);
       expect(
-        store.project!.editingResources.resources,
-        isNot(contains(imported.descriptor.id)),
-      );
-
-      await tester.tap(find.byKey(const ValueKey('cleanup-choose-capability')));
-      await tester.pumpAndSettle();
-      expect(store.project!.creationCapability, isNull);
-      expect(importer.discardedEditingResourceIds, [imported.descriptor.id]);
-
-      await tester.tap(
-        find.byKey(const ValueKey('cleanup-capability-replace-background')),
-      );
-      await tester.pumpAndSettle();
-      expect(analyzer.analyzeCalls, 2);
-      await tester.tap(
         find.byKey(const ValueKey('cleanup-choose-background-action')),
+        findsNothing,
       );
-      await tester.pumpAndSettle();
-      expect(importer.editingResourceImportCount, 2);
-
-      final apply = find.byKey(const ValueKey('cleanup-primary-action'));
-      expect(apply, findsOneWidget);
-      expect(tester.widget<FilledButton>(apply).onPressed, isNotNull);
-      await tester.tap(apply);
-      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('cleanup-primary-action')),
+        findsNothing,
+      );
 
       final result = store.project!.currentStaticStyleResult!;
       expect(result.capability, CreationCapability.cleanupReplaceBackground);
@@ -1229,7 +922,7 @@ void main() {
         store.project!.editingResources.resources[imported.descriptor.id],
         imported.descriptor,
       );
-      expect(importer.discardedEditingResourceIds, [imported.descriptor.id]);
+      expect(importer.discardedEditingResourceIds, isEmpty);
     },
   );
 
@@ -1267,23 +960,12 @@ void main() {
       CreationCapability.cleanupTransparent,
     );
     expect(analyzer.analyzeCalls, 1);
-    expect(
-      tester
-          .widget<Text>(
-            find.byKey(const ValueKey('cleanup-capability-description')),
-          )
-          .data,
-      '抠出主体并生成透明背景图片。',
-    );
+    expect(find.text('抠出主体并生成透明背景图片。'), findsNothing);
     expect(
       find.byKey(const ValueKey('cleanup-capability-unavailable-state')),
       findsNothing,
     );
-    final action = find.byKey(const ValueKey('cleanup-primary-action'));
-    expect(action, findsOneWidget);
-    expect(tester.widget<FilledButton>(action).onPressed, isNotNull);
-    await tester.tap(action);
-    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('cleanup-primary-action')), findsNothing);
     expect(
       store.project!.currentStaticStyleResult?.capability,
       CreationCapability.cleanupTransparent,
@@ -1348,14 +1030,7 @@ void main() {
       store.project!.creationCapability,
       CreationCapability.motionCameraPush,
     );
-    expect(
-      tester
-          .widget<Text>(
-            find.byKey(const ValueKey('motion-capability-description')),
-          )
-          .data,
-      '生成镜头缓慢推进的动态效果。',
-    );
+    expect(find.text('生成镜头缓慢推进的动态效果。'), findsNothing);
     expect(
       find.byKey(const ValueKey('motion-capability-unavailable-state')),
       findsOneWidget,
@@ -1398,16 +1073,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final action = find.byKey(const ValueKey('motion-generate-primary-action'));
-    expect(action, findsOneWidget);
-    await tester.ensureVisible(action);
-    await tester.tap(action);
-    await tester.pumpAndSettle();
-
     expect(generator.effects, [MotionPhotoEffect.cameraPush]);
     expect(
-      find.byKey(const ValueKey('motion-generated-result-ready')),
-      findsOneWidget,
+      find.byKey(const ValueKey('motion-generate-primary-action')),
+      findsNothing,
     );
     final share = find.byKey(const ValueKey('motion-generated-result-share'));
     await tester.ensureVisible(share);
@@ -1438,20 +1107,16 @@ void main() {
     await tester.pumpAndSettle();
     await _selectOfficialStyle(tester);
 
-    final apply = tester.widget<FilledButton>(
-      find.byKey(const ValueKey('apply-style-primary-action')),
-    );
-    expect(apply.onPressed, isNull);
     expect(
-      find.descendant(
-        of: find.byKey(const ValueKey('apply-style-primary-action')),
-        matching: find.text('应用风格'),
-      ),
-      findsOneWidget,
+      find.byKey(const ValueKey('apply-style-primary-action')),
+      findsNothing,
     );
-    expect(find.text('当前效果预览暂不可用，请重试。'), findsOneWidget);
+    final failure = find.byKey(const ValueKey('style-preview-failed'));
+    expect(failure, findsOneWidget);
     final previousAttempts = previewRenderer.creates.length;
-    await tester.tap(find.byKey(const ValueKey('style-preview-retry')));
+    await tester.tap(
+      find.descendant(of: failure, matching: find.byType(TextButton)),
+    );
     await tester.pumpAndSettle();
     expect(previewRenderer.creates.length, greaterThan(previousAttempts));
     expect(store.project!.currentStaticStyleResult, isNull);
@@ -1488,11 +1153,11 @@ void main() {
     expect(store.project!.creationCapability, isNull);
     expect(store.project!.creationStyleId, isNull);
     expect(store.project!.creationStyleRecipe, isNull);
+    expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
     expect(
-      find.byKey(const ValueKey('style-capability-official')),
+      find.byKey(const ValueKey('style-option-japanese-v1')),
       findsOneWidget,
     );
-    expect(find.byKey(const ValueKey('style-options')), findsNothing);
   });
 
   for (final legacySchema in [11, 13, 14]) {
@@ -1595,7 +1260,7 @@ void main() {
 
     expect(store.project!.flowState, PhotoProjectFlowState.editing);
     expect(store.project!.creationCapability, isNull);
-    expect(find.byKey(const ValueKey('style-options')), findsNothing);
+    expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
     expect(
       find.byKey(const ValueKey('apply-style-primary-action')),
       findsNothing,
@@ -1722,22 +1387,14 @@ void main() {
     await _selectOfficialStyle(tester);
     expect(tester.takeException(), isNull);
     expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
-    final action = find.byKey(const ValueKey('apply-style-primary-action'));
-    await tester.ensureVisible(action);
-    await tester.pumpAndSettle();
-    expect(action, findsOneWidget);
-    expect(action.hitTestable(), findsOneWidget);
-    expect(tester.takeException(), isNull);
-
-    await tester.tap(action);
-    await tester.pumpAndSettle();
     final save = find.byKey(const ValueKey('style-result-save'));
     await tester.ensureVisible(save);
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(save, findsOneWidget);
+    expect(save.hitTestable(), findsOneWidget);
     expect(
-      find.byKey(const ValueKey('style-result-change-style')),
-      findsOneWidget,
+      find.byKey(const ValueKey('apply-style-primary-action')),
+      findsNothing,
     );
     expect(tester.takeException(), isNull);
   });
@@ -1816,7 +1473,11 @@ void main() {
       final settings = await AppSettings.load();
 
       await tester.pumpWidget(
-        buildTestApp(settings, photoImporter: FakePhotoImporter([photo])),
+        buildTestApp(
+          settings,
+          photoImporter: FakePhotoImporter([photo]),
+          metaOpCapabilities: iosMetaOpCapabilities,
+        ),
       );
       await tester.pumpAndSettle();
 
@@ -1838,8 +1499,9 @@ void main() {
       );
       expect(
         find.byKey(const ValueKey('apply-style-primary-action')),
-        findsOneWidget,
+        findsNothing,
       );
+      expect(find.byKey(const ValueKey('style-result-save')), findsOneWidget);
       expect(
         find.byKey(const ValueKey('motion-style-primary-action')),
         findsNothing,
@@ -1995,35 +1657,27 @@ void main() {
     await _selectOfficialCapability(tester);
 
     final beforeSelection = store.project!;
-    final beforeRecipe = beforeSelection.effectiveRecipeFor(photo.id);
     final beforeVersion = beforeSelection.editStateVersion;
     final beforeUndoCount = beforeSelection.undoHistory.length;
 
-    await tester.tap(find.byKey(const ValueKey('style-option-soft-light')));
+    await tester.tap(find.byKey(const ValueKey('style-option-film-v1')));
     await tester.pumpAndSettle();
     expect(
       tester
           .widget<Text>(find.byKey(const ValueKey('current-style-name')))
           .data,
-      '柔光',
+      '胶片',
     );
     expect(previewRenderer.creates, isNotEmpty);
-    expect(store.project!.effectiveRecipeFor(photo.id), beforeRecipe);
-    expect(store.project!.editStateVersion, beforeVersion);
-    expect(store.project!.undoHistory, hasLength(beforeUndoCount));
-    expect(store.project!.creationStyleId, 'soft-light');
-
-    await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
-    await tester.pumpAndSettle();
-
-    expect(find.text('风格已应用'), findsOneWidget);
     final expected = EditRecipe(
-      exposure: 0.03,
+      warmth: 0.02,
+      contrast: 0.03,
       basicEditingRecipe: BasicEditingRecipe(
-        filter: PhotoFilter.portrait,
-        filterStrength: 38,
+        filter: PhotoFilter.film,
+        filterStrength: 58,
       ),
     );
+    expect(store.project!.creationStyleId, 'film-v1');
     expect(store.project!.effectiveRecipeFor(photo.id), expected);
     expect(store.project!.editStateVersion, beforeVersion + 1);
     expect(store.project!.undoHistory, hasLength(beforeUndoCount + 1));
@@ -2032,14 +1686,18 @@ void main() {
       StaticStyleResultIdentity(
         sourcePhotoId: photo.id,
         editStateVersion: beforeVersion + 1,
-        styleId: 'soft-light',
+        styleId: 'film-v1',
         capability: CreationCapability.styleOfficial,
-        styleName: '柔光',
+        styleName: '胶片',
         recipe: expected,
       ),
     );
+    expect(
+      find.byKey(const ValueKey('apply-style-primary-action')),
+      findsNothing,
+    );
 
-    await tester.tap(find.byKey(const ValueKey('style-workspace-close')));
+    await tester.tap(find.byKey(const ValueKey('style-workspace-back')));
     await tester.pumpAndSettle();
     await tester.pump();
     final resume = find.byKey(const ValueKey('home-resume-project'));
@@ -2051,46 +1709,19 @@ void main() {
       tester
           .widget<Text>(find.byKey(const ValueKey('current-style-name')))
           .data,
-      '柔光',
+      '胶片',
     );
     expect(
       find.byKey(const ValueKey('style-static-result-controls')),
       findsOneWidget,
     );
 
-    await tester.tap(find.byKey(const ValueKey('style-result-change-style')));
+    final japanese = find.byKey(const ValueKey('style-option-japanese-v1'));
+    await tester.ensureVisible(japanese);
+    await tester.tap(japanese);
     await tester.pumpAndSettle();
-    expect(store.project!.currentStaticStyleResult, isNull);
-    expect(store.project!.creationCapability, isNull);
-    expect(store.project!.creationResult, isNotNull);
-    await _selectOfficialCapability(tester);
-    expect(store.project!.recoverableStaticStyleResult, isNotNull);
-    await tester.tap(find.byKey(const ValueKey('style-option-natural')));
-    await tester.pumpAndSettle();
-    expect(store.project!.currentStaticStyleResult, isNull);
-    await tester.tap(find.byKey(const ValueKey('style-workspace-back')));
-    await tester.pumpAndSettle();
-    await _tapHomeTarget(
-      tester,
-      find.byKey(const ValueKey('home-resume-project')),
-    );
-    await tester.pumpAndSettle();
+    expect(store.project!.currentStaticStyleResult?.styleId, 'japanese-v1');
     expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('style-static-result-controls')),
-      findsNothing,
-    );
-    final restoreResult = find.byKey(
-      const ValueKey('style-restore-previous-result'),
-    );
-    await tester.ensureVisible(restoreResult);
-    await tester.tap(restoreResult);
-    await tester.pumpAndSettle();
-    expect(
-      find.byKey(const ValueKey('style-static-result-controls')),
-      findsOneWidget,
-    );
-    expect(store.project!.currentStaticStyleResult?.styleId, 'soft-light');
   });
 
   testWidgets('official styles preserve an existing draft non-style edits', (
@@ -2125,7 +1756,7 @@ void main() {
     expect(store.project!.creationCapability, isNull);
     await _selectOfficialCapability(tester);
 
-    await tester.tap(find.byKey(const ValueKey('style-option-soft-light')));
+    await tester.tap(find.byKey(const ValueKey('style-option-film-v1')));
     await tester.pumpAndSettle();
     expect(
       tester
@@ -2134,14 +1765,13 @@ void main() {
           .crop,
       crop,
     );
-    await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
     await tester.pumpAndSettle();
 
     final applied = store.project!.effectiveRecipeFor(
       store.project!.photos.single.id,
     );
     expect(applied.crop, crop);
-    expect(applied.basicEditingRecipe.filter, PhotoFilter.portrait);
+    expect(applied.basicEditingRecipe.filter, PhotoFilter.film);
     expect(store.project!.currentStaticStyleResult, isNotNull);
   });
 
@@ -2163,11 +1793,10 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
     await _selectOfficialCapability(tester);
-    await tester.tap(find.byKey(const ValueKey('style-option-soft-light')));
+    await tester.tap(find.byKey(const ValueKey('style-option-film-v1')));
     await tester.pumpAndSettle();
     final before = store.project!;
 
-    await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
     await tester.pumpAndSettle();
 
     expect(store.project!.editStateVersion, before.editStateVersion);
@@ -2202,20 +1831,13 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
       await _selectOfficialCapability(tester);
-      await tester.tap(find.byKey(const ValueKey('style-option-soft-light')));
+      await tester.tap(find.byKey(const ValueKey('style-option-film-v1')));
       await tester.pumpAndSettle();
-      await tester.tap(
-        find.byKey(const ValueKey('apply-style-primary-action')),
-      );
       await tester.pumpAndSettle();
 
       final save = find.byKey(const ValueKey('style-result-save'));
       expect(save, findsOneWidget);
-      expect(
-        find.byKey(const ValueKey('style-result-change-style')),
-        findsOneWidget,
-      );
-      expect(find.byKey(const ValueKey('style-options')), findsNothing);
+      expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
       expect(find.byKey(const ValueKey('style-ai-entry')), findsNothing);
       expect(
         tester
@@ -2229,14 +1851,13 @@ void main() {
           )
           .label;
       expect(previewSemantics, contains('照片预览区域'));
-      expect(previewSemantics, contains('柔光'));
+      expect(previewSemantics, contains('胶片'));
       expect(previewSemantics, contains('风格已应用'));
-      final close = find.byKey(const ValueKey('style-workspace-close'));
-      expect(close, findsOneWidget);
-      expect(find.byKey(const ValueKey('style-workspace-back')), findsNothing);
+      final back = find.byKey(const ValueKey('style-workspace-back'));
+      expect(back, findsOneWidget);
       expect(
-        tester.widget<IconButton>(close).tooltip,
-        MaterialLocalizations.of(tester.element(close)).closeButtonTooltip,
+        tester.widget<IconButton>(back).tooltip,
+        MaterialLocalizations.of(tester.element(back)).backButtonTooltip,
       );
       await tester.tap(save);
       await tester.pumpAndSettle();
@@ -2250,7 +1871,7 @@ void main() {
       expect(find.text('已保存到系统相册'), findsOneWidget);
       expect(find.byKey(const ValueKey('editor-page')), findsNothing);
 
-      await tester.tap(find.byKey(const ValueKey('style-workspace-close')));
+      await tester.tap(find.byKey(const ValueKey('style-workspace-back')));
       await tester.pumpAndSettle();
       final resume = find.byKey(const ValueKey('home-resume-project'));
       await _scrollHomeTo(tester, resume);
@@ -2282,16 +1903,12 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
     await _selectOfficialStyle(tester);
-    await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('style-result-save')));
     await tester.pumpAndSettle();
     expect(find.text('已保存到系统相册'), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('style-result-change-style')));
-    await tester.pumpAndSettle();
-    await _selectOfficialStyle(tester);
-    await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
+    await tester.tap(find.byKey(const ValueKey('style-option-japanese-v1')));
     await tester.pumpAndSettle();
 
     expect(find.text('已保存到系统相册'), findsOneWidget);
@@ -2319,9 +1936,6 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
       await _selectOfficialStyle(tester);
-      await tester.tap(
-        find.byKey(const ValueKey('apply-style-primary-action')),
-      );
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('style-result-save')));
       await tester.pumpAndSettle();
@@ -2403,13 +2017,13 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
       await _selectOfficialStyle(tester);
-      await tester.tap(
-        find.byKey(const ValueKey('apply-style-primary-action')),
-      );
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('style-result-save')), findsOneWidget);
 
-      await tester.tap(find.byKey(const ValueKey('style-result-share')));
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('style-result-share')),
+      );
       await tester.pumpAndSettle();
 
       expect(exporter.exportCalls, 0);
@@ -2419,14 +2033,19 @@ void main() {
       expect(store.project!.flowState, PhotoProjectFlowState.editing);
       expect(store.project!.exportStates[photo.id], PhotoExportState.notQueued);
 
-      await tester.tap(find.byKey(const ValueKey('style-workspace-close')));
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('style-workspace-back')));
       await tester.pumpAndSettle();
       await _tapHomeTarget(
         tester,
         find.byKey(const ValueKey('home-resume-project')),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('style-result-share')));
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('style-result-share')),
+      );
       await tester.pumpAndSettle();
 
       expect(exporter.preparedPhotos, [photo, photo]);
@@ -2455,17 +2074,18 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
     await _selectOfficialStyle(tester);
-    await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
     await tester.pumpAndSettle();
 
     final share = find.byKey(const ValueKey('style-result-share'));
-    await tester.tap(share);
+    await _tapVisible(tester, share);
     await tester.pumpAndSettle();
     expect(sharer.sharedAttempts, [
       ['/tmp/Yingjian_prepared-1.jpg'],
     ]);
 
-    await tester.tap(share);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    await _tapVisible(tester, find.byKey(const ValueKey('style-result-share')));
     await tester.pumpAndSettle();
 
     expect(exporter.preparedPhotos, hasLength(2));
@@ -2496,10 +2116,9 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
     await _selectOfficialStyle(tester);
-    await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('style-result-share')));
+    await _tapVisible(tester, find.byKey(const ValueKey('style-result-share')));
     await exporter.started.future;
     await tester.pump();
     expect(find.text('正在准备分享…'), findsWidgets);
@@ -2543,9 +2162,6 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
       await _selectOfficialStyle(tester);
-      await tester.tap(
-        find.byKey(const ValueKey('apply-style-primary-action')),
-      );
       await tester.pumpAndSettle();
       final appliedRecipe = store.project!.sharedStyle.recipe;
       await tester.tap(find.byKey(const ValueKey('style-result-save')));
@@ -2604,7 +2220,6 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
     await _selectOfficialStyle(tester);
-    await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
     await tester.pumpAndSettle();
     final appliedRecipe = store.project!.sharedStyle.recipe;
     await tester.tap(find.byKey(const ValueKey('style-result-save')));
@@ -2642,9 +2257,6 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
       await _selectOfficialStyle(tester);
-      await tester.tap(
-        find.byKey(const ValueKey('apply-style-primary-action')),
-      );
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('style-result-save')));
       await tester.pump();
@@ -2654,7 +2266,7 @@ void main() {
       expect(
         tester
             .widget<IconButton>(
-              find.byKey(const ValueKey('style-workspace-close')),
+              find.byKey(const ValueKey('style-workspace-back')),
             )
             .onPressed,
         isNull,
@@ -2692,9 +2304,6 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
       await _selectOfficialStyle(tester);
-      await tester.tap(
-        find.byKey(const ValueKey('apply-style-primary-action')),
-      );
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('style-result-save')));
       await tester.pumpAndSettle();
@@ -2707,20 +2316,18 @@ void main() {
 
       await tester.pump(const Duration(seconds: 5));
       await tester.pumpAndSettle();
-      final changeStyle = find.byKey(
-        const ValueKey('style-result-change-style'),
-      );
-      await tester.ensureVisible(changeStyle);
-      await tester.tap(changeStyle);
+      final film = find.byKey(const ValueKey('style-option-film-v1'));
+      await tester.ensureVisible(film);
+      await tester.tap(film);
       await tester.pumpAndSettle();
       expect(sharer.discardedPaths, ['/tmp/Yingjian_fixture.jpg']);
       expect(store.project!.flowState, PhotoProjectFlowState.editing);
-      expect(store.project!.creationCapability, isNull);
       expect(
-        find.byKey(const ValueKey('style-capability-official')),
-        findsOneWidget,
+        store.project!.creationCapability,
+        CreationCapability.styleOfficial,
       );
-      expect(find.byKey(const ValueKey('style-options')), findsNothing);
+      expect(store.project!.currentStaticStyleResult?.styleId, 'film-v1');
+      expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
     },
   );
 
@@ -2748,7 +2355,6 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
     await _selectOfficialStyle(tester);
-    await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('style-result-share')));
     await tester.pumpAndSettle();
@@ -2756,16 +2362,11 @@ void main() {
 
     await tester.pump(const Duration(seconds: 5));
     await tester.pumpAndSettle();
-    final changeStyle = find.byKey(const ValueKey('style-result-change-style'));
-    await tester.ensureVisible(changeStyle);
-    await tester.tap(changeStyle);
+    final film = find.byKey(const ValueKey('style-option-film-v1'));
+    await tester.ensureVisible(film);
+    await tester.tap(film);
     await tester.pumpAndSettle();
-    await _selectOfficialCapability(tester);
-    await tester.tap(find.byKey(const ValueKey('style-option-soft-light')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('apply-style-primary-action')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('style-result-share')));
+    await _tapVisible(tester, find.byKey(const ValueKey('style-result-share')));
     await tester.pumpAndSettle();
 
     expect(exporter.preparedPhotos, hasLength(2));
@@ -2791,36 +2392,28 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('home-style')));
       await tester.pumpAndSettle();
       await _selectOfficialStyle(tester);
-      await tester.tap(
-        find.byKey(const ValueKey('apply-style-primary-action')),
-      );
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('style-result-save')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('style-result-change-style')));
+      await tester.tap(find.byKey(const ValueKey('style-option-film-v1')));
       await store.transitionStarted.future;
       await tester.pump();
 
       expect(
         tester
-            .widget<TextButton>(
-              find.byKey(const ValueKey('style-result-change-style')),
+            .widget<InkWell>(
+              find.descendant(
+                of: find.byKey(const ValueKey('style-option-film-v1')),
+                matching: find.byType(InkWell),
+              ),
             )
-            .onPressed,
-        isNull,
-      );
-      expect(
-        tester
-            .widget<FilledButton>(
-              find.byKey(const ValueKey('style-result-share')),
-            )
-            .onPressed,
+            .onTap,
         isNull,
       );
       expect(
         tester
             .widget<IconButton>(
-              find.byKey(const ValueKey('style-workspace-close')),
+              find.byKey(const ValueKey('style-workspace-back')),
             )
             .onPressed,
         isNull,
@@ -2829,10 +2422,10 @@ void main() {
       store.completeTransition();
       await tester.pumpAndSettle();
       expect(
-        find.byKey(const ValueKey('style-capability-official')),
-        findsOneWidget,
+        (await store.loadLatest())!.currentStaticStyleResult?.styleId,
+        'film-v1',
       );
-      expect(find.byKey(const ValueKey('style-options')), findsNothing);
+      expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
     },
   );
 
@@ -3089,7 +2682,14 @@ void main() {
     expect(find.text('风格已应用'), findsNothing);
     expect(
       find.byKey(const ValueKey('apply-style-primary-action')),
-      findsOneWidget,
+      findsNothing,
+    );
+    expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('current-style-name')))
+          .data,
+      '柔光',
     );
   });
 
@@ -3143,16 +2743,24 @@ void main() {
       expect(connectorCalls, 1);
       expect(
         find.byKey(const ValueKey('optimize-cloud-primary-action')),
-        findsOneWidget,
+        findsNothing,
       );
       expect(
         find.byKey(const ValueKey('optimize-capability-unavailable-state')),
         findsNothing,
       );
+      await tester.tap(
+        find.byKey(const ValueKey('optimize-capability-ai-repair')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('generation-consent-sheet')),
+        findsOneWidget,
+      );
     },
   );
 
-  testWidgets('local style inputs stay idle until explicitly opened', (
+  testWidgets('hidden style input modes stay out of the outcome rail', (
     tester,
   ) async {
     final store = MemoryPhotoProjectStore();
@@ -3173,61 +2781,36 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-style')));
     await tester.pumpAndSettle();
 
-    const localCases = <(String, CreationCapability)>[
-      ('style-capability-text', CreationCapability.styleText),
-      ('style-capability-voice', CreationCapability.styleVoice),
-      ('style-capability-reference', CreationCapability.styleReference),
-    ];
-    for (final (key, capability) in localCases) {
-      await tester.tap(find.byKey(ValueKey(key)));
-      await tester.pumpAndSettle();
-
-      expect(store.project!.creationCapability, capability);
-      expect(store.project!.creationStyleId, isNull);
-      expect(store.project!.creationStyleRecipe, isNull);
-      expect(store.project!.creationStyleDefinition, isNull);
-      expect(
-        find.byKey(const ValueKey('style-capability-unavailable-state')),
-        findsNothing,
-      );
-      expect(
-        find.byKey(const ValueKey('style-define-primary-action')),
-        findsOneWidget,
-      );
-      expect(find.byKey(const ValueKey('style-options')), findsNothing);
-      expect(
-        find.byKey(const ValueKey('apply-style-primary-action')),
-        findsNothing,
-      );
-      expect(previewRenderer.creates, isEmpty);
-      expect(previewRenderer.updates, isEmpty);
-    }
-
-    await tester.tap(find.byKey(const ValueKey('style-capability-ai-redraw')));
-    await tester.pumpAndSettle();
-    expect(store.project!.creationCapability, CreationCapability.styleAiRedraw);
+    expect(find.byKey(const ValueKey('style-capability-text')), findsNothing);
+    expect(find.byKey(const ValueKey('style-capability-voice')), findsNothing);
     expect(
-      find.byKey(const ValueKey('style-capability-unavailable-state')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const ValueKey('style-define-primary-action')),
+      find.byKey(const ValueKey('style-capability-reference')),
       findsNothing,
     );
+    expect(
+      find.byKey(const ValueKey('style-capability-ai-redraw')),
+      findsNothing,
+    );
+    expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
+    expect(store.project!.creationCapability, isNull);
+    expect(previewRenderer.updates, isEmpty);
   });
 }
 
-Future<void> _selectOfficialCapability(WidgetTester tester) async {
-  final capability = find.byKey(const ValueKey('style-capability-official'));
-  await tester.ensureVisible(capability);
+Future<void> _tapVisible(WidgetTester tester, Finder target) async {
+  await tester.ensureVisible(target);
   await tester.pump();
-  await tester.tap(capability);
-  await tester.pumpAndSettle();
+  await tester.tap(target);
+}
+
+Future<void> _selectOfficialCapability(WidgetTester tester) async {
+  expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
+  await tester.pump();
 }
 
 Future<void> _selectOfficialStyle(
   WidgetTester tester, {
-  String styleKey = 'style-option-natural',
+  String styleKey = 'style-option-japanese-v1',
 }) async {
   await _selectOfficialCapability(tester);
   final style = find.byKey(ValueKey(styleKey));
@@ -3564,22 +3147,6 @@ final class _CountingPhotoAnalyzer implements PhotoAnalyzer {
     }
     return _delegate.analyze(photo);
   }
-}
-
-final class _FixedReferenceStyleAnalyzer implements ReferenceStyleAnalyzer {
-  const _FixedReferenceStyleAnalyzer();
-
-  @override
-  Future<ReferenceStyleSignals> analyze(String localPath) async =>
-      const ReferenceStyleSignals(
-        red: 0.72,
-        green: 0.54,
-        blue: 0.31,
-        luminance: 0.56,
-        saturation: 0.57,
-        contrast: 0.42,
-        edgeStrength: 0.18,
-      );
 }
 
 final class _DeniedPhotoExporter

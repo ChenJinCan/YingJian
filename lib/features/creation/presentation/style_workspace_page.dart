@@ -8,19 +8,15 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:yingjian/app/theme/app_theme.dart';
 import 'package:yingjian/features/creation/application/cleanup_capability_preparer.dart';
-import 'package:yingjian/features/creation/application/local_reference_style_analyzer.dart';
-import 'package:yingjian/features/creation/application/local_style_definition_factory.dart';
 import 'package:yingjian/features/creation/domain/creation_capability.dart';
 import 'package:yingjian/features/creation/domain/creation_intent.dart';
 import 'package:yingjian/features/creation/domain/creation_task.dart';
 import 'package:yingjian/features/creation/domain/style_definition.dart';
-import 'package:yingjian/features/creation/presentation/style_definition_input_sheet.dart';
 import 'package:yingjian/features/editor/application/batch_photo_exporter.dart';
 import 'package:yingjian/features/editor/application/meta_op_capabilities_provider.dart';
 import 'package:yingjian/features/editor/application/photo_exporter.dart';
 import 'package:yingjian/features/editor/application/photo_preview_renderer.dart';
 import 'package:yingjian/features/editor/application/photo_sharer.dart';
-import 'package:yingjian/features/editor/application/speech_transcriber.dart';
 import 'package:yingjian/features/editor/domain/basic_editing_recipe.dart';
 import 'package:yingjian/features/editor/domain/content_sha256.dart';
 import 'package:yingjian/features/editor/domain/edit_target.dart';
@@ -85,7 +81,6 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
   bool _exporting = false;
   bool _sharing = false;
   bool _preparingShare = false;
-  bool _continuingStyle = false;
   PhotoExportStage _exportStage = PhotoExportStage.preparing;
   bool _explainedPhotoPermission = false;
   bool _photoPermissionDenied = false;
@@ -93,10 +88,10 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
   EditRecipe? _failedPreviewRecipe;
   int _previewRetryToken = 0;
   int _previewSelectionGeneration = 0;
+  int? _pendingAutoApplyGeneration;
   BoundedBatchPhotoExporter? _batchExporter;
   Future<BatchExportSummary>? _batchCompletion;
   Future<void>? _shareCompletion;
-  Future<void>? _continueStyleCompletion;
   PhotoPreparation? _activeSharePreparation;
   BatchExportSummary? _exportSummary;
   final Map<String, String> _ownedSharePathsByPhotoId = {};
@@ -127,10 +122,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
   bool _previewingMotionResult = false;
   String? _savedGeneratedAssetId;
   OldPhotoColorMode? _oldPhotoColorMode;
-  final TextEditingController _aiRedrawController = TextEditingController();
-  String _aiRedrawDraft = '';
   StyleDefinition? _confirmedAiRedrawDefinition;
-  String? _aiRedrawValidationError;
   MaskRemovalGenerationInput? _maskRemovalInput;
 
   bool get _isLocalStaticTask =>
@@ -150,7 +142,6 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
       _applying ||
       _exporting ||
       _sharing ||
-      _continuingStyle ||
       _choosingBackground ||
       _generatingLocalResult ||
       _creatingCloudResult ||
@@ -317,10 +308,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
   void _restoreSelectedStyle(PhotoProject project) {
     _selectedStyleId = null;
     _aiStyle = null;
-    _aiRedrawDraft = '';
     _confirmedAiRedrawDefinition = null;
-    _aiRedrawValidationError = null;
-    _aiRedrawController.clear();
     if (widget.task == CreationTask.motion) return;
     final storedId = project.creationStyleId;
     final storedName = project.creationStyleName;
@@ -328,9 +316,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
     final storedDefinition = project.creationStyleDefinition;
     if (project.creationCapability == CreationCapability.styleAiRedraw &&
         storedDefinition?.origin == StyleDefinitionOrigin.aiRedraw) {
-      _aiRedrawDraft = storedDefinition!.visualIntent;
       _confirmedAiRedrawDefinition = storedDefinition;
-      _aiRedrawController.text = storedDefinition.visualIntent;
       return;
     }
     if (_isLocalStaticTask) {
@@ -391,11 +377,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
             storedResult?.recipe == storedRecipe;
         _aiStyle = _StyleChoice(
           id: storedId,
-          label: storedName == null
-              ? storedId == 'ai-custom'
-                    ? (context) => context.l10n.styleAiCustom
-                    : (context) => context.l10n.styleSavedCustom
-              : (_) => _compactStyleName(storedName),
+          label: _restoredStyleLabel(storedId, storedName),
           persistedName: storedName,
           recipe: storedRecipeIsResult
               ? project.sharedStyle.recipe
@@ -450,21 +432,17 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
 
   @override
   void dispose() {
-    _aiRedrawController.dispose();
     _batchExporter?.cancel();
     unawaited(_activeSharePreparation?.cancel());
     unawaited(_discardPendingBackgroundResource());
     final session = _session;
     final batchCompletion = _batchCompletion;
     final shareCompletion = _shareCompletion;
-    final continueStyleCompletion = _continueStyleCompletion;
     final pending = <Future<void>>[
       if (batchCompletion != null)
         batchCompletion.then<void>((_) {}, onError: (_, _) {}),
       if (shareCompletion != null)
         shareCompletion.then<void>((_) {}, onError: (_, _) {}),
-      if (continueStyleCompletion != null)
-        continueStyleCompletion.then<void>((_) {}, onError: (_, _) {}),
     ];
     if (pending.isEmpty) {
       session?.dispose();
@@ -480,16 +458,29 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
     super.dispose();
   }
 
-  Future<void> _selectStyle(String styleId, {VoidCallback? onFailure}) async {
+  Future<void> _selectStyle(
+    String styleId, {
+    bool autoApply = false,
+    VoidCallback? onFailure,
+  }) async {
     if (_session?.project?.creationCapability !=
         CreationCapability.styleOfficial) {
       return;
     }
     final style = _styles.firstWhere((candidate) => candidate.id == styleId);
-    if (_interactionLocked ||
-        (_selectedStyleId == styleId &&
-            _session?.project?.creationStyleName == style.persistedName &&
-            _session?.project?.creationStyleRecipe == style.recipe)) {
+    final persistedStyleName =
+        style.persistedName ?? _definitionForStyle(style).title;
+    final selectionAlreadyPersisted =
+        _selectedStyleId == styleId &&
+        _session?.project?.creationStyleName == persistedStyleName &&
+        _session?.project?.creationStyleRecipe == style.recipe;
+    if (_interactionLocked) {
+      return;
+    }
+    if (selectionAlreadyPersisted) {
+      if (autoApply && !_styleApplied) {
+        _queueAutoApplyForCurrentSelection();
+      }
       return;
     }
     final previousStyleId = _selectedStyleId;
@@ -500,11 +491,12 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
       _renderedPreviewRecipe = null;
       _failedPreviewRecipe = null;
       _previewSelectionGeneration += 1;
+      _pendingAutoApplyGeneration = autoApply
+          ? _previewSelectionGeneration
+          : null;
     });
-    if (_isLocalStaticTask) {
-      return;
-    }
     try {
+      await _prepareForDirectSelectionChange();
       await _session!.selectCreationStyle(
         styleId: style.id,
         styleName: style.persistedName,
@@ -518,40 +510,51 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
         _renderedPreviewRecipe = null;
         _failedPreviewRecipe = null;
         _previewSelectionGeneration += 1;
+        _pendingAutoApplyGeneration = null;
       });
       onFailure?.call();
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
     } finally {
-      if (mounted) setState(() => _savingStyle = false);
+      if (mounted) {
+        setState(() => _savingStyle = false);
+        _maybeAutoApplyCurrentSelection();
+      }
     }
   }
 
-  Future<void> _selectCapability(CreationCapability capability) async {
+  Future<bool> _selectCapability(
+    CreationCapability capability, {
+    bool autoApplyLocal = false,
+  }) async {
     final session = _session;
     final project = session?.project;
     if (!_interactionLocked &&
         _hasCloudReconciliationRequired &&
         _isCloudGenerationCapability(capability)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.cloudReconciliationRequired)),
-      );
-      return;
+      if (mounted) setState(() {});
+      return false;
     }
     if (_interactionLocked ||
-        _hasActiveCloudGeneration ||
         session == null ||
         project == null ||
-        capability.task != widget.task ||
-        project.creationCapability == capability) {
-      return;
+        capability.task != widget.task) {
+      return false;
     }
+    if (project.creationCapability == capability) {
+      if (autoApplyLocal && !_styleApplied) {
+        _queueAutoApplyForCurrentSelection();
+      }
+      return true;
+    }
+    var selected = false;
     setState(() => _savingStyle = true);
     try {
+      await _prepareForDirectSelectionChange();
       await _discardPendingBackgroundResource();
       await session.selectCreationCapability(capability);
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() {
         _selectedStyleId = _localStyleIdForCapability(capability);
         _aiStyle = null;
@@ -559,24 +562,24 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
         _renderedPreviewRecipe = null;
         _failedPreviewRecipe = null;
         _previewSelectionGeneration += 1;
+        _pendingAutoApplyGeneration = autoApplyLocal
+            ? _previewSelectionGeneration
+            : null;
         _cleanupSubjectAvailable = null;
         _selectedUpscaleScale = null;
         _upscaleArtifact = null;
         _motionArtifact = null;
         _localGenerationFailed = false;
-        _cloudGenerationJob = null;
-        _cloudGenerationFailed = false;
+        if (_cloudGenerationJob?.capability != capability &&
+            !_hasActiveCloudGeneration) {
+          _cloudGenerationJob = null;
+          _cloudGenerationFailed = false;
+        }
         _savedGeneratedAssetId = null;
         _oldPhotoColorMode = null;
-        _aiRedrawDraft = '';
         _confirmedAiRedrawDefinition = null;
-        _aiRedrawValidationError = null;
-        _aiRedrawController.clear();
         _maskRemovalInput = null;
       });
-      if (_isCloudGenerationCapability(capability)) {
-        await _refreshCloudCapabilities();
-      }
       if (_isSegmentationCleanupCapability(capability)) {
         final selectedProject = session.project;
         if (selectedProject != null) {
@@ -588,13 +591,182 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
         await _restoreGeneratedResult(selectedProject);
         if (mounted) setState(() {});
       }
+      selected = true;
+    } on Object {
+      if (!mounted) return false;
+      _pendingAutoApplyGeneration = null;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
+    } finally {
+      if (mounted) {
+        setState(() => _savingStyle = false);
+        _maybeAutoApplyCurrentSelection();
+      }
+    }
+    return selected;
+  }
+
+  Future<void> _prepareForDirectSelectionChange() async {
+    final session = _session;
+    final project = session?.project;
+    if (session == null || project == null) return;
+    if (project.flowState == PhotoProjectFlowState.editing &&
+        project.currentStaticStyleResult == null) {
+      return;
+    }
+    await session.resumeCreationStyleSelection();
+    await _discardShareFiles();
+    if (!mounted) return;
+    setState(() {
+      _styleApplied = false;
+      _exportSummary = null;
+      _photoPermissionDenied = false;
+    });
+  }
+
+  bool _isDirectLocalStaticCapability(CreationCapability capability) =>
+      capability == CreationCapability.optimizeNatural ||
+      capability == CreationCapability.cleanupWhite ||
+      capability == CreationCapability.cleanupTransparent;
+
+  void _queueAutoApplyForCurrentSelection() {
+    if (!mounted || _selectedStyle == null) return;
+    setState(() => _pendingAutoApplyGeneration = _previewSelectionGeneration);
+    _maybeAutoApplyCurrentSelection();
+  }
+
+  void _maybeAutoApplyCurrentSelection() {
+    final pendingGeneration = _pendingAutoApplyGeneration;
+    final project = _session?.project;
+    if (pendingGeneration == null ||
+        pendingGeneration != _previewSelectionGeneration ||
+        project == null ||
+        _interactionLocked ||
+        !_selectedPreviewReady) {
+      return;
+    }
+    if (_isLocalStaticTask && _capabilities?.platform != EditPlatform.ios) {
+      return;
+    }
+    if (widget.task == CreationTask.cleanup &&
+        _cleanupSubjectAvailable != true) {
+      return;
+    }
+    _pendingAutoApplyGeneration = null;
+    unawaited(_applyStyle(project));
+  }
+
+  Future<void> _activateOfficialStyle(String styleId) async {
+    if (_interactionLocked || widget.task != CreationTask.style) return;
+    final capabilitySelected = await _selectCapability(
+      CreationCapability.styleOfficial,
+    );
+    if (!mounted || !capabilitySelected) return;
+    await _selectStyle(styleId, autoApply: true);
+  }
+
+  Future<void> _activateIllustrationStyle() async {
+    if (_interactionLocked || widget.task != CreationTask.style) return;
+    if (_hasActiveCloudGeneration || _hasCloudReconciliationRequired) {
+      if (mounted) setState(() {});
+      return;
+    }
+    final capabilitySelected = await _selectCapability(
+      CreationCapability.styleAiRedraw,
+    );
+    if (!mounted || !capabilitySelected) return;
+    final definition = StyleDefinition.aiRedraw(
+      confirmedVisualIntent: context.l10n.styleIllustrationIntent,
+      title: context.l10n.styleIllustration,
+      summary: context.l10n.aiRedrawDefinitionSummary,
+    );
+    setState(() => _savingStyle = true);
+    try {
+      await _session!.selectCreationStyle(
+        styleId: definition.styleId,
+        styleName: definition.title,
+        recipe: definition.recipe,
+        definition: definition,
+      );
+      if (!mounted ||
+          _session?.project?.creationCapability !=
+              CreationCapability.styleAiRedraw) {
+        return;
+      }
+      setState(() {
+        _confirmedAiRedrawDefinition = definition;
+        _cloudGenerationJob = null;
+        _cloudGenerationFailed = false;
+        _savedGeneratedAssetId = null;
+      });
     } on Object {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
+      return;
     } finally {
       if (mounted) setState(() => _savingStyle = false);
+    }
+    final project = _session?.project;
+    if (mounted && project != null) await _startCloudGeneration(project);
+  }
+
+  Future<void> _activateCapability(CreationCapability capability) async {
+    if (_interactionLocked) return;
+    if (_isCloudGenerationCapability(capability) &&
+        (_hasActiveCloudGeneration || _hasCloudReconciliationRequired)) {
+      if (mounted) setState(() {});
+      return;
+    }
+    final selected = await _selectCapability(
+      capability,
+      autoApplyLocal: _isDirectLocalStaticCapability(capability),
+    );
+    if (!mounted || !selected) return;
+    final project = _session?.project;
+    if (project == null || project.creationCapability != capability) return;
+    switch (capability) {
+      case CreationCapability.optimizeNatural ||
+          CreationCapability.cleanupWhite ||
+          CreationCapability.cleanupTransparent:
+        _maybeAutoApplyCurrentSelection();
+      case CreationCapability.optimizeUpscale:
+        setState(() {
+          _selectedUpscaleScale = UpscalePhotoScale.twoX;
+          _upscaleArtifact = null;
+          _localGenerationFailed = false;
+          _savedGeneratedAssetId = null;
+        });
+        await _generateUpscale(project);
+      case CreationCapability.optimizeAiRepair ||
+          CreationCapability.motionAiNatural:
+        await _startCloudGeneration(project);
+      case CreationCapability.optimizeOldPhoto:
+        setState(() => _oldPhotoColorMode = OldPhotoColorMode.preserve);
+        await _startCloudGeneration(project);
+      case CreationCapability.cleanupReplaceBackground:
+        await _chooseReplacementBackground();
+        if (mounted && _pendingBackgroundResource != null) {
+          _queueAutoApplyForCurrentSelection();
+        }
+      case CreationCapability.cleanupRemovePasserby ||
+          CreationCapability.cleanupBrushRemove:
+        await _chooseRemovalMask(project);
+        if (mounted && _maskRemovalInput != null) {
+          await _startCloudGeneration(_session!.project!);
+        }
+      case CreationCapability.motionSubtle ||
+          CreationCapability.motionCameraPush ||
+          CreationCapability.motionLightFlow:
+        await _generateMotion(project);
+      case CreationCapability.styleText ||
+          CreationCapability.styleVoice ||
+          CreationCapability.styleReference ||
+          CreationCapability.styleOfficial ||
+          CreationCapability.styleAiRedraw:
+        return;
     }
   }
 
@@ -786,7 +958,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
     if (latest != null &&
         (latest.state == GenerationJobState.queued ||
             latest.state == GenerationJobState.running)) {
-      unawaited(_observeCloudGeneration(latest, capability));
+      unawaited(_observeCloudGeneration(latest));
     }
   }
 
@@ -1052,6 +1224,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
     final coordinator = _generationCoordinator;
     final capability = project.creationCapability;
     if (_interactionLocked ||
+        _hasActiveCloudGeneration ||
         _hasCloudReconciliationRequired ||
         coordinator == null ||
         capability == null) {
@@ -1075,10 +1248,9 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
       StyleRedrawGenerationInput(:final confirmedDefinition) =>
         confirmedDefinition,
       MaskRemovalGenerationInput() => context.l10n.removalAreaReady,
-      null =>
-        _capabilityChoicesForTask(widget.task)
-            .firstWhere((choice) => choice.capability == capability)
-            .description(context),
+      null => _capabilityChoicesForTask(
+        widget.task,
+      ).firstWhere((choice) => choice.capability == capability).label(context),
     };
     final offer = coordinator.offerFor(capability);
     if (!offer.requiresConsent) return;
@@ -1183,7 +1355,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
         _cloudGenerationJob = job;
         _creatingCloudResult = false;
       });
-      await _observeCloudGeneration(job, capability);
+      await _observeCloudGeneration(job);
     } on GenerationReconciliationRequired catch (error) {
       if (mounted) {
         setState(() {
@@ -1198,10 +1370,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
     }
   }
 
-  Future<void> _observeCloudGeneration(
-    GenerationJob initial,
-    CreationCapability capability,
-  ) async {
+  Future<void> _observeCloudGeneration(GenerationJob initial) async {
     final coordinator = _generationCoordinator;
     if (coordinator == null) return;
     var job = initial;
@@ -1209,7 +1378,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
         job.state == GenerationJobState.failed ||
         job.state == GenerationJobState.cancelled) {
       if (mounted &&
-          _session?.project?.creationCapability == capability &&
+          _cloudGenerationJob?.id == initial.id &&
           (job.state == GenerationJobState.failed ||
               (job.state == GenerationJobState.succeeded &&
                   job.output == null))) {
@@ -1220,15 +1389,12 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
     try {
       await for (final update in coordinator.observe(job.id)) {
         job = update;
-        if (!mounted ||
-            _session?.project?.creationCapability != capability ||
-            _cloudGenerationJob?.id != initial.id) {
+        if (!mounted || _cloudGenerationJob?.id != initial.id) {
           return;
         }
         setState(() => _cloudGenerationJob = job);
       }
       if (mounted &&
-          _session?.project?.creationCapability == capability &&
           _cloudGenerationJob?.id == initial.id &&
           (job.state == GenerationJobState.failed ||
               (job.state == GenerationJobState.succeeded &&
@@ -1236,9 +1402,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
         setState(() => _cloudGenerationFailed = true);
       }
     } on Object {
-      if (mounted &&
-          _session?.project?.creationCapability == capability &&
-          _cloudGenerationJob?.id == initial.id) {
+      if (mounted && _cloudGenerationJob?.id == initial.id) {
         setState(() => _cloudGenerationFailed = true);
       }
     }
@@ -1272,7 +1436,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
         !_hasActiveCloudGeneration) {
       return;
     }
-    await _observeCloudGeneration(job, capability);
+    await _observeCloudGeneration(job);
   }
 
   Future<void> _cancelCloudGeneration() async {
@@ -1345,7 +1509,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
       });
       if (job.state == GenerationJobState.queued ||
           job.state == GenerationJobState.running) {
-        await _observeCloudGeneration(job, job.capability);
+        await _observeCloudGeneration(job);
       }
     } on GenerationReconciliationNotFound {
       if (mounted) {
@@ -1359,75 +1523,6 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
       // not evidence that the original request can be submitted again.
     } finally {
       if (mounted) setState(() => _creatingCloudResult = false);
-    }
-  }
-
-  void _updateAiRedrawDraft(String value) {
-    setState(() {
-      _aiRedrawDraft = value;
-      _confirmedAiRedrawDefinition = null;
-      _aiRedrawValidationError = null;
-      _cloudGenerationJob = null;
-      _cloudGenerationFailed = false;
-      _savedGeneratedAssetId = null;
-    });
-  }
-
-  Future<void> _confirmAiRedrawDefinition() async {
-    final session = _session;
-    if (_interactionLocked ||
-        session?.project?.creationCapability !=
-            CreationCapability.styleAiRedraw) {
-      return;
-    }
-    late final StyleDefinition definition;
-    try {
-      definition = StyleDefinition.aiRedraw(
-        confirmedVisualIntent: _aiRedrawDraft,
-        title: context.l10n.capabilityStyleAiRedraw,
-        summary: context.l10n.aiRedrawDefinitionSummary,
-      );
-    } on ArgumentError {
-      setState(
-        () => _aiRedrawValidationError = context.l10n.aiRedrawIntentInvalid,
-      );
-      return;
-    }
-
-    setState(() => _savingStyle = true);
-    try {
-      await session!.selectCreationStyle(
-        styleId: definition.styleId,
-        styleName: definition.title,
-        recipe: definition.recipe,
-        definition: definition,
-      );
-      if (!mounted ||
-          session.project?.creationCapability !=
-              CreationCapability.styleAiRedraw) {
-        return;
-      }
-      _aiRedrawController.value = TextEditingValue(
-        text: definition.visualIntent,
-        selection: TextSelection.collapsed(
-          offset: definition.visualIntent.length,
-        ),
-      );
-      setState(() {
-        _aiRedrawDraft = definition.visualIntent;
-        _confirmedAiRedrawDefinition = definition;
-        _aiRedrawValidationError = null;
-        _cloudGenerationJob = null;
-        _cloudGenerationFailed = false;
-        _savedGeneratedAssetId = null;
-      });
-    } on Object {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
-    } finally {
-      if (mounted) setState(() => _savingStyle = false);
     }
   }
 
@@ -1666,139 +1761,6 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
     }
   }
 
-  bool _isLocalDefinedStyleCapability(CreationCapability? capability) =>
-      capability == CreationCapability.styleText ||
-      capability == CreationCapability.styleVoice ||
-      capability == CreationCapability.styleReference;
-
-  Future<void> _defineLocalStyle(PhotoProject project) async {
-    final capability = project.creationCapability;
-    if (_interactionLocked || !_isLocalDefinedStyleCapability(capability)) {
-      return;
-    }
-    final mode = switch (capability!) {
-      CreationCapability.styleText => StyleDefinitionInputMode.text,
-      CreationCapability.styleVoice => StyleDefinitionInputMode.voice,
-      CreationCapability.styleReference => StyleDefinitionInputMode.reference,
-      _ => throw StateError('Unsupported local style input capability'),
-    };
-    final definition = await showModalBottomSheet<StyleDefinition>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => StyleDefinitionInputSheet(
-        sourcePath: project.photos.single.localPath,
-        importer: context.read<PhotoImporter>(),
-        transcriber: context.read<SpeechTranscriber>(),
-        initialMode: mode,
-        allowedModes: {mode},
-        preparePrompt: _definitionFromPrompt,
-        prepareReference: _definitionFromReference,
-      ),
-    );
-    if (!mounted || definition == null) return;
-    if (!_definitionMatchesSelectedCapability(definition, capability)) {
-      return;
-    }
-    setState(() => _savingStyle = true);
-    try {
-      await _session!.selectCreationStyle(
-        styleId: definition.styleId,
-        styleName: definition.title,
-        recipe: definition.recipe,
-        definition: definition,
-      );
-      if (!mounted) return;
-      setState(() {
-        _aiStyle = _StyleChoice(
-          id: definition.styleId,
-          label: (_) => _compactStyleName(definition.title),
-          persistedName: definition.title,
-          recipe: definition.recipe,
-          previewFilter: _Filters.natural,
-          definition: definition,
-        );
-        _selectedStyleId = definition.styleId;
-        _styleApplied = false;
-        _renderedPreviewRecipe = null;
-        _failedPreviewRecipe = null;
-        _previewSelectionGeneration += 1;
-      });
-    } on Object {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
-    } finally {
-      if (mounted) setState(() => _savingStyle = false);
-    }
-  }
-
-  Future<StyleDefinition?> _definitionFromPrompt(
-    String prompt,
-    StyleDefinitionOrigin origin,
-  ) async {
-    if (origin != StyleDefinitionOrigin.text &&
-        origin != StyleDefinitionOrigin.voice) {
-      return null;
-    }
-    final recipe = LocalStyleDefinitionFactory.recipeFromPrompt(prompt);
-    if (recipe == null) return null;
-    return StyleDefinition(
-      styleId: LocalStyleDefinitionFactory.identifierFor(
-        origin: origin,
-        stableSeed: prompt,
-      ),
-      revision: 1,
-      origin: origin,
-      title: prompt,
-      summary: origin == StyleDefinitionOrigin.voice
-          ? context.l10n.styleVoiceDefinitionSummary
-          : context.l10n.styleTextDefinitionSummary,
-      recipe: recipe,
-      sourceText: prompt,
-    );
-  }
-
-  Future<StyleDefinition?> _definitionFromReference(
-    ImportedEditingResource reference,
-  ) async {
-    final l10n = context.l10n;
-    final analyzer = context.read<ReferenceStyleAnalyzer>();
-    final signals = await analyzer.analyze(reference.localPath);
-    final temperature = signals.red - signals.blue;
-    final title = temperature > 0.08
-        ? l10n.styleReferenceWarmTitle
-        : temperature < -0.08
-        ? l10n.styleReferenceCoolTitle
-        : l10n.styleReferenceNaturalTitle;
-    return StyleDefinition(
-      styleId: LocalStyleDefinitionFactory.identifierFor(
-        origin: StyleDefinitionOrigin.reference,
-        stableSeed: reference.descriptor.contentSha256,
-      ),
-      revision: 1,
-      origin: StyleDefinitionOrigin.reference,
-      title: title,
-      summary: l10n.styleReferenceDefinitionSummary,
-      recipe: LocalStyleDefinitionFactory.recipeFromReference(signals),
-      referenceFingerprint: reference.descriptor.contentSha256,
-    );
-  }
-
-  bool _definitionMatchesSelectedCapability(
-    StyleDefinition definition,
-    CreationCapability capability,
-  ) => switch (capability) {
-    CreationCapability.styleText =>
-      definition.origin == StyleDefinitionOrigin.text,
-    CreationCapability.styleVoice =>
-      definition.origin == StyleDefinitionOrigin.voice,
-    CreationCapability.styleReference =>
-      definition.origin == StyleDefinitionOrigin.reference,
-    _ => false,
-  };
-
   EditContext _editContext(PhotoProject project) {
     final capabilities = _capabilities!;
     final pendingResource = _pendingBackgroundResource;
@@ -1916,6 +1878,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
         _renderedPreviewRecipe = recipe;
         if (_failedPreviewRecipe == recipe) _failedPreviewRecipe = null;
       });
+      _maybeAutoApplyCurrentSelection();
     });
     WidgetsBinding.instance.scheduleFrame();
   }
@@ -2041,72 +2004,6 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
         });
       }
     }
-  }
-
-  Future<void> _returnToCapabilityList() async {
-    if (_interactionLocked || _hasActiveCloudGeneration) return;
-    setState(() => _continuingStyle = true);
-    final completion = _performReturnToCapabilityList();
-    _continueStyleCompletion = completion;
-    try {
-      await completion;
-      if (!mounted) return;
-      setState(() {
-        _selectedStyleId = null;
-        _aiStyle = null;
-        _styleApplied = false;
-        _renderedPreviewRecipe = null;
-        _failedPreviewRecipe = null;
-        _previewSelectionGeneration += 1;
-        _cleanupSubjectAvailable = null;
-        _exportSummary = null;
-        _photoPermissionDenied = false;
-        _aiRedrawDraft = '';
-        _confirmedAiRedrawDefinition = null;
-        _aiRedrawValidationError = null;
-        _aiRedrawController.clear();
-      });
-    } on Object {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
-    } finally {
-      if (identical(_continueStyleCompletion, completion)) {
-        _continueStyleCompletion = null;
-      }
-      if (mounted) setState(() => _continuingStyle = false);
-    }
-  }
-
-  Future<void> _restorePreviousResult() async {
-    if (_interactionLocked) return;
-    setState(() => _continuingStyle = true);
-    try {
-      await _session!.restorePreviousCreationResult();
-      if (!mounted) return;
-      final project = _session!.project!;
-      _restoreSelectedStyle(project);
-      setState(() {
-        _styleApplied = project.currentStaticStyleResult != null;
-        _photoPermissionDenied = false;
-        _restoreExportSummary(project);
-      });
-    } on Object {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
-    } finally {
-      if (mounted) setState(() => _continuingStyle = false);
-    }
-  }
-
-  Future<void> _performReturnToCapabilityList() async {
-    await _discardPendingBackgroundResource();
-    await _session!.resumeCreationStyleSelection();
-    await _session!.clearCreationCapability();
-    await _discardShareFiles();
   }
 
   Future<void> _shareStyleResult() async {
@@ -2329,385 +2226,474 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
     });
   }
 
+  Widget _buildPhotoCanvas(
+    BuildContext context, {
+    required PhotoProject project,
+    required ProjectPhoto photo,
+    required String previewPath,
+    required bool generatedImageVisible,
+  }) {
+    if (generatedImageVisible) {
+      return Image.file(
+        File(previewPath),
+        key: const ValueKey('style-workspace-generated-image'),
+        fit: BoxFit.contain,
+        errorBuilder: (_, _, _) => Center(
+          child: Text(
+            context.l10n.photoLoadFailed,
+            style: const TextStyle(color: AppTheme.softWhite),
+          ),
+        ),
+      );
+    }
+
+    final selected = _selectedStyle;
+    final recipe = selected == null
+        ? project.effectiveRecipeFor(photo.id)
+        : _projectedStyleRecipe(selected);
+    final selectionGeneration = _previewSelectionGeneration;
+    return NativePhotoPreview(
+      key: ValueKey('style-workspace-preview-${photo.id}'),
+      sourcePath: photo.localPath,
+      sourceId: photo.id,
+      recipe: recipe,
+      renderer: context.read<PhotoPreviewRenderer>(),
+      editState: project.renderStateFor(photo.id, recipe: recipe),
+      editContext: _editContext(project),
+      retryToken: _previewRetryToken,
+      allowLegacyColorFallback: false,
+      preserveLastFrameOnUpdateFailure: true,
+      onRendered: selected == null
+          ? null
+          : (rendered) => _onPreviewRendered(rendered, selectionGeneration),
+      onRenderFailed: selected == null
+          ? null
+          : (failed) => _onPreviewFailed(failed, selectionGeneration),
+      errorBuilder: (_) => Image.file(
+        File(photo.localPath),
+        fit: BoxFit.contain,
+        errorBuilder: (_, _, _) => Center(
+          child: Text(
+            context.l10n.photoLoadFailed,
+            style: const TextStyle(color: AppTheme.softWhite),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget? _buildWorkspaceStatus(
+    BuildContext context, {
+    required PhotoProject project,
+    required CreationCapability? selectedCapability,
+    required bool showUnavailable,
+    required String unavailableTitle,
+    required String cloudFailureMessage,
+  }) {
+    String? message;
+    VoidCallback? action;
+    String? actionLabel;
+    Key? actionKey;
+    Key? key;
+
+    if (_hasCloudReconciliationRequired) {
+      message = context.l10n.cloudReconciliationRequired;
+      action = _interactionLocked ? null : _reconcileCloudGeneration;
+      actionLabel = context.l10n.checkCloudGenerationStatus;
+      actionKey = ValueKey('${widget.task.name}-cloud-reconciliation-check');
+      key = ValueKey('${widget.task.name}-cloud-reconciliation-required');
+    } else if (_hasActiveCloudGeneration) {
+      message = _cloudGenerationFailed
+          ? cloudFailureMessage
+          : _cloudGenerationJob?.state == GenerationJobState.queued
+          ? context.l10n.cloudGenerationQueued
+          : context.l10n.cloudGenerationRunning;
+      if (_cloudGenerationFailed && selectedCapability != null) {
+        action = _interactionLocked
+            ? null
+            : () => unawaited(
+                _retryCloudGenerationObservation(selectedCapability),
+              );
+        actionLabel = context.l10n.retry;
+        actionKey = ValueKey('${widget.task.name}-cloud-result-refresh');
+      } else if (_cloudGenerationJob?.canCancel == true) {
+        action = _interactionLocked ? null : _cancelCloudGeneration;
+        actionLabel = context.l10n.cancelGeneration;
+        actionKey = ValueKey('${widget.task.name}-cloud-result-cancel');
+      }
+      key = ValueKey('${widget.task.name}-cloud-result-progress');
+    } else if (_creatingCloudResult || _refreshingCloudCapabilities) {
+      message = context.l10n.generatingResult;
+      key = ValueKey('${widget.task.name}-cloud-result-progress');
+    } else if (_generatingLocalResult) {
+      message = context.l10n.generatingResult;
+      key = ValueKey('${widget.task.name}-local-result-progress');
+    } else if (_cloudGenerationFailed) {
+      message = cloudFailureMessage;
+      if (selectedCapability != null &&
+          _isCloudGenerationCapability(selectedCapability)) {
+        action = _interactionLocked
+            ? null
+            : () => unawaited(_startCloudGeneration(project));
+        actionLabel = context.l10n.retry;
+        actionKey = ValueKey('${widget.task.name}-cloud-result-retry');
+      }
+      key = ValueKey('${widget.task.name}-cloud-result-failed');
+    } else if (_localGenerationFailed) {
+      message = context.l10n.generationFailed;
+      action = _interactionLocked || selectedCapability == null
+          ? null
+          : () => unawaited(_activateCapability(selectedCapability));
+      actionLabel = context.l10n.retry;
+      actionKey = ValueKey('${widget.task.name}-local-result-retry');
+      key = ValueKey('${widget.task.name}-local-result-failed');
+    } else if (_failedPreviewRecipe != null) {
+      message = context.l10n.effectPreviewUnavailable;
+      action = _interactionLocked ? null : _retryPreview;
+      actionLabel = context.l10n.retry;
+      actionKey = ValueKey('${widget.task.name}-preview-retry');
+      key = ValueKey('${widget.task.name}-preview-failed');
+    } else if (showUnavailable) {
+      message = unavailableTitle;
+      if (selectedCapability != null &&
+          _isCloudGenerationCapability(selectedCapability)) {
+        action = _interactionLocked
+            ? null
+            : () => unawaited(
+                _refreshSelectedCloudCapability(selectedCapability),
+              );
+        actionLabel = context.l10n.retry;
+        actionKey = ValueKey('${widget.task.name}-cloud-capability-refresh');
+      }
+      key = ValueKey('${widget.task.name}-capability-unavailable-state');
+    }
+
+    if (message == null) return null;
+    return Positioned(
+      left: 12,
+      right: 12,
+      top: MediaQuery.paddingOf(context).top + 58,
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: _WorkspaceStatusPill(
+          key: key,
+          message: message,
+          actionLabel: actionLabel,
+          actionKey: actionKey,
+          onAction: action,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCompactResultActions(
+    BuildContext context, {
+    required PhotoProject project,
+    required GeneratedMedia? generatedMedia,
+  }) {
+    final staticResultReady =
+        _styleApplied && project.currentStaticStyleResult != null;
+    if (!staticResultReady && generatedMedia == null) {
+      return const SizedBox.shrink();
+    }
+
+    if (generatedMedia case final media?) {
+      final isCloudResult = _cloudGenerationJob?.output?.id == media.id;
+      final saveKey = isCloudResult
+          ? ValueKey('${widget.task.name}-cloud-result-save')
+          : widget.task == CreationTask.motion
+          ? const ValueKey('motion-generated-result-save')
+          : const ValueKey('optimize-generated-result-save');
+      final shareKey = isCloudResult
+          ? ValueKey('${widget.task.name}-cloud-result-share')
+          : widget.task == CreationTask.motion
+          ? const ValueKey('motion-generated-result-share')
+          : const ValueKey('optimize-generated-result-share');
+      final playKey = isCloudResult
+          ? ValueKey('${widget.task.name}-cloud-result-play')
+          : const ValueKey('motion-generated-result-play');
+      return Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: Wrap(
+          key: ValueKey('${widget.task.name}-result-actions'),
+          alignment: WrapAlignment.center,
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            if (media.kind == GeneratedMediaKind.imageMotion)
+              OutlinedButton.icon(
+                key: playKey,
+                onPressed: _interactionLocked || _generatedMediaActions == null
+                    ? null
+                    : () => _previewMotionResult(media),
+                icon: const Icon(Icons.play_arrow_rounded),
+                label: Text(context.l10n.previewMotionResult),
+              ),
+            FilledButton.icon(
+              key: saveKey,
+              onPressed: _interactionLocked || _generatedMediaActions == null
+                  ? null
+                  : () => _saveGeneratedResult(media),
+              icon: Icon(
+                _savedGeneratedAssetId == null
+                    ? Icons.save_alt_rounded
+                    : Icons.check_rounded,
+              ),
+              label: Text(
+                _savedGeneratedAssetId == null
+                    ? context.l10n.saveToAlbum
+                    : context.l10n.savedToSystemPhotos,
+              ),
+            ),
+            OutlinedButton.icon(
+              key: shareKey,
+              onPressed: _interactionLocked
+                  ? null
+                  : () => _shareGeneratedResult(media.localPath),
+              icon: const Icon(Icons.ios_share_rounded),
+              label: Text(context.l10n.shareResult),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final summary = _exportSummary;
+    final saved = summary?.savedCount == 1 && summary?.failedCount == 0;
+    final failed = summary != null && !saved;
+    final canShare =
+        _capabilities?.platform == EditPlatform.ios &&
+        (summary?.canShare == true ||
+            context.read<PhotoExporter>() is PhotoResultPreparer);
+    final status = _preparingShare
+        ? context.l10n.preparingShare
+        : _exporting
+        ? _exportStage == PhotoExportStage.savingToPhotoLibrary
+              ? context.l10n.savingToSystemPhotos
+              : context.l10n.preparingExport
+        : saved
+        ? context.l10n.savedToSystemPhotos
+        : context.l10n.styleApplied;
+    return Semantics(
+      key: const ValueKey('style-result-status'),
+      container: true,
+      liveRegion: true,
+      excludeSemantics: true,
+      label: status,
+      child: Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: Wrap(
+          key: const ValueKey('style-static-result-controls'),
+          alignment: WrapAlignment.center,
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            if (_exporting)
+              FilledButton.icon(
+                key: const ValueKey('style-result-save'),
+                onPressed: null,
+                icon: const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                label: Text(status),
+              )
+            else if (saved)
+              Chip(
+                key: const ValueKey('style-result-saved-state'),
+                avatar: const Icon(Icons.check_rounded, size: 18),
+                label: Text(context.l10n.savedToSystemPhotos),
+              )
+            else if (_photoPermissionDenied)
+              FilledButton.icon(
+                key: const ValueKey('style-result-open-settings'),
+                onPressed: _interactionLocked ? null : _openPhotoSettings,
+                icon: const Icon(Icons.settings_outlined),
+                label: Text(context.l10n.goToSystemSettings),
+              )
+            else
+              FilledButton.icon(
+                key: failed
+                    ? const ValueKey('style-result-retry')
+                    : const ValueKey('style-result-save'),
+                onPressed: _interactionLocked
+                    ? null
+                    : failed
+                    ? () => _exportStyleResult(project.photos.single.id)
+                    : _saveStyleResult,
+                icon: _exporting
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.save_alt_rounded),
+                label: Text(
+                  failed ? context.l10n.retry : context.l10n.saveToAlbum,
+                ),
+              ),
+            if (canShare)
+              if (saved)
+                FilledButton.icon(
+                  key: const ValueKey('style-result-share'),
+                  onPressed: _interactionLocked ? null : _shareStyleResult,
+                  icon: _sharing
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.ios_share_rounded),
+                  label: Text(
+                    _preparingShare
+                        ? context.l10n.preparingShare
+                        : _sharing
+                        ? context.l10n.sharingPhotos
+                        : context.l10n.shareResult,
+                  ),
+                )
+              else
+                OutlinedButton.icon(
+                  key: const ValueKey('style-result-share'),
+                  onPressed: _interactionLocked ? null : _shareStyleResult,
+                  icon: _sharing
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.ios_share_rounded),
+                  label: Text(
+                    _preparingShare
+                        ? context.l10n.preparingShare
+                        : _sharing
+                        ? context.l10n.sharingPhotos
+                        : context.l10n.shareResult,
+                  ),
+                ),
+            if (_preparingShare)
+              TextButton(
+                key: const ValueKey('style-result-cancel-preparation'),
+                onPressed: _cancelSharePreparation,
+                child: Text(context.l10n.cancel),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final pageKey = widget.intent == CreationIntent.apply
         ? const ValueKey('apply-style-workspace')
         : const ValueKey('motion-style-workspace');
-    final showingStaticResult =
-        widget.intent == CreationIntent.apply && _styleApplied;
     return PopScope(
       canPop: !_interactionLocked,
       child: Scaffold(
         key: pageKey,
         backgroundColor: AppTheme.canvas,
-        appBar: AppBar(
-          backgroundColor: AppTheme.canvas,
-          leading: IconButton(
-            key: showingStaticResult
-                ? const ValueKey('style-workspace-close')
-                : const ValueKey('style-workspace-back'),
-            tooltip: showingStaticResult
-                ? MaterialLocalizations.of(context).closeButtonTooltip
-                : MaterialLocalizations.of(context).backButtonTooltip,
-            onPressed: _interactionLocked
-                ? null
-                : () => Navigator.of(context).maybePop(),
-            icon: Icon(
-              showingStaticResult
-                  ? Icons.close_rounded
-                  : Icons.chevron_left_rounded,
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            FutureBuilder<PhotoProject?>(
+              future: _project,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const ColoredBox(
+                    color: AppTheme.canvas,
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
+                final project = snapshot.data;
+                if (snapshot.hasError ||
+                    project == null ||
+                    project.creationIntent != widget.intent ||
+                    project.creationTask != widget.task) {
+                  return _WorkspaceFailure(
+                    onRetry: _retryRestore,
+                    onBack: () => Navigator.of(context).maybePop(),
+                  );
+                }
+                return _buildWorkspace(context, _session?.project ?? project);
+              },
             ),
-          ),
-          title: Text(switch (widget.task) {
-            CreationTask.style => context.l10n.homeChangeStyle,
-            CreationTask.motion => context.l10n.createMotionEffect,
-            CreationTask.optimize => context.l10n.optimizePhoto,
-            CreationTask.cleanup => context.l10n.removeBackgroundOrObjects,
-          }),
-        ),
-        body: FutureBuilder<PhotoProject?>(
-          future: _project,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            final project = snapshot.data;
-            if (snapshot.hasError ||
-                project == null ||
-                project.creationIntent != widget.intent ||
-                project.creationTask != widget.task) {
-              return _WorkspaceFailure(
-                onRetry: _retryRestore,
-                onBack: () => Navigator.of(context).maybePop(),
-              );
-            }
-            return _buildWorkspace(context, _session?.project ?? project);
-          },
+            _FloatingWorkspaceNavigation(
+              title: switch (widget.task) {
+                CreationTask.style => context.l10n.homeChangeStyle,
+                CreationTask.motion => context.l10n.createMotionEffect,
+                CreationTask.optimize => context.l10n.optimizePhoto,
+                CreationTask.cleanup => context.l10n.removeBackgroundOrObjects,
+              },
+              enabled: !_interactionLocked,
+              onPressed: () => Navigator.of(context).maybePop(),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildWorkspace(BuildContext context, PhotoProject project) {
-    final capability = project.creationCapability;
-    final selected = _selectedStyle;
-    final showingLegacyResult =
-        _styleApplied &&
-        project.currentStaticStyleResult != null &&
-        selected != null;
-    if (!showingLegacyResult &&
-        (capability == null ||
-            !_hasRuntimeImplementation(capability) ||
-            capability == CreationCapability.styleOfficial &&
-                selected == null)) {
-      return _buildCapabilityWorkspace(context, project);
-    }
-    if (selected == null) {
-      return _buildCapabilityWorkspace(context, project);
-    }
-    final photo = project.photos.first;
-    final textScaler = MediaQuery.textScalerOf(context);
-    final styleRailHeight = 82 + textScaler.scale(16);
-    final projectedRecipe = _projectedStyleRecipe(selected);
-    final previewFailed = _failedPreviewRecipe == projectedRecipe;
-    final previewStatus = previewFailed
-        ? context.l10n.stylePreviewFailedShowingOriginal
-        : _styleApplied
-        ? context.l10n.styleApplied
-        : _selectedPreviewReady
-        ? context.l10n.stylePreviewReady
-        : context.l10n.preparingStylePreview;
-    final previewSelectionGeneration = _previewSelectionGeneration;
-    final styleSummary = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          context.l10n.currentStyle,
-          style: Theme.of(context).textTheme.labelSmall,
-        ),
-        const SizedBox(height: 2),
-        Text(
-          selected.label(context),
-          key: const ValueKey('current-style-name'),
-          style: Theme.of(
-            context,
-          ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
-        ),
-      ],
-    );
-    return SafeArea(
-      top: false,
-      child: Column(
-        children: [
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(22),
-                child: ColoredBox(
-                  color: Colors.black,
-                  child: Semantics(
-                    key: const ValueKey('style-workspace-source-photo'),
-                    image: true,
-                    label:
-                        '${context.l10n.photoPreviewArea}, '
-                        '${selected.label(context)}, '
-                        '$previewStatus',
-                    child: NativePhotoPreview(
-                      sourcePath: photo.localPath,
-                      sourceId: photo.id,
-                      recipe: projectedRecipe,
-                      renderer: context.read<PhotoPreviewRenderer>(),
-                      editContext: _editContext(project),
-                      retryToken: _previewRetryToken,
-                      allowLegacyColorFallback: false,
-                      preserveLastFrameOnUpdateFailure: true,
-                      onRendered: (recipe) => _onPreviewRendered(
-                        recipe,
-                        previewSelectionGeneration,
-                      ),
-                      onRenderFailed: (recipe) =>
-                          _onPreviewFailed(recipe, previewSelectionGeneration),
-                      errorBuilder: (_) => Image.file(
-                        File(photo.localPath),
-                        fit: BoxFit.contain,
-                        errorBuilder: (_, _, _) =>
-                            Center(child: Text(context.l10n.photoLoadFailed)),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          Flexible(
-            flex: 0,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 292),
-              child: DecoratedBox(
-                decoration: const BoxDecoration(
-                  color: Color(0xFF151719),
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-                  border: Border(
-                    top: BorderSide(color: Color(0xFF2B2D2F), width: 0.5),
-                  ),
-                ),
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-                  child: widget.intent == CreationIntent.apply && _styleApplied
-                      ? _buildStaticResultControls(context, project, selected)
-                      : _isLocalStaticTask
-                      ? _buildLocalTaskControls(
-                          context,
-                          project,
-                          selected,
-                          previewFailed,
-                        )
-                      : Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            styleSummary,
-                            if (capability ==
-                                CreationCapability.styleOfficial) ...[
-                              const SizedBox(height: 10),
-                              SizedBox(
-                                height: styleRailHeight,
-                                child: ListView.separated(
-                                  key: const ValueKey('style-options'),
-                                  scrollDirection: Axis.horizontal,
-                                  itemCount: _officialStyles.length,
-                                  separatorBuilder: (_, _) =>
-                                      const SizedBox(width: 10),
-                                  itemBuilder: (context, index) {
-                                    final style = _officialStyles[index];
-                                    return _StyleOption(
-                                      key: ValueKey('style-option-${style.id}'),
-                                      style: style,
-                                      sourcePath: photo.localPath,
-                                      selected: style.id == selected.id,
-                                      onTap: _interactionLocked
-                                          ? null
-                                          : () => unawaited(
-                                              _selectStyle(style.id),
-                                            ),
-                                    );
-                                  },
-                                ),
-                              ),
-                            ],
-                            const SizedBox(height: 12),
-                            if (widget.intent == CreationIntent.apply &&
-                                previewFailed) ...[
-                              Semantics(
-                                liveRegion: true,
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        context.l10n.effectPreviewUnavailable,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(
-                                              color: Theme.of(
-                                                context,
-                                              ).colorScheme.error,
-                                            ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    TextButton(
-                                      key: const ValueKey(
-                                        'style-preview-retry',
-                                      ),
-                                      onPressed: _interactionLocked
-                                          ? null
-                                          : _retryPreview,
-                                      child: Text(context.l10n.retry),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                            ],
-                            FilledButton(
-                              key: const ValueKey('apply-style-primary-action'),
-                              onPressed:
-                                  _interactionLocked || !_selectedPreviewReady
-                                  ? null
-                                  : () => _applyStyle(project),
-                              child: _applying
-                                  ? Text(context.l10n.applyingStyle)
-                                  : Text(context.l10n.applyStyle),
-                            ),
-                            TextButton(
-                              key: const ValueKey('style-choose-capability'),
-                              onPressed:
-                                  _interactionLocked ||
-                                      _hasActiveCloudGeneration
-                                  ? null
-                                  : _returnToCapabilityList,
-                              child: Text(context.l10n.chooseAnotherCapability),
-                            ),
-                            if (widget.intent == CreationIntent.apply &&
-                                project.recoverableStaticStyleResult != null &&
-                                project.currentStaticStyleResult == null) ...[
-                              const SizedBox(height: 4),
-                              TextButton(
-                                key: const ValueKey(
-                                  'style-restore-previous-result',
-                                ),
-                                onPressed: _interactionLocked
-                                    ? null
-                                    : _restorePreviousResult,
-                                child: Text(context.l10n.restorePreviousResult),
-                              ),
-                            ],
-                          ],
-                        ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget _buildWorkspace(BuildContext context, PhotoProject project) =>
+      _buildCapabilityWorkspace(context, project);
 
   Widget _buildCapabilityWorkspace(BuildContext context, PhotoProject project) {
     final photo = project.photos.single;
     final selectedCapability = project.creationCapability;
-    final choices = _capabilityChoicesForTask(widget.task);
-    final selectedChoice = choices
-        .where((choice) => choice.capability == selectedCapability)
-        .firstOrNull;
-    final showOfficialStyles =
-        selectedCapability == CreationCapability.styleOfficial;
-    final showLocalStyleInput = _isLocalDefinedStyleCapability(
-      selectedCapability,
-    );
-    final showReplacementPicker =
-        selectedCapability == CreationCapability.cleanupReplaceBackground;
-    final showUpscale =
-        selectedCapability == CreationCapability.optimizeUpscale &&
-        _upscalePhotoGenerator != null;
-    final showMotion =
-        _motionPhotoGenerator != null &&
-        (selectedCapability == CreationCapability.motionSubtle ||
-            selectedCapability == CreationCapability.motionCameraPush ||
-            selectedCapability == CreationCapability.motionLightFlow);
-    final cloudCapabilityAvailable =
-        selectedCapability != null &&
-        _isCloudGenerationCapability(selectedCapability) &&
-        (_generationCoordinator?.availableCapabilities.contains(
-              selectedCapability,
-            ) ??
-            false);
-    final showCloudGeneration =
-        selectedCapability != null &&
-        _isCloudGenerationCapability(selectedCapability) &&
-        (cloudCapabilityAvailable ||
-            _cloudGenerationJob != null ||
-            _hasCloudReconciliationRequired);
-    final cloudInput = selectedCapability == null
-        ? null
-        : _generationInputFor(selectedCapability);
-    final cloudInputReady =
-        selectedCapability != null &&
-        _cloudInputReady(selectedCapability, cloudInput);
-    final cloudOutput = _cloudGenerationJob?.output;
-    final cloudImageOutput = cloudOutput?.kind == GeneratedMediaKind.image
-        ? cloudOutput
-        : null;
+    final choices = widget.task == CreationTask.style
+        ? const <_CapabilityChoice>[]
+        : _capabilityChoicesForTask(widget.task);
+    final showOfficialStyles = widget.task == CreationTask.style;
     final cloudJobIsActive = _hasActiveCloudGeneration;
-    final cloudRequestLocked =
-        cloudJobIsActive || _hasCloudReconciliationRequired;
-    final cloudJobSucceeded =
-        _cloudGenerationJob?.state == GenerationJobState.succeeded &&
-        cloudOutput != null;
     final generatedMedia = _generatedMediaForCurrentCapability();
     final motionMedia = generatedMedia?.kind == GeneratedMediaKind.imageMotion
         ? generatedMedia
         : null;
-    final previewPath =
-        cloudImageOutput?.localPath ??
-        (showUpscale
-            ? _upscaleArtifact?.outputPath ?? photo.localPath
-            : photo.localPath);
+    final generatedImage = generatedMedia?.kind == GeneratedMediaKind.image
+        ? generatedMedia
+        : null;
+    final previewPath = generatedImage?.localPath ?? photo.localPath;
+    final staticResult = project.currentStaticStyleResult;
+    final staticResultName = staticResult == null
+        ? null
+        : switch (widget.task) {
+            CreationTask.style =>
+              staticResult.styleName ?? _selectedStyle?.label(context),
+            CreationTask.optimize => context.l10n.optimizeResult,
+            CreationTask.cleanup => context.l10n.cleanupResult,
+            CreationTask.motion => null,
+          };
+    final staticResultStatus = staticResult == null
+        ? null
+        : switch (widget.task) {
+            CreationTask.style => context.l10n.styleApplied,
+            CreationTask.optimize => context.l10n.optimizeApplied,
+            CreationTask.cleanup => context.l10n.cleanupApplied,
+            CreationTask.motion => null,
+          };
+    final photoSemanticsLabel = [
+      context.l10n.photoPreviewArea,
+      ?staticResultName,
+      ?staticResultStatus,
+    ].join(', ');
     final showUnavailable =
         selectedCapability != null &&
         !_hasRuntimeImplementation(selectedCapability) &&
         !_hasCloudReconciliationRequired &&
         generatedMedia == null;
-    final unavailableTitle =
-        selectedCapability != null &&
-            _isCloudGenerationCapability(selectedCapability)
-        ? switch (_cloudCapabilityDiscovery) {
-            _CloudCapabilityDiscovery.notLoaded =>
-              context.l10n.cloudCapabilitiesNotLoaded,
-            _CloudCapabilityDiscovery.loading =>
-              context.l10n.cloudCapabilitiesLoading,
-            _CloudCapabilityDiscovery.failed =>
-              context.l10n.cloudCapabilitiesConnectionFailed,
-            _CloudCapabilityDiscovery.loaded =>
-              context.l10n.cloudCapabilityUnavailable,
-          }
-        : context.l10n.capabilityUnavailable;
-    final unavailableDetail =
-        selectedCapability != null &&
-            _isCloudGenerationCapability(selectedCapability)
-        ? switch (_cloudCapabilityDiscovery) {
-            _CloudCapabilityDiscovery.notLoaded =>
-              context.l10n.cloudCapabilitiesNotLoadedDetail,
-            _CloudCapabilityDiscovery.loading =>
-              context.l10n.cloudCapabilitiesLoadingDetail,
-            _CloudCapabilityDiscovery.failed =>
-              context.l10n.cloudCapabilitiesConnectionFailedDetail,
-            _CloudCapabilityDiscovery.loaded =>
-              context.l10n.cloudCapabilityUnavailableDetail,
-          }
-        : context.l10n.capabilityUnavailableDetail;
+    late final String unavailableTitle;
+    if (selectedCapability != null &&
+        _isCloudGenerationCapability(selectedCapability)) {
+      unavailableTitle = switch (_cloudCapabilityDiscovery) {
+        _CloudCapabilityDiscovery.notLoaded =>
+          context.l10n.cloudCapabilitiesNotLoaded,
+        _CloudCapabilityDiscovery.loading =>
+          context.l10n.cloudCapabilitiesLoading,
+        _CloudCapabilityDiscovery.failed =>
+          context.l10n.cloudCapabilitiesConnectionFailed,
+        _CloudCapabilityDiscovery.loaded =>
+          context.l10n.cloudCapabilityUnavailable,
+      };
+    } else {
+      unavailableTitle = context.l10n.capabilityUnavailable;
+    }
     final cloudFailureMessage = switch (_cloudGenerationJob?.errorCode) {
       'generation_concurrency_exceeded' =>
         context.l10n.generationConcurrencyExceeded,
@@ -2731,6 +2717,12 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
     };
     final textScaler = MediaQuery.textScalerOf(context);
     final styleRailHeight = 82 + textScaler.scale(16);
+    final visibleStyles = <_StyleChoice>[
+      ..._officialStyles,
+      if (_aiStyle case final restoredStyle?)
+        if (!_officialStyles.any((style) => style.id == restoredStyle.id))
+          restoredStyle,
+    ];
     return SafeArea(
       top: false,
       child: Column(
@@ -2748,17 +2740,13 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
                       Semantics(
                         key: const ValueKey('style-workspace-source-photo'),
                         image: true,
-                        label: context.l10n.photoPreviewArea,
-                        child: Image.file(
-                          File(previewPath),
-                          key: ValueKey(
-                            _upscaleArtifact == null
-                                ? 'capability-source-preview'
-                                : 'optimize-generated-result-preview',
-                          ),
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, _, _) =>
-                              Center(child: Text(context.l10n.photoLoadFailed)),
+                        label: photoSemanticsLabel,
+                        child: _buildPhotoCanvas(
+                          context,
+                          project: project,
+                          photo: photo,
+                          previewPath: previewPath,
+                          generatedImageVisible: generatedImage != null,
                         ),
                       ),
                       if (motionMedia != null)
@@ -2777,6 +2765,14 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
                             icon: const Icon(Icons.play_arrow_rounded),
                           ),
                         ),
+                      ?_buildWorkspaceStatus(
+                        context,
+                        project: project,
+                        selectedCapability: selectedCapability,
+                        showUnavailable: showUnavailable,
+                        unavailableTitle: unavailableTitle,
+                        cloudFailureMessage: cloudFailureMessage,
+                      ),
                     ],
                   ),
                 ),
@@ -2800,55 +2796,35 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text(
-                        context.l10n.chooseCapabilityTitle,
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        context.l10n.chooseCapabilityHint,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          children: [
-                            for (final choice in choices)
-                              Padding(
-                                padding: const EdgeInsets.only(right: 8),
-                                child: _CapabilityOption(
-                                  key: ValueKey(
-                                    '${widget.task.name}-capability-'
-                                    '${choice.keySuffix}',
+                      if (choices.isNotEmpty)
+                        SingleChildScrollView(
+                          key: ValueKey('${widget.task.name}-capability-rail'),
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              for (final choice in choices)
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 8),
+                                  child: _CapabilityOption(
+                                    key: ValueKey(
+                                      '${widget.task.name}-capability-'
+                                      '${choice.keySuffix}',
+                                    ),
+                                    label: choice.label(context),
+                                    selected:
+                                        choice.capability == selectedCapability,
+                                    onTap: _interactionLocked
+                                        ? null
+                                        : () => unawaited(
+                                            _activateCapability(
+                                              choice.capability,
+                                            ),
+                                          ),
                                   ),
-                                  label: choice.label(context),
-                                  selected:
-                                      choice.capability == selectedCapability,
-                                  onTap:
-                                      _interactionLocked ||
-                                          _hasActiveCloudGeneration
-                                      ? null
-                                      : () => unawaited(
-                                          _selectCapability(choice.capability),
-                                        ),
                                 ),
-                              ),
-                          ],
-                        ),
-                      ),
-                      if (selectedChoice != null) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          selectedChoice.description(context),
-                          key: ValueKey(
-                            '${widget.task.name}-capability-description',
+                            ],
                           ),
-                          style: Theme.of(context).textTheme.bodyMedium,
                         ),
-                      ],
                       if (showOfficialStyles) ...[
                         const SizedBox(height: 14),
                         SizedBox(
@@ -2856,688 +2832,39 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
                           child: ListView.separated(
                             key: const ValueKey('style-options'),
                             scrollDirection: Axis.horizontal,
-                            itemCount: _officialStyles.length,
+                            itemCount: visibleStyles.length,
                             separatorBuilder: (_, _) =>
                                 const SizedBox(width: 10),
                             itemBuilder: (context, index) {
-                              final style = _officialStyles[index];
+                              final style = visibleStyles[index];
                               return _StyleOption(
                                 key: ValueKey('style-option-${style.id}'),
                                 style: style,
                                 sourcePath: photo.localPath,
-                                selected: style.id == _selectedStyleId,
+                                selected: style.id == _illustrationStyleId
+                                    ? selectedCapability ==
+                                          CreationCapability.styleAiRedraw
+                                    : selectedCapability ==
+                                              CreationCapability
+                                                  .styleOfficial &&
+                                          style.id == _selectedStyleId,
                                 onTap: _interactionLocked
                                     ? null
-                                    : () => unawaited(_selectStyle(style.id)),
+                                    : () => unawaited(
+                                        style.id == _illustrationStyleId
+                                            ? _activateIllustrationStyle()
+                                            : _activateOfficialStyle(style.id),
+                                      ),
                               );
                             },
                           ),
                         ),
                       ],
-                      if (showLocalStyleInput) ...[
-                        const SizedBox(height: 14),
-                        FilledButton(
-                          key: const ValueKey('style-define-primary-action'),
-                          onPressed: _interactionLocked
-                              ? null
-                              : () => _defineLocalStyle(project),
-                          child: Text(context.l10n.defineStyle),
-                        ),
-                      ],
-                      if (showReplacementPicker) ...[
-                        const SizedBox(height: 14),
-                        if (_cleanupSubjectAvailable == false) ...[
-                          Semantics(
-                            key: const ValueKey('cleanup-task-unavailable'),
-                            liveRegion: true,
-                            child: Text(
-                              context.l10n.cleanupSubjectUnavailable,
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(
-                                    color: Theme.of(context).colorScheme.error,
-                                  ),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                        ],
-                        FilledButton(
-                          key: const ValueKey(
-                            'cleanup-choose-background-action',
-                          ),
-                          onPressed:
-                              _interactionLocked ||
-                                  _cleanupSubjectAvailable != true
-                              ? null
-                              : _chooseReplacementBackground,
-                          child: Text(
-                            _choosingBackground
-                                ? context.l10n.importingBackground
-                                : context.l10n.chooseReplacementBackground,
-                          ),
-                        ),
-                      ],
-                      if (showUpscale) ...[
-                        const SizedBox(height: 14),
-                        Text(
-                          context.l10n.chooseUpscaleScale,
-                          style: Theme.of(context).textTheme.labelLarge,
-                        ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          children: [
-                            ChoiceChip(
-                              key: const ValueKey('upscale-scale-2x'),
-                              label: const Text('2×'),
-                              selected:
-                                  _selectedUpscaleScale ==
-                                  UpscalePhotoScale.twoX,
-                              onSelected: _interactionLocked
-                                  ? null
-                                  : (_) => setState(() {
-                                      _selectedUpscaleScale =
-                                          UpscalePhotoScale.twoX;
-                                      _upscaleArtifact = null;
-                                      _localGenerationFailed = false;
-                                      _savedGeneratedAssetId = null;
-                                    }),
-                            ),
-                            ChoiceChip(
-                              key: const ValueKey('upscale-scale-4x'),
-                              label: const Text('4×'),
-                              selected:
-                                  _selectedUpscaleScale ==
-                                  UpscalePhotoScale.fourX,
-                              onSelected: _interactionLocked
-                                  ? null
-                                  : (_) => setState(() {
-                                      _selectedUpscaleScale =
-                                          UpscalePhotoScale.fourX;
-                                      _upscaleArtifact = null;
-                                      _localGenerationFailed = false;
-                                      _savedGeneratedAssetId = null;
-                                    }),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        if (_upscaleArtifact == null)
-                          FilledButton(
-                            key: const ValueKey(
-                              'optimize-upscale-primary-action',
-                            ),
-                            onPressed:
-                                _interactionLocked ||
-                                    _selectedUpscaleScale == null
-                                ? null
-                                : () => _generateUpscale(project),
-                            child: Text(
-                              _generatingLocalResult
-                                  ? context.l10n.generatingResult
-                                  : context.l10n.generateUpscale,
-                            ),
-                          ),
-                        if (_upscaleArtifact != null) ...[
-                          const SizedBox(height: 8),
-                          Semantics(
-                            key: const ValueKey(
-                              'optimize-generated-result-ready',
-                            ),
-                            liveRegion: true,
-                            child: Text(context.l10n.upscaleReady),
-                          ),
-                          const SizedBox(height: 8),
-                          FilledButton.icon(
-                            key: const ValueKey(
-                              'optimize-generated-result-save',
-                            ),
-                            onPressed:
-                                _interactionLocked ||
-                                    generatedMedia == null ||
-                                    _generatedMediaActions == null
-                                ? null
-                                : () => _saveGeneratedResult(generatedMedia),
-                            icon: const Icon(Icons.save_alt_rounded),
-                            label: Text(context.l10n.saveToAlbum),
-                          ),
-                          const SizedBox(height: 8),
-                          OutlinedButton.icon(
-                            key: const ValueKey(
-                              'optimize-generated-result-share',
-                            ),
-                            onPressed: _interactionLocked
-                                ? null
-                                : () => _shareGeneratedResult(
-                                    _upscaleArtifact!.outputPath,
-                                  ),
-                            icon: const Icon(Icons.ios_share_rounded),
-                            label: Text(context.l10n.shareResult),
-                          ),
-                        ],
-                        if (_localGenerationFailed) ...[
-                          const SizedBox(height: 8),
-                          Semantics(
-                            key: const ValueKey(
-                              'optimize-generated-result-failed',
-                            ),
-                            liveRegion: true,
-                            child: Text(
-                              context.l10n.generationFailed,
-                              style: TextStyle(
-                                color: Theme.of(context).colorScheme.error,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                      if (showMotion) ...[
-                        const SizedBox(height: 14),
-                        if (_motionArtifact == null)
-                          FilledButton.icon(
-                            key: const ValueKey(
-                              'motion-generate-primary-action',
-                            ),
-                            onPressed: _interactionLocked
-                                ? null
-                                : () => _generateMotion(project),
-                            icon: const Icon(Icons.play_arrow_rounded),
-                            label: Text(
-                              _generatingLocalResult
-                                  ? context.l10n.generatingResult
-                                  : context.l10n.generateMotion,
-                            ),
-                          ),
-                        if (_motionArtifact != null) ...[
-                          const SizedBox(height: 8),
-                          Semantics(
-                            key: const ValueKey(
-                              'motion-generated-result-ready',
-                            ),
-                            liveRegion: true,
-                            child: Text(context.l10n.motionReady),
-                          ),
-                          const SizedBox(height: 8),
-                          OutlinedButton.icon(
-                            key: const ValueKey('motion-generated-result-play'),
-                            onPressed:
-                                _interactionLocked ||
-                                    motionMedia == null ||
-                                    _generatedMediaActions == null
-                                ? null
-                                : () => _previewMotionResult(motionMedia),
-                            icon: const Icon(Icons.play_arrow_rounded),
-                            label: Text(context.l10n.previewMotionResult),
-                          ),
-                          const SizedBox(height: 8),
-                          FilledButton.icon(
-                            key: const ValueKey('motion-generated-result-save'),
-                            onPressed:
-                                _interactionLocked ||
-                                    motionMedia == null ||
-                                    _generatedMediaActions == null
-                                ? null
-                                : () => _saveGeneratedResult(motionMedia),
-                            icon: const Icon(Icons.save_alt_rounded),
-                            label: Text(context.l10n.saveToAlbum),
-                          ),
-                          const SizedBox(height: 8),
-                          OutlinedButton.icon(
-                            key: const ValueKey(
-                              'motion-generated-result-share',
-                            ),
-                            onPressed: _interactionLocked
-                                ? null
-                                : () => _shareGeneratedResult(
-                                    _motionArtifact!.outputPath,
-                                  ),
-                            icon: const Icon(Icons.ios_share_rounded),
-                            label: Text(context.l10n.shareResult),
-                          ),
-                          TextButton(
-                            key: const ValueKey(
-                              'motion-choose-another-capability',
-                            ),
-                            onPressed:
-                                _interactionLocked || _hasActiveCloudGeneration
-                                ? null
-                                : _returnToCapabilityList,
-                            child: Text(context.l10n.chooseAnotherCapability),
-                          ),
-                        ],
-                        if (_localGenerationFailed) ...[
-                          const SizedBox(height: 8),
-                          Semantics(
-                            key: const ValueKey(
-                              'motion-generated-result-failed',
-                            ),
-                            liveRegion: true,
-                            child: Text(
-                              context.l10n.generationFailed,
-                              style: TextStyle(
-                                color: Theme.of(context).colorScheme.error,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                      if (showCloudGeneration) ...[
-                        const SizedBox(height: 14),
-                        if (selectedCapability ==
-                            CreationCapability.optimizeOldPhoto) ...[
-                          Text(
-                            context.l10n.chooseOldPhotoColorMode,
-                            style: Theme.of(context).textTheme.labelLarge,
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            children: [
-                              ChoiceChip(
-                                key: const ValueKey('old-photo-mode-preserve'),
-                                label: Text(context.l10n.oldPhotoPreserveColor),
-                                selected:
-                                    _oldPhotoColorMode ==
-                                    OldPhotoColorMode.preserve,
-                                onSelected:
-                                    _interactionLocked || cloudRequestLocked
-                                    ? null
-                                    : (_) => setState(() {
-                                        _oldPhotoColorMode =
-                                            OldPhotoColorMode.preserve;
-                                        _cloudGenerationJob = null;
-                                        _cloudGenerationFailed = false;
-                                        _savedGeneratedAssetId = null;
-                                      }),
-                              ),
-                              ChoiceChip(
-                                key: const ValueKey('old-photo-mode-colorize'),
-                                label: Text(context.l10n.oldPhotoColorize),
-                                selected:
-                                    _oldPhotoColorMode ==
-                                    OldPhotoColorMode.colorize,
-                                onSelected:
-                                    _interactionLocked || cloudRequestLocked
-                                    ? null
-                                    : (_) => setState(() {
-                                        _oldPhotoColorMode =
-                                            OldPhotoColorMode.colorize;
-                                        _cloudGenerationJob = null;
-                                        _cloudGenerationFailed = false;
-                                        _savedGeneratedAssetId = null;
-                                      }),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                        ],
-                        if (selectedCapability ==
-                            CreationCapability.styleAiRedraw) ...[
-                          TextField(
-                            key: const ValueKey('ai-redraw-style-definition'),
-                            controller: _aiRedrawController,
-                            minLines: 2,
-                            maxLines: 4,
-                            maxLength: StyleDefinition.maxAiRedrawIntentLength,
-                            enabled: !_interactionLocked && !cloudRequestLocked,
-                            decoration: InputDecoration(
-                              labelText: context.l10n.aiRedrawDefinitionLabel,
-                              hintText: context.l10n.aiRedrawDefinitionHint,
-                              error: _aiRedrawValidationError == null
-                                  ? null
-                                  : Semantics(
-                                      key: const ValueKey(
-                                        'ai-redraw-intent-error',
-                                      ),
-                                      liveRegion: true,
-                                      child: Text(_aiRedrawValidationError!),
-                                    ),
-                            ),
-                            onChanged: _updateAiRedrawDraft,
-                          ),
-                          const SizedBox(height: 8),
-                          OutlinedButton(
-                            key: const ValueKey('ai-redraw-confirm-definition'),
-                            onPressed:
-                                _interactionLocked ||
-                                    cloudRequestLocked ||
-                                    _aiRedrawDraft.trim().isEmpty ||
-                                    _confirmedAiRedrawDefinition != null
-                                ? null
-                                : _confirmAiRedrawDefinition,
-                            child: Text(context.l10n.aiRedrawConfirmIntent),
-                          ),
-                          if (_confirmedAiRedrawDefinition
-                              case final definition?) ...[
-                            const SizedBox(height: 10),
-                            Card(
-                              key: const ValueKey('ai-redraw-intent-preview'),
-                              child: Padding(
-                                padding: const EdgeInsets.all(12),
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    Text(
-                                      context.l10n.aiRedrawIntentPreviewTitle,
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.labelLarge,
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      definition.visualIntent,
-                                      key: const ValueKey(
-                                        'ai-redraw-confirmed-visual-intent',
-                                      ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      context.l10n.aiRedrawIntentVersion(
-                                        definition.revision,
-                                      ),
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.bodySmall,
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      context.l10n.aiRedrawIntentConfirmed,
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.bodySmall,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 10),
-                        ],
-                        if (selectedCapability ==
-                                CreationCapability.cleanupRemovePasserby ||
-                            selectedCapability ==
-                                CreationCapability.cleanupBrushRemove) ...[
-                          OutlinedButton.icon(
-                            key: const ValueKey('cleanup-mask-input-action'),
-                            onPressed: _interactionLocked || cloudRequestLocked
-                                ? null
-                                : () => _chooseRemovalMask(project),
-                            icon: const Icon(Icons.brush_outlined),
-                            label: Text(
-                              _maskRemovalInput == null
-                                  ? context.l10n.markRemovalArea
-                                  : context.l10n.changeRemovalArea,
-                            ),
-                          ),
-                          if (_maskRemovalInput != null) ...[
-                            const SizedBox(height: 8),
-                            Semantics(
-                              key: const ValueKey('cleanup-mask-input-ready'),
-                              liveRegion: true,
-                              child: Text(context.l10n.removalAreaReady),
-                            ),
-                          ],
-                          const SizedBox(height: 10),
-                        ],
-                        if (!cloudRequestLocked && !cloudJobSucceeded)
-                          FilledButton.icon(
-                            key: ValueKey(
-                              '${widget.task.name}-cloud-primary-action',
-                            ),
-                            onPressed:
-                                _interactionLocked ||
-                                    !cloudInputReady ||
-                                    !cloudCapabilityAvailable
-                                ? null
-                                : () => _startCloudGeneration(project),
-                            icon: const Icon(Icons.auto_fix_high_rounded),
-                            label: Text(
-                              _creatingCloudResult
-                                  ? context.l10n.generatingResult
-                                  : context.l10n.confirmCloudGeneration,
-                            ),
-                          ),
-                        if (cloudJobIsActive) ...[
-                          Semantics(
-                            key: ValueKey(
-                              '${widget.task.name}-cloud-result-progress',
-                            ),
-                            liveRegion: true,
-                            child: Text(
-                              _cloudGenerationJob?.state ==
-                                      GenerationJobState.queued
-                                  ? context.l10n.cloudGenerationQueued
-                                  : context.l10n.cloudGenerationRunning,
-                            ),
-                          ),
-                          if (_cloudGenerationJob?.canCancel == true) ...[
-                            const SizedBox(height: 8),
-                            OutlinedButton(
-                              key: ValueKey(
-                                '${widget.task.name}-cloud-result-cancel',
-                              ),
-                              onPressed: _interactionLocked
-                                  ? null
-                                  : _cancelCloudGeneration,
-                              child: Text(context.l10n.cancelGeneration),
-                            ),
-                          ],
-                        ],
-                        if (_cloudGenerationJob?.state ==
-                            GenerationJobState.cancelled) ...[
-                          const SizedBox(height: 8),
-                          Semantics(
-                            key: ValueKey(
-                              '${widget.task.name}-cloud-result-cancelled',
-                            ),
-                            liveRegion: true,
-                            child: Text(
-                              _cloudGenerationJob?.usageState ==
-                                      GenerationUsageState.released
-                                  ? context
-                                        .l10n
-                                        .generationCancelledCreditReleased
-                                  : context.l10n.generationCancelled,
-                            ),
-                          ),
-                        ],
-                        if (_hasCloudReconciliationRequired) ...[
-                          const SizedBox(height: 8),
-                          Semantics(
-                            key: ValueKey(
-                              '${widget.task.name}-cloud-reconciliation-required',
-                            ),
-                            container: true,
-                            liveRegion: true,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  context.l10n.cloudReconciliationRequired,
-                                  style: Theme.of(
-                                    context,
-                                  ).textTheme.titleMedium,
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  context
-                                      .l10n
-                                      .cloudReconciliationRequiredDetail,
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.onSurfaceVariant,
-                                      ),
-                                ),
-                                const SizedBox(height: 8),
-                                OutlinedButton(
-                                  key: ValueKey(
-                                    '${widget.task.name}-cloud-reconciliation-check',
-                                  ),
-                                  onPressed: _interactionLocked
-                                      ? null
-                                      : _reconcileCloudGeneration,
-                                  child: Text(
-                                    context.l10n.checkCloudGenerationStatus,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                        if (cloudJobSucceeded) ...[
-                          const SizedBox(height: 8),
-                          Semantics(
-                            key: ValueKey(
-                              '${widget.task.name}-cloud-result-ready',
-                            ),
-                            liveRegion: true,
-                            child: Text(context.l10n.cloudGenerationReady),
-                          ),
-                          const SizedBox(height: 8),
-                          if (cloudOutput.kind ==
-                              GeneratedMediaKind.imageMotion) ...[
-                            OutlinedButton.icon(
-                              key: ValueKey(
-                                '${widget.task.name}-cloud-result-play',
-                              ),
-                              onPressed:
-                                  _interactionLocked ||
-                                      _generatedMediaActions == null
-                                  ? null
-                                  : () => _previewMotionResult(cloudOutput),
-                              icon: const Icon(Icons.play_arrow_rounded),
-                              label: Text(context.l10n.previewMotionResult),
-                            ),
-                            const SizedBox(height: 8),
-                          ],
-                          FilledButton.icon(
-                            key: ValueKey(
-                              '${widget.task.name}-cloud-result-save',
-                            ),
-                            onPressed:
-                                _interactionLocked ||
-                                    _generatedMediaActions == null
-                                ? null
-                                : () => _saveGeneratedResult(cloudOutput),
-                            icon: const Icon(Icons.save_alt_rounded),
-                            label: Text(context.l10n.saveToAlbum),
-                          ),
-                          const SizedBox(height: 8),
-                          OutlinedButton.icon(
-                            key: ValueKey(
-                              '${widget.task.name}-cloud-result-share',
-                            ),
-                            onPressed: _interactionLocked
-                                ? null
-                                : () => _shareGeneratedResult(
-                                    cloudOutput.localPath,
-                                  ),
-                            icon: const Icon(Icons.ios_share_rounded),
-                            label: Text(context.l10n.shareResult),
-                          ),
-                        ],
-                        if (_cloudGenerationFailed &&
-                            !_hasCloudReconciliationRequired) ...[
-                          const SizedBox(height: 8),
-                          Semantics(
-                            key: ValueKey(
-                              '${widget.task.name}-cloud-result-failed',
-                            ),
-                            liveRegion: true,
-                            child: Text(
-                              cloudFailureMessage,
-                              style: TextStyle(
-                                color: Theme.of(context).colorScheme.error,
-                              ),
-                            ),
-                          ),
-                          if (cloudJobIsActive) ...[
-                            const SizedBox(height: 8),
-                            OutlinedButton(
-                              key: ValueKey(
-                                '${widget.task.name}-cloud-result-refresh',
-                              ),
-                              onPressed: _interactionLocked
-                                  ? null
-                                  : () => unawaited(
-                                      _retryCloudGenerationObservation(
-                                        selectedCapability,
-                                      ),
-                                    ),
-                              child: Text(context.l10n.retry),
-                            ),
-                          ],
-                        ],
-                      ],
-                      if (generatedMedia != null &&
-                          _savedGeneratedAssetId != null) ...[
-                        const SizedBox(height: 8),
-                        Semantics(
-                          key: const ValueKey('generated-media-saved-state'),
-                          liveRegion: true,
-                          child: Text(context.l10n.savedToSystemPhotos),
-                        ),
-                      ],
-                      if (generatedMedia != null && _photoPermissionDenied) ...[
-                        const SizedBox(height: 8),
-                        Text(context.l10n.photoPermissionPurpose),
-                        TextButton(
-                          key: const ValueKey(
-                            'generated-media-open-photo-settings',
-                          ),
-                          onPressed: _interactionLocked
-                              ? null
-                              : _openPhotoSettings,
-                          child: Text(context.l10n.settings),
-                        ),
-                      ],
-                      if (showUnavailable) ...[
-                        const SizedBox(height: 14),
-                        Semantics(
-                          key: ValueKey(
-                            '${widget.task.name}-capability-unavailable-state',
-                          ),
-                          container: true,
-                          liveRegion: true,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                unavailableTitle,
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                unavailableDetail,
-                                style: Theme.of(context).textTheme.bodySmall
-                                    ?.copyWith(
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.onSurfaceVariant,
-                                    ),
-                              ),
-                              if (_isCloudGenerationCapability(
-                                selectedCapability,
-                              )) ...[
-                                const SizedBox(height: 8),
-                                OutlinedButton(
-                                  key: ValueKey(
-                                    '${widget.task.name}-cloud-capability-refresh',
-                                  ),
-                                  onPressed: _interactionLocked
-                                      ? null
-                                      : () => _refreshSelectedCloudCapability(
-                                          selectedCapability,
-                                        ),
-                                  child: Text(context.l10n.retry),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ],
+                      _buildCompactResultActions(
+                        context,
+                        project: project,
+                        generatedMedia: generatedMedia,
+                      ),
                     ],
                   ),
                 ),
@@ -3548,307 +2875,125 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
       ),
     );
   }
+}
 
-  Widget _buildLocalTaskControls(
-    BuildContext context,
-    PhotoProject project,
-    _StyleChoice selected,
-    bool previewFailed,
-  ) {
-    final isCleanup = widget.task == CreationTask.cleanup;
-    final capability = project.creationCapability;
-    final iosLocalTask = _capabilities?.platform == EditPlatform.ios;
-    final cleanupUnavailable = isCleanup && _cleanupSubjectAvailable != true;
-    final taskUnavailable = !iosLocalTask || cleanupUnavailable;
-    final actionLabel = switch (capability) {
-      CreationCapability.cleanupWhite => context.l10n.applyWhiteBackground,
-      CreationCapability.cleanupTransparent =>
-        context.l10n.applyTransparentBackground,
-      CreationCapability.cleanupReplaceBackground =>
-        context.l10n.applyReplacementBackground,
-      _ => context.l10n.applyNaturalOptimization,
-    };
-    final actionKey = isCleanup
-        ? const ValueKey('cleanup-primary-action')
-        : const ValueKey('optimize-primary-action');
-    final taskTitle = isCleanup
-        ? context.l10n.removeBackgroundOrObjects
-        : context.l10n.optimizePhoto;
-    final taskSubtitle = switch (capability) {
-      CreationCapability.cleanupWhite =>
-        context.l10n.capabilityCleanupWhiteDescription,
-      CreationCapability.cleanupTransparent =>
-        context.l10n.capabilityCleanupTransparentDescription,
-      CreationCapability.cleanupReplaceBackground =>
-        context.l10n.capabilityCleanupReplaceBackgroundDescription,
-      _ => context.l10n.capabilityOptimizeNaturalDescription,
-    };
-    return Column(
-      key: ValueKey('${widget.task.name}-task-controls'),
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(taskTitle, style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 4),
-        Text(
-          taskSubtitle,
-          key: ValueKey('${widget.task.name}-capability-description'),
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-        ),
-        const SizedBox(height: 14),
-        if (!iosLocalTask) ...[
-          Semantics(
-            key: ValueKey('${widget.task.name}-task-unavailable'),
-            liveRegion: true,
-            child: Text(
-              context.l10n.localStaticTaskIosOnly,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.error,
+class _FloatingWorkspaceNavigation extends StatelessWidget {
+  const _FloatingWorkspaceNavigation({
+    required this.title,
+    required this.enabled,
+    required this.onPressed,
+  });
+
+  final String title;
+  final bool enabled;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+    bottom: false,
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: SizedBox(
+        height: 44,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Material(
+                color: Colors.black.withValues(alpha: 0.58),
+                shape: const CircleBorder(),
+                clipBehavior: Clip.antiAlias,
+                child: IconButton(
+                  key: const ValueKey('style-workspace-back'),
+                  tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+                  onPressed: enabled ? onPressed : null,
+                  icon: const Icon(Icons.arrow_back_ios_new, size: 20),
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 8),
-        ] else if (cleanupUnavailable) ...[
-          Semantics(
-            key: const ValueKey('cleanup-task-unavailable'),
-            liveRegion: true,
-            child: Text(
-              context.l10n.cleanupSubjectUnavailable,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.error,
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-        ],
-        if (capability == CreationCapability.cleanupReplaceBackground) ...[
-          OutlinedButton(
-            key: const ValueKey('cleanup-change-background-action'),
-            onPressed: _interactionLocked ? null : _chooseReplacementBackground,
-            child: Text(context.l10n.chooseAnotherBackground),
-          ),
-          const SizedBox(height: 8),
-        ],
-        if (previewFailed) ...[
-          Semantics(
-            liveRegion: true,
-            child: Row(
-              children: [
-                Expanded(
+            IgnorePointer(
+              child: Material(
+                key: const ValueKey('style-workspace-title'),
+                color: Colors.black.withValues(alpha: 0.58),
+                borderRadius: BorderRadius.circular(22),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 9,
+                  ),
                   child: Text(
-                    context.l10n.effectPreviewUnavailable,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.error,
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: AppTheme.softWhite,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                TextButton(
-                  key: ValueKey('${widget.task.name}-preview-retry'),
-                  onPressed: _interactionLocked ? null : _retryPreview,
-                  child: Text(context.l10n.retry),
-                ),
-              ],
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-        ],
-        FilledButton(
-          key: actionKey,
-          onPressed:
-              _interactionLocked || !_selectedPreviewReady || taskUnavailable
-              ? null
-              : () => _applyStyle(project),
-          child: Text(_applying ? context.l10n.applyingStyle : actionLabel),
+          ],
         ),
-        TextButton(
-          key: ValueKey('${widget.task.name}-choose-capability'),
-          onPressed: _interactionLocked || _hasActiveCloudGeneration
-              ? null
-              : _returnToCapabilityList,
-          child: Text(context.l10n.chooseAnotherCapability),
-        ),
-        if (project.recoverableStaticStyleResult != null &&
-            project.currentStaticStyleResult == null) ...[
-          const SizedBox(height: 4),
-          TextButton(
-            key: ValueKey('${widget.task.name}-restore-previous-result'),
-            onPressed: _interactionLocked ? null : _restorePreviousResult,
-            child: Text(context.l10n.restorePreviousResult),
-          ),
-        ],
-      ],
-    );
-  }
+      ),
+    ),
+  );
+}
 
-  Widget _buildStaticResultControls(
-    BuildContext context,
-    PhotoProject project,
-    _StyleChoice selected,
-  ) {
-    final summary = _exportSummary;
-    final saved = summary?.savedCount == 1 && summary?.failedCount == 0;
-    final failed = summary != null && !saved;
-    final sharingSupported = _capabilities?.platform == EditPlatform.ios;
-    final canShare =
-        sharingSupported &&
-        (summary?.canShare == true ||
-            context.read<PhotoExporter>() is PhotoResultPreparer);
-    final taskResultName = switch (widget.task) {
-      CreationTask.style => selected.label(context),
-      CreationTask.optimize => context.l10n.optimizeResult,
-      CreationTask.cleanup => context.l10n.cleanupResult,
-      CreationTask.motion => context.l10n.motionUnavailable,
-    };
-    final staticResultStatus = switch (widget.task) {
-      CreationTask.style => context.l10n.styleApplied,
-      CreationTask.optimize => context.l10n.optimizeApplied,
-      CreationTask.cleanup => context.l10n.cleanupApplied,
-      CreationTask.motion => context.l10n.motionUnavailable,
-    };
-    final status = _preparingShare
-        ? context.l10n.preparingShare
-        : _exporting
-        ? _exportStage == PhotoExportStage.savingToPhotoLibrary
-              ? context.l10n.savingToSystemPhotos
-              : context.l10n.preparingExport
-        : saved
-        ? context.l10n.savedToSystemPhotos
-        : failed
-        ? _photoPermissionDenied
-              ? context.l10n.photoPermissionPurpose
-              : context.l10n.exportFailedTitle
-        : staticResultStatus;
-    final icon = _preparingShare
-        ? Icons.hourglass_top_rounded
-        : saved
-        ? Icons.check_circle_rounded
-        : failed
-        ? Icons.error_outline_rounded
-        : Icons.check_circle_outline_rounded;
-    return Column(
-      key: const ValueKey('style-static-result-controls'),
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          widget.task == CreationTask.style
-              ? context.l10n.currentStyle
-              : context.l10n.currentResult,
-          style: Theme.of(context).textTheme.labelSmall,
-        ),
-        const SizedBox(height: 2),
-        Text(
-          taskResultName,
-          key: const ValueKey('current-style-name'),
-          style: Theme.of(
-            context,
-          ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 10),
-        Semantics(
-          key: const ValueKey('style-result-status'),
-          container: true,
-          liveRegion: true,
-          excludeSemantics: true,
-          label: status,
-          child: Row(
-            children: [
-              Icon(icon, size: 20),
-              const SizedBox(width: 8),
-              Expanded(child: Text(status)),
+class _WorkspaceStatusPill extends StatelessWidget {
+  const _WorkspaceStatusPill({
+    required this.message,
+    required this.actionLabel,
+    required this.actionKey,
+    required this.onAction,
+    super.key,
+  });
+
+  final String message;
+  final String? actionLabel;
+  final Key? actionKey;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    container: true,
+    liveRegion: true,
+    child: Material(
+      color: Colors.black.withValues(alpha: 0.72),
+      borderRadius: BorderRadius.circular(18),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(12, 7, onAction == null ? 12 : 4, 7),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                message,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: AppTheme.softWhite),
+              ),
+            ),
+            if (onAction != null && actionLabel != null) ...[
+              const SizedBox(width: 4),
+              TextButton(
+                key: actionKey,
+                onPressed: onAction,
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(44, 44),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text(actionLabel!),
+              ),
             ],
-          ),
+          ],
         ),
-        const SizedBox(height: 14),
-        if (_exporting)
-          FilledButton.icon(
-            key: const ValueKey('style-result-save'),
-            onPressed: null,
-            icon: const SizedBox.square(
-              dimension: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            label: Text(status),
-          )
-        else if (failed && _photoPermissionDenied)
-          FilledButton(
-            key: const ValueKey('style-result-open-settings'),
-            onPressed: _interactionLocked ? null : _openPhotoSettings,
-            child: Text(context.l10n.goToSystemSettings),
-          )
-        else if (failed)
-          FilledButton(
-            key: const ValueKey('style-result-retry'),
-            onPressed: _interactionLocked
-                ? null
-                : () => _exportStyleResult(project.photos.single.id),
-            child: Text(context.l10n.retry),
-          )
-        else if (!saved)
-          FilledButton(
-            key: const ValueKey('style-result-save'),
-            onPressed: _interactionLocked ? null : _saveStyleResult,
-            child: Text(context.l10n.saveToAlbum),
-          ),
-        if (canShare) ...[
-          const SizedBox(height: 4),
-          if (saved)
-            FilledButton.icon(
-              key: const ValueKey('style-result-share'),
-              onPressed: _interactionLocked ? null : _shareStyleResult,
-              icon: _sharing
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.ios_share_outlined),
-              label: Text(
-                _preparingShare
-                    ? context.l10n.preparingShare
-                    : _sharing
-                    ? context.l10n.sharingPhotos
-                    : context.l10n.shareResult,
-              ),
-            )
-          else
-            OutlinedButton.icon(
-              key: const ValueKey('style-result-share'),
-              onPressed: _interactionLocked ? null : _shareStyleResult,
-              icon: _sharing
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.ios_share_outlined),
-              label: Text(
-                _preparingShare
-                    ? context.l10n.preparingShare
-                    : _sharing
-                    ? context.l10n.sharingPhotos
-                    : context.l10n.shareResult,
-              ),
-            ),
-          if (_preparingShare)
-            TextButton(
-              key: const ValueKey('style-result-cancel-preparation'),
-              onPressed: _cancelSharePreparation,
-              child: Text(context.l10n.cancel),
-            ),
-        ],
-        if (!_exporting) ...[
-          const SizedBox(height: 4),
-          TextButton(
-            key: const ValueKey('style-result-change-style'),
-            onPressed: _interactionLocked || _hasActiveCloudGeneration
-                ? null
-                : _returnToCapabilityList,
-            child: Text(context.l10n.chooseAnotherCapability),
-          ),
-        ],
-      ],
-    );
-  }
+      ),
+    ),
+  );
 }
 
 class _StyleOption extends StatelessWidget {
@@ -3907,6 +3052,7 @@ class _StyleOption extends StatelessWidget {
             const SizedBox(height: 5),
             Text(
               style.label(context),
+              key: selected ? const ValueKey('current-style-name') : null,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
@@ -3995,18 +3141,18 @@ bool _isCloudGenerationCapability(CreationCapability capability) =>
 
 typedef _StyleLabel = String Function(BuildContext context);
 
+const _illustrationStyleId = 'illustration-v1';
+
 class _CapabilityChoice {
   const _CapabilityChoice({
     required this.capability,
     required this.keySuffix,
     required this.label,
-    required this.description,
   });
 
   final CreationCapability capability;
   final String keySuffix;
   final _StyleLabel label;
-  final _StyleLabel description;
 }
 
 List<_CapabilityChoice> _capabilityChoicesForTask(CreationTask task) =>
@@ -4016,102 +3162,49 @@ List<_CapabilityChoice> _capabilityChoicesForTask(CreationTask task) =>
           capability: CreationCapability.optimizeNatural,
           keySuffix: 'natural',
           label: (context) => context.l10n.capabilityOptimizeNatural,
-          description: (context) =>
-              context.l10n.capabilityOptimizeNaturalDescription,
         ),
         _CapabilityChoice(
           capability: CreationCapability.optimizeAiRepair,
           keySuffix: 'ai-repair',
           label: (context) => context.l10n.capabilityOptimizeAiRepair,
-          description: (context) =>
-              context.l10n.capabilityOptimizeAiRepairDescription,
         ),
         _CapabilityChoice(
           capability: CreationCapability.optimizeUpscale,
           keySuffix: 'upscale',
           label: (context) => context.l10n.capabilityOptimizeUpscale,
-          description: (context) =>
-              context.l10n.capabilityOptimizeUpscaleDescription,
         ),
         _CapabilityChoice(
           capability: CreationCapability.optimizeOldPhoto,
           keySuffix: 'old-photo',
           label: (context) => context.l10n.capabilityOptimizeOldPhoto,
-          description: (context) =>
-              context.l10n.capabilityOptimizeOldPhotoDescription,
         ),
       ],
-      CreationTask.style => [
-        _CapabilityChoice(
-          capability: CreationCapability.styleOfficial,
-          keySuffix: 'official',
-          label: (context) => context.l10n.capabilityStyleOfficial,
-          description: (context) =>
-              context.l10n.capabilityStyleOfficialDescription,
-        ),
-        _CapabilityChoice(
-          capability: CreationCapability.styleText,
-          keySuffix: 'text',
-          label: (context) => context.l10n.capabilityStyleText,
-          description: (context) => context.l10n.capabilityStyleTextDescription,
-        ),
-        _CapabilityChoice(
-          capability: CreationCapability.styleVoice,
-          keySuffix: 'voice',
-          label: (context) => context.l10n.capabilityStyleVoice,
-          description: (context) =>
-              context.l10n.capabilityStyleVoiceDescription,
-        ),
-        _CapabilityChoice(
-          capability: CreationCapability.styleReference,
-          keySuffix: 'reference',
-          label: (context) => context.l10n.capabilityStyleReference,
-          description: (context) =>
-              context.l10n.capabilityStyleReferenceDescription,
-        ),
-        _CapabilityChoice(
-          capability: CreationCapability.styleAiRedraw,
-          keySuffix: 'ai-redraw',
-          label: (context) => context.l10n.capabilityStyleAiRedraw,
-          description: (context) =>
-              context.l10n.capabilityStyleAiRedrawDescription,
-        ),
-      ],
+      CreationTask.style => const [],
       CreationTask.cleanup => [
         _CapabilityChoice(
           capability: CreationCapability.cleanupWhite,
           keySuffix: 'white',
           label: (context) => context.l10n.capabilityCleanupWhite,
-          description: (context) =>
-              context.l10n.capabilityCleanupWhiteDescription,
         ),
         _CapabilityChoice(
           capability: CreationCapability.cleanupTransparent,
           keySuffix: 'transparent',
           label: (context) => context.l10n.capabilityCleanupTransparent,
-          description: (context) =>
-              context.l10n.capabilityCleanupTransparentDescription,
         ),
         _CapabilityChoice(
           capability: CreationCapability.cleanupReplaceBackground,
           keySuffix: 'replace-background',
           label: (context) => context.l10n.capabilityCleanupReplaceBackground,
-          description: (context) =>
-              context.l10n.capabilityCleanupReplaceBackgroundDescription,
         ),
         _CapabilityChoice(
           capability: CreationCapability.cleanupRemovePasserby,
           keySuffix: 'remove-passerby',
           label: (context) => context.l10n.capabilityCleanupRemovePasserby,
-          description: (context) =>
-              context.l10n.capabilityCleanupRemovePasserbyDescription,
         ),
         _CapabilityChoice(
           capability: CreationCapability.cleanupBrushRemove,
           keySuffix: 'brush-remove',
           label: (context) => context.l10n.capabilityCleanupBrushRemove,
-          description: (context) =>
-              context.l10n.capabilityCleanupBrushRemoveDescription,
         ),
       ],
       CreationTask.motion => [
@@ -4119,29 +3212,21 @@ List<_CapabilityChoice> _capabilityChoicesForTask(CreationTask task) =>
           capability: CreationCapability.motionSubtle,
           keySuffix: 'subtle',
           label: (context) => context.l10n.capabilityMotionSubtle,
-          description: (context) =>
-              context.l10n.capabilityMotionSubtleDescription,
         ),
         _CapabilityChoice(
           capability: CreationCapability.motionCameraPush,
           keySuffix: 'camera-push',
           label: (context) => context.l10n.capabilityMotionCameraPush,
-          description: (context) =>
-              context.l10n.capabilityMotionCameraPushDescription,
         ),
         _CapabilityChoice(
           capability: CreationCapability.motionLightFlow,
           keySuffix: 'light-flow',
           label: (context) => context.l10n.capabilityMotionLightFlow,
-          description: (context) =>
-              context.l10n.capabilityMotionLightFlowDescription,
         ),
         _CapabilityChoice(
           capability: CreationCapability.motionAiNatural,
           keySuffix: 'ai-natural',
           label: (context) => context.l10n.capabilityMotionAiNatural,
-          description: (context) =>
-              context.l10n.capabilityMotionAiNaturalDescription,
         ),
       ],
     };
@@ -4176,6 +3261,20 @@ class _StyleChoice {
 
 String _compactStyleName(String name) =>
     name.length > 10 ? '${name.substring(0, 10)}…' : name;
+
+_StyleLabel _restoredStyleLabel(String styleId, String? storedName) {
+  if (storedName != null) return (_) => _compactStyleName(storedName);
+  return switch (styleId) {
+    'natural' => (context) => context.l10n.styleNatural,
+    'soft-light' => (context) => context.l10n.styleSoftLight,
+    'night' => (context) => context.l10n.styleNight,
+    'cool' => (context) => context.l10n.styleCool,
+    'warm-sun' => (context) => context.l10n.styleWarmSun,
+    'mono' => (context) => context.l10n.styleMono,
+    'ai-custom' => (context) => context.l10n.styleAiCustom,
+    _ => (context) => context.l10n.styleSavedCustom,
+  };
+}
 
 List<_StyleChoice> _stylesForTask(CreationTask task) => switch (task) {
   CreationTask.optimize => [
@@ -4289,51 +3388,40 @@ List<_StyleChoice> _stylesFor(CreationIntent intent) {
   }
   return [
     choice(
-      'natural',
-      (c) => c.l10n.styleNatural,
-      PhotoFilter.clean,
-      42,
-      _Filters.natural,
-      exposure: 0.02,
+      'japanese-v1',
+      (c) => c.l10n.styleJapanese,
+      PhotoFilter.faded,
+      34,
+      _Filters.japanese,
+      exposure: 0.04,
+      saturation: -0.04,
     ),
     choice(
-      'soft-light',
-      (c) => c.l10n.styleSoftLight,
-      PhotoFilter.portrait,
-      38,
-      _Filters.soft,
-      exposure: 0.03,
+      'film-v1',
+      (c) => c.l10n.styleFilm,
+      PhotoFilter.film,
+      58,
+      _Filters.film,
+      warmth: 0.02,
+      contrast: 0.03,
     ),
     choice(
-      'night',
-      (c) => c.l10n.styleNight,
-      PhotoFilter.night,
-      48,
-      _Filters.night,
-      contrast: 0.05,
+      _illustrationStyleId,
+      (c) => c.l10n.styleIllustration,
+      PhotoFilter.vivid,
+      44,
+      _Filters.illustration,
+      saturation: 0.08,
+      contrast: 0.04,
     ),
     choice(
-      'cool',
-      (c) => c.l10n.styleCool,
-      PhotoFilter.coolAir,
-      42,
-      _Filters.cool,
-      warmth: -0.05,
-    ),
-    choice(
-      'warm-sun',
-      (c) => c.l10n.styleWarmSun,
-      PhotoFilter.warmSun,
-      40,
-      _Filters.warm,
-      warmth: 0.04,
-    ),
-    choice(
-      'mono',
-      (c) => c.l10n.styleMono,
-      PhotoFilter.noir,
-      52,
-      _Filters.mono,
+      'cinematic-v1',
+      (c) => c.l10n.styleCinematic,
+      PhotoFilter.cinematic,
+      56,
+      _Filters.cinema,
+      saturation: -0.05,
+      contrast: 0.08,
     ),
   ];
 }
@@ -4377,6 +3465,72 @@ abstract final class _Filters {
     0.96,
     0,
     2,
+    0,
+    0,
+    0,
+    1,
+    0,
+  ]);
+  static const japanese = ColorFilter.matrix(<double>[
+    1.04,
+    0.02,
+    0,
+    0,
+    6,
+    0.01,
+    1.03,
+    0.01,
+    0,
+    5,
+    0.01,
+    0.02,
+    0.96,
+    0,
+    4,
+    0,
+    0,
+    0,
+    1,
+    0,
+  ]);
+  static const film = ColorFilter.matrix(<double>[
+    1.06,
+    0.03,
+    0.01,
+    0,
+    2,
+    0.02,
+    1.0,
+    0.02,
+    0,
+    1,
+    0.02,
+    0.03,
+    0.9,
+    0,
+    -2,
+    0,
+    0,
+    0,
+    1,
+    0,
+  ]);
+  static const illustration = ColorFilter.matrix(<double>[
+    1.14,
+    -0.02,
+    -0.02,
+    0,
+    1,
+    -0.03,
+    1.12,
+    -0.03,
+    0,
+    1,
+    -0.02,
+    -0.02,
+    1.14,
+    0,
+    1,
     0,
     0,
     0,
@@ -4443,28 +3597,6 @@ abstract final class _Filters {
     0.91,
     0,
     -2,
-    0,
-    0,
-    0,
-    1,
-    0,
-  ]);
-  static const mono = ColorFilter.matrix(<double>[
-    0.33,
-    0.59,
-    0.11,
-    0,
-    0,
-    0.33,
-    0.59,
-    0.11,
-    0,
-    0,
-    0.33,
-    0.59,
-    0.11,
-    0,
-    0,
     0,
     0,
     0,

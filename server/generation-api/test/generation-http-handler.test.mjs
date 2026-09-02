@@ -6,7 +6,7 @@ import { HmacOfferAuthority } from '../src/security/hmac-offer-authority.mjs';
 
 const OFFER_IDS = {
   optimizeAiRepair: 'optimize-ai-repair@1:credit-1',
-  optimizeOldPhoto: 'optimize-old-photo@1:credit-1',
+  optimizeOldPhoto: 'optimize-old-photo@2:credit-1',
   styleAiRedraw: 'style-ai-redraw@1:credit-1',
   cleanupRemovePasserby: 'cleanup-remove-passerby-mask@1:credit-1',
   cleanupBrushRemove: 'cleanup-brush-remove-mask@1:credit-1',
@@ -203,7 +203,7 @@ test('an unauthenticated request is rejected before media or providers are touch
   assert.equal(mediaTouched, false);
 });
 
-test('capability discovery reports the old-photo feature gate without choosing for the user', async () => {
+test('capability discovery exposes old-photo repair through the configured Alibaba provider', async () => {
   const handler = createGenerationHttpHandler({
     authenticator: async () => ({ ownerId: 'user-1' }),
     taskRepository: memoryTaskRepository(),
@@ -233,14 +233,14 @@ test('capability discovery reports the old-photo feature gate without choosing f
     body.capabilities.find((item) => item.capability === 'optimizeOldPhoto'),
     {
       capability: 'optimizeOldPhoto',
-      enabled: false,
-      provider: 'volcengine',
-      model: 'lens_opr',
-      recipeVersion: 'optimize-old-photo@1',
-      providerCancelable: false,
-      cancelBoundary: 'not_provider_cancelable',
+      enabled: true,
+      provider: 'alibaba',
+      model: 'wanx2.1-imageedit',
+      recipeVersion: 'optimize-old-photo@2',
+      providerCancelable: true,
+      cancelBoundary: 'provider_pending_only',
       offer: {
-        id: 'optimize-old-photo@1:credit-1',
+        id: 'optimize-old-photo@2:credit-1',
         creditCost: 1,
         expiresAt: '2026-09-01T03:15:00.000Z',
       },
@@ -811,16 +811,15 @@ test('old-photo color mode is explicit and part of idempotency identity', async 
       },
     },
     providers: {
-      volcengine: {
-        enabled: true,
-        cancelPolicy: 'none',
+      alibaba: {
+        cancelPolicy: 'pending-only',
         async submit(input) {
           providerCalls.push(input);
           return {
             kind: 'succeeded',
-            provider: 'volcengine',
-            model: 'lens_opr',
-            providerRequestId: 'volc-request',
+            provider: 'alibaba',
+            model: 'wanx2.1-imageedit',
+            providerRequestId: 'ali-request',
             providerCancelable: false,
             output: {
               kind: 'base64',

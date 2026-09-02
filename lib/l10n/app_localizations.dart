@@ -242,24 +242,6 @@ abstract class AppLocalizations {
   /// **'当前结果'**
   String get currentResult;
 
-  /// No description provided for @chooseCapabilityTitle.
-  ///
-  /// In zh, this message translates to:
-  /// **'请选择能力'**
-  String get chooseCapabilityTitle;
-
-  /// No description provided for @chooseCapabilityHint.
-  ///
-  /// In zh, this message translates to:
-  /// **'系统不会替你选择；每次只执行你点选的一项。'**
-  String get chooseCapabilityHint;
-
-  /// No description provided for @chooseAnotherCapability.
-  ///
-  /// In zh, this message translates to:
-  /// **'重新选择能力'**
-  String get chooseAnotherCapability;
-
   /// No description provided for @capabilityUnavailable.
   ///
   /// In zh, this message translates to:
@@ -362,36 +344,6 @@ abstract class AppLocalizations {
   /// **'老照片修复'**
   String get capabilityOptimizeOldPhoto;
 
-  /// No description provided for @capabilityStyleOfficial.
-  ///
-  /// In zh, this message translates to:
-  /// **'官方风格'**
-  String get capabilityStyleOfficial;
-
-  /// No description provided for @capabilityStyleText.
-  ///
-  /// In zh, this message translates to:
-  /// **'文字定风格'**
-  String get capabilityStyleText;
-
-  /// No description provided for @capabilityStyleVoice.
-  ///
-  /// In zh, this message translates to:
-  /// **'语音定风格'**
-  String get capabilityStyleVoice;
-
-  /// No description provided for @capabilityStyleReference.
-  ///
-  /// In zh, this message translates to:
-  /// **'参考图风格'**
-  String get capabilityStyleReference;
-
-  /// No description provided for @capabilityStyleAiRedraw.
-  ///
-  /// In zh, this message translates to:
-  /// **'AI 风格重绘'**
-  String get capabilityStyleAiRedraw;
-
   /// No description provided for @capabilityCleanupWhite.
   ///
   /// In zh, this message translates to:
@@ -446,126 +398,6 @@ abstract class AppLocalizations {
   /// **'AI 自然动效'**
   String get capabilityMotionAiNatural;
 
-  /// No description provided for @capabilityOptimizeNaturalDescription.
-  ///
-  /// In zh, this message translates to:
-  /// **'本地改善亮度、清晰度和质感，原图保持不变。'**
-  String get capabilityOptimizeNaturalDescription;
-
-  /// No description provided for @capabilityOptimizeAiRepairDescription.
-  ///
-  /// In zh, this message translates to:
-  /// **'修复模糊、噪点和细节缺失。'**
-  String get capabilityOptimizeAiRepairDescription;
-
-  /// No description provided for @capabilityOptimizeUpscaleDescription.
-  ///
-  /// In zh, this message translates to:
-  /// **'提升分辨率并保留主体细节。'**
-  String get capabilityOptimizeUpscaleDescription;
-
-  /// No description provided for @capabilityOptimizeOldPhotoDescription.
-  ///
-  /// In zh, this message translates to:
-  /// **'修复划痕、褪色和老照片损伤。'**
-  String get capabilityOptimizeOldPhotoDescription;
-
-  /// No description provided for @capabilityStyleOfficialDescription.
-  ///
-  /// In zh, this message translates to:
-  /// **'从内置可复现风格中明确选择一种。'**
-  String get capabilityStyleOfficialDescription;
-
-  /// No description provided for @capabilityStyleTextDescription.
-  ///
-  /// In zh, this message translates to:
-  /// **'根据你输入的文字定义风格。'**
-  String get capabilityStyleTextDescription;
-
-  /// No description provided for @capabilityStyleVoiceDescription.
-  ///
-  /// In zh, this message translates to:
-  /// **'根据你确认的语音转写定义风格。'**
-  String get capabilityStyleVoiceDescription;
-
-  /// No description provided for @capabilityStyleReferenceDescription.
-  ///
-  /// In zh, this message translates to:
-  /// **'将参考图的光色质感应用到当前照片。'**
-  String get capabilityStyleReferenceDescription;
-
-  /// No description provided for @capabilityStyleAiRedrawDescription.
-  ///
-  /// In zh, this message translates to:
-  /// **'生成重新绘制的风格化静态图片。'**
-  String get capabilityStyleAiRedrawDescription;
-
-  /// No description provided for @capabilityCleanupWhiteDescription.
-  ///
-  /// In zh, this message translates to:
-  /// **'识别人像主体并生成白色背景。'**
-  String get capabilityCleanupWhiteDescription;
-
-  /// No description provided for @capabilityCleanupTransparentDescription.
-  ///
-  /// In zh, this message translates to:
-  /// **'抠出主体并生成透明背景图片。'**
-  String get capabilityCleanupTransparentDescription;
-
-  /// No description provided for @capabilityCleanupReplaceBackgroundDescription.
-  ///
-  /// In zh, this message translates to:
-  /// **'抠出主体后使用你选择的新背景。'**
-  String get capabilityCleanupReplaceBackgroundDescription;
-
-  /// No description provided for @capabilityCleanupRemovePasserbyDescription.
-  ///
-  /// In zh, this message translates to:
-  /// **'移除画面中的路人并补全背景。'**
-  String get capabilityCleanupRemovePasserbyDescription;
-
-  /// No description provided for @capabilityCleanupBrushRemoveDescription.
-  ///
-  /// In zh, this message translates to:
-  /// **'只移除你明确涂抹标记的内容。'**
-  String get capabilityCleanupBrushRemoveDescription;
-
-  /// No description provided for @capabilityMotionSubtleDescription.
-  ///
-  /// In zh, this message translates to:
-  /// **'为整张照片添加幅度克制的平移与缩放动态。'**
-  String get capabilityMotionSubtleDescription;
-
-  /// No description provided for @capabilityMotionCameraPushDescription.
-  ///
-  /// In zh, this message translates to:
-  /// **'生成镜头缓慢推进的动态效果。'**
-  String get capabilityMotionCameraPushDescription;
-
-  /// No description provided for @capabilityMotionLightFlowDescription.
-  ///
-  /// In zh, this message translates to:
-  /// **'生成光影自然流动的动态效果。'**
-  String get capabilityMotionLightFlowDescription;
-
-  /// No description provided for @capabilityMotionAiNaturalDescription.
-  ///
-  /// In zh, this message translates to:
-  /// **'将照片上传到云端并生成 3 秒自然动态视频。'**
-  String get capabilityMotionAiNaturalDescription;
-
-  /// No description provided for @chooseUpscaleScale.
-  ///
-  /// In zh, this message translates to:
-  /// **'选择放大倍率'**
-  String get chooseUpscaleScale;
-
-  /// No description provided for @generateUpscale.
-  ///
-  /// In zh, this message translates to:
-  /// **'生成高清图片'**
-  String get generateUpscale;
-
   /// No description provided for @generatingResult.
   ///
   /// In zh, this message translates to:
@@ -577,12 +409,6 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'高清图片已生成，可分享或保存。'**
   String get upscaleReady;
-
-  /// No description provided for @generateMotion.
-  ///
-  /// In zh, this message translates to:
-  /// **'生成动态照片'**
-  String get generateMotion;
 
   /// No description provided for @motionReady.
   ///
@@ -728,53 +554,11 @@ abstract class AppLocalizations {
   /// **'智能上色'**
   String get oldPhotoColorize;
 
-  /// No description provided for @aiRedrawDefinitionLabel.
-  ///
-  /// In zh, this message translates to:
-  /// **'描述要重绘成什么风格'**
-  String get aiRedrawDefinitionLabel;
-
-  /// No description provided for @aiRedrawDefinitionHint.
-  ///
-  /// In zh, this message translates to:
-  /// **'例如：保留人物身份，改成低饱和电影剧照'**
-  String get aiRedrawDefinitionHint;
-
   /// No description provided for @aiRedrawDefinitionSummary.
   ///
   /// In zh, this message translates to:
   /// **'只按你确认的生成意图重绘，不会自动改成其他方向。'**
   String get aiRedrawDefinitionSummary;
-
-  /// No description provided for @aiRedrawConfirmIntent.
-  ///
-  /// In zh, this message translates to:
-  /// **'确认生成意图'**
-  String get aiRedrawConfirmIntent;
-
-  /// No description provided for @aiRedrawIntentPreviewTitle.
-  ///
-  /// In zh, this message translates to:
-  /// **'生成意图'**
-  String get aiRedrawIntentPreviewTitle;
-
-  /// No description provided for @aiRedrawIntentConfirmed.
-  ///
-  /// In zh, this message translates to:
-  /// **'已冻结这份定义；修改文字后需要重新确认。'**
-  String get aiRedrawIntentConfirmed;
-
-  /// No description provided for @aiRedrawIntentVersion.
-  ///
-  /// In zh, this message translates to:
-  /// **'定义版本 {revision}'**
-  String aiRedrawIntentVersion(int revision);
-
-  /// No description provided for @aiRedrawIntentInvalid.
-  ///
-  /// In zh, this message translates to:
-  /// **'请输入 1 至 500 个可见字符，不能包含隐藏或控制字符。'**
-  String get aiRedrawIntentInvalid;
 
   /// No description provided for @markRemovalArea.
   ///
@@ -793,12 +577,6 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'已使用你手动涂抹的区域，不会自动选择其他内容。'**
   String get removalAreaReady;
-
-  /// No description provided for @applyNaturalOptimization.
-  ///
-  /// In zh, this message translates to:
-  /// **'应用自然优化'**
-  String get applyNaturalOptimization;
 
   /// No description provided for @applyWhiteBackground.
   ///
@@ -1076,6 +854,36 @@ abstract class AppLocalizations {
   /// **'自然参考'**
   String get styleReferenceNaturalTitle;
 
+  /// No description provided for @styleJapanese.
+  ///
+  /// In zh, this message translates to:
+  /// **'日系'**
+  String get styleJapanese;
+
+  /// No description provided for @styleFilm.
+  ///
+  /// In zh, this message translates to:
+  /// **'胶片'**
+  String get styleFilm;
+
+  /// No description provided for @styleIllustration.
+  ///
+  /// In zh, this message translates to:
+  /// **'插画'**
+  String get styleIllustration;
+
+  /// No description provided for @styleCinematic.
+  ///
+  /// In zh, this message translates to:
+  /// **'电影感'**
+  String get styleCinematic;
+
+  /// No description provided for @styleIllustrationIntent.
+  ///
+  /// In zh, this message translates to:
+  /// **'保留人物身份、五官、姿势和原始构图，转换为精致自然的手绘插画风格；线条干净，色彩柔和，细节完整，不添加文字、水印或无关物体。'**
+  String get styleIllustrationIntent;
+
   /// No description provided for @styleNatural.
   ///
   /// In zh, this message translates to:
@@ -1165,6 +973,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'换个风格'**
   String get changeStyle;
+
+  /// No description provided for @generateMotion.
+  ///
+  /// In zh, this message translates to:
+  /// **'生成动态照片'**
+  String get generateMotion;
 
   /// No description provided for @motionConfirmationTitle.
   ///

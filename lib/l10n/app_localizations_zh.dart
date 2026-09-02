@@ -81,15 +81,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get currentResult => '当前结果';
 
   @override
-  String get chooseCapabilityTitle => '请选择能力';
-
-  @override
-  String get chooseCapabilityHint => '系统不会替你选择；每次只执行你点选的一项。';
-
-  @override
-  String get chooseAnotherCapability => '重新选择能力';
-
-  @override
   String get capabilityUnavailable => '该能力尚未完成';
 
   @override
@@ -146,21 +137,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get capabilityOptimizeOldPhoto => '老照片修复';
 
   @override
-  String get capabilityStyleOfficial => '官方风格';
-
-  @override
-  String get capabilityStyleText => '文字定风格';
-
-  @override
-  String get capabilityStyleVoice => '语音定风格';
-
-  @override
-  String get capabilityStyleReference => '参考图风格';
-
-  @override
-  String get capabilityStyleAiRedraw => 'AI 风格重绘';
-
-  @override
   String get capabilityCleanupWhite => '人物白底';
 
   @override
@@ -188,73 +164,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get capabilityMotionAiNatural => 'AI 自然动效';
 
   @override
-  String get capabilityOptimizeNaturalDescription => '本地改善亮度、清晰度和质感，原图保持不变。';
-
-  @override
-  String get capabilityOptimizeAiRepairDescription => '修复模糊、噪点和细节缺失。';
-
-  @override
-  String get capabilityOptimizeUpscaleDescription => '提升分辨率并保留主体细节。';
-
-  @override
-  String get capabilityOptimizeOldPhotoDescription => '修复划痕、褪色和老照片损伤。';
-
-  @override
-  String get capabilityStyleOfficialDescription => '从内置可复现风格中明确选择一种。';
-
-  @override
-  String get capabilityStyleTextDescription => '根据你输入的文字定义风格。';
-
-  @override
-  String get capabilityStyleVoiceDescription => '根据你确认的语音转写定义风格。';
-
-  @override
-  String get capabilityStyleReferenceDescription => '将参考图的光色质感应用到当前照片。';
-
-  @override
-  String get capabilityStyleAiRedrawDescription => '生成重新绘制的风格化静态图片。';
-
-  @override
-  String get capabilityCleanupWhiteDescription => '识别人像主体并生成白色背景。';
-
-  @override
-  String get capabilityCleanupTransparentDescription => '抠出主体并生成透明背景图片。';
-
-  @override
-  String get capabilityCleanupReplaceBackgroundDescription => '抠出主体后使用你选择的新背景。';
-
-  @override
-  String get capabilityCleanupRemovePasserbyDescription => '移除画面中的路人并补全背景。';
-
-  @override
-  String get capabilityCleanupBrushRemoveDescription => '只移除你明确涂抹标记的内容。';
-
-  @override
-  String get capabilityMotionSubtleDescription => '为整张照片添加幅度克制的平移与缩放动态。';
-
-  @override
-  String get capabilityMotionCameraPushDescription => '生成镜头缓慢推进的动态效果。';
-
-  @override
-  String get capabilityMotionLightFlowDescription => '生成光影自然流动的动态效果。';
-
-  @override
-  String get capabilityMotionAiNaturalDescription => '将照片上传到云端并生成 3 秒自然动态视频。';
-
-  @override
-  String get chooseUpscaleScale => '选择放大倍率';
-
-  @override
-  String get generateUpscale => '生成高清图片';
-
-  @override
   String get generatingResult => '正在生成…';
 
   @override
   String get upscaleReady => '高清图片已生成，可分享或保存。';
-
-  @override
-  String get generateMotion => '生成动态照片';
 
   @override
   String get motionReady => '动态照片已生成，可分享或保存。';
@@ -335,30 +248,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get oldPhotoColorize => '智能上色';
 
   @override
-  String get aiRedrawDefinitionLabel => '描述要重绘成什么风格';
-
-  @override
-  String get aiRedrawDefinitionHint => '例如：保留人物身份，改成低饱和电影剧照';
-
-  @override
   String get aiRedrawDefinitionSummary => '只按你确认的生成意图重绘，不会自动改成其他方向。';
-
-  @override
-  String get aiRedrawConfirmIntent => '确认生成意图';
-
-  @override
-  String get aiRedrawIntentPreviewTitle => '生成意图';
-
-  @override
-  String get aiRedrawIntentConfirmed => '已冻结这份定义；修改文字后需要重新确认。';
-
-  @override
-  String aiRedrawIntentVersion(int revision) {
-    return '定义版本 $revision';
-  }
-
-  @override
-  String get aiRedrawIntentInvalid => '请输入 1 至 500 个可见字符，不能包含隐藏或控制字符。';
 
   @override
   String get markRemovalArea => '涂抹要移除的区域';
@@ -368,9 +258,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get removalAreaReady => '已使用你手动涂抹的区域，不会自动选择其他内容。';
-
-  @override
-  String get applyNaturalOptimization => '应用自然优化';
 
   @override
   String get applyWhiteBackground => '应用白底';
@@ -511,6 +398,22 @@ class AppLocalizationsZh extends AppLocalizations {
   String get styleReferenceNaturalTitle => '自然参考';
 
   @override
+  String get styleJapanese => '日系';
+
+  @override
+  String get styleFilm => '胶片';
+
+  @override
+  String get styleIllustration => '插画';
+
+  @override
+  String get styleCinematic => '电影感';
+
+  @override
+  String get styleIllustrationIntent =>
+      '保留人物身份、五官、姿势和原始构图，转换为精致自然的手绘插画风格；线条干净，色彩柔和，细节完整，不添加文字、水印或无关物体。';
+
+  @override
   String get styleNatural => '自然';
 
   @override
@@ -554,6 +457,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get changeStyle => '换个风格';
+
+  @override
+  String get generateMotion => '生成动态照片';
 
   @override
   String get motionConfirmationTitle => '生成动态作品';

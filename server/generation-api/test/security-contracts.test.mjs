@@ -4,6 +4,8 @@ import { Readable } from 'node:stream';
 import test from 'node:test';
 
 import { HmacOfferAuthority } from '../src/security/hmac-offer-authority.mjs';
+import { createCloudflareAlibabaResultDownloader } from '../src/cloudflare/alibaba-result-downloader.mjs';
+import { isAllowedAlibabaResultHost } from '../src/security/alibaba-result-host.mjs';
 import { LocalFixedUsageGuard } from '../src/security/local-fixed-usage-guard.mjs';
 import { probeImage } from '../src/security/image-probe.mjs';
 import { probeMp4 } from '../src/security/mp4-probe.mjs';
@@ -182,6 +184,49 @@ test('Alibaba result downloader rejects private DNS and enforces streaming limit
     ),
     (error) => error.code === 'provider_output_redirect_forbidden',
   );
+});
+
+test('Alibaba result hosts follow the documented dynamic DashScope OSS formats', () => {
+  assert.equal(
+    isAllowedAlibabaResultHost(
+      'dashscope-result-wlcb.oss-cn-wulanchabu.aliyuncs.com',
+    ),
+    true,
+  );
+  assert.equal(
+    isAllowedAlibabaResultHost('dashscope-a717.oss-accelerate.aliyuncs.com'),
+    true,
+  );
+  assert.equal(
+    isAllowedAlibabaResultHost('other-result.oss-cn-beijing.aliyuncs.com'),
+    false,
+  );
+  assert.equal(
+    isAllowedAlibabaResultHost(
+      'dashscope-result.oss-cn-beijing.aliyuncs.com.attacker.example',
+    ),
+    false,
+  );
+});
+
+test('Cloudflare Alibaba result downloader uses manual redirects and still rejects 3xx', async () => {
+  let redirectMode;
+  const downloader = createCloudflareAlibabaResultDownloader({
+    fetchImpl: async (_url, init) => {
+      redirectMode = init.redirect;
+      return new Response(null, {
+        status: 302,
+        headers: { location: 'https://other.example/result.png' },
+      });
+    },
+  });
+  await assert.rejects(
+    downloader.download(
+      'https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/result.png',
+    ),
+    (error) => error.code === 'provider_output_redirect_forbidden',
+  );
+  assert.equal(redirectMode, 'manual');
 });
 
 test('Alibaba result deadline covers DNS and rejects IPv4-mapped loopback', { timeout: 1000 }, async () => {

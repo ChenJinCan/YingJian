@@ -2,6 +2,7 @@ import { fetchProviderJson } from './bounded-provider-fetch.mjs';
 import { ProviderError } from './provider-error.mjs';
 
 export const ALIBABA_IMAGE_TO_VIDEO_MODEL = 'wan2.6-i2v-flash';
+const ALIBABA_BEIJING_BASE_URL = 'https://dashscope.aliyuncs.com';
 
 const VIDEO_DURATION_SECONDS = 3;
 const VIDEO_RESOLUTION = '720P';
@@ -19,18 +20,15 @@ export function isAlibabaImageToVideoCapability(capability) {
 }
 
 export class AlibabaImageToVideoProvider {
-  constructor({ apiKey, workspaceId, fetchImpl }) {
+  constructor({ apiKey, fetchImpl }) {
     if (typeof apiKey !== 'string' || apiKey.length === 0) {
       throw new TypeError('apiKey is required.');
-    }
-    if (!/^[A-Za-z0-9-]+$/.test(workspaceId ?? '')) {
-      throw new TypeError('workspaceId is required and must be a safe host label.');
     }
     if (typeof fetchImpl !== 'function') {
       throw new TypeError('fetchImpl is required.');
     }
     this.apiKey = apiKey;
-    this.baseUrl = `https://${workspaceId}.cn-beijing.maas.aliyuncs.com`;
+    this.baseUrl = ALIBABA_BEIJING_BASE_URL;
     this.fetchImpl = fetchImpl;
     this.name = 'alibaba';
     this.cancelPolicy = 'pending-only';

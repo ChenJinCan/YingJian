@@ -24,7 +24,6 @@ function recordingFetch(responseBody = {
 function providerWith(transport) {
   return new AlibabaImageToVideoProvider({
     apiKey: 'server-only-key',
-    workspaceId: 'workspace-123',
     fetchImpl: transport.fetchImpl,
   });
 }
@@ -51,7 +50,7 @@ for (const [capability, recipe] of Object.entries(expectedRecipes)) {
     const call = transport.calls[0];
     assert.equal(
       call.url,
-      'https://workspace-123.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis',
+      'https://dashscope.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis',
     );
     assert.equal(call.init.headers.authorization, 'Bearer server-only-key');
     assert.equal(call.init.headers['x-dashscope-async'], 'enable');
@@ -114,7 +113,7 @@ test('the motion provider reads the provider video URL without exposing the API 
 
   assert.equal(
     transport.calls[0].url,
-    'https://workspace-123.cn-beijing.maas.aliyuncs.com/api/v1/tasks/ali-video-task-1',
+    'https://dashscope.aliyuncs.com/api/v1/tasks/ali-video-task-1',
   );
   assert.deepEqual(result, {
     kind: 'succeeded',

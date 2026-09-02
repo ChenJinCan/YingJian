@@ -24,7 +24,8 @@
 - [Flutter 工程基座](architecture/flutter-foundation.md)：分层、依赖方向、平台边界与应用组装。
 - [静态风格执行](architecture/style-execution.md)：风格定义如何形成确定性应用结果。
 - [派生媒体生成管线](architecture/generation-pipeline.md)：静态与动态生成任务、隐私、幂等和结果生命周期。
-- [四任务首页 ADR](adr/0005-four-task-home.md)：用户任务、明确能力选择与静态/动态页面分支分离的决定。
+- [结果直达工作区 ADR](adr/0006-direct-result-actions.md)：悬浮导航、点击即执行、四个结果风格与不阻塞云状态的当前决定。
+- [四任务首页 ADR](adr/0005-four-task-home.md)：用户任务、明确能力选择与静态/动态页面分支分离的决定；下游二次 CTA 和旧风格分类已由 ADR 0006 取代。
 - [Style-first creation ADR](adr/0004-style-first-creation.md)：从工具编辑转向风格优先的架构决定；首页入口部分已由 ADR 0005 取代。
 - [现有编辑核心 ADR](adr/0003-editing-core-and-render-plan.md)：仅保留仍有效的内部执行约束；其产品入口部分已被新 ADR 取代。
 - [MVP 质量基线](quality/mvp-quality-baseline.md)：主旅程、静态应用、动态作品、设备与人工验收门。

@@ -3,6 +3,8 @@ import { promisify } from 'node:util';
 import { request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
 
+import { isAllowedAlibabaResultHost } from './alibaba-result-host.mjs';
+
 const defaultLookup = promisify(dnsLookupCallback);
 
 class DownloadError extends Error {
@@ -57,15 +59,6 @@ function isPublicAddress(address) {
   return true;
 }
 
-function allowedAlibabaHost(hostname) {
-  return (
-    hostname.startsWith('dashscope-') &&
-    (hostname.endsWith('.oss-cn-beijing.aliyuncs.com') ||
-      hostname.endsWith('.oss-cn-shanghai.aliyuncs.com') ||
-      hostname.endsWith('.oss-accelerate.aliyuncs.com'))
-  );
-}
-
 async function withTimeout(promise, timeoutMilliseconds) {
   let timeout;
   try {
@@ -107,7 +100,7 @@ export function createAlibabaResultDownloader({
         url.username !== '' ||
         url.password !== '' ||
         isIP(url.hostname) !== 0 ||
-        !allowedAlibabaHost(url.hostname)
+        !isAllowedAlibabaResultHost(url.hostname)
       ) {
         throw new DownloadError('provider_output_host_forbidden');
       }

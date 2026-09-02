@@ -1,3 +1,5 @@
+import { isAllowedAlibabaResultHost } from '../security/alibaba-result-host.mjs';
+
 const ALLOWED_MIME_TYPES = new Set([
   'image/jpeg',
   'image/png',
@@ -14,17 +16,11 @@ class DownloadError extends Error {
   }
 }
 
-function allowedAlibabaHost(hostname) {
-  return (
-    hostname.endsWith('.oss-cn-beijing.aliyuncs.com') &&
-    hostname !== 'oss-cn-beijing.aliyuncs.com'
-  );
-}
-
 /**
  * Workers do not expose the Node socket lookup pinning used by the local
- * gateway. At the edge we instead allow only Alibaba's exact HTTPS OSS suffix,
- * reject redirects, and use Cloudflare's outbound fetch isolation.
+ * gateway. At the edge we instead allow only Alibaba's documented dynamic
+ * DashScope HTTPS OSS host format, reject redirects, and use Cloudflare's
+ * outbound fetch isolation.
  */
 export function createCloudflareAlibabaResultDownloader({
   fetchImpl = globalThis.fetch,
@@ -47,7 +43,7 @@ export function createCloudflareAlibabaResultDownloader({
         url.port !== '' ||
         url.username !== '' ||
         url.password !== '' ||
-        !allowedAlibabaHost(url.hostname)
+        !isAllowedAlibabaResultHost(url.hostname)
       ) {
         throw new DownloadError('provider_output_host_forbidden');
       }
@@ -64,7 +60,9 @@ export function createCloudflareAlibabaResultDownloader({
             headers: {
               accept: 'image/png,image/jpeg,image/webp,image/bmp,video/mp4',
             },
-            redirect: 'error',
+            // Cloudflare Workers do not implement `redirect: "error"`.
+            // Manual mode lets us reject 3xx without following the signed URL.
+            redirect: 'manual',
             signal: controller.signal,
           });
         } catch {

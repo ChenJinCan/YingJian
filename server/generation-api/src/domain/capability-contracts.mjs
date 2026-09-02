@@ -8,9 +8,9 @@ export const CAPABILITY_CONTRACTS = Object.freeze({
     requiresStyleDefinition: false,
   }),
   optimizeOldPhoto: Object.freeze({
-    provider: 'volcengine',
-    model: 'lens_opr',
-    recipeVersion: 'optimize-old-photo@1',
+    provider: 'alibaba',
+    model: 'wanx2.1-imageedit',
+    recipeVersion: 'optimize-old-photo@2',
     creditCost: 1,
     requiresMask: false,
     requiresStyleDefinition: false,

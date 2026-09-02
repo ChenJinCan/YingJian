@@ -136,14 +136,12 @@ export function createCloudflareGenerationRuntime({
   if (env.ALIBABA_IMAGE_ENABLED === 'true') {
     providers.alibaba = new AlibabaImageProvider({
       apiKey: requiredEnvironment(env, 'ALIBABA_DASHSCOPE_API_KEY'),
-      workspaceId: requiredEnvironment(env, 'ALIBABA_WORKSPACE_ID'),
       fetchImpl,
     });
   }
   if (env.ALIBABA_VIDEO_ENABLED === 'true') {
     providers.alibabaMotion = new AlibabaImageToVideoProvider({
       apiKey: requiredEnvironment(env, 'ALIBABA_DASHSCOPE_API_KEY'),
-      workspaceId: requiredEnvironment(env, 'ALIBABA_WORKSPACE_ID'),
       fetchImpl,
     });
   }

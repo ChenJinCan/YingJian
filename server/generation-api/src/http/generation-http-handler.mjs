@@ -751,6 +751,7 @@ export function createGenerationHttpHandler({
       state: 'created',
       resultMediaId: null,
       errorCode: null,
+      providerDiagnosticCode: null,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -883,6 +884,10 @@ export function createGenerationHttpHandler({
       if (!TERMINAL_STATES.has(task.state)) {
         const shouldRelease =
           error?.billingDisposition === 'release' || error?.code === 'capability_disabled';
+        const providerDiagnosticCode = safeErrorCode(
+          error?.code,
+          'provider_error',
+        );
         try {
           const failed = await compareAndSet(task, {
             state: error?.code === 'capability_disabled' ? 'rejected' : 'failed',
@@ -891,8 +896,9 @@ export function createGenerationHttpHandler({
               : 'reconciliation_required',
             dispatchLeaseExpiresAt: null,
             errorCode: shouldRelease
-              ? safeErrorCode(error?.code)
+              ? providerDiagnosticCode
               : 'dispatch_reconciliation_required',
+            providerDiagnosticCode,
             providerCancelable: false,
             providerCancellation: 'not_available',
             usageDisposition: shouldRelease ? 'release' : 'hold',

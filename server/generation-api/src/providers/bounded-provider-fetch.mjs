@@ -50,7 +50,10 @@ async function executeProviderJson({
     try {
       response = await fetchImpl(url, {
         ...init,
-        redirect: 'error',
+        // Cloudflare Workers only support `follow` and `manual`. Keep redirects
+        // manual so provider responses cannot move a credentialed request to a
+        // different origin, then reject every redirect below.
+        redirect: 'manual',
         signal: controller.signal,
       });
     } catch {
@@ -63,6 +66,13 @@ async function executeProviderJson({
       }
       throw new ProviderError('Provider network request failed.', {
         code: 'provider_network_error',
+        billingDisposition: 'hold',
+      });
+    }
+
+    if (response.status >= 300 && response.status < 400) {
+      throw new ProviderError('Provider redirects are forbidden.', {
+        code: 'provider_redirect_forbidden',
         billingDisposition: 'hold',
       });
     }

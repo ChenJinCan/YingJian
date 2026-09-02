@@ -70,3 +70,26 @@ test('provider transport caps concurrent upstream requests', async () => {
   ]);
   assert.equal(maximumObserved, 1);
 });
+
+test('provider transport uses the Workers-compatible manual redirect mode and rejects 3xx', async () => {
+  let redirectMode;
+  await assert.rejects(
+    fetchProviderJson({
+      fetchImpl: async (_url, init) => {
+        redirectMode = init.redirect;
+        return new Response(null, {
+          status: 302,
+          headers: { location: 'https://other.example/result' },
+        });
+      },
+      url: 'https://provider.example',
+      init: { method: 'POST' },
+      timeoutMilliseconds: 100,
+      maxResponseBytes: 1024,
+    }),
+    (error) =>
+      error.code === 'provider_redirect_forbidden' &&
+      error.billingDisposition === 'hold',
+  );
+  assert.equal(redirectMode, 'manual');
+});

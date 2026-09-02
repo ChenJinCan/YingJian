@@ -2,6 +2,34 @@ import { fetchProviderJson } from './bounded-provider-fetch.mjs';
 import { ProviderError } from './provider-error.mjs';
 
 const STYLE_SEED = 42001;
+const ALIBABA_BEIJING_BASE_URL = 'https://dashscope.aliyuncs.com';
+
+function explicitAlibabaRejectionCode(value) {
+  const normalized = String(value ?? '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^A-Za-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase();
+  if (!/^[a-z][a-z0-9_]{0,47}$/.test(normalized)) {
+    return 'provider_rejected';
+  }
+  return `alibaba_${normalized}`;
+}
+
+const OLD_PHOTO_RECIPES = Object.freeze({
+  preserve: Object.freeze({
+    function: 'super_resolution',
+    prompt: '图像超分。',
+    seed: 44001,
+    parameters: Object.freeze({ upscale_factor: 1 }),
+  }),
+  colorize: Object.freeze({
+    function: 'colorization',
+    prompt: '为黑白或灰度老照片自然上色，保持人物身份、构图和内容不变。',
+    seed: 44002,
+    parameters: Object.freeze({}),
+  }),
+});
 const MASK_RECIPES = Object.freeze({
   cleanupRemovePasserby: Object.freeze({
     prompt:
@@ -16,18 +44,15 @@ const MASK_RECIPES = Object.freeze({
 });
 
 export class AlibabaImageProvider {
-  constructor({ apiKey, workspaceId, fetchImpl }) {
+  constructor({ apiKey, fetchImpl }) {
     if (typeof apiKey !== 'string' || apiKey.length === 0) {
       throw new TypeError('apiKey is required.');
-    }
-    if (!/^[A-Za-z0-9-]+$/.test(workspaceId ?? '')) {
-      throw new TypeError('workspaceId is required and must be a safe host label.');
     }
     if (typeof fetchImpl !== 'function') {
       throw new TypeError('fetchImpl is required.');
     }
     this.apiKey = apiKey;
-    this.baseUrl = `https://${workspaceId}.cn-beijing.maas.aliyuncs.com`;
+    this.baseUrl = ALIBABA_BEIJING_BASE_URL;
     this.fetchImpl = fetchImpl;
     this.name = 'alibaba';
     this.cancelPolicy = 'pending-only';
@@ -35,6 +60,9 @@ export class AlibabaImageProvider {
 
   async submit(input) {
     const { capability, sourceUri, styleDefinition } = input;
+    if (capability === 'optimizeOldPhoto') {
+      return this.#submitOldPhoto(input);
+    }
     if (capability in MASK_RECIPES) {
       return this.#submitMaskedEdit(input);
     }
@@ -78,6 +106,34 @@ export class AlibabaImageProvider {
       '/api/v1/services/aigc/image-generation/generation',
       body,
       'wan2.7-image',
+    );
+  }
+
+  async #submitOldPhoto({ sourceUri, colorMode }) {
+    const recipe = OLD_PHOTO_RECIPES[colorMode];
+    if (recipe === undefined) {
+      throw new ProviderError('An explicit old-photo color mode is required.', {
+        code: 'color_mode_required',
+        status: 400,
+      });
+    }
+    return this.#submitAsync(
+      '/api/v1/services/aigc/image2image/image-synthesis',
+      {
+        model: 'wanx2.1-imageedit',
+        input: {
+          function: recipe.function,
+          prompt: recipe.prompt,
+          base_image_url: sourceUri,
+        },
+        parameters: {
+          ...recipe.parameters,
+          n: 1,
+          seed: recipe.seed,
+          watermark: true,
+        },
+      },
+      'wanx2.1-imageedit',
     );
   }
 
@@ -202,6 +258,12 @@ export class AlibabaImageProvider {
       timeoutMilliseconds: 30_000,
       maxResponseBytes: 1024 * 1024,
     });
+    if (typeof payload?.code === 'string' && payload.code.length > 0) {
+      throw new ProviderError('Alibaba explicitly rejected the task.', {
+        code: explicitAlibabaRejectionCode(payload.code),
+        billingDisposition: 'release',
+      });
+    }
     const taskId = payload?.output?.task_id;
     const providerStatus = payload?.output?.task_status;
     if (typeof taskId !== 'string' || typeof providerStatus !== 'string') {

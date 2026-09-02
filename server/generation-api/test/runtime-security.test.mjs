@@ -124,7 +124,6 @@ test('provider credentials alone never enable a capability', async (t) => {
       BAIDU_API_KEY: 'test-only-api-key',
       BAIDU_SECRET_KEY: 'test-only-secret-key',
       ALIBABA_DASHSCOPE_API_KEY: 'test-only-dashscope-key',
-      ALIBABA_WORKSPACE_ID: 'test-workspace',
       VOLC_ACCESS_KEY_ID: 'test-only-access-key',
       VOLC_SECRET_ACCESS_KEY: 'test-only-secret-key',
     }),
@@ -171,28 +170,10 @@ test('runtime requires provider credentials only for an explicitly enabled provi
   await assert.rejects(
     createGenerationRuntime({
       env: localEvaluationEnvironment(directory, {
-        ALIBABA_IMAGE_ENABLED: 'true',
-        ALIBABA_DASHSCOPE_API_KEY: 'test-only-dashscope-key',
-      }),
-    }),
-    /ALIBABA_WORKSPACE_ID is required/,
-  );
-  await assert.rejects(
-    createGenerationRuntime({
-      env: localEvaluationEnvironment(directory, {
         ALIBABA_VIDEO_ENABLED: 'true',
       }),
     }),
     /ALIBABA_DASHSCOPE_API_KEY is required/,
-  );
-  await assert.rejects(
-    createGenerationRuntime({
-      env: localEvaluationEnvironment(directory, {
-        ALIBABA_VIDEO_ENABLED: 'true',
-        ALIBABA_DASHSCOPE_API_KEY: 'test-only-dashscope-key',
-      }),
-    }),
-    /ALIBABA_WORKSPACE_ID is required/,
   );
   await assert.rejects(
     createGenerationRuntime({
@@ -229,9 +210,9 @@ test('runtime exposes only capabilities for providers explicitly enabled', async
       env: {
         ALIBABA_IMAGE_ENABLED: 'true',
         ALIBABA_DASHSCOPE_API_KEY: 'test-only-dashscope-key',
-        ALIBABA_WORKSPACE_ID: 'test-workspace',
       },
       enabled: [
+        'optimizeOldPhoto',
         'styleAiRedraw',
         'cleanupRemovePasserby',
         'cleanupBrushRemove',
@@ -242,7 +223,6 @@ test('runtime exposes only capabilities for providers explicitly enabled', async
       env: {
         ALIBABA_VIDEO_ENABLED: 'true',
         ALIBABA_DASHSCOPE_API_KEY: 'test-only-dashscope-key',
-        ALIBABA_WORKSPACE_ID: 'test-workspace',
       },
       enabled: ['motionAiNatural'],
     },
@@ -253,7 +233,7 @@ test('runtime exposes only capabilities for providers explicitly enabled', async
         VOLC_ACCESS_KEY_ID: 'test-only-access-key',
         VOLC_SECRET_ACCESS_KEY: 'test-only-secret-key',
       },
-      enabled: ['optimizeOldPhoto'],
+      enabled: [],
     },
   ];
 

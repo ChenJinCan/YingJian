@@ -84,16 +84,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get currentResult => 'Current result';
 
   @override
-  String get chooseCapabilityTitle => 'Choose a capability';
-
-  @override
-  String get chooseCapabilityHint =>
-      'Nothing is chosen for you. Only the capability you select can run.';
-
-  @override
-  String get chooseAnotherCapability => 'Choose another capability';
-
-  @override
   String get capabilityUnavailable => 'This capability is not complete yet';
 
   @override
@@ -153,21 +143,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get capabilityOptimizeOldPhoto => 'Old photo restoration';
 
   @override
-  String get capabilityStyleOfficial => 'Official styles';
-
-  @override
-  String get capabilityStyleText => 'Style from text';
-
-  @override
-  String get capabilityStyleVoice => 'Style from voice';
-
-  @override
-  String get capabilityStyleReference => 'Reference style';
-
-  @override
-  String get capabilityStyleAiRedraw => 'AI style redraw';
-
-  @override
   String get capabilityCleanupWhite => 'Portrait white background';
 
   @override
@@ -195,91 +170,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get capabilityMotionAiNatural => 'AI natural motion';
 
   @override
-  String get capabilityOptimizeNaturalDescription =>
-      'Improve light, clarity, and texture locally while keeping the original unchanged.';
-
-  @override
-  String get capabilityOptimizeAiRepairDescription =>
-      'Repair blur, noise, and missing detail.';
-
-  @override
-  String get capabilityOptimizeUpscaleDescription =>
-      'Increase resolution while preserving subject detail.';
-
-  @override
-  String get capabilityOptimizeOldPhotoDescription =>
-      'Repair scratches, fading, and old-photo damage.';
-
-  @override
-  String get capabilityStyleOfficialDescription =>
-      'Explicitly choose one reproducible built-in style.';
-
-  @override
-  String get capabilityStyleTextDescription =>
-      'Define a style from the text you enter.';
-
-  @override
-  String get capabilityStyleVoiceDescription =>
-      'Define a style from the voice transcript you confirm.';
-
-  @override
-  String get capabilityStyleReferenceDescription =>
-      'Apply the reference photo\'s light, color, and texture to this photo.';
-
-  @override
-  String get capabilityStyleAiRedrawDescription =>
-      'Generate a redrawn, stylized still image.';
-
-  @override
-  String get capabilityCleanupWhiteDescription =>
-      'Identify the portrait subject and create a white background.';
-
-  @override
-  String get capabilityCleanupTransparentDescription =>
-      'Cut out the subject and create an image with a transparent background.';
-
-  @override
-  String get capabilityCleanupReplaceBackgroundDescription =>
-      'Cut out the subject and use the new background you choose.';
-
-  @override
-  String get capabilityCleanupRemovePasserbyDescription =>
-      'Remove passers-by and fill in the background.';
-
-  @override
-  String get capabilityCleanupBrushRemoveDescription =>
-      'Remove only the content you explicitly mark with the brush.';
-
-  @override
-  String get capabilityMotionSubtleDescription =>
-      'Add restrained pan and zoom motion to the whole photo.';
-
-  @override
-  String get capabilityMotionCameraPushDescription =>
-      'Generate a slow camera push-in effect.';
-
-  @override
-  String get capabilityMotionLightFlowDescription =>
-      'Generate naturally flowing light and shadow.';
-
-  @override
-  String get capabilityMotionAiNaturalDescription =>
-      'Upload the photo to generate a three-second natural motion video.';
-
-  @override
-  String get chooseUpscaleScale => 'Choose an upscale factor';
-
-  @override
-  String get generateUpscale => 'Generate HD image';
-
-  @override
   String get generatingResult => 'Generating…';
 
   @override
   String get upscaleReady => 'The HD image is ready to share or save.';
-
-  @override
-  String get generateMotion => 'Generate motion photo';
 
   @override
   String get motionReady => 'The motion photo is ready to share or save.';
@@ -370,34 +264,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get oldPhotoColorize => 'Colorize';
 
   @override
-  String get aiRedrawDefinitionLabel => 'Describe the redraw style';
-
-  @override
-  String get aiRedrawDefinitionHint =>
-      'For example: preserve identity and use a muted cinematic look';
-
-  @override
   String get aiRedrawDefinitionSummary =>
       'Redraw only from your confirmed generation intent without choosing another direction.';
-
-  @override
-  String get aiRedrawConfirmIntent => 'Confirm generation intent';
-
-  @override
-  String get aiRedrawIntentPreviewTitle => 'Generation intent';
-
-  @override
-  String get aiRedrawIntentConfirmed =>
-      'This definition is frozen. Editing the text requires confirmation again.';
-
-  @override
-  String aiRedrawIntentVersion(int revision) {
-    return 'Definition version $revision';
-  }
-
-  @override
-  String get aiRedrawIntentInvalid =>
-      'Enter 1 to 500 visible characters without hidden or control characters.';
 
   @override
   String get markRemovalArea => 'Paint the area to remove';
@@ -408,9 +276,6 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get removalAreaReady =>
       'Only your manually painted area will be used; nothing else is selected automatically.';
-
-  @override
-  String get applyNaturalOptimization => 'Apply natural enhancement';
 
   @override
   String get applyWhiteBackground => 'Apply white background';
@@ -567,6 +432,22 @@ class AppLocalizationsEn extends AppLocalizations {
   String get styleReferenceNaturalTitle => 'Natural reference';
 
   @override
+  String get styleJapanese => 'Japanese';
+
+  @override
+  String get styleFilm => 'Film';
+
+  @override
+  String get styleIllustration => 'Illustration';
+
+  @override
+  String get styleCinematic => 'Cinematic';
+
+  @override
+  String get styleIllustrationIntent =>
+      'Preserve the person\'s identity, facial features, pose, and original composition. Transform the photo into a refined hand-drawn illustration with clean lines, soft color, and complete detail. Add no text, watermark, or unrelated objects.';
+
+  @override
   String get styleNatural => 'Natural';
 
   @override
@@ -610,6 +491,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get changeStyle => 'Change style';
+
+  @override
+  String get generateMotion => 'Generate motion photo';
 
   @override
   String get motionConfirmationTitle => 'Create a moving image';

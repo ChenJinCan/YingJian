@@ -6,7 +6,7 @@
 
 四张卡片只确定 `CreationTask`。选图后，presentation 以固定顺序展示该任务的 `CreationCapability`，初始没有默认选择。只有用户点击的能力才能进入本管线；图片分析、AI、历史、设备或供应商状态都不能替用户推荐、排序、组合、替换、降级或触发能力。
 
-`creationIntent=apply|motion` 只区分静态与动态页面。能力的内部 `executionKind=staticGenerate|motionGenerate` 决定是否进入本管线，但不构成用户授权。选择能力本身也不授权上传、创建任务或扣费；这些动作必须在所选能力内再次明确确认。
+`creationIntent=apply|motion` 只区分静态与动态页面。能力的内部 `executionKind=staticGenerate|motionGenerate` 决定是否进入本管线，但不构成用户授权。点击具名生成结果授权进入该能力的必要确认，但不自动授权上传、创建任务或扣费；这些动作必须在所选能力的同一确认 sheet 中明确完成。该 sheet 是新的隐私与成本授权，不是第二个“应用”。
 
 生成不要求先创建 `StyleCommit`、先应用风格或先静态导出。它可以是异步、非确定性、远程且有成本，因此不得加入本地 `EditRecipe`、`EditingCore` 或 `RenderPlan`，也不得借用静态撤销历史表达远程任务。
 
@@ -44,15 +44,15 @@
 ```text
 选图片
   → capabilityAwaitingChoice（固定列表、无默认选中）
-  → 用户选择一项生成式能力
+  → 用户点击一项生成式结果
   → 当前不可用：显示 unavailable，停止
-  → 服务可用：显示该能力的唯一主操作
-  → 用户点击主操作
-  → awaitingConsent（上传、费用、取消与删除说明）
+  → 服务可用：直接进入 awaitingConsent（上传、费用、取消与删除说明）
   → 用户确认后创建任务
 ```
 
-静态云端生成使用 `cloudStaticAwaitingConsent`。动态生成由用户选择轻微动态、镜头推进或光影流动后进入 `motionDirectionReady`，唯一主操作为“生成动态照片”；当前 iOS 直接本地编码 H.264 MP4，因此不展示上传确认、费用或额度。不支持本地编码器的平台进入 `motionUnavailable`，且不得自动改走云端或其他方向。
+静态云端生成使用 `cloudStaticAwaitingConsent`。轻微动态、镜头推进和光影流动在 iOS 上由选项点击直接本地编码 H.264 MP4，不进入本云端管线，也不展示上传、费用或额度确认。AI 自然动效点击后直接进入该能力的 `awaitingConsent`。不支持某个编码器或云能力的环境只把对应选项进入 `unavailable`，不得自动改走另一执行分支或方向。
+
+任务创建后的队列、运行、失败和待对账状态显示在图片上的紧凑状态中。它们不替换工作区、不遮挡底部选项，也不会因用户查看状态而创建第二个请求。
 
 用户确认后，任务才进入：
 
