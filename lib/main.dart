@@ -26,6 +26,7 @@ import 'package:yingjian/features/generation/application/mask_removal_input_buil
 import 'package:yingjian/features/generation/application/motion_photo_generator.dart';
 import 'package:yingjian/features/generation/application/upscale_photo_generator.dart';
 import 'package:yingjian/features/generation/infrastructure/explicit_refresh_generation_provider.dart';
+import 'package:yingjian/features/generation/infrastructure/generation_api_endpoint.dart';
 import 'package:yingjian/features/generation/infrastructure/json_generation_job_store.dart';
 import 'package:yingjian/features/generation/infrastructure/method_channel_generated_media_actions.dart';
 import 'package:yingjian/features/generation/infrastructure/first_party_generation_provider.dart';
@@ -196,8 +197,7 @@ Future<GenerationProvider> _createGenerationProvider({
 }) async {
   const baseUrl = String.fromEnvironment(
     'GENERATION_API_BASE_URL',
-    defaultValue:
-        'https://yingjian-generation-api.baby-animals-ai-cjc.workers.dev',
+    defaultValue: GenerationApiEndpoint.production,
   );
   if (baseUrl.trim().isEmpty) return const UnavailableGenerationProvider();
 

@@ -17,6 +17,11 @@
 
 生产入口是 `src/cloudflare/worker.mjs`，配置位于 `wrangler.jsonc`：
 
+- 移动端生产入口为 `https://yingjian-ai.520orz.com`。旧
+  `https://yingjian-generation-api.baby-animals-ai-cjc.workers.dev` 保持启用，
+  仅作为已发布旧客户端的兼容与回滚入口；自定义域名、TLS、完整认证探针和
+  新客户端候选全部验证前不得关闭旧入口。
+
 - `DB` 是 D1 绑定，持久化任务、创建幂等、CAS 版本、权益、存储额度、兼容旧客户端的一次性激活码、安装公钥与会话 Challenge。
 - `MEDIA` 是私有 R2 Standard bucket 绑定；客户端无法取得 R2 地址或 R2 凭据，所有上传和下载都经过已认证 Worker。
 - `REGISTRATION_RATE_LIMITER` 按安装公钥 `keyId` 限制公开注册突发请求，`SESSION_RATE_LIMITER` 按 `installationId` 限制短期会话刷新；两者都不读取图片或保存客户端 IP。
