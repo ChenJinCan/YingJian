@@ -207,6 +207,20 @@ test('file task repository returns duplicates and rejects fingerprint conflicts'
     version: 1,
   });
   assert.equal(await repository.get({ ownerId: 'owner-b', taskId: 'task-1' }), null);
+  assert.equal(
+    (await repository.getByCreation({
+      ownerId: 'owner-a',
+      creationKey: task.creationKey,
+    })).id,
+    task.id,
+  );
+  assert.equal(
+    await repository.getByCreation({
+      ownerId: 'owner-b',
+      creationKey: task.creationKey,
+    }),
+    null,
+  );
 });
 
 test('file task repository uses append-only CAS so concurrent writers cannot overwrite', async (t) => {

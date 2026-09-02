@@ -19,6 +19,7 @@ export class LocalFixedUsageGuard {
     maxConcurrentGenerationsPerOwner,
     maxGenerationReservationsPerWindow,
     rateWindowMilliseconds,
+    activeReservationWindowMilliseconds,
     maxStorageBytesPerOwner,
     now = () => new Date(),
   }) {
@@ -34,6 +35,10 @@ export class LocalFixedUsageGuard {
     this.rateWindowMilliseconds = positiveInteger(
       rateWindowMilliseconds,
       'rateWindowMilliseconds',
+    );
+    this.activeReservationWindowMilliseconds = positiveInteger(
+      activeReservationWindowMilliseconds ?? this.rateWindowMilliseconds,
+      'activeReservationWindowMilliseconds',
     );
     this.maxStorageBytesPerOwner = positiveInteger(
       maxStorageBytesPerOwner,
@@ -67,7 +72,10 @@ export class LocalFixedUsageGuard {
       const reserved = [...ledger.generations.values()].filter(
         (item) => item.state === 'reserved',
       );
-      if (reserved.length >= this.maxConcurrent) {
+      const activeReserved = reserved.filter(
+        (item) => now - item.updatedAt <= this.activeReservationWindowMilliseconds,
+      );
+      if (activeReserved.length >= this.maxConcurrent) {
         throw new UsageGuardError('generation_concurrency_exceeded', 429);
       }
       const reservedCredits = reserved.reduce((sum, item) => sum + item.creditCost, 0);
@@ -82,8 +90,18 @@ export class LocalFixedUsageGuard {
         fingerprint: input.fingerprint,
         creditCost: input.creditCost,
         state: 'reserved',
+        updatedAt: now,
       });
       return { kind: 'reserved', reservationId: input.reservationId };
+    });
+  }
+
+  touchGeneration({ ownerId, reservationId }) {
+    return this.#exclusive(() => {
+      const reservation = this.#reservation(ownerId, reservationId);
+      if (reservation.state !== 'reserved') return { kind: 'existing' };
+      reservation.updatedAt = this.now().getTime();
+      return { kind: 'touched' };
     });
   }
 
@@ -97,6 +115,7 @@ export class LocalFixedUsageGuard {
         throw new UsageGuardError('usage_reservation_released', 409);
       }
       reservation.state = 'settled';
+      reservation.updatedAt = this.now().getTime();
       this.#owner(ownerId).spentCredits += reservation.creditCost;
       return { kind: 'settled' };
     });
@@ -112,6 +131,7 @@ export class LocalFixedUsageGuard {
         return { kind: 'already_settled' };
       }
       reservation.state = 'released';
+      reservation.updatedAt = this.now().getTime();
       return { kind: 'released' };
     });
   }

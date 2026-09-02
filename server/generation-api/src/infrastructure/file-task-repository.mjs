@@ -123,6 +123,23 @@ export class FileTaskRepository {
     return task.ownerId === ownerId && task.id === taskId ? task : null;
   }
 
+  async getByCreation({ ownerId, creationKey }) {
+    const indexPath = join(
+      this.rootDirectory,
+      'creation',
+      `${digest(creationKey)}.json`,
+    );
+    let index;
+    try {
+      index = JSON.parse(await readFile(indexPath, 'utf8'));
+    } catch (error) {
+      if (error?.code === 'ENOENT') return null;
+      throw error;
+    }
+    if (index.creationKey !== creationKey || index.ownerId !== ownerId) return null;
+    return this.get({ ownerId, taskId: index.taskId });
+  }
+
   #taskDirectory(taskId) {
     return join(this.rootDirectory, 'tasks', digest(taskId));
   }

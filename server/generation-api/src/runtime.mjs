@@ -133,6 +133,10 @@ export async function createGenerationRuntime({
   const authenticator = await loadAuthenticator(env);
   const usageGuard = await loadUsageGuard(env);
   const retentionHours = mediaRetentionHours(env);
+  const dispatchReconciliationWindowMilliseconds =
+    env.GENERATION_LOCAL_RATE_WINDOW_MS == null
+      ? 60 * 60 * 1000
+      : requiredPositiveInteger(env, 'GENERATION_LOCAL_RATE_WINDOW_MS');
   const offerAuthority = new HmacOfferAuthority({
     signingKey: requiredEnvironment(env, 'GENERATION_OFFER_SIGNING_KEY'),
   });
@@ -190,6 +194,7 @@ export async function createGenerationRuntime({
       offerAuthority,
       usageGuard,
       mediaRetentionHours: retentionHours,
+      dispatchReconciliationWindowMilliseconds,
     }),
     mediaStore,
     close: () => mediaStore.close(),

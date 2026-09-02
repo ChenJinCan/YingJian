@@ -272,6 +272,72 @@ abstract class AppLocalizations {
   /// **'当前不会处理、上传、创建任务或扣费。你可以返回能力列表自己选择下一步。'**
   String get capabilityUnavailableDetail;
 
+  /// No description provided for @cloudCapabilitiesNotLoaded.
+  ///
+  /// In zh, this message translates to:
+  /// **'云端能力待连接'**
+  String get cloudCapabilitiesNotLoaded;
+
+  /// No description provided for @cloudCapabilitiesNotLoadedDetail.
+  ///
+  /// In zh, this message translates to:
+  /// **'尚未检查当前云端可用状态。点击重试只会连接并查询，不会上传、创建任务或扣费。'**
+  String get cloudCapabilitiesNotLoadedDetail;
+
+  /// No description provided for @cloudCapabilitiesLoading.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在连接云端能力'**
+  String get cloudCapabilitiesLoading;
+
+  /// No description provided for @cloudCapabilitiesLoadingDetail.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在查询当前能力状态，不会上传照片、创建任务或扣费。'**
+  String get cloudCapabilitiesLoadingDetail;
+
+  /// No description provided for @cloudCapabilitiesConnectionFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'云端连接失败'**
+  String get cloudCapabilitiesConnectionFailed;
+
+  /// No description provided for @cloudCapabilitiesConnectionFailedDetail.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂时无法确认当前能力状态。请检查网络后重试；不会自动上传、创建任务或扣费。'**
+  String get cloudCapabilitiesConnectionFailedDetail;
+
+  /// No description provided for @cloudCapabilityUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'该云端能力当前未开通'**
+  String get cloudCapabilityUnavailable;
+
+  /// No description provided for @cloudCapabilityUnavailableDetail.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务端当前没有为这项能力提供可执行额度。不会上传、创建任务或扣费。'**
+  String get cloudCapabilityUnavailableDetail;
+
+  /// No description provided for @cloudReconciliationRequired.
+  ///
+  /// In zh, this message translates to:
+  /// **'云端任务状态待确认'**
+  String get cloudReconciliationRequired;
+
+  /// No description provided for @cloudReconciliationRequiredDetail.
+  ///
+  /// In zh, this message translates to:
+  /// **'上一次请求可能已被云端接收。已暂停新建云端任务并保留当前权益状态；只会查询原请求，不会重复生成或重复扣费。'**
+  String get cloudReconciliationRequiredDetail;
+
+  /// No description provided for @checkCloudGenerationStatus.
+  ///
+  /// In zh, this message translates to:
+  /// **'查询原任务状态'**
+  String get checkCloudGenerationStatus;
+
   /// No description provided for @capabilityOptimizeNatural.
   ///
   /// In zh, this message translates to:
@@ -529,6 +595,30 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'生成失败，请重试。'**
   String get generationFailed;
+
+  /// No description provided for @generationConcurrencyExceeded.
+  ///
+  /// In zh, this message translates to:
+  /// **'已有云端任务仍在处理或待确认，暂时不能创建新的云端任务。'**
+  String get generationConcurrencyExceeded;
+
+  /// No description provided for @generationCreditExhausted.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前云端权益不足，任务没有开始。'**
+  String get generationCreditExhausted;
+
+  /// No description provided for @generationCapabilityDisabled.
+  ///
+  /// In zh, this message translates to:
+  /// **'该云端能力当前未开通，任务没有开始。'**
+  String get generationCapabilityDisabled;
+
+  /// No description provided for @generationProviderFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'云端供应商处理失败，请保留当前结果后再决定是否重试。'**
+  String get generationProviderFailed;
 
   /// No description provided for @cloudGenerationConsentTitle.
   ///

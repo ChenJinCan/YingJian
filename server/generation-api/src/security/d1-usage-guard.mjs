@@ -37,6 +37,7 @@ export class D1UsageGuard {
     maxGenerationReservationsPerWindow,
     maxGlobalGenerationReservationsPerWindow,
     rateWindowMilliseconds,
+    activeReservationWindowMilliseconds,
     maxStorageBytesPerOwner,
     now = () => new Date(),
   }) {
@@ -64,6 +65,10 @@ export class D1UsageGuard {
       rateWindowMilliseconds,
       'rateWindowMilliseconds',
     );
+    this.activeReservationWindowMilliseconds = positiveInteger(
+      activeReservationWindowMilliseconds ?? this.rateWindowMilliseconds,
+      'activeReservationWindowMilliseconds',
+    );
     this.maxStorageBytesPerOwner = positiveInteger(
       maxStorageBytesPerOwner,
       'maxStorageBytesPerOwner',
@@ -90,7 +95,8 @@ export class D1UsageGuard {
               WHERE created_at_ms >= ?) < ?
             AND
             (SELECT COUNT(*) FROM generation_usage_reservations
-              WHERE owner_id = ? AND state = 'reserved') < ?
+              WHERE owner_id = ? AND state = 'reserved'
+                AND updated_at_ms >= ?) < ?
             AND
             (SELECT COUNT(*) FROM generation_usage_reservations
               WHERE owner_id = ? AND created_at_ms >= ?) < ?
@@ -111,6 +117,7 @@ export class D1UsageGuard {
         timestamp - this.rateWindowMilliseconds,
         this.maxGlobalReservationsPerWindow,
         ownerId,
+        timestamp - this.activeReservationWindowMilliseconds,
         this.maxConcurrent,
         ownerId,
         timestamp - this.rateWindowMilliseconds,
@@ -140,7 +147,8 @@ export class D1UsageGuard {
         `SELECT
            (SELECT COUNT(*) FROM generation_usage_reservations
              WHERE created_at_ms >= ?) AS global_rate_count,
-           SUM(CASE WHEN state = 'reserved' THEN 1 ELSE 0 END) AS reserved_count,
+           SUM(CASE WHEN state = 'reserved' AND updated_at_ms >= ?
+             THEN 1 ELSE 0 END) AS reserved_count,
            SUM(CASE WHEN created_at_ms >= ? THEN 1 ELSE 0 END) AS rate_count,
            COALESCE(SUM(CASE WHEN state IN ('reserved', 'settled') THEN credit_cost ELSE 0 END), 0) AS used_credits
          FROM generation_usage_reservations
@@ -148,6 +156,7 @@ export class D1UsageGuard {
       )
       .bind(
         timestamp - this.rateWindowMilliseconds,
+        timestamp - this.activeReservationWindowMilliseconds,
         timestamp - this.rateWindowMilliseconds,
         ownerId,
       )
@@ -172,6 +181,20 @@ export class D1UsageGuard {
       throw new UsageGuardError('generation_credit_exhausted', 402);
     }
     throw new UsageGuardError('generation_reservation_rejected', 409);
+  }
+
+  async touchGeneration({ ownerId, reservationId }) {
+    const reservation = await this.#requiredGeneration(ownerId, reservationId);
+    if (reservation.state !== 'reserved') return { kind: 'existing' };
+    const result = await this.database
+      .prepare(
+        `UPDATE generation_usage_reservations
+            SET updated_at_ms = ?
+          WHERE owner_id = ? AND reservation_id = ? AND state = 'reserved'`,
+      )
+      .bind(this.now().getTime(), ownerId, reservationId)
+      .run();
+    return { kind: changes(result) === 1 ? 'touched' : 'existing' };
   }
 
   async settleGeneration({ ownerId, reservationId }) {

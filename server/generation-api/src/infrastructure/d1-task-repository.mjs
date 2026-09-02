@@ -145,4 +145,16 @@ export class D1TaskRepository {
       .first();
     return parseTaskRow(row);
   }
+
+  async getByCreation({ ownerId, creationKey }) {
+    const row = await this.database
+      .prepare(
+        `SELECT id, owner_id, creation_key, fingerprint, version, task_json
+           FROM generation_tasks
+          WHERE creation_key = ? AND owner_id = ?`,
+      )
+      .bind(creationKey, ownerId)
+      .first();
+    return parseTaskRow(row);
+  }
 }

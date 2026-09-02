@@ -158,6 +158,16 @@ final class _MemoryGenerationJobStore implements GenerationJobStore {
   ) async => _reservations[identity];
 
   @override
+  Future<GenerationRequestReservation?> findReconciliationRequired() async =>
+      _reservations.values
+          .where(
+            (reservation) =>
+                reservation.state ==
+                GenerationRequestReservationState.reconciliationRequired,
+          )
+          .firstOrNull;
+
+  @override
   Future<void> saveReservation(GenerationRequestReservation reservation) async {
     _reservations[reservation.identity] = reservation;
   }

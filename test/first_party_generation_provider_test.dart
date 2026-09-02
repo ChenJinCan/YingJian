@@ -126,6 +126,61 @@ void main() {
   });
 
   test(
+    'reconciliation queries the original request without creating again',
+    () async {
+      const requestId = 'project:photo:optimizeAiRepair:123';
+      final sourceSha = 'a' * 64;
+      var reconciliationCount = 0;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(server.close);
+      server.listen((request) async {
+        if (request.uri.path == '/v1/generation-capabilities') {
+          await writeJson(request.response, HttpStatus.ok, catalogPayload());
+          return;
+        }
+        reconciliationCount += 1;
+        expect(request.method, 'GET');
+        expect(request.uri.pathSegments.last, requestId);
+        expect(request.uri.queryParameters['capability'], 'optimizeAiRepair');
+        await writeJson(request.response, HttpStatus.ok, {
+          'task': taskPayload(
+            id: 'task-reconciliation',
+            requestId: requestId,
+            capability: 'optimizeAiRepair',
+            sourceMediaId: 'private-source-1',
+            sourceSha256: sourceSha,
+            provider: 'baidu',
+            model: 'image_definition_enhance',
+            state: 'failed',
+            usageState: 'reserved',
+            usageDisposition: 'hold',
+            errorCode: 'dispatch_reconciliation_required',
+          ),
+        });
+      });
+      final provider = await connectTo(server);
+      final reservation = GenerationRequestReservation(
+        clientRequestId: requestId,
+        identity: GenerationRequestIdentity(
+          projectId: 'project-1',
+          sourcePhotoId: 'photo-1',
+          sourceSha256: sourceSha,
+          capability: CreationCapability.optimizeAiRepair,
+        ),
+        createdAt: DateTime.utc(2026, 9, 1),
+        state: GenerationRequestReservationState.reconciliationRequired,
+      );
+
+      final job = await provider.reconcile(reservation);
+
+      expect(reconciliationCount, 1);
+      expect(job.clientRequestId, requestId);
+      expect(job.errorCode, 'dispatch_reconciliation_required');
+      expect(job.requiresReconciliation, isTrue);
+    },
+  );
+
+  test(
     'missing consent fails before private source media is uploaded',
     () async {
       var uploadCount = 0;
@@ -914,6 +969,7 @@ Map<String, Object?> taskPayload({
   String usageState = 'reserved',
   String usageDisposition = 'hold',
   String? resultMediaId,
+  String? errorCode,
 }) => {
   'id': id,
   'requestId': requestId,
@@ -937,7 +993,7 @@ Map<String, Object?> taskPayload({
   'usageState': usageState,
   'usageDisposition': usageDisposition,
   'resultMediaId': resultMediaId,
-  'errorCode': null,
+  'errorCode': errorCode,
   'createdAt': '2026-09-01T00:00:00.000Z',
   'updatedAt': '2026-09-01T00:00:01.000Z',
 };

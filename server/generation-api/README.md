@@ -102,7 +102,7 @@ releaseStorage(input)
 expireStorage(input)
 ```
 
-`reserveGeneration` 必须以 `ownerId + reservationId` 原子幂等，并拒绝相同 ID 的不同 fingerprint/费用；还必须执行用户权益、速率和并发上限。只有供应商确定成功才 settle，确定拒绝、确定失败或供应商确认取消才 release；网络超时、未知 dispatch 结果和本地取消保持 hold，等待人工/账务对账。生产模块不得使用进程内 Map 代替持久化账本。
+`reserveGeneration` 必须以 `ownerId + reservationId` 原子幂等，并拒绝相同 ID 的不同 fingerprint/费用；还必须执行用户权益、速率和并发上限。只有供应商确定成功才 settle，确定拒绝、确定失败或供应商确认取消才 release；网络超时、未知 dispatch 结果和本地取消保持 hold，等待人工/账务对账。未知 dispatch 的活动并发租约以速率窗口为安全上限：窗口内继续阻止第二个付费请求，窗口后只释放活动并发，原预留仍为 `reserved/hold`、继续计入额度且不得再次 submit。`pending|running` 任务在观察时调用 `touchGeneration` 续租。生产模块不得使用进程内 Map 代替持久化账本。
 
 ## 本地运行
 
@@ -253,7 +253,7 @@ GET /v1/generation-tasks/{taskId}
 POST /v1/generation-tasks/{taskId}/cancel
 ```
 
-查询阿里任务时会读取同一个供应商任务 ID；不会因为网络失败新建任务。付费调用前先持久化 append-only dispatch intent；若供应商已经可能接收、但其任务 ID 未能持久化，后续 POST/GET 只返回 `dispatch_reconciliation_required`，权益保持 hold，绝不会二次 submit。任务观察和取消使用版本 CAS，过期响应不能覆盖更新状态。
+查询阿里任务时会读取同一个供应商任务 ID；不会因为网络失败新建任务。付费调用前先持久化 append-only dispatch intent；若供应商已经可能接收、但其任务 ID 未能持久化，安全窗口内后续 POST/GET 只返回 `dispatch_reconciliation_required`，权益保持 hold，绝不会二次 submit。窗口结束仍无供应商 ID 时，同一任务转为 `provider_outcome_unknown`，保留权益冻结与审计记录但不再永久占用活动并发；重放原 creation identity 仍只返回原任务，不会再次 submit。任务观察和取消使用版本 CAS，过期响应不能覆盖更新状态。
 
 阿里仅在 `PENDING` 时请求供应商取消。供应商确认取消才进入 `canceled` 并 release 权益；若取消响应表明任务已经 `RUNNING`，服务端保持真实的 `running` 状态、设 `providerCancelable=false` 并保持权益 hold，绝不把它误报为已取消、停止计费或已退款。百度和火山是同步接口，从不声称支持供应商取消。
 

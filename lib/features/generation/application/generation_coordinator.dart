@@ -257,6 +257,7 @@ class GenerationJob {
     this.cancellationDisposition,
     this.usageState,
     this.usageDisposition,
+    this.errorCode,
     this.output,
   });
 
@@ -285,7 +286,13 @@ class GenerationJob {
   final GenerationCancellationDisposition? cancellationDisposition;
   final GenerationUsageState? usageState;
   final GenerationUsageDisposition? usageDisposition;
+  final String? errorCode;
   final GeneratedMedia? output;
+
+  bool get requiresReconciliation =>
+      errorCode == 'dispatch_reconciliation_required' &&
+      usageState == GenerationUsageState.reserved &&
+      usageDisposition == GenerationUsageDisposition.hold;
 
   GenerationJob copyWith({
     GenerationJobState? state,
@@ -294,6 +301,7 @@ class GenerationJob {
     GenerationCancellationDisposition? cancellationDisposition,
     GenerationUsageState? usageState,
     GenerationUsageDisposition? usageDisposition,
+    String? errorCode,
     GeneratedMedia? output,
   }) => GenerationJob(
     id: id,
@@ -315,6 +323,7 @@ class GenerationJob {
         cancellationDisposition ?? this.cancellationDisposition,
     usageState: usageState ?? this.usageState,
     usageDisposition: usageDisposition ?? this.usageDisposition,
+    errorCode: errorCode ?? this.errorCode,
     output: output ?? this.output,
   );
 }
@@ -390,12 +399,15 @@ class GenerationRequestIdentity {
   );
 }
 
+enum GenerationRequestReservationState { prepared, reconciliationRequired }
+
 @immutable
 class GenerationRequestReservation {
   GenerationRequestReservation({
     required this.clientRequestId,
     required this.identity,
     required this.createdAt,
+    this.state = GenerationRequestReservationState.prepared,
   }) {
     if (clientRequestId.trim().isEmpty) {
       throw ArgumentError.value(
@@ -409,6 +421,16 @@ class GenerationRequestReservation {
   final String clientRequestId;
   final GenerationRequestIdentity identity;
   final DateTime createdAt;
+  final GenerationRequestReservationState state;
+
+  GenerationRequestReservation copyWith({
+    GenerationRequestReservationState? state,
+  }) => GenerationRequestReservation(
+    clientRequestId: clientRequestId,
+    identity: identity,
+    createdAt: createdAt,
+    state: state ?? this.state,
+  );
 }
 
 abstract interface class GenerationProvider {
@@ -429,6 +451,12 @@ abstract interface class GenerationProvider {
   Stream<GenerationJob> observe(GenerationJob job);
 }
 
+/// Optional provider interface for querying a create attempt by its stable,
+/// app-owned request identity without submitting the paid request again.
+abstract interface class GenerationRequestReconciler {
+  Future<GenerationJob> reconcile(GenerationRequestReservation reservation);
+}
+
 abstract interface class GenerationJobStore {
   Future<GenerationJob?> findByClientRequestId(String clientRequestId);
 
@@ -445,6 +473,8 @@ abstract interface class GenerationJobStore {
   Future<GenerationRequestReservation?> findReservation(
     GenerationRequestIdentity identity,
   );
+
+  Future<GenerationRequestReservation?> findReconciliationRequired();
 
   Future<void> saveReservation(GenerationRequestReservation reservation);
 
@@ -524,16 +554,64 @@ final class GenerationProtocolViolation implements Exception {
   String toString() => 'Invalid generation provider response: $message';
 }
 
+/// The first-party gateway may have durably created or dispatched the request,
+/// but the client did not receive a trustworthy final create response.
+///
+/// Callers must reconcile [clientRequestId] instead of creating another paid
+/// request. The value is an app-owned idempotency identity, not a provider ID.
+final class GenerationCreateOutcomeUnknown implements Exception {
+  const GenerationCreateOutcomeUnknown(this.clientRequestId);
+
+  final String clientRequestId;
+
+  @override
+  String toString() =>
+      'Generation request $clientRequestId requires first-party reconciliation';
+}
+
+final class GenerationReconciliationRequired implements Exception {
+  const GenerationReconciliationRequired(this.reservation);
+
+  final GenerationRequestReservation reservation;
+
+  @override
+  String toString() =>
+      'Generation request ${reservation.clientRequestId} must be reconciled';
+}
+
+final class GenerationReconciliationUnavailable implements Exception {
+  const GenerationReconciliationUnavailable();
+}
+
+final class GenerationReconciliationNotFound implements Exception {
+  const GenerationReconciliationNotFound(this.clientRequestId);
+
+  final String clientRequestId;
+}
+
+/// A privacy-safe first-party gateway failure. [code] is constrained by the
+/// gateway contract and must never contain raw provider text or identifiers.
+final class GenerationRemoteFailure implements Exception {
+  const GenerationRemoteFailure(this.statusCode, this.code);
+
+  final int statusCode;
+  final String code;
+
+  @override
+  String toString() => 'Generation gateway failed ($statusCode: $code)';
+}
+
 final class GenerationCoordinator {
-  const GenerationCoordinator({
+  GenerationCoordinator({
     required GenerationProvider provider,
     required GenerationJobStore store,
   }) : this._(provider, store);
 
-  const GenerationCoordinator._(this._provider, this._store);
+  GenerationCoordinator._(this._provider, this._store);
 
   final GenerationProvider _provider;
   final GenerationJobStore _store;
+  Future<void> _createTail = Future.value();
 
   Set<CreationCapability> get availableCapabilities =>
       _provider.availableCapabilities;
@@ -602,7 +680,23 @@ final class GenerationCoordinator {
     required GenerationSourceSnapshot snapshot,
     required GenerationConsent? consent,
     required String Function() clientRequestIdFactory,
+  }) => _serializeCreate(
+    () => _createPersisted(
+      snapshot: snapshot,
+      consent: consent,
+      clientRequestIdFactory: clientRequestIdFactory,
+    ),
+  );
+
+  Future<GenerationJob> _createPersisted({
+    required GenerationSourceSnapshot snapshot,
+    required GenerationConsent? consent,
+    required String Function() clientRequestIdFactory,
   }) async {
+    final unresolved = await _store.findReconciliationRequired();
+    if (unresolved != null) {
+      throw GenerationReconciliationRequired(unresolved);
+    }
     final identity = GenerationRequestIdentity.fromSnapshot(snapshot);
     var reservation = await _store.findReservation(identity);
     if (reservation == null) {
@@ -613,13 +707,73 @@ final class GenerationCoordinator {
       );
       await _store.saveReservation(reservation);
     }
-    final job = await create(
-      snapshot: snapshot,
-      clientRequestId: reservation.clientRequestId,
-      consent: consent,
-    );
+    late final GenerationJob job;
+    try {
+      job = await create(
+        snapshot: snapshot,
+        clientRequestId: reservation.clientRequestId,
+        consent: consent,
+      );
+    } on GenerationCreateOutcomeUnknown catch (error) {
+      if (error.clientRequestId != reservation.clientRequestId) {
+        throw const GenerationProtocolViolation(
+          'unknown create outcome does not match the reserved request',
+        );
+      }
+      final pending = reservation.copyWith(
+        state: GenerationRequestReservationState.reconciliationRequired,
+      );
+      await _store.saveReservation(pending);
+      throw GenerationReconciliationRequired(pending);
+    }
     await _store.deleteReservation(reservation.clientRequestId);
     return job;
+  }
+
+  Future<GenerationRequestReservation?> findReconciliationRequired() =>
+      _store.findReconciliationRequired();
+
+  Future<GenerationJob> reconcile(
+    GenerationRequestReservation reservation,
+  ) async {
+    final pending = await _store.findReconciliationRequired();
+    if (pending == null ||
+        pending.clientRequestId != reservation.clientRequestId ||
+        pending.identity != reservation.identity) {
+      throw const GenerationReconciliationUnavailable();
+    }
+    final GenerationRequestReconciler reconciler;
+    if (_provider case final GenerationRequestReconciler value) {
+      reconciler = value;
+    } else {
+      throw const GenerationReconciliationUnavailable();
+    }
+    late final GenerationJob job;
+    try {
+      job = await reconciler.reconcile(pending);
+    } on GenerationRemoteFailure catch (error) {
+      if (error.statusCode == 404 && error.code == 'task_not_found') {
+        await _store.deleteReservation(pending.clientRequestId);
+        throw GenerationReconciliationNotFound(pending.clientRequestId);
+      }
+      rethrow;
+    }
+    if (!pending.identity.matches(job)) {
+      throw const GenerationProtocolViolation(
+        'reconciled job does not match the reserved request',
+      );
+    }
+    await _store.save(job);
+    if (!job.requiresReconciliation) {
+      await _store.deleteReservation(pending.clientRequestId);
+    }
+    return job;
+  }
+
+  Future<T> _serializeCreate<T>(Future<T> Function() operation) {
+    final result = _createTail.then((_) => operation());
+    _createTail = result.then<void>((_) {}, onError: (_, _) {});
+    return result;
   }
 
   Future<GenerationJob> recordLocalSuccess({
@@ -711,6 +865,13 @@ final class GenerationCoordinator {
   Future<void> prepareProjectDeletion(String projectId) async {
     if (projectId.trim().isEmpty) {
       throw ArgumentError.value(projectId, 'projectId');
+    }
+    final pending = await _store.findReconciliationRequired();
+    if (pending != null && pending.identity.projectId == projectId) {
+      throw GenerationProjectDeletionBlocked(
+        projectId,
+        pending.clientRequestId,
+      );
     }
     final jobs = await _store.findByProjectId(projectId);
     for (final job in jobs) {

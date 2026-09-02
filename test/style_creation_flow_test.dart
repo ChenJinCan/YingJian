@@ -25,6 +25,7 @@ import 'package:yingjian/features/generation/application/motion_photo_generator.
 import 'package:yingjian/features/generation/application/generation_coordinator.dart';
 import 'package:yingjian/features/generation/application/mask_removal_input_builder.dart';
 import 'package:yingjian/features/generation/domain/generation_input.dart';
+import 'package:yingjian/features/generation/infrastructure/explicit_refresh_generation_provider.dart';
 import 'package:yingjian/features/project/application/photo_project_session.dart';
 import 'package:yingjian/features/project/domain/photo_project.dart';
 import 'package:yingjian/features/photo_analysis/domain/photo_analysis.dart';
@@ -596,6 +597,141 @@ void main() {
         find.byKey(const ValueKey('optimize-cloud-result-ready')),
         findsOneWidget,
       );
+    },
+  );
+
+  testWidgets(
+    'unknown cloud create outcome is shown as reconciliation and blocks another cloud request',
+    (tester) async {
+      final projectStore = MemoryPhotoProjectStore();
+      final generationStore = _UiGenerationJobStore();
+      final provider = _CompletedCloudGenerationProvider(
+        capabilities: const {
+          CreationCapability.optimizeAiRepair,
+          CreationCapability.optimizeOldPhoto,
+        },
+        createOutcomeUnknown: true,
+      );
+      final settings = await _settings();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoImporter: FakePhotoImporter([
+            ProjectPhoto(
+              id: 'cloud-reconciliation-photo',
+              localPath:
+                  'ios/Runner/Assets.xcassets/AppIcon.appiconset/'
+                  'Icon-App-1024x1024@1x.png',
+              originalName: 'cloud-reconciliation.png',
+              contentSha256: '9' * 64,
+            ),
+          ]),
+          photoProjectStore: projectStore,
+          generationCoordinator: GenerationCoordinator(
+            provider: provider,
+            store: generationStore,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await _tapHomeTarget(tester, find.byKey(const ValueKey('home-optimize')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('optimize-capability-ai-repair')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('optimize-cloud-primary-action')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('generation-upload-consent')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('generation-cost-consent')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('generation-confirm-create')));
+      await tester.pumpAndSettle();
+
+      expect(provider.createCount, 1);
+      expect(
+        find.byKey(const ValueKey('optimize-cloud-reconciliation-required')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('optimize-cloud-result-failed')),
+        findsNothing,
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('optimize-capability-old-photo')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        projectStore.project?.creationCapability,
+        CreationCapability.optimizeAiRepair,
+      );
+      expect(provider.createCount, 1);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      final restoredProvider = _CompletedCloudGenerationProvider(
+        capabilities: const {
+          CreationCapability.optimizeAiRepair,
+          CreationCapability.optimizeOldPhoto,
+        },
+      );
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoProjectStore: projectStore,
+          generationCoordinator: GenerationCoordinator(
+            provider: restoredProvider,
+            store: generationStore,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final resume = find.byKey(const ValueKey('home-resume-project'));
+      await _scrollHomeTo(tester, resume);
+      await tester.tap(resume);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('optimize-cloud-reconciliation-required')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('optimize-capability-unavailable-state')),
+        findsNothing,
+      );
+      expect(restoredProvider.createCount, 0);
+
+      await tester.tap(
+        find.byKey(const ValueKey('optimize-cloud-reconciliation-check')),
+      );
+      await tester.pumpAndSettle();
+      expect(restoredProvider.reconcileCount, 1);
+      expect(
+        find.byKey(const ValueKey('optimize-cloud-reconciliation-required')),
+        findsOneWidget,
+      );
+      expect(restoredProvider.createCount, 0);
+
+      restoredProvider.resolveReconciliation = true;
+      await tester.tap(
+        find.byKey(const ValueKey('optimize-cloud-reconciliation-check')),
+      );
+      await tester.pumpAndSettle();
+      expect(restoredProvider.reconcileCount, 2);
+      expect(
+        find.byKey(const ValueKey('optimize-cloud-reconciliation-required')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('optimize-cloud-result-failed')),
+        findsOneWidget,
+      );
+      expect(find.text('已有云端任务仍在处理或待确认，暂时不能创建新的云端任务。'), findsOneWidget);
+      expect(restoredProvider.createCount, 0);
     },
   );
 
@@ -2957,6 +3093,65 @@ void main() {
     );
   });
 
+  testWidgets(
+    'restored cloud capability is shown as not connected until explicit refresh',
+    (tester) async {
+      final project = PhotoProject(
+        id: 'restored-cloud-capability',
+        createdAt: DateTime.utc(2026, 9, 1),
+        updatedAt: DateTime.utc(2026, 9, 1),
+        photos: [
+          _fixturePhoto('restored-cloud-photo', contentSha256: '8' * 64),
+        ],
+        creationIntent: CreationIntent.apply,
+        creationTask: CreationTask.optimize,
+        creationCapability: CreationCapability.optimizeAiRepair,
+      );
+      var connectorCalls = 0;
+      final provider = ExplicitRefreshGenerationProvider(
+        connector: () async {
+          connectorCalls += 1;
+          return _CompletedCloudGenerationProvider();
+        },
+      );
+      final settings = await _settings();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoProjectStore: MemoryPhotoProjectStore(project),
+          generationCoordinator: GenerationCoordinator(
+            provider: provider,
+            store: _UiGenerationJobStore(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final resume = find.byKey(const ValueKey('home-resume-project'));
+      await _scrollHomeTo(tester, resume);
+      await tester.tap(resume);
+      await tester.pumpAndSettle();
+
+      expect(connectorCalls, 0);
+      expect(find.text('云端能力待连接'), findsOneWidget);
+      expect(find.text('该能力尚未完成'), findsNothing);
+
+      await tester.tap(
+        find.byKey(const ValueKey('optimize-cloud-capability-refresh')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(connectorCalls, 1);
+      expect(
+        find.byKey(const ValueKey('optimize-cloud-primary-action')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('optimize-capability-unavailable-state')),
+        findsNothing,
+      );
+    },
+  );
+
   testWidgets('local style inputs stay idle until explicitly opened', (
     tester,
   ) async {
@@ -3169,6 +3364,16 @@ final class _UiGenerationJobStore implements GenerationJobStore {
   ) async => reservations[identity];
 
   @override
+  Future<GenerationRequestReservation?> findReconciliationRequired() async =>
+      reservations.values
+          .where(
+            (reservation) =>
+                reservation.state ==
+                GenerationRequestReservationState.reconciliationRequired,
+          )
+          .firstOrNull;
+
+  @override
   Future<void> saveReservation(GenerationRequestReservation reservation) async {
     reservations[reservation.identity] = reservation;
   }
@@ -3215,13 +3420,18 @@ final class _RecordingMaskRemovalInputCreator
   }
 }
 
-final class _CompletedCloudGenerationProvider implements GenerationProvider {
+final class _CompletedCloudGenerationProvider
+    implements GenerationProvider, GenerationRequestReconciler {
   _CompletedCloudGenerationProvider({
     this.capabilities = const {CreationCapability.optimizeAiRepair},
+    this.createOutcomeUnknown = false,
   });
 
   final Set<CreationCapability> capabilities;
+  final bool createOutcomeUnknown;
   int createCount = 0;
+  int reconcileCount = 0;
+  bool resolveReconciliation = false;
   final List<GenerationSourceSnapshot> snapshots = [];
 
   @override
@@ -3247,6 +3457,9 @@ final class _CompletedCloudGenerationProvider implements GenerationProvider {
   }) async {
     createCount += 1;
     snapshots.add(snapshot);
+    if (createOutcomeUnknown) {
+      throw GenerationCreateOutcomeUnknown(clientRequestId);
+    }
     return GenerationJob(
       id: 'cloud-job-1',
       clientRequestId: clientRequestId,
@@ -3274,6 +3487,38 @@ final class _CompletedCloudGenerationProvider implements GenerationProvider {
 
   @override
   Future<GenerationJob> cancel(GenerationJob job) async => job;
+
+  @override
+  Future<GenerationJob> reconcile(
+    GenerationRequestReservation reservation,
+  ) async {
+    reconcileCount += 1;
+    final resolved = resolveReconciliation;
+    return GenerationJob(
+      id: 'cloud-reconciliation-job',
+      clientRequestId: reservation.clientRequestId,
+      projectId: reservation.identity.projectId,
+      sourcePhotoId: reservation.identity.sourcePhotoId,
+      sourceSha256: reservation.identity.sourceSha256,
+      inputIdentity: reservation.identity.inputIdentity,
+      capability: reservation.identity.capability,
+      state: GenerationJobState.failed,
+      provider: 'baidu',
+      model: 'image_definition_enhance',
+      canCancel: false,
+      createdAt: DateTime.utc(2026, 9, 1),
+      updatedAt: DateTime.utc(2026, 9, 1, 0, reconcileCount),
+      usageState: resolved
+          ? GenerationUsageState.released
+          : GenerationUsageState.reserved,
+      usageDisposition: resolved
+          ? GenerationUsageDisposition.release
+          : GenerationUsageDisposition.hold,
+      errorCode: resolved
+          ? 'generation_concurrency_exceeded'
+          : 'dispatch_reconciliation_required',
+    );
+  }
 
   @override
   Stream<GenerationJob> observe(GenerationJob job) => const Stream.empty();

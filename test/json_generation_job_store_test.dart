@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -12,7 +13,7 @@ void main() {
     );
     addTearDown(() => directory.delete(recursive: true));
     final store = JsonGenerationJobStore(directory: () async => directory);
-    final job = _job();
+    final job = _job().copyWith(errorCode: 'provider_failed');
 
     await store.save(job);
 
@@ -70,6 +71,7 @@ void main() {
       clientRequestId: 'request-before-provider-call',
       identity: identity,
       createdAt: DateTime.utc(2026, 9, 1),
+      state: GenerationRequestReservationState.reconciliationRequired,
     );
 
     await store.saveReservation(reservation);
@@ -80,10 +82,57 @@ void main() {
     expect(restored?.clientRequestId, reservation.clientRequestId);
     expect(restored?.identity, identity);
     expect(restored?.createdAt, reservation.createdAt);
+    expect(
+      restored?.state,
+      GenerationRequestReservationState.reconciliationRequired,
+    );
+    expect(
+      (await store.findReconciliationRequired())?.clientRequestId,
+      reservation.clientRequestId,
+    );
 
     await store.deleteReservation(reservation.clientRequestId);
     expect(await store.findReservation(identity), isNull);
   });
+
+  test(
+    'a legacy incomplete reservation is migrated to reconciliation',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'yingjian-generation-legacy-reservation-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final file = File(
+        '${directory.path}/generation/request-reservations.json',
+      );
+      await file.parent.create(recursive: true);
+      await file.writeAsString(
+        jsonEncode({
+          'schemaVersion': 1,
+          'reservations': [
+            {
+              'clientRequestId': 'legacy-unknown-request',
+              'projectId': 'legacy-project',
+              'sourcePhotoId': 'legacy-photo',
+              'sourceSha256': 'a' * 64,
+              'capability': 'style.aiRedraw',
+              'inputIdentity': 'style-redraw-v1:${'b' * 64}',
+              'createdAt': '2026-09-02T01:00:30.000Z',
+            },
+          ],
+        }),
+      );
+      final store = JsonGenerationJobStore(directory: () async => directory);
+
+      final pending = await store.findReconciliationRequired();
+
+      expect(pending?.clientRequestId, 'legacy-unknown-request');
+      expect(
+        pending?.state,
+        GenerationRequestReservationState.reconciliationRequired,
+      );
+    },
+  );
 
   test('project deletion cleanup authorization survives restart', () async {
     final directory = await Directory.systemTemp.createTemp(
@@ -192,7 +241,7 @@ void main() {
     addTearDown(() => directory.delete(recursive: true));
     final file = File('${directory.path}/generation/jobs.json');
     await file.parent.create(recursive: true);
-    await file.writeAsString('{"schemaVersion":3,"jobs":[]}');
+    await file.writeAsString('{"schemaVersion":4,"jobs":[]}');
     final store = JsonGenerationJobStore(directory: () async => directory);
 
     await expectLater(store.findById('job-1'), throwsFormatException);
@@ -257,5 +306,6 @@ void _expectSameJob(GenerationJob? actual, GenerationJob expected) {
   expect(actual.cancellationDisposition, expected.cancellationDisposition);
   expect(actual.usageState, expected.usageState);
   expect(actual.usageDisposition, expected.usageDisposition);
+  expect(actual.errorCode, expected.errorCode);
   expect(actual.output, expected.output);
 }

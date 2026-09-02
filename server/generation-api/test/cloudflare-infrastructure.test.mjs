@@ -75,6 +75,20 @@ test('D1 task repository persists idempotency and compare-and-set versions', asy
     (await repository.get({ ownerId: task.ownerId, taskId: task.id })).version,
     2,
   );
+  assert.equal(
+    (await repository.getByCreation({
+      ownerId: task.ownerId,
+      creationKey: task.creationKey,
+    })).id,
+    task.id,
+  );
+  assert.equal(
+    await repository.getByCreation({
+      ownerId: 'install:owner-b',
+      creationKey: task.creationKey,
+    }),
+    null,
+  );
 });
 
 test('D1 usage guard atomically enforces enrolled credits and storage', async (t) => {
@@ -237,4 +251,56 @@ test('D1 usage guard atomically caps generation reservations across all owners',
     })).kind,
     'reserved',
   );
+});
+
+test('a stale held reservation keeps its credit hold without consuming active concurrency', async (t) => {
+  const db = database(t);
+  await db
+    .prepare(
+      `INSERT INTO usage_accounts
+        (owner_id, credit_limit, status, created_at_ms, updated_at_ms)
+       VALUES (?, 3, 'active', 0, 0)`,
+    )
+    .bind('install:owner-a')
+    .run();
+  let now = new Date('2026-09-01T00:00:00.000Z');
+  const guard = new D1UsageGuard({
+    database: db,
+    maxCreditsPerOwner: 3,
+    maxConcurrentGenerationsPerOwner: 1,
+    maxGenerationReservationsPerWindow: 5,
+    maxGlobalGenerationReservationsPerWindow: 50,
+    rateWindowMilliseconds: 60_000,
+    activeReservationWindowMilliseconds: 1_000,
+    maxStorageBytesPerOwner: 100,
+    now: () => now,
+  });
+
+  await guard.reserveGeneration({
+    ownerId: 'install:owner-a',
+    reservationId: 'unknown-provider-outcome',
+    fingerprint: 'fingerprint-unknown',
+    creditCost: 1,
+  });
+  now = new Date('2026-09-01T00:00:01.001Z');
+  assert.equal(
+    (await guard.reserveGeneration({
+      ownerId: 'install:owner-a',
+      reservationId: 'new-explicit-request',
+      fingerprint: 'fingerprint-new',
+      creditCost: 1,
+    })).kind,
+    'reserved',
+  );
+
+  const ledger = await db
+    .prepare(
+      `SELECT COUNT(*) AS held_count, SUM(credit_cost) AS held_credits
+         FROM generation_usage_reservations
+        WHERE owner_id = ? AND state = 'reserved'`,
+    )
+    .bind('install:owner-a')
+    .first();
+  assert.equal(Number(ledger.held_count), 2);
+  assert.equal(Number(ledger.held_credits), 2);
 });

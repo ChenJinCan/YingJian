@@ -222,6 +222,10 @@ platform :ios do
     }
     write_private_json_exclusive!(attempt_path, attempt)
 
+    # Pilot treats a changelog as a reason to wait for build processing even
+    # when skip_waiting_for_build_processing is true. This lane stops at
+    # Apple's receipt, so inherited release-note state must not cross it.
+    ENV.delete("PILOT_CHANGELOG")
     upload_to_testflight(
       api_key: api_key,
       app_identifier: IOS_BUNDLE_ID,
@@ -244,7 +248,7 @@ platform :ios do
     write_private_json_exclusive!(receipt_path, receipt)
     File.unlink(attempt_path)
     FastlaneCore::UI.success(
-      "Uploaded #{IOS_BUNDLE_ID} #{version} (#{build}); provider processing remains pending."
+      "UPLOADED #{IOS_BUNDLE_ID} #{version} (#{build}); provider processing remains pending."
     )
   end
 end

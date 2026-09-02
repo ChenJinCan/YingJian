@@ -10,6 +10,7 @@ const OFFER_IDS = {
   styleAiRedraw: 'style-ai-redraw@1:credit-1',
   cleanupRemovePasserby: 'cleanup-remove-passerby-mask@1:credit-1',
   cleanupBrushRemove: 'cleanup-brush-remove-mask@1:credit-1',
+  motionAiNatural: 'motion-ai-natural@1:credit-1',
 };
 
 const testOfferAuthority = {
@@ -96,6 +97,10 @@ function memoryTaskRepository() {
     },
     async get({ ownerId, taskId }) {
       const task = byId.get(taskId);
+      return task?.ownerId === ownerId ? task : null;
+    },
+    async getByCreation({ ownerId, creationKey }) {
+      const task = byCreation.get(creationKey);
       return task?.ownerId === ownerId ? task : null;
     },
   };
@@ -999,7 +1004,138 @@ test('a durable dispatch intent prevents a second submit after post-submit persi
   const replay = await handler(createRequest(body));
   assert.equal(replay.status, 200);
   assert.equal((await replay.json()).task.errorCode, 'dispatch_reconciliation_required');
+  const reconciliation = await handler(
+    new Request(
+      'http://localhost/v1/generation-tasks/by-creation/creation-dispatch' +
+        '?capability=styleAiRedraw',
+      { headers: { authorization: 'Bearer user' } },
+    ),
+  );
+  assert.equal(reconciliation.status, 200);
+  assert.equal(
+    (await reconciliation.json()).task.errorCode,
+    'dispatch_reconciliation_required',
+  );
   assert.equal(submits, 1);
+});
+
+test('an expired unknown dispatch stops locking the client while its credit remains held', async () => {
+  let currentTime = new Date('2026-09-01T03:00:00.000Z');
+  let submits = 0;
+  const usageEvents = [];
+  const handler = createGenerationHttpHandler({
+    authenticator: async () => ({ ownerId: 'user-1' }),
+    taskRepository: memoryTaskRepository(),
+    mediaStore: {
+      async resolveInput() { return validMedia(); },
+      async storeProviderOutput() { throw new Error('not expected'); },
+    },
+    usageGuard: {
+      ...allowingUsageGuard,
+      async reserveGeneration() { usageEvents.push('reserve'); },
+      async settleGeneration() { usageEvents.push('settle'); },
+      async releaseGeneration() { usageEvents.push('release'); },
+    },
+    providers: {
+      alibaba: {
+        cancelPolicy: 'pending-only',
+        async submit() {
+          submits += 1;
+          throw new Error('provider outcome is unknown');
+        },
+      },
+    },
+    idFactory: () => 'task-unknown-outcome',
+    dispatchIdFactory: () => 'dispatch-unknown-outcome',
+    dispatchReconciliationWindowMilliseconds: 1_000,
+    now: () => currentTime,
+  });
+  const body = {
+    creationId: 'creation-unknown-outcome',
+    capability: 'styleAiRedraw',
+    sourceMediaId: 'source-1',
+    styleDefinition: '用户确认的风格',
+    styleDefinitionConfirmed: true,
+    consent: { uploadConfirmed: true, costConfirmed: true, policyVersion: 1 },
+  };
+
+  const failed = await handler(createRequest(body));
+  assert.equal(failed.status, 502);
+  assert.equal(
+    (await failed.json()).error.code,
+    'dispatch_reconciliation_required',
+  );
+
+  currentTime = new Date('2026-09-01T03:00:01.001Z');
+  const reconciliation = await handler(
+    new Request(
+      'http://localhost/v1/generation-tasks/by-creation/' +
+        'creation-unknown-outcome?capability=styleAiRedraw',
+      { headers: { authorization: 'Bearer user' } },
+    ),
+  );
+  assert.equal(reconciliation.status, 200);
+  const reconciledTask = (await reconciliation.json()).task;
+  assert.equal(reconciledTask.errorCode, 'provider_outcome_unknown');
+  assert.equal(reconciledTask.usageState, 'reserved');
+  assert.equal(reconciledTask.usageDisposition, 'hold');
+
+  const replay = await handler(createRequest(body));
+  assert.equal(replay.status, 200);
+  assert.equal((await replay.json()).task.errorCode, 'provider_outcome_unknown');
+  assert.equal(submits, 1);
+  assert.deepEqual(usageEvents, ['reserve']);
+});
+
+test('creation reconciliation cannot read another owner task', async () => {
+  const handler = createGenerationHttpHandler({
+    authenticator: async (request) => ({
+      ownerId:
+        request.headers.get('authorization') === 'Bearer other'
+          ? 'user-2'
+          : 'user-1',
+    }),
+    taskRepository: memoryTaskRepository(),
+    mediaStore: {
+      async resolveInput() { return validMedia(); },
+      async storeProviderOutput() { throw new Error('not expected'); },
+    },
+    providers: {
+      alibaba: {
+        cancelPolicy: 'pending-only',
+        async submit() {
+          return {
+            kind: 'accepted',
+            providerTaskId: 'owner-scoped-task',
+            providerRequestId: 'owner-scoped-request',
+            providerStatus: 'PENDING',
+            providerCancelable: true,
+          };
+        },
+      },
+    },
+    idFactory: () => 'task-owner-scoped',
+  });
+  const creationId = 'creation-owner-scoped';
+  const created = await handler(createRequest({
+    creationId,
+    capability: 'styleAiRedraw',
+    sourceMediaId: 'source-1',
+    styleDefinition: '用户确认的风格',
+    styleDefinitionConfirmed: true,
+    consent: { uploadConfirmed: true, costConfirmed: true, policyVersion: 1 },
+  }));
+  assert.equal(created.status, 201);
+
+  const response = await handler(
+    new Request(
+      `http://localhost/v1/generation-tasks/by-creation/${creationId}` +
+        '?capability=styleAiRedraw',
+      { headers: { authorization: 'Bearer other' } },
+    ),
+  );
+  assert.equal(response.status, 404);
+  assert.equal((await response.json()).error.code, 'task_not_found');
 });
 
 test('a live dispatch lease lets a concurrent idempotent request observe without corrupting the task', async () => {
@@ -1052,6 +1188,62 @@ test('a live dispatch lease lets a concurrent idempotent request observe without
   finishSubmit();
   assert.equal((await first).status, 201);
   assert.equal(submits, 1);
+});
+
+test('a usage rejection is persisted as terminal before any provider dispatch', async () => {
+  let submits = 0;
+  const handler = createGenerationHttpHandler({
+    authenticator: async () => ({ ownerId: 'user-1' }),
+    taskRepository: memoryTaskRepository(),
+    mediaStore: {
+      async resolveInput() { return validMedia(); },
+      async storeProviderOutput() { throw new Error('not expected'); },
+    },
+    usageGuard: {
+      ...allowingUsageGuard,
+      async reserveGeneration() {
+        const error = new Error('generation_concurrency_exceeded');
+        error.code = 'generation_concurrency_exceeded';
+        error.status = 429;
+        throw error;
+      },
+    },
+    providers: {
+      alibabaMotion: {
+        cancelPolicy: 'pending-only',
+        async submit() {
+          submits += 1;
+          throw new Error('must not dispatch');
+        },
+      },
+    },
+    idFactory: () => 'task-concurrency-rejected',
+  });
+  const body = {
+    creationId: 'creation-concurrency-rejected',
+    capability: 'motionAiNatural',
+    sourceMediaId: 'source-1',
+    consent: { uploadConfirmed: true, costConfirmed: true, policyVersion: 1 },
+  };
+
+  const created = await handler(createRequest(body));
+  assert.equal(created.status, 429);
+  assert.equal((await created.json()).error.code, 'generation_concurrency_exceeded');
+
+  const reconciliation = await handler(
+    new Request(
+      'http://localhost/v1/generation-tasks/by-creation/' +
+        'creation-concurrency-rejected?capability=motionAiNatural',
+      { headers: { authorization: 'Bearer user' } },
+    ),
+  );
+  assert.equal(reconciliation.status, 200);
+  const task = (await reconciliation.json()).task;
+  assert.equal(task.state, 'rejected');
+  assert.equal(task.errorCode, 'generation_concurrency_exceeded');
+  assert.equal(task.usageState, 'unreserved');
+  assert.equal(task.usageDisposition, 'release');
+  assert.equal(submits, 0);
 });
 
 test('private upload reserves owner storage before persistence and commits after success', async () => {

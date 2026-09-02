@@ -68,6 +68,8 @@ class StyleWorkspacePage extends StatefulWidget {
   State<StyleWorkspacePage> createState() => _StyleWorkspacePageState();
 }
 
+enum _CloudCapabilityDiscovery { notLoaded, loading, loaded, failed }
+
 class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
   PhotoProjectStore? _store;
   PhotoProjectSession? _session;
@@ -116,7 +118,10 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
   GenerationJob? _cloudGenerationJob;
   bool _creatingCloudResult = false;
   bool _refreshingCloudCapabilities = false;
+  _CloudCapabilityDiscovery _cloudCapabilityDiscovery =
+      _CloudCapabilityDiscovery.notLoaded;
   bool _cloudGenerationFailed = false;
+  GenerationRequestReservation? _cloudReconciliation;
   bool _cancellingCloudResult = false;
   bool _savingGeneratedResult = false;
   bool _previewingMotionResult = false;
@@ -135,6 +140,10 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
   bool get _hasActiveCloudGeneration =>
       _cloudGenerationJob?.state == GenerationJobState.queued ||
       _cloudGenerationJob?.state == GenerationJobState.running;
+
+  bool get _hasCloudReconciliationRequired =>
+      _cloudReconciliation?.state ==
+      GenerationRequestReservationState.reconciliationRequired;
 
   bool get _interactionLocked =>
       _savingStyle ||
@@ -522,6 +531,14 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
   Future<void> _selectCapability(CreationCapability capability) async {
     final session = _session;
     final project = session?.project;
+    if (!_interactionLocked &&
+        _hasCloudReconciliationRequired &&
+        _isCloudGenerationCapability(capability)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.cloudReconciliationRequired)),
+      );
+      return;
+    }
     if (_interactionLocked ||
         _hasActiveCloudGeneration ||
         session == null ||
@@ -558,11 +575,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
         _maskRemovalInput = null;
       });
       if (_isCloudGenerationCapability(capability)) {
-        try {
-          await _generationCoordinator?.refreshCapabilities();
-        } on Object {
-          if (mounted) setState(() => _cloudGenerationFailed = true);
-        }
+        await _refreshCloudCapabilities();
       }
       if (_isSegmentationCleanupCapability(capability)) {
         final selectedProject = session.project;
@@ -582,6 +595,35 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
       ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
     } finally {
       if (mounted) setState(() => _savingStyle = false);
+    }
+  }
+
+  Future<bool> _refreshCloudCapabilities() async {
+    final coordinator = _generationCoordinator;
+    if (coordinator == null) return false;
+    if (mounted) {
+      setState(() {
+        _refreshingCloudCapabilities = true;
+        _cloudCapabilityDiscovery = _CloudCapabilityDiscovery.loading;
+      });
+    }
+    try {
+      await coordinator.refreshCapabilities();
+      if (mounted) {
+        setState(() {
+          _cloudCapabilityDiscovery = _CloudCapabilityDiscovery.loaded;
+        });
+      }
+      return true;
+    } on Object {
+      if (mounted) {
+        setState(() {
+          _cloudCapabilityDiscovery = _CloudCapabilityDiscovery.failed;
+        });
+      }
+      return false;
+    } finally {
+      if (mounted) setState(() => _refreshingCloudCapabilities = false);
     }
   }
 
@@ -649,6 +691,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
         ).hasMatch(project.photos.single.contentSha256)) {
       return;
     }
+    _cloudReconciliation = await coordinator.findReconciliationRequired();
     if (capability == CreationCapability.optimizeUpscale) {
       GenerationJob? latest;
       UpscalePhotoScale? latestScale;
@@ -1008,21 +1051,14 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
   Future<void> _startCloudGeneration(PhotoProject project) async {
     final coordinator = _generationCoordinator;
     final capability = project.creationCapability;
-    if (_interactionLocked || coordinator == null || capability == null) {
+    if (_interactionLocked ||
+        _hasCloudReconciliationRequired ||
+        coordinator == null ||
+        capability == null) {
       return;
     }
-    setState(() {
-      _refreshingCloudCapabilities = true;
-      _cloudGenerationFailed = false;
-    });
-    try {
-      await coordinator.refreshCapabilities();
-    } on Object {
-      if (mounted) setState(() => _cloudGenerationFailed = true);
-      return;
-    } finally {
-      if (mounted) setState(() => _refreshingCloudCapabilities = false);
-    }
+    setState(() => _cloudGenerationFailed = false);
+    if (!await _refreshCloudCapabilities()) return;
     if (!mounted ||
         _session?.project?.creationCapability != capability ||
         !coordinator.availableCapabilities.contains(capability)) {
@@ -1148,6 +1184,13 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
         _creatingCloudResult = false;
       });
       await _observeCloudGeneration(job, capability);
+    } on GenerationReconciliationRequired catch (error) {
+      if (mounted) {
+        setState(() {
+          _cloudReconciliation = error.reservation;
+          _cloudGenerationFailed = false;
+        });
+      }
     } on Object {
       if (mounted) setState(() => _cloudGenerationFailed = true);
     } finally {
@@ -1216,19 +1259,12 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
       return;
     }
     final jobId = job.id;
-    setState(() {
-      _refreshingCloudCapabilities = true;
-      _cloudGenerationFailed = false;
-    });
-    try {
-      await coordinator.refreshCapabilities();
-    } on Object {
+    setState(() => _cloudGenerationFailed = false);
+    if (!await _refreshCloudCapabilities()) {
       if (mounted && _cloudGenerationJob?.id == jobId) {
         setState(() => _cloudGenerationFailed = true);
       }
       return;
-    } finally {
-      if (mounted) setState(() => _refreshingCloudCapabilities = false);
     }
     if (!mounted ||
         _session?.project?.creationCapability != capability ||
@@ -1255,7 +1291,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
       // Cancellation is itself an explicit user action. Reconnect only to the
       // same configured first-party gateway so a restored job can still be
       // cancelled after startup authentication or network recovery.
-      await coordinator.refreshCapabilities();
+      if (!await _refreshCloudCapabilities()) return;
       if (!mounted || _cloudGenerationJob?.id != job.id) return;
       final cancelled = await coordinator.cancel(job.id);
       if (!mounted || _cloudGenerationJob?.id != job.id) return;
@@ -1280,16 +1316,49 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
         !_isCloudGenerationCapability(capability)) {
       return;
     }
-    setState(() {
-      _refreshingCloudCapabilities = true;
-      _cloudGenerationFailed = false;
-    });
+    setState(() => _cloudGenerationFailed = false);
+    await _refreshCloudCapabilities();
+  }
+
+  Future<void> _reconcileCloudGeneration() async {
+    final coordinator = _generationCoordinator;
+    final pending = _cloudReconciliation;
+    if (_interactionLocked || coordinator == null || pending == null) return;
+    if (!await _refreshCloudCapabilities()) return;
+    if (!mounted ||
+        _cloudReconciliation?.clientRequestId != pending.clientRequestId) {
+      return;
+    }
+    setState(() => _creatingCloudResult = true);
     try {
-      await coordinator.refreshCapabilities();
+      final job = await coordinator.reconcile(pending);
+      if (!mounted ||
+          _cloudReconciliation?.clientRequestId != pending.clientRequestId) {
+        return;
+      }
+      setState(() {
+        _cloudGenerationJob = job;
+        _cloudReconciliation = job.requiresReconciliation ? pending : null;
+        _cloudGenerationFailed =
+            job.state == GenerationJobState.failed &&
+            !job.requiresReconciliation;
+      });
+      if (job.state == GenerationJobState.queued ||
+          job.state == GenerationJobState.running) {
+        await _observeCloudGeneration(job, job.capability);
+      }
+    } on GenerationReconciliationNotFound {
+      if (mounted) {
+        setState(() {
+          _cloudReconciliation = null;
+          _cloudGenerationFailed = true;
+        });
+      }
     } on Object {
-      if (mounted) setState(() => _cloudGenerationFailed = true);
+      // Keep the pending identity and paid-task lock. A failed status query is
+      // not evidence that the original request can be submitted again.
     } finally {
-      if (mounted) setState(() => _refreshingCloudCapabilities = false);
+      if (mounted) setState(() => _creatingCloudResult = false);
     }
   }
 
@@ -2578,7 +2647,9 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
     final showCloudGeneration =
         selectedCapability != null &&
         _isCloudGenerationCapability(selectedCapability) &&
-        (cloudCapabilityAvailable || _cloudGenerationJob != null);
+        (cloudCapabilityAvailable ||
+            _cloudGenerationJob != null ||
+            _hasCloudReconciliationRequired);
     final cloudInput = selectedCapability == null
         ? null
         : _generationInputFor(selectedCapability);
@@ -2590,6 +2661,8 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
         ? cloudOutput
         : null;
     final cloudJobIsActive = _hasActiveCloudGeneration;
+    final cloudRequestLocked =
+        cloudJobIsActive || _hasCloudReconciliationRequired;
     final cloudJobSucceeded =
         _cloudGenerationJob?.state == GenerationJobState.succeeded &&
         cloudOutput != null;
@@ -2605,7 +2678,57 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
     final showUnavailable =
         selectedCapability != null &&
         !_hasRuntimeImplementation(selectedCapability) &&
+        !_hasCloudReconciliationRequired &&
         generatedMedia == null;
+    final unavailableTitle =
+        selectedCapability != null &&
+            _isCloudGenerationCapability(selectedCapability)
+        ? switch (_cloudCapabilityDiscovery) {
+            _CloudCapabilityDiscovery.notLoaded =>
+              context.l10n.cloudCapabilitiesNotLoaded,
+            _CloudCapabilityDiscovery.loading =>
+              context.l10n.cloudCapabilitiesLoading,
+            _CloudCapabilityDiscovery.failed =>
+              context.l10n.cloudCapabilitiesConnectionFailed,
+            _CloudCapabilityDiscovery.loaded =>
+              context.l10n.cloudCapabilityUnavailable,
+          }
+        : context.l10n.capabilityUnavailable;
+    final unavailableDetail =
+        selectedCapability != null &&
+            _isCloudGenerationCapability(selectedCapability)
+        ? switch (_cloudCapabilityDiscovery) {
+            _CloudCapabilityDiscovery.notLoaded =>
+              context.l10n.cloudCapabilitiesNotLoadedDetail,
+            _CloudCapabilityDiscovery.loading =>
+              context.l10n.cloudCapabilitiesLoadingDetail,
+            _CloudCapabilityDiscovery.failed =>
+              context.l10n.cloudCapabilitiesConnectionFailedDetail,
+            _CloudCapabilityDiscovery.loaded =>
+              context.l10n.cloudCapabilityUnavailableDetail,
+          }
+        : context.l10n.capabilityUnavailableDetail;
+    final cloudFailureMessage = switch (_cloudGenerationJob?.errorCode) {
+      'generation_concurrency_exceeded' =>
+        context.l10n.generationConcurrencyExceeded,
+      'generation_credit_exhausted' => context.l10n.generationCreditExhausted,
+      'capability_disabled' ||
+      'capability_not_configured' => context.l10n.generationCapabilityDisabled,
+      'provider_failed' ||
+      'result_import_failed' => context.l10n.generationProviderFailed,
+      _
+          when cloudJobIsActive &&
+              _cloudGenerationJob?.usageDisposition ==
+                  GenerationUsageDisposition.hold &&
+              _cloudGenerationJob?.cancellationDisposition ==
+                  GenerationCancellationDisposition.unavailable =>
+        context.l10n.generationCancellationStillRunning,
+      _
+          when _cloudGenerationJob?.usageDisposition ==
+              GenerationUsageDisposition.hold =>
+        context.l10n.generationStatusCreditHeld,
+      _ => context.l10n.generationFailed,
+    };
     final textScaler = MediaQuery.textScalerOf(context);
     final styleRailHeight = 82 + textScaler.scale(16);
     return SafeArea(
@@ -3016,7 +3139,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
                                     _oldPhotoColorMode ==
                                     OldPhotoColorMode.preserve,
                                 onSelected:
-                                    _interactionLocked || cloudJobIsActive
+                                    _interactionLocked || cloudRequestLocked
                                     ? null
                                     : (_) => setState(() {
                                         _oldPhotoColorMode =
@@ -3033,7 +3156,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
                                     _oldPhotoColorMode ==
                                     OldPhotoColorMode.colorize,
                                 onSelected:
-                                    _interactionLocked || cloudJobIsActive
+                                    _interactionLocked || cloudRequestLocked
                                     ? null
                                     : (_) => setState(() {
                                         _oldPhotoColorMode =
@@ -3055,7 +3178,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
                             minLines: 2,
                             maxLines: 4,
                             maxLength: StyleDefinition.maxAiRedrawIntentLength,
-                            enabled: !_interactionLocked && !cloudJobIsActive,
+                            enabled: !_interactionLocked && !cloudRequestLocked,
                             decoration: InputDecoration(
                               labelText: context.l10n.aiRedrawDefinitionLabel,
                               hintText: context.l10n.aiRedrawDefinitionHint,
@@ -3076,7 +3199,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
                             key: const ValueKey('ai-redraw-confirm-definition'),
                             onPressed:
                                 _interactionLocked ||
-                                    cloudJobIsActive ||
+                                    cloudRequestLocked ||
                                     _aiRedrawDraft.trim().isEmpty ||
                                     _confirmedAiRedrawDefinition != null
                                 ? null
@@ -3136,7 +3259,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
                                 CreationCapability.cleanupBrushRemove) ...[
                           OutlinedButton.icon(
                             key: const ValueKey('cleanup-mask-input-action'),
-                            onPressed: _interactionLocked || cloudJobIsActive
+                            onPressed: _interactionLocked || cloudRequestLocked
                                 ? null
                                 : () => _chooseRemovalMask(project),
                             icon: const Icon(Icons.brush_outlined),
@@ -3156,7 +3279,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
                           ],
                           const SizedBox(height: 10),
                         ],
-                        if (!cloudJobIsActive && !cloudJobSucceeded)
+                        if (!cloudRequestLocked && !cloudJobSucceeded)
                           FilledButton.icon(
                             key: ValueKey(
                               '${widget.task.name}-cloud-primary-action',
@@ -3218,6 +3341,51 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
                             ),
                           ),
                         ],
+                        if (_hasCloudReconciliationRequired) ...[
+                          const SizedBox(height: 8),
+                          Semantics(
+                            key: ValueKey(
+                              '${widget.task.name}-cloud-reconciliation-required',
+                            ),
+                            container: true,
+                            liveRegion: true,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  context.l10n.cloudReconciliationRequired,
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.titleMedium,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  context
+                                      .l10n
+                                      .cloudReconciliationRequiredDetail,
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                      ),
+                                ),
+                                const SizedBox(height: 8),
+                                OutlinedButton(
+                                  key: ValueKey(
+                                    '${widget.task.name}-cloud-reconciliation-check',
+                                  ),
+                                  onPressed: _interactionLocked
+                                      ? null
+                                      : _reconcileCloudGeneration,
+                                  child: Text(
+                                    context.l10n.checkCloudGenerationStatus,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                         if (cloudJobSucceeded) ...[
                           const SizedBox(height: 8),
                           Semantics(
@@ -3270,7 +3438,8 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
                             label: Text(context.l10n.shareResult),
                           ),
                         ],
-                        if (_cloudGenerationFailed) ...[
+                        if (_cloudGenerationFailed &&
+                            !_hasCloudReconciliationRequired) ...[
                           const SizedBox(height: 8),
                           Semantics(
                             key: ValueKey(
@@ -3278,20 +3447,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
                             ),
                             liveRegion: true,
                             child: Text(
-                              cloudJobIsActive &&
-                                      _cloudGenerationJob?.usageDisposition ==
-                                          GenerationUsageDisposition.hold &&
-                                      _cloudGenerationJob
-                                              ?.cancellationDisposition ==
-                                          GenerationCancellationDisposition
-                                              .unavailable
-                                  ? context
-                                        .l10n
-                                        .generationCancellationStillRunning
-                                  : _cloudGenerationJob?.usageDisposition ==
-                                        GenerationUsageDisposition.hold
-                                  ? context.l10n.generationStatusCreditHeld
-                                  : context.l10n.generationFailed,
+                              cloudFailureMessage,
                               style: TextStyle(
                                 color: Theme.of(context).colorScheme.error,
                               ),
@@ -3349,12 +3505,12 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                context.l10n.capabilityUnavailable,
+                                unavailableTitle,
                                 style: Theme.of(context).textTheme.titleMedium,
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                context.l10n.capabilityUnavailableDetail,
+                                unavailableDetail,
                                 style: Theme.of(context).textTheme.bodySmall
                                     ?.copyWith(
                                       color: Theme.of(

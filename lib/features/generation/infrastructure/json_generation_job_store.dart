@@ -14,7 +14,8 @@ final class JsonGenerationJobStore
 
   JsonGenerationJobStore._(this._directory);
 
-  static const schemaVersion = 2;
+  static const schemaVersion = 3;
+  static const reservationSchemaVersion = 2;
 
   final GenerationJobDirectoryProvider _directory;
 
@@ -102,6 +103,21 @@ final class JsonGenerationJobStore
     return reservations
         .where((reservation) => reservation.identity == identity)
         .firstOrNull;
+  }
+
+  @override
+  Future<GenerationRequestReservation?> findReconciliationRequired() async {
+    final root = await _directory();
+    final matches =
+        (await _readReservations(_reservationFile(root)))
+            .where(
+              (reservation) =>
+                  reservation.state ==
+                  GenerationRequestReservationState.reconciliationRequired,
+            )
+            .toList()
+          ..sort((left, right) => left.createdAt.compareTo(right.createdAt));
+    return matches.firstOrNull;
   }
 
   @override
@@ -301,7 +317,16 @@ final class JsonGenerationJobStore
   ) async {
     if (!await file.exists()) return <GenerationRequestReservation>[];
     final decoded = jsonDecode(await file.readAsString());
-    if (decoded is! Map<String, Object?> || decoded['schemaVersion'] != 1) {
+    if (decoded is! Map<String, Object?>) {
+      throw const FormatException(
+        'Unsupported generation request reservation store',
+      );
+    }
+    final storedVersion = decoded['schemaVersion'];
+    if (storedVersion is! num ||
+        storedVersion.toInt() != storedVersion ||
+        storedVersion.toInt() < 1 ||
+        storedVersion.toInt() > reservationSchemaVersion) {
       throw const FormatException(
         'Unsupported generation request reservation store',
       );
@@ -321,7 +346,10 @@ final class JsonGenerationJobStore
           'Generation request reservations must be JSON objects',
         );
       }
-      final reservation = _decodeReservation(value);
+      final reservation = _decodeReservation(
+        value,
+        legacyPreparedRequiresReconciliation: storedVersion.toInt() == 1,
+      );
       if (!identities.add(reservation.identity) ||
           !requestIds.add(reservation.clientRequestId)) {
         throw const FormatException(
@@ -342,7 +370,7 @@ final class JsonGenerationJobStore
     try {
       await temporary.writeAsString(
         jsonEncode({
-          'schemaVersion': 1,
+          'schemaVersion': reservationSchemaVersion,
           'reservations': reservations
               .map(_encodeReservation)
               .toList(growable: false),
@@ -367,11 +395,13 @@ final class JsonGenerationJobStore
     'capability': reservation.identity.capability.persistedId,
     'inputIdentity': ?reservation.identity.inputIdentity,
     'createdAt': reservation.createdAt.toUtc().toIso8601String(),
+    'state': reservation.state.name,
   };
 
   static GenerationRequestReservation _decodeReservation(
-    Map<String, Object?> value,
-  ) => GenerationRequestReservation(
+    Map<String, Object?> value, {
+    required bool legacyPreparedRequiresReconciliation,
+  }) => GenerationRequestReservation(
     clientRequestId: _requiredString(value, 'clientRequestId'),
     identity: GenerationRequestIdentity(
       projectId: _requiredString(value, 'projectId'),
@@ -383,6 +413,15 @@ final class JsonGenerationJobStore
       inputIdentity: value['inputIdentity'] as String?,
     ),
     createdAt: _requiredDate(value, 'createdAt'),
+    state:
+        _optionalEnum(
+          value,
+          'state',
+          GenerationRequestReservationState.values,
+        ) ??
+        (legacyPreparedRequiresReconciliation
+            ? GenerationRequestReservationState.reconciliationRequired
+            : GenerationRequestReservationState.prepared),
   );
 
   static Future<List<GenerationJob>> _readJobs(File file) async {
@@ -440,6 +479,7 @@ final class JsonGenerationJobStore
       'cancellationDisposition': value.name,
     if (job.usageState case final value?) 'usageState': value.name,
     if (job.usageDisposition case final value?) 'usageDisposition': value.name,
+    'errorCode': ?job.errorCode,
     if (job.output case final output?) 'output': _encodeOutput(output),
   };
 
@@ -500,6 +540,7 @@ final class JsonGenerationJobStore
         'usageDisposition',
         GenerationUsageDisposition.values,
       ),
+      errorCode: value['errorCode'] as String?,
       output: value['output'] == null
           ? null
           : _decodeOutput(Map<String, Object?>.from(value['output']! as Map)),

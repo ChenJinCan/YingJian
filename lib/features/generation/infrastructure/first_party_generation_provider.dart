@@ -17,18 +17,8 @@ final class GenerationBackendAuthenticationRequired implements Exception {
   String toString() => 'A short-lived first-party bearer token is required';
 }
 
-final class GenerationBackendHttpFailure implements Exception {
-  const GenerationBackendHttpFailure(this.statusCode, this.code);
-
-  final int statusCode;
-  final String code;
-
-  @override
-  String toString() =>
-      'First-party generation backend failed ($statusCode: $code)';
-}
-
-final class FirstPartyGenerationProvider implements GenerationProvider {
+final class FirstPartyGenerationProvider
+    implements GenerationProvider, GenerationRequestReconciler {
   static const _networkTimeout = Duration(seconds: 30);
   static const _maxResponseBytes = 26 * 1024 * 1024;
   static const _maxUploadBytes = 25 * 1024 * 1024;
@@ -114,6 +104,32 @@ final class FirstPartyGenerationProvider implements GenerationProvider {
       expectedProvider: job.provider,
       expectedModel: job.model,
       expectedProviderCancelable: job.canCancel,
+    );
+  }
+
+  @override
+  Future<GenerationJob> reconcile(
+    GenerationRequestReservation reservation,
+  ) async {
+    final capability = reservation.identity.capability;
+    final path = Uri(
+      path:
+          '/v1/generation-tasks/by-creation/'
+          '${Uri.encodeComponent(reservation.clientRequestId)}',
+      queryParameters: {'capability': _backendId(capability)},
+    ).toString();
+    final body = await _getJson(path);
+    return _parseTask(
+      body['task'],
+      expectedTaskId: null,
+      expectedRequestId: reservation.clientRequestId,
+      expectedProjectId: reservation.identity.projectId,
+      expectedSourcePhotoId: reservation.identity.sourcePhotoId,
+      expectedSourceSha256: reservation.identity.sourceSha256,
+      expectedInputIdentity: reservation.identity.inputIdentity,
+      expectedCapability: capability,
+      expectedProvider: null,
+      expectedModel: null,
     );
   }
 
@@ -271,24 +287,31 @@ final class FirstPartyGenerationProvider implements GenerationProvider {
         case null:
           break;
       }
-      final body = await _postJson('/v1/generation-tasks', requestBody);
-      return await _parseTask(
-        body['task'],
-        expectedTaskId: null,
-        expectedRequestId: clientRequestId,
-        expectedProjectId: snapshot.projectId,
-        expectedSourcePhotoId: snapshot.sourcePhotoId,
-        expectedSourceSha256: snapshot.sourceSha256,
-        expectedSourceUploadSha256: prepared.sourceSha256,
-        expectedMaskUploadSha256: preparedMaskSha256,
-        expectedSourceMediaId: sourceMediaId,
-        expectedInputIdentity: snapshot.input?.identity,
-        expectedCapability: snapshot.capability,
-        expectedOfferId: offer.id,
-        expectedProvider: contract.provider,
-        expectedModel: contract.model,
-        expectedProviderCancelable: contract.providerCancelable,
-      );
+      try {
+        final body = await _postJson('/v1/generation-tasks', requestBody);
+        return await _parseTask(
+          body['task'],
+          expectedTaskId: null,
+          expectedRequestId: clientRequestId,
+          expectedProjectId: snapshot.projectId,
+          expectedSourcePhotoId: snapshot.sourcePhotoId,
+          expectedSourceSha256: snapshot.sourceSha256,
+          expectedSourceUploadSha256: prepared.sourceSha256,
+          expectedMaskUploadSha256: preparedMaskSha256,
+          expectedSourceMediaId: sourceMediaId,
+          expectedInputIdentity: snapshot.input?.identity,
+          expectedCapability: snapshot.capability,
+          expectedOfferId: offer.id,
+          expectedProvider: contract.provider,
+          expectedModel: contract.model,
+          expectedProviderCancelable: contract.providerCancelable,
+        );
+      } on Object {
+        // Once the create request is sent, a local exception or non-2xx reply
+        // cannot prove that the first-party gateway did not persist or dispatch
+        // it. Recovery must query the stable request identity, never resubmit.
+        throw GenerationCreateOutcomeUnknown(clientRequestId);
+      }
     } finally {
       try {
         await _uploadPreparer.cleanup(prepared);
@@ -535,7 +558,7 @@ final class FirstPartyGenerationProvider implements GenerationProvider {
       final code = error is Map
           ? error['code']?.toString() ?? 'http_error'
           : 'http_error';
-      throw GenerationBackendHttpFailure(response.statusCode, code);
+      throw GenerationRemoteFailure(response.statusCode, code);
     }
     return body;
   }
@@ -607,8 +630,8 @@ final class FirstPartyGenerationProvider implements GenerationProvider {
     required String? expectedInputIdentity,
     required CreationCapability expectedCapability,
     String? expectedOfferId,
-    required String expectedProvider,
-    required String expectedModel,
+    required String? expectedProvider,
+    required String? expectedModel,
     bool? expectedProviderCancelable,
   }) async {
     final task = _stringMap(value, 'generation task');
@@ -711,10 +734,17 @@ final class FirstPartyGenerationProvider implements GenerationProvider {
         'unsupported task usage disposition $value',
       ),
     };
+    final errorCode = switch (task['errorCode']) {
+      null => null,
+      final String value
+          when RegExp(r'^[a-z][a-z0-9_]{0,63}$').hasMatch(value) =>
+        value,
+      _ => throw const GenerationProtocolViolation('task.errorCode is invalid'),
+    };
     final provider = _requiredString(task['provider'], 'task.provider');
     final model = _requiredString(task['model'], 'task.model');
-    if (provider != expectedProvider ||
-        model != expectedModel ||
+    if ((expectedProvider != null && provider != expectedProvider) ||
+        (expectedModel != null && model != expectedModel) ||
         (canCancel && expectedProviderCancelable == false)) {
       throw const GenerationProtocolViolation(
         'task provider contract does not match the confirmed task contract',
@@ -761,6 +791,7 @@ final class FirstPartyGenerationProvider implements GenerationProvider {
       cancellationDisposition: cancellationDisposition,
       usageState: usageState,
       usageDisposition: usageDisposition,
+      errorCode: errorCode,
       output: output,
     );
   }

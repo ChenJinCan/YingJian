@@ -97,6 +97,43 @@ class AppLocalizationsZh extends AppLocalizations {
       '当前不会处理、上传、创建任务或扣费。你可以返回能力列表自己选择下一步。';
 
   @override
+  String get cloudCapabilitiesNotLoaded => '云端能力待连接';
+
+  @override
+  String get cloudCapabilitiesNotLoadedDetail =>
+      '尚未检查当前云端可用状态。点击重试只会连接并查询，不会上传、创建任务或扣费。';
+
+  @override
+  String get cloudCapabilitiesLoading => '正在连接云端能力';
+
+  @override
+  String get cloudCapabilitiesLoadingDetail => '正在查询当前能力状态，不会上传照片、创建任务或扣费。';
+
+  @override
+  String get cloudCapabilitiesConnectionFailed => '云端连接失败';
+
+  @override
+  String get cloudCapabilitiesConnectionFailedDetail =>
+      '暂时无法确认当前能力状态。请检查网络后重试；不会自动上传、创建任务或扣费。';
+
+  @override
+  String get cloudCapabilityUnavailable => '该云端能力当前未开通';
+
+  @override
+  String get cloudCapabilityUnavailableDetail =>
+      '服务端当前没有为这项能力提供可执行额度。不会上传、创建任务或扣费。';
+
+  @override
+  String get cloudReconciliationRequired => '云端任务状态待确认';
+
+  @override
+  String get cloudReconciliationRequiredDetail =>
+      '上一次请求可能已被云端接收。已暂停新建云端任务并保留当前权益状态；只会查询原请求，不会重复生成或重复扣费。';
+
+  @override
+  String get checkCloudGenerationStatus => '查询原任务状态';
+
+  @override
   String get capabilityOptimizeNatural => '自然优化';
 
   @override
@@ -224,6 +261,18 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get generationFailed => '生成失败，请重试。';
+
+  @override
+  String get generationConcurrencyExceeded => '已有云端任务仍在处理或待确认，暂时不能创建新的云端任务。';
+
+  @override
+  String get generationCreditExhausted => '当前云端权益不足，任务没有开始。';
+
+  @override
+  String get generationCapabilityDisabled => '该云端能力当前未开通，任务没有开始。';
+
+  @override
+  String get generationProviderFailed => '云端供应商处理失败，请保留当前结果后再决定是否重试。';
 
   @override
   String get cloudGenerationConsentTitle => '确认云端处理';

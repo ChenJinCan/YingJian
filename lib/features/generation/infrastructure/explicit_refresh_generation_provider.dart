@@ -12,7 +12,8 @@ typedef GenerationProviderConnector = Future<GenerationProvider> Function();
 /// [refreshCapabilities]. App startup never creates a session, probes a cloud
 /// provider, uploads media, or spends credits. Job and request identities pass
 /// through unchanged.
-final class ExplicitRefreshGenerationProvider implements GenerationProvider {
+final class ExplicitRefreshGenerationProvider
+    implements GenerationProvider, GenerationRequestReconciler {
   ExplicitRefreshGenerationProvider({
     required GenerationProviderConnector connector,
     GenerationProvider? initialProvider,
@@ -82,6 +83,14 @@ final class ExplicitRefreshGenerationProvider implements GenerationProvider {
       return Future.error(GenerationCannotCancel(job.id));
     }
     return current.cancel(job);
+  }
+
+  @override
+  Future<GenerationJob> reconcile(GenerationRequestReservation reservation) {
+    if (_delegate case final GenerationRequestReconciler reconciler) {
+      return reconciler.reconcile(reservation);
+    }
+    return Future.error(const GenerationReconciliationUnavailable());
   }
 
   @override

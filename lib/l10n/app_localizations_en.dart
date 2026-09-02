@@ -101,6 +101,46 @@ class AppLocalizationsEn extends AppLocalizations {
       'Nothing will be processed, uploaded, queued, or charged. Return to the capability list to choose what to do next.';
 
   @override
+  String get cloudCapabilitiesNotLoaded => 'Cloud capability not connected';
+
+  @override
+  String get cloudCapabilitiesNotLoadedDetail =>
+      'Current cloud availability has not been checked. Retry only connects and checks; it does not upload, create a task, or charge credits.';
+
+  @override
+  String get cloudCapabilitiesLoading => 'Connecting to cloud capabilities';
+
+  @override
+  String get cloudCapabilitiesLoadingDetail =>
+      'Checking the current capability state without uploading, creating a task, or charging credits.';
+
+  @override
+  String get cloudCapabilitiesConnectionFailed => 'Cloud connection failed';
+
+  @override
+  String get cloudCapabilitiesConnectionFailedDetail =>
+      'The current capability state could not be confirmed. Check the network and retry; nothing will be uploaded, queued, or charged automatically.';
+
+  @override
+  String get cloudCapabilityUnavailable =>
+      'This cloud capability is not currently enabled';
+
+  @override
+  String get cloudCapabilityUnavailableDetail =>
+      'The service is not offering this capability right now. Nothing will be uploaded, queued, or charged.';
+
+  @override
+  String get cloudReconciliationRequired =>
+      'Cloud task status needs confirmation';
+
+  @override
+  String get cloudReconciliationRequiredDetail =>
+      'The previous request may have reached the cloud. New cloud tasks are paused while the current credit state is preserved; only the original request will be checked, never resubmitted or charged twice.';
+
+  @override
+  String get checkCloudGenerationStatus => 'Check original task';
+
+  @override
   String get capabilityOptimizeNatural => 'Natural enhancement';
 
   @override
@@ -246,6 +286,22 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get generationFailed => 'Generation failed. Try again.';
+
+  @override
+  String get generationConcurrencyExceeded =>
+      'Another cloud task is still running or awaiting confirmation, so a new cloud task cannot start yet.';
+
+  @override
+  String get generationCreditExhausted =>
+      'There are not enough cloud credits, so the task did not start.';
+
+  @override
+  String get generationCapabilityDisabled =>
+      'This cloud capability is not currently enabled, so the task did not start.';
+
+  @override
+  String get generationProviderFailed =>
+      'The cloud provider could not complete the task. Keep the current result and decide whether to retry.';
 
   @override
   String get cloudGenerationConsentTitle => 'Confirm cloud processing';

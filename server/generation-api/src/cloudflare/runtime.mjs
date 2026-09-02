@@ -78,6 +78,10 @@ export function createCloudflareGenerationRuntime({
     env,
     'GENERATION_MAX_CREDITS',
   );
+  const rateWindowMilliseconds = requiredPositiveInteger(
+    env,
+    'GENERATION_RATE_WINDOW_MS',
+  );
   const usageGuard = new D1UsageGuard({
     database,
     maxCreditsPerOwner,
@@ -93,10 +97,8 @@ export function createCloudflareGenerationRuntime({
       env,
       'GENERATION_MAX_GLOBAL_RESERVATIONS_PER_WINDOW',
     ),
-    rateWindowMilliseconds: requiredPositiveInteger(
-      env,
-      'GENERATION_RATE_WINDOW_MS',
-    ),
+    rateWindowMilliseconds,
+    activeReservationWindowMilliseconds: rateWindowMilliseconds,
     maxStorageBytesPerOwner: requiredPositiveInteger(
       env,
       'GENERATION_MAX_STORAGE_BYTES',
@@ -166,6 +168,7 @@ export function createCloudflareGenerationRuntime({
       offerAuthority,
       usageGuard,
       mediaRetentionHours: retentionHours,
+      dispatchReconciliationWindowMilliseconds: rateWindowMilliseconds,
       now,
     }),
     mediaStore,

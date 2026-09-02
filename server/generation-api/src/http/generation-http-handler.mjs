@@ -122,6 +122,7 @@ export function createGenerationHttpHandler({
   offerAuthority,
   usageGuard,
   mediaRetentionHours = 24,
+  dispatchReconciliationWindowMilliseconds = 60 * 60 * 1000,
   idFactory = randomUUID,
   dispatchIdFactory = randomUUID,
   mediaIdFactory = randomUUID,
@@ -132,7 +133,7 @@ export function createGenerationHttpHandler({
   }
   assertMethods(
     taskRepository,
-    ['reserve', 'compareAndSet', 'get'],
+    ['reserve', 'compareAndSet', 'get', 'getByCreation'],
     'taskRepository',
   );
   assertMethods(
@@ -163,6 +164,14 @@ export function createGenerationHttpHandler({
     mediaRetentionHours > 24
   ) {
     throw new TypeError('mediaRetentionHours must be an integer from 1 to 24.');
+  }
+  if (
+    !Number.isInteger(dispatchReconciliationWindowMilliseconds) ||
+    dispatchReconciliationWindowMilliseconds <= 0
+  ) {
+    throw new TypeError(
+      'dispatchReconciliationWindowMilliseconds must be a positive integer.',
+    );
   }
 
   function providerForContract(contract) {
@@ -231,6 +240,57 @@ export function createGenerationHttpHandler({
       usageDisposition: 'hold',
     });
     return result.task;
+  }
+
+  async function expireDispatchReconciliation(task) {
+    if (
+      task.dispatchState !== 'reconciliation_required' ||
+      task.errorCode !== 'dispatch_reconciliation_required' ||
+      task.providerTaskId ||
+      task.usageState !== 'reserved' ||
+      task.usageDisposition !== 'hold' ||
+      !TERMINAL_STATES.has(task.state)
+    ) {
+      return task;
+    }
+    const updatedAt = Date.parse(task.updatedAt);
+    if (
+      !Number.isFinite(updatedAt) ||
+      now().getTime() - updatedAt <=
+        dispatchReconciliationWindowMilliseconds
+    ) {
+      return task;
+    }
+    const result = await compareAndSet(task, {
+      dispatchState: 'reconciliation_expired',
+      dispatchLeaseExpiresAt: null,
+      errorCode: 'provider_outcome_unknown',
+      providerCancelable: false,
+      providerCancellation: 'not_available',
+      usageDisposition: 'hold',
+    });
+    return result.task;
+  }
+
+  async function handleFindByCreation(ownerId, creationId, capability) {
+    const confirmedCreationId = requireString(
+      creationId,
+      'creation_id_required',
+    );
+    const confirmedCapability = requireString(
+      capability,
+      'capability_required',
+      64,
+    );
+    if (!CAPABILITY_CONTRACTS[confirmedCapability]) {
+      throw new HttpError(400, 'unsupported_capability');
+    }
+    const task = await taskRepository.getByCreation({
+      ownerId,
+      creationKey: `${ownerId}:${confirmedCreationId}:${confirmedCapability}`,
+    });
+    if (!task) throw new HttpError(404, 'task_not_found');
+    return handleObserve(ownerId, task.id);
   }
 
   async function recoverDispatchIntent(task) {
@@ -335,6 +395,7 @@ export function createGenerationHttpHandler({
     let task = await taskRepository.get({ ownerId, taskId });
     if (!task) throw new HttpError(404, 'task_not_found');
     if (TERMINAL_STATES.has(task.state)) {
+      task = await expireDispatchReconciliation(task);
       task = await reconcileTerminalUsage(task);
       return json(200, { task: publicTask(task) });
     }
@@ -408,11 +469,21 @@ export function createGenerationHttpHandler({
       return json(200, { task: publicTask(task) });
     }
     if (TERMINAL_STATES.has(task.state)) {
+      task = await expireDispatchReconciliation(task);
       task = await reconcileTerminalUsage(task);
       return json(200, { task: publicTask(task) });
     }
     if (task.state !== 'pending' && task.state !== 'running') {
       return json(200, { task: publicTask(task) });
+    }
+    if (
+      task.usageState === 'reserved' &&
+      typeof usageGuard.touchGeneration === 'function'
+    ) {
+      await usageGuard.touchGeneration({
+        ownerId: task.ownerId,
+        reservationId: task.id,
+      });
     }
     const provider = providerForTask(task);
     if (!provider || typeof provider.observe !== 'function') {
@@ -697,17 +768,39 @@ export function createGenerationHttpHandler({
         task = await recoverDispatchIntent(task);
         return json(200, { task: publicTask(task) });
       } else if (task.dispatchState !== 'created') {
+        task = await expireDispatchReconciliation(task);
         task = await reconcileTerminalUsage(task);
         return json(200, { task: publicTask(task) });
       }
     }
 
-    await usageGuard.reserveGeneration({
-      ownerId,
-      reservationId: task.id,
-      fingerprint,
-      creditCost: verifiedOffer.creditCost,
-    });
+    try {
+      await usageGuard.reserveGeneration({
+        ownerId,
+        reservationId: task.id,
+        fingerprint,
+        creditCost: verifiedOffer.creditCost,
+      });
+    } catch (error) {
+      // No provider request has occurred. Persist a terminal, non-billable
+      // outcome so reconciliation never leaves an idempotency row looking
+      // queued forever after a concurrency, credit, or rate-limit rejection.
+      try {
+        await compareAndSet(task, {
+          state: 'rejected',
+          dispatchState: 'provider_recorded',
+          dispatchLeaseExpiresAt: null,
+          errorCode: safeErrorCode(error?.code, 'usage_rejected'),
+          providerCancelable: false,
+          providerCancellation: 'not_available',
+          usageDisposition: 'release',
+        });
+      } catch {
+        // The original usage error remains the response. A later lookup reads
+        // the durable task row and never resubmits this creation identity.
+      }
+      throw error;
+    }
     let persisted = await compareAndSet(task, {
       usageState: 'reserved',
       dispatchState: 'intent',
@@ -882,6 +975,15 @@ export function createGenerationHttpHandler({
       );
       if (request.method === 'POST' && cancelMatch) {
         return await handleCancel(ownerId, decodeURIComponent(cancelMatch[1]));
+      }
+      const creationMatch =
+        /^\/v1\/generation-tasks\/by-creation\/([^/]+)$/.exec(url.pathname);
+      if (request.method === 'GET' && creationMatch) {
+        return await handleFindByCreation(
+          ownerId,
+          decodeURIComponent(creationMatch[1]),
+          url.searchParams.get('capability'),
+        );
       }
       const taskMatch = /^\/v1\/generation-tasks\/([^/]+)$/.exec(url.pathname);
       if (request.method === 'GET' && taskMatch) {

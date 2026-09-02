@@ -150,6 +150,76 @@ void main() {
   );
 
   test(
+    'an unknown create outcome survives restart and blocks a second paid request until reconciliation',
+    () async {
+      final provider = _RecordingGenerationProvider()..unknownCreateCount = 1;
+      final store = _MemoryGenerationJobStore();
+      final firstCoordinator = GenerationCoordinator(
+        provider: provider,
+        store: store,
+      );
+      final snapshot = _snapshot(CreationCapability.optimizeAiRepair);
+
+      await expectLater(
+        firstCoordinator.createPersisted(
+          snapshot: snapshot,
+          consent: _completeConsent,
+          clientRequestIdFactory: () => 'request-needs-reconciliation',
+        ),
+        throwsA(isA<GenerationReconciliationRequired>()),
+      );
+      final pending = await store.findReconciliationRequired();
+      expect(pending, isNotNull);
+      expect(
+        pending?.state,
+        GenerationRequestReservationState.reconciliationRequired,
+      );
+
+      final restoredCoordinator = GenerationCoordinator(
+        provider: provider,
+        store: store,
+      );
+      await expectLater(
+        restoredCoordinator.createPersisted(
+          snapshot: _snapshot(CreationCapability.motionAiNatural),
+          consent: _completeConsent,
+          clientRequestIdFactory: () => 'must-not-be-created',
+        ),
+        throwsA(
+          isA<GenerationReconciliationRequired>().having(
+            (error) => error.reservation.clientRequestId,
+            'clientRequestId',
+            'request-needs-reconciliation',
+          ),
+        ),
+      );
+      expect(provider.createRequestIds, ['request-needs-reconciliation']);
+
+      provider.reconcileResponse = _reconciledJob(
+        errorCode: 'dispatch_reconciliation_required',
+        usageState: GenerationUsageState.reserved,
+        usageDisposition: GenerationUsageDisposition.hold,
+      );
+      final held = await restoredCoordinator.reconcile(pending!);
+      expect(held.requiresReconciliation, isTrue);
+      expect(await store.findReconciliationRequired(), isNotNull);
+
+      provider.reconcileResponse = _reconciledJob(
+        errorCode: 'provider_failed',
+        usageState: GenerationUsageState.released,
+        usageDisposition: GenerationUsageDisposition.release,
+      );
+      final terminal = await restoredCoordinator.reconcile(pending);
+      expect(terminal.requiresReconciliation, isFalse);
+      expect(await store.findReconciliationRequired(), isNull);
+      expect(provider.reconcileCalls, [
+        'request-needs-reconciliation',
+        'request-needs-reconciliation',
+      ]);
+    },
+  );
+
+  test(
     'a completed local result is recoverable by its exact input identity',
     () async {
       final store = _MemoryGenerationJobStore();
@@ -286,6 +356,37 @@ void main() {
     },
   );
 
+  test(
+    'project deletion cannot discard a request awaiting reconciliation',
+    () async {
+      final store = _MemoryGenerationJobStore();
+      final snapshot = _snapshot(CreationCapability.optimizeAiRepair);
+      final reservation = GenerationRequestReservation(
+        clientRequestId: 'request-awaiting-reconciliation',
+        identity: GenerationRequestIdentity.fromSnapshot(snapshot),
+        createdAt: DateTime.utc(2026, 9, 1),
+        state: GenerationRequestReservationState.reconciliationRequired,
+      );
+      await store.saveReservation(reservation);
+      final coordinator = GenerationCoordinator(
+        provider: _RecordingGenerationProvider(),
+        store: store,
+      );
+
+      await expectLater(
+        coordinator.prepareProjectDeletion(snapshot.projectId),
+        throwsA(
+          isA<GenerationProjectDeletionBlocked>().having(
+            (error) => error.jobId,
+            'requestId',
+            reservation.clientRequestId,
+          ),
+        ),
+      );
+      expect(await store.findReconciliationRequired(), reservation);
+    },
+  );
+
   test('a non-cancellable job never sends a false cancel request', () async {
     final provider = _RecordingGenerationProvider(canCancelOnCreate: false);
     final store = _MemoryGenerationJobStore();
@@ -405,7 +506,30 @@ GenerationSourceSnapshot _snapshot(CreationCapability capability) =>
       createdAt: DateTime.utc(2026, 9, 1),
     );
 
-final class _RecordingGenerationProvider implements GenerationProvider {
+GenerationJob _reconciledJob({
+  required String errorCode,
+  required GenerationUsageState usageState,
+  required GenerationUsageDisposition usageDisposition,
+}) => GenerationJob(
+  id: 'job-reconciled',
+  clientRequestId: 'request-needs-reconciliation',
+  projectId: 'project-1',
+  sourcePhotoId: 'photo-1',
+  sourceSha256: 'a' * 64,
+  capability: CreationCapability.optimizeAiRepair,
+  state: GenerationJobState.failed,
+  provider: 'baidu',
+  model: 'image_definition_enhance',
+  canCancel: false,
+  createdAt: DateTime.utc(2026, 9, 1),
+  updatedAt: DateTime.utc(2026, 9, 1, 0, 1),
+  usageState: usageState,
+  usageDisposition: usageDisposition,
+  errorCode: errorCode,
+);
+
+final class _RecordingGenerationProvider
+    implements GenerationProvider, GenerationRequestReconciler {
   _RecordingGenerationProvider({
     this.availableCapabilities = const {CreationCapability.optimizeAiRepair},
     this.canCancelOnCreate = true,
@@ -426,6 +550,9 @@ final class _RecordingGenerationProvider implements GenerationProvider {
   GenerationJob? cancelResponse;
   List<GenerationJob> observedJobs = [];
   int failCreateCount = 0;
+  int unknownCreateCount = 0;
+  GenerationJob? reconcileResponse;
+  final List<String> reconcileCalls = [];
   final bool canCancelOnCreate;
   final GenerationOffer offer;
 
@@ -449,6 +576,10 @@ final class _RecordingGenerationProvider implements GenerationProvider {
     if (failCreateCount > 0) {
       failCreateCount -= 1;
       throw StateError('simulated response loss');
+    }
+    if (unknownCreateCount > 0) {
+      unknownCreateCount -= 1;
+      throw GenerationCreateOutcomeUnknown(clientRequestId);
     }
     return GenerationJob(
       id: 'job-1',
@@ -478,6 +609,15 @@ final class _RecordingGenerationProvider implements GenerationProvider {
     for (final update in observedJobs) {
       yield update;
     }
+  }
+
+  @override
+  Future<GenerationJob> reconcile(
+    GenerationRequestReservation reservation,
+  ) async {
+    reconcileCalls.add(reservation.clientRequestId);
+    return reconcileResponse ??
+        (throw StateError('missing reconcile response'));
   }
 }
 
@@ -550,6 +690,16 @@ final class _MemoryGenerationJobStore implements GenerationJobStore {
   Future<GenerationRequestReservation?> findReservation(
     GenerationRequestIdentity identity,
   ) async => _reservations[identity];
+
+  @override
+  Future<GenerationRequestReservation?> findReconciliationRequired() async =>
+      _reservations.values
+          .where(
+            (reservation) =>
+                reservation.state ==
+                GenerationRequestReservationState.reconciliationRequired,
+          )
+          .firstOrNull;
 
   @override
   Future<void> saveReservation(GenerationRequestReservation reservation) async {

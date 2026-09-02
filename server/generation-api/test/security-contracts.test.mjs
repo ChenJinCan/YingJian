@@ -365,3 +365,42 @@ test('local usage guard reserves atomically, is idempotent, and enforces credit/
     'reserved',
   );
 });
+
+test('local usage guard keeps stale held credits without keeping the active slot', async () => {
+  let now = new Date('2026-09-01T03:00:00.000Z');
+  const guard = new LocalFixedUsageGuard({
+    maxCreditsPerOwner: 3,
+    maxConcurrentGenerationsPerOwner: 1,
+    maxGenerationReservationsPerWindow: 5,
+    rateWindowMilliseconds: 60_000,
+    activeReservationWindowMilliseconds: 1_000,
+    maxStorageBytesPerOwner: 100,
+    now: () => now,
+  });
+
+  await guard.reserveGeneration({
+    ownerId: 'owner-a',
+    reservationId: 'unknown-provider-outcome',
+    fingerprint: 'unknown-fingerprint',
+    creditCost: 1,
+  });
+  now = new Date('2026-09-01T03:00:01.001Z');
+  assert.equal(
+    (await guard.reserveGeneration({
+      ownerId: 'owner-a',
+      reservationId: 'new-explicit-request',
+      fingerprint: 'new-fingerprint',
+      creditCost: 1,
+    })).kind,
+    'reserved',
+  );
+  await assert.rejects(
+    guard.reserveGeneration({
+      ownerId: 'owner-a',
+      reservationId: 'third-request',
+      fingerprint: 'third-fingerprint',
+      creditCost: 2,
+    }),
+    (error) => error.code === 'generation_concurrency_exceeded',
+  );
+});

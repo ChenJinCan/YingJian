@@ -113,6 +113,8 @@ assert(fastfile_source.include?("skip_submission: true"),
        "Fastlane lane may submit or distribute a build")
 assert(fastfile_source.include?("skip_waiting_for_build_processing: true"),
        "Fastlane lane may wait for provider processing")
+assert(fastfile_source.include?('ENV.delete("PILOT_CHANGELOG")'),
+       "Fastlane lane must clear inherited upload changelog state")
 assert(fastfile_source.include?("distribute_external: false"),
        "Fastlane lane may distribute to external testers")
 assert(fastfile_source.include?("notify_external_testers: false"),
