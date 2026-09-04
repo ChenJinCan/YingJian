@@ -302,6 +302,19 @@ void main() {
         find.byKey(const ValueKey('style-workspace-title')),
         findsOneWidget,
       );
+      final workspaceBack = find.byKey(const ValueKey('style-workspace-back'));
+      final workspaceTitle = find.byKey(
+        const ValueKey('style-workspace-title'),
+      );
+      expect(tester.getRect(workspaceBack).top, lessThan(120));
+      expect(tester.getRect(workspaceTitle).top, lessThan(120));
+      expect(
+        (tester.getCenter(workspaceBack).dy -
+                tester.getCenter(workspaceTitle).dy)
+            .abs(),
+        lessThan(2),
+      );
+      expect(tester.widget<IconButton>(workspaceBack).onPressed, isNotNull);
       expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
       expect(
         find.byKey(const ValueKey('apply-style-primary-action')),

@@ -382,6 +382,91 @@ void main() {
     expect(sharer.sharedPaths, ['/tmp/yingjian-upscaled-2x.jpg']);
   });
 
+  testWidgets('workspace chrome stays pinned to the top edge', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final settings = await _settings();
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        photoImporter: FakePhotoImporter([_fixturePhoto('top-chrome')]),
+        metaOpCapabilities: iosMetaOpCapabilities,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _tapHomeTarget(tester, find.byKey(const ValueKey('home-optimize')));
+    await tester.pumpAndSettle();
+
+    final back = find.byKey(const ValueKey('style-workspace-back'));
+    final title = find.byKey(const ValueKey('style-workspace-title'));
+    expect(tester.getRect(back).top, lessThan(100));
+    expect(tester.getRect(title).top, lessThan(100));
+    expect(
+      (tester.getCenter(back).dy - tester.getCenter(title).dy).abs(),
+      lessThan(2),
+    );
+  });
+
+  testWidgets(
+    'workspace chrome stays usable while a local result is processing',
+    (tester) async {
+      final store = MemoryPhotoProjectStore();
+      final generator = _PendingUpscalePhotoGenerator();
+      addTearDown(generator.completeIfPending);
+      final settings = await _settings();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoImporter: FakePhotoImporter([
+            _fixturePhoto('unlocked-processing', contentSha256: 'a' * 64),
+          ]),
+          photoProjectStore: store,
+          upscalePhotoGenerator: generator,
+          metaOpCapabilities: iosMetaOpCapabilities,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await _tapHomeTarget(tester, find.byKey(const ValueKey('home-optimize')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('optimize-capability-upscale')),
+      );
+      await tester.pump();
+      await generator.started.future;
+
+      final back = find.byKey(const ValueKey('style-workspace-back'));
+      final natural = find.byKey(const ValueKey('optimize-capability-natural'));
+      final naturalButton = find.descendant(
+        of: natural,
+        matching: find.byType(OutlinedButton),
+      );
+      expect(tester.widget<IconButton>(back).onPressed, isNotNull);
+      expect(tester.widget<OutlinedButton>(naturalButton).onPressed, isNotNull);
+
+      await tester.tap(natural);
+      await tester.pumpAndSettle();
+      expect(
+        store.project!.creationCapability,
+        CreationCapability.optimizeNatural,
+      );
+
+      generator.completeIfPending();
+      await tester.pumpAndSettle();
+      expect(
+        store.project!.currentStaticStyleResult?.capability,
+        CreationCapability.optimizeNatural,
+      );
+      expect(
+        find.byKey(const ValueKey('optimize-generated-result-share')),
+        findsNothing,
+      );
+    },
+  );
+
   testWidgets(
     'cloud repair uploads and charges only after both confirmations',
     (tester) async {
@@ -439,6 +524,78 @@ void main() {
       expect(
         find.byKey(const ValueKey('optimize-cloud-result-save')),
         findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'cloud request creation keeps navigation and other choices operable',
+    (tester) async {
+      final store = MemoryPhotoProjectStore();
+      final createGate = Completer<void>();
+      addTearDown(() {
+        if (!createGate.isCompleted) createGate.complete();
+      });
+      final provider = _CompletedCloudGenerationProvider(
+        createGate: createGate,
+      );
+      final settings = await _settings();
+      await tester.pumpWidget(
+        buildTestApp(
+          settings,
+          photoImporter: FakePhotoImporter([
+            _fixturePhoto('cloud-choice-switch', contentSha256: 'a' * 64),
+          ]),
+          photoProjectStore: store,
+          photoPreviewRenderer: FakePhotoPreviewRenderer.supported(),
+          metaOpCapabilities: iosMetaOpCapabilities,
+          generationCoordinator: GenerationCoordinator(
+            provider: provider,
+            store: _UiGenerationJobStore(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await _tapHomeTarget(tester, find.byKey(const ValueKey('home-optimize')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('optimize-capability-ai-repair')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('generation-upload-consent')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('generation-cost-consent')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('generation-confirm-create')));
+      await tester.pump();
+      await provider.createStarted.future;
+
+      final back = find.byKey(const ValueKey('style-workspace-back'));
+      final natural = find.byKey(const ValueKey('optimize-capability-natural'));
+      final naturalButton = find.descendant(
+        of: natural,
+        matching: find.byType(OutlinedButton),
+      );
+      expect(tester.widget<IconButton>(back).onPressed, isNotNull);
+      expect(tester.widget<OutlinedButton>(naturalButton).onPressed, isNotNull);
+
+      await tester.tap(natural);
+      await tester.pumpAndSettle();
+      expect(
+        store.project!.currentStaticStyleResult?.capability,
+        CreationCapability.optimizeNatural,
+      );
+
+      createGate.complete();
+      await tester.pumpAndSettle();
+      expect(provider.createCount, 1);
+      expect(
+        store.project!.currentStaticStyleResult?.capability,
+        CreationCapability.optimizeNatural,
+      );
+      expect(
+        find.byKey(const ValueKey('optimize-cloud-result-save')),
+        findsNothing,
       );
     },
   );
@@ -2269,7 +2426,7 @@ void main() {
               find.byKey(const ValueKey('style-workspace-back')),
             )
             .onPressed,
-        isNull,
+        isNotNull,
       );
       exporter.moveToSystemWrite();
       await tester.pump();
@@ -2374,7 +2531,7 @@ void main() {
   });
 
   testWidgets(
-    'restyle transition locks result actions until persistence settles',
+    'restyle transition keeps navigation and accepts the latest style choice',
     (tester) async {
       final store = _DelayedRestyleStore();
       final settings = await _settings();
@@ -2408,7 +2565,7 @@ void main() {
               ),
             )
             .onTap,
-        isNull,
+        isNotNull,
       );
       expect(
         tester
@@ -2416,14 +2573,17 @@ void main() {
               find.byKey(const ValueKey('style-workspace-back')),
             )
             .onPressed,
-        isNull,
+        isNotNull,
       );
+
+      await tester.tap(find.byKey(const ValueKey('style-option-japanese-v1')));
+      await tester.pump();
 
       store.completeTransition();
       await tester.pumpAndSettle();
       expect(
         (await store.loadLatest())!.currentStaticStyleResult?.styleId,
-        'film-v1',
+        'japanese-v1',
       );
       expect(find.byKey(const ValueKey('style-options')), findsOneWidget);
     },
@@ -2883,6 +3043,35 @@ final class _RecordingUpscalePhotoGenerator implements UpscalePhotoGenerator {
   }
 }
 
+final class _PendingUpscalePhotoGenerator implements UpscalePhotoGenerator {
+  final Completer<void> started = Completer<void>();
+  final Completer<UpscalePhotoArtifact> _result =
+      Completer<UpscalePhotoArtifact>();
+
+  @override
+  Future<UpscalePhotoArtifact> generate({
+    required String sourcePath,
+    required UpscalePhotoScale scale,
+  }) {
+    if (!started.isCompleted) started.complete();
+    return _result.future;
+  }
+
+  void completeIfPending() {
+    if (_result.isCompleted) return;
+    _result.complete(
+      const UpscalePhotoArtifact(
+        outputPath: '/tmp/yingjian-pending-upscale.jpg',
+        contentSha256:
+            'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+        scale: UpscalePhotoScale.twoX,
+        width: 2048,
+        height: 2048,
+      ),
+    );
+  }
+}
+
 final class _RecordingMotionPhotoGenerator implements MotionPhotoGenerator {
   final List<MotionPhotoEffect> effects = [];
 
@@ -3008,10 +3197,13 @@ final class _CompletedCloudGenerationProvider
   _CompletedCloudGenerationProvider({
     this.capabilities = const {CreationCapability.optimizeAiRepair},
     this.createOutcomeUnknown = false,
+    this.createGate,
   });
 
   final Set<CreationCapability> capabilities;
   final bool createOutcomeUnknown;
+  final Completer<void>? createGate;
+  final Completer<void> createStarted = Completer<void>();
   int createCount = 0;
   int reconcileCount = 0;
   bool resolveReconciliation = false;
@@ -3040,6 +3232,8 @@ final class _CompletedCloudGenerationProvider
   }) async {
     createCount += 1;
     snapshots.add(snapshot);
+    if (!createStarted.isCompleted) createStarted.complete();
+    await createGate?.future;
     if (createOutcomeUnknown) {
       throw GenerationCreateOutcomeUnknown(clientRequestId);
     }

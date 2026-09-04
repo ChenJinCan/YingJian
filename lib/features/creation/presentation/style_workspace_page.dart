@@ -89,6 +89,8 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
   int _previewRetryToken = 0;
   int _previewSelectionGeneration = 0;
   int? _pendingAutoApplyGeneration;
+  int _latestDirectSelectionGeneration = 0;
+  _DirectSelectionRequest? _pendingDirectSelection;
   BoundedBatchPhotoExporter? _batchExporter;
   Future<BatchExportSummary>? _batchCompletion;
   Future<void>? _shareCompletion;
@@ -109,6 +111,8 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
   UpscalePhotoArtifact? _upscaleArtifact;
   MotionPhotoArtifact? _motionArtifact;
   bool _generatingLocalResult = false;
+  CreationCapability? _activeLocalGenerationCapability;
+  CreationCapability? _pendingLocalGenerationCapability;
   bool _localGenerationFailed = false;
   GenerationJob? _cloudGenerationJob;
   bool _creatingCloudResult = false;
@@ -149,6 +153,13 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
       _cancellingCloudResult ||
       _savingGeneratedResult ||
       _previewingMotionResult;
+
+  bool get _directSelectionTransitionLocked =>
+      _savingStyle ||
+      _applying ||
+      _exporting ||
+      _sharing ||
+      _choosingBackground;
 
   List<_StyleChoice> get _styles => [..._officialStyles, ?_aiStyle];
 
@@ -432,6 +443,8 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
 
   @override
   void dispose() {
+    _pendingDirectSelection = null;
+    _pendingLocalGenerationCapability = null;
     _batchExporter?.cancel();
     unawaited(_activeSharePreparation?.cancel());
     unawaited(_discardPendingBackgroundResource());
@@ -458,6 +471,65 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
     super.dispose();
   }
 
+  void _requestCapability(CreationCapability capability) {
+    _requestDirectSelection(
+      _DirectSelectionRequest(
+        generation: ++_latestDirectSelectionGeneration,
+        capability: capability,
+      ),
+    );
+  }
+
+  void _requestOfficialStyle(String styleId) {
+    _requestDirectSelection(
+      _DirectSelectionRequest(
+        generation: ++_latestDirectSelectionGeneration,
+        capability: CreationCapability.styleOfficial,
+        officialStyleId: styleId,
+      ),
+    );
+  }
+
+  void _requestIllustrationStyle() {
+    _requestDirectSelection(
+      _DirectSelectionRequest(
+        generation: ++_latestDirectSelectionGeneration,
+        capability: CreationCapability.styleAiRedraw,
+        illustration: true,
+      ),
+    );
+  }
+
+  void _requestDirectSelection(_DirectSelectionRequest request) {
+    _pendingDirectSelection = request;
+    _drainDirectSelection();
+  }
+
+  void _drainDirectSelection() {
+    if (!mounted || _directSelectionTransitionLocked) return;
+    final request = _pendingDirectSelection;
+    if (request == null) return;
+    _pendingDirectSelection = null;
+    unawaited(_executeDirectSelection(request));
+  }
+
+  Future<void> _executeDirectSelection(_DirectSelectionRequest request) async {
+    if (!_isLatestDirectSelection(request.generation)) return;
+    if (request.illustration) {
+      await _activateIllustrationStyle(request.generation);
+      return;
+    }
+    final styleId = request.officialStyleId;
+    if (styleId != null) {
+      await _activateOfficialStyle(styleId, request.generation);
+      return;
+    }
+    await _activateCapability(request.capability, request.generation);
+  }
+
+  bool _isLatestDirectSelection(int generation) =>
+      mounted && generation == _latestDirectSelectionGeneration;
+
   Future<void> _selectStyle(
     String styleId, {
     bool autoApply = false,
@@ -474,7 +546,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
         _selectedStyleId == styleId &&
         _session?.project?.creationStyleName == persistedStyleName &&
         _session?.project?.creationStyleRecipe == style.recipe;
-    if (_interactionLocked) {
+    if (_directSelectionTransitionLocked) {
       return;
     }
     if (selectionAlreadyPersisted) {
@@ -520,6 +592,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
       if (mounted) {
         setState(() => _savingStyle = false);
         _maybeAutoApplyCurrentSelection();
+        _drainDirectSelection();
       }
     }
   }
@@ -530,13 +603,13 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
   }) async {
     final session = _session;
     final project = session?.project;
-    if (!_interactionLocked &&
+    if (!_directSelectionTransitionLocked &&
         _hasCloudReconciliationRequired &&
         _isCloudGenerationCapability(capability)) {
       if (mounted) setState(() {});
       return false;
     }
-    if (_interactionLocked ||
+    if (_directSelectionTransitionLocked ||
         session == null ||
         project == null ||
         capability.task != widget.task) {
@@ -569,6 +642,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
         _selectedUpscaleScale = null;
         _upscaleArtifact = null;
         _motionArtifact = null;
+        _pendingLocalGenerationCapability = null;
         _localGenerationFailed = false;
         if (_cloudGenerationJob?.capability != capability &&
             !_hasActiveCloudGeneration) {
@@ -602,6 +676,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
       if (mounted) {
         setState(() => _savingStyle = false);
         _maybeAutoApplyCurrentSelection();
+        _drainDirectSelection();
       }
     }
     return selected;
@@ -642,7 +717,8 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
     if (pendingGeneration == null ||
         pendingGeneration != _previewSelectionGeneration ||
         project == null ||
-        _interactionLocked ||
+        _directSelectionTransitionLocked ||
+        _pendingDirectSelection != null ||
         !_selectedPreviewReady) {
       return;
     }
@@ -657,25 +733,45 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
     unawaited(_applyStyle(project));
   }
 
-  Future<void> _activateOfficialStyle(String styleId) async {
-    if (_interactionLocked || widget.task != CreationTask.style) return;
+  Future<void> _activateOfficialStyle(
+    String styleId,
+    int requestGeneration,
+  ) async {
+    if (!_isLatestDirectSelection(requestGeneration) ||
+        widget.task != CreationTask.style) {
+      return;
+    }
     final capabilitySelected = await _selectCapability(
       CreationCapability.styleOfficial,
     );
-    if (!mounted || !capabilitySelected) return;
+    if (!mounted ||
+        !_isLatestDirectSelection(requestGeneration) ||
+        !capabilitySelected) {
+      return;
+    }
     await _selectStyle(styleId, autoApply: true);
   }
 
-  Future<void> _activateIllustrationStyle() async {
-    if (_interactionLocked || widget.task != CreationTask.style) return;
-    if (_hasActiveCloudGeneration || _hasCloudReconciliationRequired) {
+  Future<void> _activateIllustrationStyle(int requestGeneration) async {
+    if (!_isLatestDirectSelection(requestGeneration) ||
+        widget.task != CreationTask.style) {
+      return;
+    }
+    if (_hasActiveCloudGeneration ||
+        _hasCloudReconciliationRequired ||
+        _creatingCloudResult ||
+        _refreshingCloudCapabilities) {
       if (mounted) setState(() {});
       return;
     }
     final capabilitySelected = await _selectCapability(
       CreationCapability.styleAiRedraw,
     );
-    if (!mounted || !capabilitySelected) return;
+    if (!mounted ||
+        !_isLatestDirectSelection(requestGeneration) ||
+        !capabilitySelected) {
+      return;
+    }
     final definition = StyleDefinition.aiRedraw(
       confirmedVisualIntent: context.l10n.styleIllustrationIntent,
       title: context.l10n.styleIllustration,
@@ -690,6 +786,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
         definition: definition,
       );
       if (!mounted ||
+          !_isLatestDirectSelection(requestGeneration) ||
           _session?.project?.creationCapability !=
               CreationCapability.styleAiRedraw) {
         return;
@@ -707,16 +804,27 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
       ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
       return;
     } finally {
-      if (mounted) setState(() => _savingStyle = false);
+      if (mounted) {
+        setState(() => _savingStyle = false);
+        _drainDirectSelection();
+      }
     }
     final project = _session?.project;
-    if (mounted && project != null) await _startCloudGeneration(project);
+    if (_isLatestDirectSelection(requestGeneration) && project != null) {
+      await _startCloudGeneration(project);
+    }
   }
 
-  Future<void> _activateCapability(CreationCapability capability) async {
-    if (_interactionLocked) return;
+  Future<void> _activateCapability(
+    CreationCapability capability,
+    int requestGeneration,
+  ) async {
+    if (!_isLatestDirectSelection(requestGeneration)) return;
     if (_isCloudGenerationCapability(capability) &&
-        (_hasActiveCloudGeneration || _hasCloudReconciliationRequired)) {
+        (_hasActiveCloudGeneration ||
+            _hasCloudReconciliationRequired ||
+            _creatingCloudResult ||
+            _refreshingCloudCapabilities)) {
       if (mounted) setState(() {});
       return;
     }
@@ -724,7 +832,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
       capability,
       autoApplyLocal: _isDirectLocalStaticCapability(capability),
     );
-    if (!mounted || !selected) return;
+    if (!_isLatestDirectSelection(requestGeneration) || !selected) return;
     final project = _session?.project;
     if (project == null || project.creationCapability != capability) return;
     switch (capability) {
@@ -1002,14 +1110,22 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
   Future<void> _generateUpscale(PhotoProject project) async {
     final generator = _upscalePhotoGenerator;
     final scale = _selectedUpscaleScale;
-    if (_interactionLocked ||
-        generator == null ||
+    if (generator == null ||
         scale == null ||
         project.creationCapability != CreationCapability.optimizeUpscale) {
       return;
     }
+    if (_generatingLocalResult) {
+      _pendingLocalGenerationCapability =
+          _activeLocalGenerationCapability == CreationCapability.optimizeUpscale
+          ? null
+          : CreationCapability.optimizeUpscale;
+      return;
+    }
+    if (_directSelectionTransitionLocked) return;
     setState(() {
       _generatingLocalResult = true;
+      _activeLocalGenerationCapability = CreationCapability.optimizeUpscale;
       _localGenerationFailed = false;
       _savedGeneratedAssetId = null;
     });
@@ -1049,10 +1165,21 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
       }
       setState(() => _upscaleArtifact = artifact);
     } on Object {
-      if (!mounted) return;
+      if (!mounted ||
+          _session?.project?.creationCapability !=
+              CreationCapability.optimizeUpscale ||
+          _selectedUpscaleScale != scale) {
+        return;
+      }
       setState(() => _localGenerationFailed = true);
     } finally {
-      if (mounted) setState(() => _generatingLocalResult = false);
+      if (mounted) {
+        setState(() {
+          _generatingLocalResult = false;
+          _activeLocalGenerationCapability = null;
+        });
+        _runPendingLocalGeneration();
+      }
     }
   }
 
@@ -1174,9 +1301,16 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
       CreationCapability.motionLightFlow => MotionPhotoEffect.lightFlow,
       _ => null,
     };
-    if (_interactionLocked || generator == null || effect == null) return;
+    if (generator == null || effect == null || capability == null) return;
+    if (_generatingLocalResult) {
+      _pendingLocalGenerationCapability =
+          _activeLocalGenerationCapability == capability ? null : capability;
+      return;
+    }
+    if (_directSelectionTransitionLocked) return;
     setState(() {
       _generatingLocalResult = true;
+      _activeLocalGenerationCapability = capability;
       _localGenerationFailed = false;
       _savedGeneratedAssetId = null;
     });
@@ -1196,7 +1330,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
       );
       try {
         await _generationCoordinator!.recordLocalSuccess(
-          snapshot: _generationSnapshot(project, capability!),
+          snapshot: _generationSnapshot(project, capability),
           inputIdentity: _motionInputIdentity(effect),
           provider: 'ios-avfoundation',
           model: 'motion-photo-v1',
@@ -1213,17 +1347,64 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
       }
       setState(() => _motionArtifact = artifact);
     } on Object {
-      if (!mounted) return;
+      if (!mounted ||
+          _session?.project?.creationCapability != capability ||
+          _activeLocalGenerationCapability != capability) {
+        return;
+      }
       setState(() => _localGenerationFailed = true);
     } finally {
-      if (mounted) setState(() => _generatingLocalResult = false);
+      if (mounted) {
+        setState(() {
+          _generatingLocalResult = false;
+          _activeLocalGenerationCapability = null;
+        });
+        _runPendingLocalGeneration();
+      }
+    }
+  }
+
+  void _runPendingLocalGeneration() {
+    final capability = _pendingLocalGenerationCapability;
+    final project = _session?.project;
+    _pendingLocalGenerationCapability = null;
+    if (!mounted ||
+        capability == null ||
+        project == null ||
+        project.creationCapability != capability) {
+      return;
+    }
+    switch (capability) {
+      case CreationCapability.optimizeUpscale:
+        unawaited(_generateUpscale(project));
+      case CreationCapability.motionSubtle ||
+          CreationCapability.motionCameraPush ||
+          CreationCapability.motionLightFlow:
+        unawaited(_generateMotion(project));
+      case CreationCapability.styleOfficial ||
+          CreationCapability.styleText ||
+          CreationCapability.styleVoice ||
+          CreationCapability.styleReference ||
+          CreationCapability.styleAiRedraw ||
+          CreationCapability.optimizeNatural ||
+          CreationCapability.optimizeAiRepair ||
+          CreationCapability.optimizeOldPhoto ||
+          CreationCapability.cleanupWhite ||
+          CreationCapability.cleanupTransparent ||
+          CreationCapability.cleanupReplaceBackground ||
+          CreationCapability.cleanupRemovePasserby ||
+          CreationCapability.cleanupBrushRemove ||
+          CreationCapability.motionAiNatural:
+        return;
     }
   }
 
   Future<void> _startCloudGeneration(PhotoProject project) async {
     final coordinator = _generationCoordinator;
     final capability = project.creationCapability;
-    if (_interactionLocked ||
+    if (_directSelectionTransitionLocked ||
+        _creatingCloudResult ||
+        _refreshingCloudCapabilities ||
         _hasActiveCloudGeneration ||
         _hasCloudReconciliationRequired ||
         coordinator == null ||
@@ -1232,10 +1413,11 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
     }
     setState(() => _cloudGenerationFailed = false);
     if (!await _refreshCloudCapabilities()) return;
-    if (!mounted ||
-        _session?.project?.creationCapability != capability ||
-        !coordinator.availableCapabilities.contains(capability)) {
-      if (mounted) setState(() => _cloudGenerationFailed = true);
+    if (!mounted || _session?.project?.creationCapability != capability) {
+      return;
+    }
+    if (!coordinator.availableCapabilities.contains(capability)) {
+      setState(() => _cloudGenerationFailed = true);
       return;
     }
     final input = _generationInputFor(capability);
@@ -1564,7 +1746,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
   Future<void> _chooseRemovalMask(PhotoProject project) async {
     final capability = project.creationCapability;
     final creator = _maskRemovalInputCreator;
-    if (_interactionLocked ||
+    if (_directSelectionTransitionLocked ||
         creator == null ||
         (capability != CreationCapability.cleanupRemovePasserby &&
             capability != CreationCapability.cleanupBrushRemove)) {
@@ -1682,7 +1864,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
 
   Future<void> _chooseReplacementBackground() async {
     final project = _session?.project;
-    if (_interactionLocked ||
+    if (_directSelectionTransitionLocked ||
         project?.creationCapability !=
             CreationCapability.cleanupReplaceBackground ||
         _cleanupSubjectAvailable != true) {
@@ -1744,7 +1926,10 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
         );
       }
     } finally {
-      if (mounted) setState(() => _choosingBackground = false);
+      if (mounted) {
+        setState(() => _choosingBackground = false);
+        _drainDirectSelection();
+      }
     }
   }
 
@@ -1794,7 +1979,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
   }
 
   Future<void> _applyStyle(PhotoProject project) async {
-    if (_interactionLocked || !_selectedPreviewReady) return;
+    if (_directSelectionTransitionLocked || !_selectedPreviewReady) return;
     if (widget.task == CreationTask.cleanup &&
         _cleanupSubjectAvailable != true) {
       return;
@@ -1861,7 +2046,10 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
         context,
       ).showSnackBar(SnackBar(content: Text(context.l10n.projectSaveFailed)));
     } finally {
-      if (mounted) setState(() => _applying = false);
+      if (mounted) {
+        setState(() => _applying = false);
+        _drainDirectSelection();
+      }
     }
   }
 
@@ -2002,6 +2190,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
           _exporting = false;
           _batchExporter = null;
         });
+        _drainDirectSelection();
       }
     }
   }
@@ -2019,7 +2208,10 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
     } finally {
       if (identical(_shareCompletion, completion)) {
         _shareCompletion = null;
-        if (mounted) setState(() => _sharing = false);
+        if (mounted) {
+          setState(() => _sharing = false);
+          _drainDirectSelection();
+        }
       }
     }
   }
@@ -2325,7 +2517,8 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
     } else if (_creatingCloudResult || _refreshingCloudCapabilities) {
       message = context.l10n.generatingResult;
       key = ValueKey('${widget.task.name}-cloud-result-progress');
-    } else if (_generatingLocalResult) {
+    } else if (_generatingLocalResult &&
+        _activeLocalGenerationCapability == selectedCapability) {
       message = context.l10n.generatingResult;
       key = ValueKey('${widget.task.name}-local-result-progress');
     } else if (_cloudGenerationFailed) {
@@ -2341,9 +2534,9 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
       key = ValueKey('${widget.task.name}-cloud-result-failed');
     } else if (_localGenerationFailed) {
       message = context.l10n.generationFailed;
-      action = _interactionLocked || selectedCapability == null
+      action = selectedCapability == null
           ? null
-          : () => unawaited(_activateCapability(selectedCapability));
+          : () => _requestCapability(selectedCapability);
       actionLabel = context.l10n.retry;
       actionKey = ValueKey('${widget.task.name}-local-result-retry');
       key = ValueKey('${widget.task.name}-local-result-failed');
@@ -2586,7 +2779,7 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
         ? const ValueKey('apply-style-workspace')
         : const ValueKey('motion-style-workspace');
     return PopScope(
-      canPop: !_interactionLocked,
+      canPop: true,
       child: Scaffold(
         key: pageKey,
         backgroundColor: AppTheme.canvas,
@@ -2615,15 +2808,20 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
                 return _buildWorkspace(context, _session?.project ?? project);
               },
             ),
-            _FloatingWorkspaceNavigation(
-              title: switch (widget.task) {
-                CreationTask.style => context.l10n.homeChangeStyle,
-                CreationTask.motion => context.l10n.createMotionEffect,
-                CreationTask.optimize => context.l10n.optimizePhoto,
-                CreationTask.cleanup => context.l10n.removeBackgroundOrObjects,
-              },
-              enabled: !_interactionLocked,
-              onPressed: () => Navigator.of(context).maybePop(),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: _FloatingWorkspaceNavigation(
+                title: switch (widget.task) {
+                  CreationTask.style => context.l10n.homeChangeStyle,
+                  CreationTask.motion => context.l10n.createMotionEffect,
+                  CreationTask.optimize => context.l10n.optimizePhoto,
+                  CreationTask.cleanup =>
+                    context.l10n.removeBackgroundOrObjects,
+                },
+                onPressed: () => Navigator.of(context).maybePop(),
+              ),
             ),
           ],
         ),
@@ -2813,13 +3011,8 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
                                     label: choice.label(context),
                                     selected:
                                         choice.capability == selectedCapability,
-                                    onTap: _interactionLocked
-                                        ? null
-                                        : () => unawaited(
-                                            _activateCapability(
-                                              choice.capability,
-                                            ),
-                                          ),
+                                    onTap: () =>
+                                        _requestCapability(choice.capability),
                                   ),
                                 ),
                             ],
@@ -2848,13 +3041,9 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
                                               CreationCapability
                                                   .styleOfficial &&
                                           style.id == _selectedStyleId,
-                                onTap: _interactionLocked
-                                    ? null
-                                    : () => unawaited(
-                                        style.id == _illustrationStyleId
-                                            ? _activateIllustrationStyle()
-                                            : _activateOfficialStyle(style.id),
-                                      ),
+                                onTap: () => style.id == _illustrationStyleId
+                                    ? _requestIllustrationStyle()
+                                    : _requestOfficialStyle(style.id),
                               );
                             },
                           ),
@@ -2877,15 +3066,27 @@ class _StyleWorkspacePageState extends State<StyleWorkspacePage> {
   }
 }
 
+class _DirectSelectionRequest {
+  const _DirectSelectionRequest({
+    required this.generation,
+    required this.capability,
+    this.officialStyleId,
+    this.illustration = false,
+  });
+
+  final int generation;
+  final CreationCapability capability;
+  final String? officialStyleId;
+  final bool illustration;
+}
+
 class _FloatingWorkspaceNavigation extends StatelessWidget {
   const _FloatingWorkspaceNavigation({
     required this.title,
-    required this.enabled,
     required this.onPressed,
   });
 
   final String title;
-  final bool enabled;
   final VoidCallback onPressed;
 
   @override
@@ -2907,7 +3108,7 @@ class _FloatingWorkspaceNavigation extends StatelessWidget {
                 child: IconButton(
                   key: const ValueKey('style-workspace-back'),
                   tooltip: MaterialLocalizations.of(context).backButtonTooltip,
-                  onPressed: enabled ? onPressed : null,
+                  onPressed: onPressed,
                   icon: const Icon(Icons.arrow_back_ios_new, size: 20),
                 ),
               ),
